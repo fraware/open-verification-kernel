@@ -1,0 +1,70 @@
+{
+  "intent_id": "agent-cannot-disable-own-ci-gate",
+  "version": "0.1.0",
+  "domain": "ci_cd",
+  "title": "Agent-authored PR cannot weaken its own verification gate",
+  "description": "An AI-authored pull request must not remove, weaken, bypass, or self-approve the verification controls that govern its own merge.",
+  "scope": {
+    "files": [
+      ".github/workflows/**",
+      "CODEOWNERS",
+      ".github/rulesets/**",
+      ".verification/**"
+    ],
+    "repo_controls_required": [
+      "required_status_checks",
+      "branch_protection"
+    ]
+  },
+  "actor": {
+    "type": "ai_agent"
+  },
+  "resource": {
+    "type": "ci_workflow",
+    "selector": ".github/workflows/**"
+  },
+  "operation": "modify",
+  "property": {
+    "kind": "invariant",
+    "natural_language": "The PR must not reduce the set of required checks that apply to itself.",
+    "formal_hint": "actor_type = ai_agent and gate in required_checks_before implies gate in required_checks_after"
+  },
+  "failure_modes": [
+    "required_check_removed",
+    "workflow_trigger_disabled",
+    "permissions_escalated",
+    "self_approval_enabled",
+    "verification_job_made_optional"
+  ],
+  "acceptable_evidence": [
+    {
+      "kind": "policy_check",
+      "minimum_confidence": "high"
+    },
+    {
+      "kind": "human_approval",
+      "required_for_override": true
+    }
+  ],
+  "risk": {
+    "severity": "critical",
+    "likelihood": "medium",
+    "rationale": "The change touches controls that validate agent-authored changes."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "faithfulness": {
+    "source": ["changed_files", "branch_protection", "workflow_config", "repo_invariants"],
+    "anti_vacuity_checks": [
+      "property_mentions_changed_resource",
+      "property_has_nonempty_scope",
+      "property_has_known_failure_mode",
+      "backend_obligation_uses_changed_symbol",
+      "counterfactual_mutation_should_fail"
+    ],
+    "requires_human_confirmation_above_risk": "high"
+  }
+}
