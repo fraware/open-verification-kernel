@@ -1,0 +1,35 @@
+name: Open Verification Kernel
+
+description: Solver-agnostic verification evidence for AI-agent pull requests
+
+author: Open Verification Kernel Contributors
+
+inputs:
+  config:
+    description: Path to OVK configuration
+    required: false
+    default: .verification/config.yml
+  mode:
+    description: advisory, enforce, or attest
+    required: false
+    default: advisory
+  evidence-output:
+    description: Path for the generated evidence bundle
+    required: false
+    default: ovk-evidence.json
+
+runs:
+  using: composite
+  steps:
+    - name: Install OVK package
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .
+    - name: Initialize verification directory if needed
+      shell: bash
+      run: ovk init
+    - name: Placeholder OVK check
+      shell: bash
+      run: |
+        echo "OVK action scaffold installed. Full PR verification runner is planned in docs/ROADMAP.md."
