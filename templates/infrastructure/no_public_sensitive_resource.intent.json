@@ -1,0 +1,53 @@
+{
+  "intent_id": "no-public-sensitive-resource",
+  "version": "0.1.0",
+  "domain": "infrastructure",
+  "title": "No public sensitive resource",
+  "description": "A resource tagged sensitive, private, internal, regulated, or production-only must not become publicly reachable after an infrastructure change.",
+  "scope": {
+    "files": [
+      "**/*.tf",
+      "**/*.tf.json",
+      "**/k8s/**",
+      "**/kubernetes/**",
+      "**/*deployment*.yml",
+      "**/*deployment*.yaml",
+      "**/*iam*",
+      "**/*network*"
+    ]
+  },
+  "actor": {
+    "type": "principal"
+  },
+  "resource": {
+    "type": "infrastructure_resource",
+    "selector": "sensitive_or_private"
+  },
+  "operation": "reach",
+  "property": {
+    "kind": "data_boundary",
+    "natural_language": "Resources marked sensitive or private must not be reachable from the public internet.",
+    "formal_hint": "Reachable(public, resource, edges_after) and Sensitive(resource) implies violation"
+  },
+  "failure_modes": [
+    "public_bucket",
+    "public_security_group",
+    "open_ingress",
+    "public_load_balancer_to_private_service",
+    "overbroad_iam_principal"
+  ],
+  "acceptable_evidence": [
+    { "kind": "policy_check", "minimum_confidence": "high" },
+    { "kind": "smt_reachability", "minimum_confidence": "medium" }
+  ],
+  "risk": {
+    "severity": "high",
+    "likelihood": "medium",
+    "rationale": "Infrastructure changes can expose sensitive resources through composed configuration paths."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  }
+}
