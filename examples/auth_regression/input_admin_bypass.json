@@ -1,0 +1,22 @@
+{
+  "author_type": "ai_agent",
+  "agent": "codex",
+  "task": "Add export endpoint for admin analytics.",
+  "routes": [
+    {
+      "path": "/admin/export",
+      "admin_only_before": true,
+      "admin_only_after": true,
+      "reachable_after": [
+        {
+          "role": "user",
+          "via": [
+            "route_group_added",
+            "middleware_not_applied",
+            "handler_reachable"
+          ]
+        }
+      ]
+    }
+  ]
+}
