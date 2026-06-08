@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/verification.evidence.schema.json",
+  "title": "Verification Evidence",
+  "type": "object",
+  "required": ["evidence_id", "schema_version", "subject", "intent", "backend_claims", "decision"],
+  "properties": {
+    "evidence_id": { "type": "string", "minLength": 1 },
+    "schema_version": { "type": "string" },
+    "subject": {
+      "type": "object",
+      "required": ["repo", "head_sha"],
+      "properties": {
+        "repo": { "type": "string" },
+        "pull_request": { "type": ["integer", "string"] },
+        "head_sha": { "type": "string" },
+        "base_sha": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "change_origin": {
+      "type": "object",
+      "properties": {
+        "author_type": { "type": "string" },
+        "agent": { "type": "string" },
+        "task": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "intent": {
+      "type": "object",
+      "required": ["intent_id", "title"],
+      "properties": {
+        "intent_id": { "type": "string" },
+        "title": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "backend_claims": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["backend", "guarantee_type", "status"],
+        "properties": {
+          "backend": { "type": "string" },
+          "guarantee_type": { "type": "string" },
+          "status": { "type": "string", "enum": ["pass", "fail", "unknown", "error", "skipped"] },
+          "assumptions": { "type": "array", "items": { "type": "string" } },
+          "limits": { "type": "array", "items": { "type": "string" } },
+          "tool_version": { "type": "string" },
+          "adapter_version": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "counterexamples": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "summary": { "type": "string" },
+          "affected_file": { "type": "string" },
+          "failure_mode": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "generated_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": { "type": "string" },
+          "path": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "decision": {
+      "type": "object",
+      "required": ["merge_recommendation"],
+      "properties": {
+        "merge_recommendation": { "type": "string", "enum": ["allow", "block", "require_human_review", "allow_with_warning", "require_stronger_check"] },
+        "human_review_required": { "type": "boolean" },
+        "override_allowed": { "type": "boolean" },
+        "override_requires": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}
