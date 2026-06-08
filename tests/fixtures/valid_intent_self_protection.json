@@ -1,0 +1,18 @@
+{
+  "intent_id": "agent-cannot-disable-own-ci-gate",
+  "version": "0.1.0",
+  "domain": "ci_cd",
+  "title": "Agent-authored PR cannot weaken its own verification gate",
+  "property": {
+    "kind": "invariant",
+    "natural_language": "The verification control remains required after the change."
+  },
+  "risk": {
+    "severity": "critical"
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  }
+}
