@@ -1,0 +1,40 @@
+{
+  "capability_id": "z3-smt-v1",
+  "tool": {
+    "name": "z3",
+    "adapter": "ovk-adapter-z3",
+    "adapter_version": "0.1.0"
+  },
+  "backend_class": "smt_solver",
+  "input_languages": ["smtlib2", "python-z3", "json-constraints"],
+  "supported_domains": [
+    "authorization",
+    "infrastructure",
+    "workflow",
+    "data_boundary"
+  ],
+  "supported_property_kinds": [
+    "safety",
+    "invariant",
+    "access_control",
+    "data_boundary",
+    "forbidden_configuration"
+  ],
+  "guarantee": {
+    "type": "smt_satisfiability",
+    "meaning_of_pass": "No counterexample was found for the encoded formula, or the desired condition was satisfiable, depending on query polarity. Evidence must state polarity.",
+    "meaning_of_fail": "A model or unsatisfiable core was returned that refutes the encoded obligation, depending on query polarity.",
+    "meaning_of_unknown": "The solver returned unknown, timed out, or the adapter lacked sufficient context to encode the obligation."
+  },
+  "assumptions": [
+    "The finite abstraction captures the relevant behavior of the changed system.",
+    "The query polarity is recorded in the proof obligation."
+  ],
+  "limits": [
+    "Does not prove properties outside the encoded abstraction.",
+    "May return unknown for unsupported theories or timeout."
+  ],
+  "result_format": "ovk.result.v1",
+  "counterexample_format": "smt_model",
+  "timeout_behavior": "unknown"
+}
