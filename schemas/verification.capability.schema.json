@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/verification.capability.schema.json",
+  "title": "Verification Capability Manifest",
+  "type": "object",
+  "required": ["capability_id", "tool", "backend_class", "supported_domains", "supported_property_kinds", "guarantee"],
+  "properties": {
+    "capability_id": { "type": "string", "minLength": 1 },
+    "tool": {
+      "type": "object",
+      "required": ["name", "adapter", "adapter_version"],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" },
+        "adapter": { "type": "string" },
+        "adapter_version": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "backend_class": {
+      "type": "string",
+      "enum": ["policy_engine", "smt_solver", "model_checker", "bounded_model_checker", "proof_assistant", "static_analyzer", "runtime_monitor", "custom"]
+    },
+    "input_languages": { "type": "array", "items": { "type": "string" } },
+    "supported_domains": { "type": "array", "items": { "type": "string" } },
+    "supported_property_kinds": { "type": "array", "items": { "type": "string" } },
+    "guarantee": {
+      "type": "object",
+      "required": ["type", "meaning_of_pass", "meaning_of_fail", "meaning_of_unknown"],
+      "properties": {
+        "type": { "type": "string" },
+        "meaning_of_pass": { "type": "string" },
+        "meaning_of_fail": { "type": "string" },
+        "meaning_of_unknown": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "assumptions": { "type": "array", "items": { "type": "string" } },
+    "limits": { "type": "array", "items": { "type": "string" } },
+    "result_format": { "type": "string" },
+    "counterexample_format": { "type": "string" },
+    "timeout_behavior": { "type": "string", "enum": ["unknown", "error", "fail"] }
+  },
+  "additionalProperties": true
+}
