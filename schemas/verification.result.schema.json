@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/verification.result.schema.json",
+  "title": "Verification Result",
+  "type": "object",
+  "required": ["result_id", "obligation_id", "backend", "status", "result_kind"],
+  "properties": {
+    "result_id": { "type": "string" },
+    "obligation_id": { "type": "string" },
+    "backend": { "type": "string" },
+    "status": { "type": "string", "enum": ["pass", "fail", "unknown", "error", "skipped"] },
+    "result_kind": { "type": "string" },
+    "summary": { "type": "string" },
+    "counterexamples": {
+      "type": "array",
+      "items": { "type": "object", "additionalProperties": true }
+    },
+    "assumptions": { "type": "array", "items": { "type": "string" } },
+    "limits": { "type": "array", "items": { "type": "string" } },
+    "tool_metadata": {
+      "type": "object",
+      "properties": {
+        "tool_version": { "type": "string" },
+        "adapter_version": { "type": "string" },
+        "runtime_ms": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}
