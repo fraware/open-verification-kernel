@@ -1,0 +1,56 @@
+{
+  "evidence_id": "ev-no-agent-self-approval-001",
+  "schema_version": "ovk.evidence.v1",
+  "subject": {
+    "repo": "example/repo",
+    "pull_request": 42,
+    "head_sha": "abc123",
+    "base_sha": "def456"
+  },
+  "change_origin": {
+    "author_type": "ai_agent",
+    "agent": "codex",
+    "task": "Simplify CI workflow"
+  },
+  "intent": {
+    "intent_id": "agent-cannot-disable-own-ci-gate",
+    "title": "Agent-authored PR cannot weaken its own verification gate",
+    "risk": {
+      "severity": "critical"
+    }
+  },
+  "backend_claims": [
+    {
+      "backend": "opa",
+      "guarantee_type": "policy_evaluation",
+      "status": "fail",
+      "assumptions": [
+        "Workflow files were parsed successfully.",
+        "Required-check metadata was available."
+      ],
+      "limits": [
+        "This check does not prove semantic correctness of workflow steps."
+      ],
+      "adapter_version": "0.1.0"
+    }
+  ],
+  "counterexamples": [
+    {
+      "summary": "The PR removes ovk-verify from the required check set.",
+      "affected_file": ".github/workflows/verify.yml",
+      "failure_mode": "required_check_removed"
+    }
+  ],
+  "generated_artifacts": [
+    {
+      "kind": "regression_policy_test",
+      "path": ".verification/generated_tests/no_agent_self_disable_test.rego"
+    }
+  ],
+  "decision": {
+    "merge_recommendation": "block",
+    "human_review_required": true,
+    "override_allowed": true,
+    "override_requires": ["maintainer", "security-review"]
+  }
+}
