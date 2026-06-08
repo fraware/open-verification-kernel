@@ -1,0 +1,41 @@
+{
+  "schema_version": "formal_pr_bench.seed.v0",
+  "cases": [
+    {
+      "case_id": "control_removed",
+      "input_fixture": "examples/no_agent_self_approval/input_gate_removed.json",
+      "expected_intent": "agent-cannot-disable-own-ci-gate",
+      "expected_backend_class": "policy_engine",
+      "expected_status": "fail",
+      "expected_merge_recommendation": "block",
+      "expected_counterexample_class": "required_check_removed"
+    },
+    {
+      "case_id": "control_preserved",
+      "input_fixture": "examples/no_agent_self_approval/input_gate_preserved.json",
+      "expected_intent": "agent-cannot-disable-own-ci-gate",
+      "expected_backend_class": "policy_engine",
+      "expected_status": "pass",
+      "expected_merge_recommendation": "allow",
+      "expected_counterexample_class": null
+    },
+    {
+      "case_id": "auth_bypass",
+      "input_fixture": "examples/auth_regression/input_admin_bypass.json",
+      "expected_intent": "no-admin-route-bypass",
+      "expected_backend_class": "smt_solver",
+      "expected_status": "fail",
+      "expected_merge_recommendation": "block",
+      "expected_counterexample_class": "admin_route_reachable_by_non_admin"
+    },
+    {
+      "case_id": "auth_preserved",
+      "input_fixture": "examples/auth_regression/input_admin_protected.json",
+      "expected_intent": "no-admin-route-bypass",
+      "expected_backend_class": "smt_solver",
+      "expected_status": "pass",
+      "expected_merge_recommendation": "allow",
+      "expected_counterexample_class": null
+    }
+  ]
+}
