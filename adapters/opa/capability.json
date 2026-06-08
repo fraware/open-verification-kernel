@@ -1,0 +1,41 @@
+{
+  "capability_id": "opa-policy-v1",
+  "tool": {
+    "name": "opa",
+    "adapter": "ovk-adapter-opa",
+    "adapter_version": "0.1.0"
+  },
+  "backend_class": "policy_engine",
+  "input_languages": ["rego", "json", "yaml"],
+  "supported_domains": [
+    "ci_cd",
+    "infrastructure",
+    "authorization",
+    "data_boundary",
+    "agent_authority"
+  ],
+  "supported_property_kinds": [
+    "safety",
+    "invariant",
+    "forbidden_configuration",
+    "access_control",
+    "data_boundary"
+  ],
+  "guarantee": {
+    "type": "policy_evaluation",
+    "meaning_of_pass": "The provided structured input satisfies the selected Rego policy under the supplied data model.",
+    "meaning_of_fail": "The policy produced one or more violations for the supplied input.",
+    "meaning_of_unknown": "The adapter could not parse or evaluate the required input."
+  },
+  "assumptions": [
+    "Input extraction faithfully represents the repository state relevant to the policy.",
+    "Policy templates accurately encode the intended invariant."
+  ],
+  "limits": [
+    "Does not prove properties of arbitrary program execution.",
+    "Does not establish unbounded liveness."
+  ],
+  "result_format": "ovk.result.v1",
+  "counterexample_format": "policy_violation",
+  "timeout_behavior": "unknown"
+}
