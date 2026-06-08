@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/verification.obligation.schema.json",
+  "title": "Verification Obligation",
+  "type": "object",
+  "required": ["obligation_id", "intent_id", "backend"],
+  "properties": {
+    "obligation_id": { "type": "string" },
+    "intent_id": { "type": "string" },
+    "backend": { "type": "string" },
+    "query_polarity": {
+      "type": "string",
+      "enum": ["find_counterexample", "prove_property", "evaluate_policy", "check_model", "custom"]
+    },
+    "input": { "type": "object", "additionalProperties": true },
+    "policy": { "type": "string" },
+    "query": { "type": "string" },
+    "constraints": { "type": "array", "items": { "type": "string" } },
+    "model": { "type": "object", "additionalProperties": true },
+    "assumptions": { "type": "array", "items": { "type": "string" } },
+    "budget": {
+      "type": "object",
+      "properties": {
+        "timeout_seconds": { "type": "integer", "minimum": 1 },
+        "max_memory_mb": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}
