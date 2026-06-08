@@ -1,0 +1,52 @@
+{
+  "intent_id": "no-admin-route-bypass",
+  "version": "0.1.0",
+  "domain": "authorization",
+  "title": "No admin route bypass",
+  "description": "A route, endpoint, method, action, or resource previously restricted to privileged users must not become reachable by unprivileged users.",
+  "scope": {
+    "files": [
+      "**/routes/**",
+      "**/controllers/**",
+      "**/middleware/**",
+      "**/auth/**",
+      "**/*policy*",
+      "**/openapi*.yml",
+      "**/openapi*.yaml"
+    ]
+  },
+  "actor": {
+    "type": "user"
+  },
+  "resource": {
+    "type": "route",
+    "selector": "admin_only"
+  },
+  "operation": "reach",
+  "property": {
+    "kind": "access_control",
+    "natural_language": "A user without admin authority must not reach admin-only operations.",
+    "formal_hint": "forall u,r. AdminOnly_before(r) and role(u) != admin implies not CanReach_after(u,r)"
+  },
+  "failure_modes": [
+    "middleware_skipped",
+    "route_group_unprotected",
+    "policy_default_allow",
+    "role_check_removed"
+  ],
+  "acceptable_evidence": [
+    { "kind": "smt_counterexample", "minimum_confidence": "medium" },
+    { "kind": "policy_check", "minimum_confidence": "medium" },
+    { "kind": "generated_regression_test", "minimum_confidence": "medium" }
+  ],
+  "risk": {
+    "severity": "high",
+    "likelihood": "medium",
+    "rationale": "Authorization regressions can expose privileged operations."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  }
+}
