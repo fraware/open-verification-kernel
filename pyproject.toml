@@ -20,6 +20,12 @@ dev = [
   "pytest>=8.0.0",
   "ruff>=0.5.0"
 ]
+solvers = [
+  "z3-solver>=4.13.0"
+]
+all = [
+  "z3-solver>=4.13.0"
+]
 
 [project.scripts]
 ovk = "ovk.cli:app"
