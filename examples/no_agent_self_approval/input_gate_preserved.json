@@ -1,0 +1,29 @@
+{
+  "actor": {
+    "type": "ai_agent",
+    "id": "codex"
+  },
+  "task": "Simplify CI workflow while preserving required verification.",
+  "ovk_gate_name": "ovk-verify",
+  "changed_files": [
+    ".github/workflows/verify.yml"
+  ],
+  "before": {
+    "required_checks": [
+      "unit-tests",
+      "ovk-verify"
+    ],
+    "workflow_permissions": {
+      "actions": "read"
+    }
+  },
+  "after": {
+    "required_checks": [
+      "unit-tests",
+      "ovk-verify"
+    ],
+    "workflow_permissions": {
+      "actions": "read"
+    }
+  }
+}
