@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
+import json
 from hashlib import sha256
 
 from ovk.core.models import EvidenceBundle, VerificationEvidence
 
 
+def _stable_json(value: object) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def content_digest(value: object) -> str:
+    """Return a stable SHA-256 digest for a JSON-like value."""
+    return sha256(_stable_json(value).encode("utf-8")).hexdigest()
+
+
 def make_bundle(evidence: list[VerificationEvidence]) -> EvidenceBundle:
-    """Create a conservative bundle from one or more evidence objects."""
+    """Create a conservative content-addressed bundle from evidence objects."""
     if not evidence:
         raise ValueError("cannot create an evidence bundle without evidence")
 
@@ -25,9 +35,8 @@ def make_bundle(evidence: list[VerificationEvidence]) -> EvidenceBundle:
         recommendation = "allow"
         reason = "all evaluated verification intents passed"
 
-    fingerprint = sha256(
-        (str(subject) + "|" + "|".join(item.evidence_id for item in evidence)).encode("utf-8")
-    ).hexdigest()[:16]
+    evidence_payload = [item.model_dump(mode="json") for item in evidence]
+    fingerprint = content_digest({"subject": subject, "evidence": evidence_payload})[:16]
 
     return EvidenceBundle(
         bundle_id=f"bundle-{fingerprint}",
