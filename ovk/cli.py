@@ -9,10 +9,22 @@ from typing import Optional
 import typer
 from jsonschema import Draft202012Validator
 
+from ovk.adapters.opa import evaluate_self_protection
+from ovk.core.bundle import make_bundle
 from ovk.core.decision import decide
 from ovk.core.models import EvidenceBundle
+from ovk.core.render import render_bundle_markdown
 
 app = typer.Typer(help="Open Verification Kernel CLI")
+
+
+EXIT_CODES = {
+    "allow": 0,
+    "allow_with_warning": 0,
+    "block": 1,
+    "require_human_review": 2,
+    "require_stronger_check": 2,
+}
 
 
 @app.command()
@@ -56,14 +68,45 @@ def decide_bundle(evidence_bundle: Path, enforce: bool = True) -> None:
 
 
 @app.command()
+def render_pr_comment(evidence_bundle: Path, output: Optional[Path] = None) -> None:
+    """Render an evidence bundle as pull-request Markdown."""
+    data = json.loads(evidence_bundle.read_text(encoding="utf-8"))
+    bundle = EvidenceBundle.model_validate(data)
+    rendered = render_bundle_markdown(bundle)
+    if output:
+        output.write_text(rendered, encoding="utf-8")
+    else:
+        typer.echo(rendered)
+
+
+@app.command()
+def demo_self_protection(
+    input_json: Path,
+    output: Path = typer.Option(Path("ovk-evidence.json"), help="Evidence bundle output path."),
+    markdown_output: Optional[Path] = typer.Option(None, help="Optional Markdown output."),
+    repo: str = typer.Option("unknown/repo", help="Repository name for evidence subject."),
+    head_sha: str = typer.Option("unknown", help="Head commit SHA."),
+    enforce: bool = typer.Option(True, help="Use non-zero exits for non-allow recommendations."),
+) -> None:
+    """Run the first OVK demo and emit an evidence bundle."""
+    data = json.loads(input_json.read_text(encoding="utf-8"))
+    evidence = evaluate_self_protection(data, repo=repo, head_sha=head_sha)
+    bundle = make_bundle([evidence])
+    output.write_text(json.dumps(bundle.model_dump(mode="json"), indent=2) + "\n", encoding="utf-8")
+    if markdown_output:
+        markdown_output.write_text(render_bundle_markdown(bundle), encoding="utf-8")
+    recommendation = bundle.decision.get("merge_recommendation", "require_human_review")
+    typer.echo(f"OVK recommendation: {recommendation}")
+    if enforce:
+        raise typer.Exit(code=EXIT_CODES.get(str(recommendation), 2))
+
+
+@app.command()
 def infer(
     base: Optional[str] = typer.Option(None, help="Base ref, for example origin/main."),
     head: Optional[str] = typer.Option(None, help="Head ref, for example HEAD."),
 ) -> None:
-    """Placeholder for intent inference.
-
-    Engineers should implement repository diff parsing here. For now this command documents the target CLI.
-    """
+    """Placeholder for intent inference."""
     typer.echo(json.dumps({"base": base, "head": head, "intents": []}, indent=2))
 
 
