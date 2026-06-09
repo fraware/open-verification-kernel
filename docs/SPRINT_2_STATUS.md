@@ -14,6 +14,8 @@ Sprint 2 focuses on replacing manual metadata assumptions with stronger GitHub m
 - Updated CI to exercise the GitHub event metadata path.
 - Added conservative GitHub API metadata collector in `ovk.core.github_api_metadata`.
 - Added required-check metadata normalization script at `scripts/normalize_required_checks.py`.
+- Added conservative branch metadata collector script at `scripts/collect_branch_metadata.py`.
+- Added branch metadata documentation in `docs/BRANCH_METADATA_COLLECTION.md`.
 - Added OPA self-protection policy asset generation in `ovk.adapters.opa.policy_assets`.
 - Added materialized Rego fixture at `adapters/opa/policies/self_protection.rego`.
 - Added optional OPA CLI runner in `ovk.adapters.opa.optional_runner`.
@@ -22,7 +24,7 @@ Sprint 2 focuses on replacing manual metadata assumptions with stronger GitHub m
 - Added opt-in PR comment posting script at `scripts/post_pr_comment.py`.
 - Updated `action.yml` with `post-comment: "true"` support.
 - Added installation guide at `docs/INSTALLATION.md`.
-- Added tests for GitHub event metadata, GitHub-shaped required-check metadata, GitHub API metadata helpers, OPA policy assets, optional OPA runner behavior, OPA evidence normalization, helper scripts, and optional OPA integration.
+- Added tests for GitHub event metadata, GitHub-shaped required-check metadata, GitHub API metadata helpers, branch metadata collection fallback, OPA policy assets, optional OPA runner behavior, OPA evidence normalization, helper scripts, and optional OPA integration.
 
 ## Current command
 
@@ -38,12 +40,23 @@ ovk ci \
   --advisory
 ```
 
+## Branch metadata command
+
+```bash
+python scripts/collect_branch_metadata.py \
+  --repository owner/repo \
+  --branch main \
+  --output ovk-required-checks.json
+```
+
+If collection fails, the script writes an empty object and OVK treats the required-check state as unknown.
+
 ## Remaining Sprint 2 work
 
-1. Wire live GitHub branch-protection metadata collection directly into the Action when token permissions allow it.
-2. Decide whether strict mode should use deterministic evaluator, OPA CLI, or both.
-3. Add update-in-place behavior for PR comments so OVK does not create duplicate comments.
-4. Add a real external-repository smoke test workflow once an integration repo exists.
+1. Decide whether strict mode should use deterministic evaluator, OPA CLI, or both.
+2. Add update-in-place behavior for PR comments so OVK does not create duplicate comments.
+3. Add a real external-repository smoke test workflow once an integration repo exists.
+4. Optionally wire branch metadata collection directly into the Action after repository token permissions are deliberately configured.
 
 ## Engineering rule
 
