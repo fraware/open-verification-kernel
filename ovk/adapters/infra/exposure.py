@@ -4,17 +4,21 @@ from __future__ import annotations
 
 from typing import Any
 
-from ovk.adapters.infra.model import InfraResource, is_sensitive, load_resources
+from ovk.adapters.infra.model import InfraResource, load_resources
+from ovk.adapters.infra.policy import DEFAULT_INFRA_EXPOSURE_POLICY, InfraExposurePolicy
 
 
 FAILURE_MODE = "sensitive_resource_publicly_exposed"
 
 
-def find_exposure_counterexamples(data: dict[str, Any]) -> list[dict[str, Any]]:
-    """Find sensitive resources that are publicly exposed."""
+def find_exposure_counterexamples(
+    data: dict[str, Any],
+    policy: InfraExposurePolicy = DEFAULT_INFRA_EXPOSURE_POLICY,
+) -> list[dict[str, Any]]:
+    """Find resources that violate the exposure policy."""
     counterexamples: list[dict[str, Any]] = []
     for resource in load_resources(data):
-        if is_sensitive(resource) and resource.public_exposure:
+        if policy.blocks_public_exposure(resource):
             counterexamples.append(counterexample_from_resource(resource))
     return counterexamples
 
