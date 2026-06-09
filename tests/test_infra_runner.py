@@ -8,6 +8,7 @@ def test_infra_runner_public_sensitive_resource_writes_blocking_outputs(tmp_path
     evidence = tmp_path / "evidence.json"
     markdown = tmp_path / "comment.md"
     attestation = tmp_path / "attestation.json"
+    manifest = tmp_path / "manifest.json"
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -23,14 +24,19 @@ def test_infra_runner_public_sensitive_resource_writes_blocking_outputs(tmp_path
             str(markdown),
             "--attestation-output",
             str(attestation),
+            "--manifest-output",
+            str(manifest),
             "--advisory",
         ],
     )
     assert infra_main() == 0
     payload = json.loads(evidence.read_text(encoding="utf-8"))
+    manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
     assert payload["decision"]["merge_recommendation"] == "block"
     assert markdown.exists()
     assert attestation.exists()
+    assert manifest_payload["schema_version"] == "ovk.artifact_manifest.v1"
+    assert {item["kind"] for item in manifest_payload["artifacts"]} == {"evidence", "markdown", "attestation"}
 
 
 def test_infra_runner_private_sensitive_resource_allows(tmp_path: Path, monkeypatch) -> None:
