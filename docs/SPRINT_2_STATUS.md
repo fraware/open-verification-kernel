@@ -21,12 +21,15 @@ Sprint 2 focuses on replacing manual metadata assumptions with stronger GitHub m
 - Added optional OPA CLI runner in `ovk.adapters.opa.optional_runner`.
 - Added OPA raw-result normalization into `VerificationEvidence` in `ovk.adapters.opa.evidence`.
 - Added optional OPA integration tests that skip when the OPA binary is unavailable.
+- Added backend strategy execution in `ovk.core.backend_strategy`.
+- Exposed `backend-strategy` through `ovk ci`, `scripts/run_v0_self_protection.py`, and the composite Action.
 - Added opt-in PR comment posting script at `scripts/post_pr_comment.py`.
 - Added update-in-place PR comment behavior using an OVK marker.
 - Updated `action.yml` with `post-comment: "true"` support.
-- Added installation guide at `docs/INSTALLATION.md` and updated it with branch metadata and comment-update behavior.
-- Added strict-mode policy documentation in `docs/STRICT_MODE_POLICY.md`.
-- Added tests for GitHub event metadata, GitHub-shaped required-check metadata, GitHub API metadata helpers, branch metadata collection fallback, OPA policy assets, optional OPA runner behavior, OPA evidence normalization, helper scripts, PR comment marker behavior, and optional OPA integration.
+- Added installation guide at `docs/INSTALLATION.md` and updated it with branch metadata, comment-update behavior, and backend strategy options.
+- Added strict-mode policy documentation in `docs/STRICT_MODE_POLICY.md` and updated it with implemented strategy semantics.
+- Added external smoke-test guide at `docs/EXTERNAL_SMOKE_TEST.md`.
+- Added tests for GitHub event metadata, GitHub-shaped required-check metadata, GitHub API metadata helpers, branch metadata collection fallback, OPA policy assets, optional OPA runner behavior, OPA evidence normalization, helper scripts, PR comment marker behavior, optional OPA integration, and runner backend-strategy acceptance.
 
 ## Current command
 
@@ -36,6 +39,7 @@ ovk ci \
   --metadata examples/no_agent_self_approval/metadata_missing_required_checks.json \
   --changed-files examples/no_agent_self_approval/changed_files_workflow.txt \
   --check-metadata examples/no_agent_self_approval/check_metadata_github_shape_removed.json \
+  --backend-strategy deterministic \
   --evidence-output ovk-evidence.json \
   --markdown-output ovk-pr-comment.md \
   --attestation-output ovk-attestation.json \
@@ -55,13 +59,13 @@ If collection fails, the script writes an empty object and OVK treats the requir
 
 ## Strict mode decision
 
-For v0, strict mode uses the deterministic self-protection evaluator as the authoritative decision path. The optional OPA CLI runner remains supplementary until parity is validated across the benchmark suite. Missing OPA must not break strict mode unless a future user explicitly selects OPA as a required backend.
+For v0, strict mode uses the deterministic self-protection evaluator as the default authoritative decision path. Users can explicitly choose `backend-strategy: opa` or `backend-strategy: both`, but OPA remains optional and missing OPA must not create a false passing claim.
 
 ## Remaining Sprint 2 work
 
-1. Add a real external-repository smoke test workflow once an integration repo exists.
+1. Run a real external-repository smoke test once an integration repository exists.
 2. Optionally wire branch metadata collection directly into the Action after repository token permissions are deliberately configured.
-3. Add backend strategy options in a future release: deterministic, opa, and both.
+3. Expand backend strategy tests when connector safety controls allow direct optional-backend monkeypatching.
 
 ## Engineering rule
 
