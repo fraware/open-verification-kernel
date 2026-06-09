@@ -9,6 +9,7 @@ from pathlib import Path
 
 from ovk.adapters.infra.evidence import evaluate_infra_exposure
 from ovk.adapters.infra.normalize import normalize_infra_input
+from ovk.adapters.infra.policy_config import load_policy
 from ovk.core.attestation import bundle_to_statement
 from ovk.core.bundle import make_bundle
 from ovk.core.render import render_bundle_markdown
@@ -27,6 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run OVK infrastructure exposure path")
     parser.add_argument("input", type=Path, help="Infrastructure input JSON")
     parser.add_argument("--input-format", default="infra", choices=["infra", "terraform", "kubernetes"])
+    parser.add_argument("--policy", type=Path, default=None, help="Optional infrastructure exposure policy JSON")
     parser.add_argument("--repo", default="unknown/repo")
     parser.add_argument("--head-sha", default="unknown")
     parser.add_argument("--base-sha", default=None)
@@ -41,11 +43,13 @@ def main() -> int:
     args = parse_args()
     raw_data = json.loads(args.input.read_text(encoding="utf-8"))
     data = normalize_infra_input(raw_data, args.input_format)
+    policy = load_policy(args.policy)
     evidence = evaluate_infra_exposure(
         data,
         repo=args.repo,
         head_sha=args.head_sha,
         base_sha=args.base_sha,
+        policy=policy,
     )
     bundle = make_bundle([evidence])
     markdown = render_bundle_markdown(bundle)
