@@ -15,14 +15,21 @@ Reduce duplicated runner logic, make release packaging easier to audit, and keep
 - Authorization and infrastructure runners now use shared recommendation exit-code semantics.
 - Authorization and infrastructure runners now use shared JSON input loading.
 - Standard run manifest writer now uses shared JSON output writing.
+- Repository health checklist added for maintainer review.
+- Local release smoke script added.
+- Local release smoke script covered by pytest.
+
+## Local smoke coverage
+
+The local smoke script checks release metadata consistency, authorization evidence, infrastructure evidence, standard output generation, manifest generation, and representative recommendation behavior without relying on GitHub Actions.
 
 ## Remaining quality work
 
 1. Continue reducing local JSON serialization in scripts.
 2. Keep runner command surfaces aligned with release metadata.
-3. Add repository-health documentation for maintainers.
-4. Add a manual smoke-test script or checklist that does not depend on GitHub Actions changes.
-5. Review old Sprint status documents for stale limitations after refactors.
+3. Review old Sprint status documents for stale limitations after refactors.
+4. Add additional smoke coverage for self-protection outputs.
+5. Add a maintainer release checklist for running smoke checks before tagging.
 
 ## Engineering rule
 
