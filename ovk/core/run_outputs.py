@@ -33,14 +33,15 @@ def write_standard_run_outputs(bundle: EvidenceBundle, paths: StandardOutputPath
     paths.markdown.write_text(markdown, encoding="utf-8")
     write_json_file(paths.attestation, attestation)
 
+    if paths.quality_report is not None:
+        report = build_evidence_quality_report(bundle)
+        write_json_file(paths.quality_report, report.to_dict())
+
     if paths.manifest is not None:
         manifest = standard_run_manifest(
             evidence_path=paths.evidence,
             markdown_path=paths.markdown,
             attestation_path=paths.attestation,
+            quality_report_path=paths.quality_report,
         )
         write_json_file(paths.manifest, manifest)
-
-    if paths.quality_report is not None:
-        report = build_evidence_quality_report(bundle)
-        write_json_file(paths.quality_report, report.to_dict())
