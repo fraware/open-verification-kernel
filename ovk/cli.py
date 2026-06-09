@@ -14,6 +14,11 @@ from ovk.core.bundle import make_bundle
 from ovk.core.decision import decide
 from ovk.core.models import EvidenceBundle
 from ovk.core.render import render_bundle_markdown
+from ovk.core.sprint1_runner import (
+    build_metadata_from_inputs,
+    run_sprint1_self_protection,
+    write_sprint1_outputs,
+)
 
 app = typer.Typer(help="Open Verification Kernel CLI")
 
@@ -99,6 +104,42 @@ def demo_self_protection(
     typer.echo(f"OVK recommendation: {recommendation}")
     if enforce:
         raise typer.Exit(code=EXIT_CODES.get(str(recommendation), 2))
+
+
+@app.command()
+def ci(
+    metadata: Optional[Path] = typer.Option(None, help="Optional self-protection metadata JSON."),
+    changed_files: Optional[Path] = typer.Option(None, help="Changed files as JSON, newline text, or diff."),
+    check_metadata: Optional[Path] = typer.Option(None, help="Required-check metadata JSON."),
+    repo: str = typer.Option("unknown/repo", help="Repository name for evidence subject."),
+    head_sha: str = typer.Option("unknown", help="Head commit SHA."),
+    base_sha: Optional[str] = typer.Option(None, help="Base commit SHA."),
+    evidence_output: Path = typer.Option(Path("ovk-evidence.json"), help="Evidence bundle output path."),
+    markdown_output: Path = typer.Option(Path("ovk-pr-comment.md"), help="Markdown output path."),
+    attestation_output: Path = typer.Option(Path("ovk-attestation.json"), help="Attestation output path."),
+    advisory: bool = typer.Option(False, help="Write outputs and exit 0."),
+) -> None:
+    """Run the Sprint 1 self-protection CI path."""
+    normalized = build_metadata_from_inputs(
+        metadata_path=metadata,
+        changed_files_path=changed_files,
+        check_metadata_path=check_metadata,
+    )
+    result = run_sprint1_self_protection(
+        metadata=normalized,
+        repo=repo,
+        head_sha=head_sha,
+        base_sha=base_sha,
+    )
+    write_sprint1_outputs(
+        result,
+        evidence_output=evidence_output,
+        markdown_output=markdown_output,
+        attestation_output=attestation_output,
+    )
+    typer.echo(f"OVK recommendation: {result.recommendation}")
+    if not advisory:
+        raise typer.Exit(code=EXIT_CODES.get(result.recommendation, 2))
 
 
 @app.command()
