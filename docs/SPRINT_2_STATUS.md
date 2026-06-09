@@ -22,9 +22,10 @@ Sprint 2 focuses on replacing manual metadata assumptions with stronger GitHub m
 - Added OPA raw-result normalization into `VerificationEvidence` in `ovk.adapters.opa.evidence`.
 - Added optional OPA integration tests that skip when the OPA binary is unavailable.
 - Added opt-in PR comment posting script at `scripts/post_pr_comment.py`.
+- Added update-in-place PR comment behavior using an OVK marker.
 - Updated `action.yml` with `post-comment: "true"` support.
-- Added installation guide at `docs/INSTALLATION.md`.
-- Added tests for GitHub event metadata, GitHub-shaped required-check metadata, GitHub API metadata helpers, branch metadata collection fallback, OPA policy assets, optional OPA runner behavior, OPA evidence normalization, helper scripts, and optional OPA integration.
+- Added installation guide at `docs/INSTALLATION.md` and updated it with branch metadata and comment-update behavior.
+- Added tests for GitHub event metadata, GitHub-shaped required-check metadata, GitHub API metadata helpers, branch metadata collection fallback, OPA policy assets, optional OPA runner behavior, OPA evidence normalization, helper scripts, PR comment marker behavior, and optional OPA integration.
 
 ## Current command
 
@@ -54,9 +55,8 @@ If collection fails, the script writes an empty object and OVK treats the requir
 ## Remaining Sprint 2 work
 
 1. Decide whether strict mode should use deterministic evaluator, OPA CLI, or both.
-2. Add update-in-place behavior for PR comments so OVK does not create duplicate comments.
-3. Add a real external-repository smoke test workflow once an integration repo exists.
-4. Optionally wire branch metadata collection directly into the Action after repository token permissions are deliberately configured.
+2. Add a real external-repository smoke test workflow once an integration repo exists.
+3. Optionally wire branch metadata collection directly into the Action after repository token permissions are deliberately configured.
 
 ## Engineering rule
 
