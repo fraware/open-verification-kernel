@@ -16,5 +16,6 @@ Implemented:
 - standard output helper support for optional quality reports
 - infrastructure runner `--quality-output`
 - infrastructure runner quality-output test
+- manifest inclusion for quality reports under the `evidence_quality` artifact kind
 
-The new gate checks evidence bundles for basic internal consistency before release or CI use. It can also emit an auditable JSON quality report for release archives, and the infrastructure runner now exposes that artifact directly.
+The new gate checks evidence bundles for basic internal consistency before release or CI use. It can also emit an auditable JSON quality report for release archives, expose that artifact directly from the infrastructure runner, and hash-address the report in standard manifests.
