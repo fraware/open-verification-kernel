@@ -13,5 +13,8 @@ Implemented:
 - `scripts/write_evidence_quality_report.py`
 - evidence quality report tests
 - `docs/EVIDENCE_QUALITY_REPORT.md`
+- standard output helper support for optional quality reports
+- infrastructure runner `--quality-output`
+- infrastructure runner quality-output test
 
-The new gate checks evidence bundles for basic internal consistency before release or CI use. It can also emit an auditable JSON quality report for release archives.
+The new gate checks evidence bundles for basic internal consistency before release or CI use. It can also emit an auditable JSON quality report for release archives, and the infrastructure runner now exposes that artifact directly.
