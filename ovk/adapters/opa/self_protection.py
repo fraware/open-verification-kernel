@@ -3,8 +3,8 @@
 This module implements the first end-to-end OVK policy check.
 
 Policy intent:
-An AI-authored pull request must not remove, weaken, bypass, or self-approve
-the verification controls that govern its own merge.
+An AI-authored pull request must preserve the verification controls that govern
+its own merge.
 
 The implementation deliberately returns OVK evidence, not a bare boolean.
 """
@@ -20,6 +20,8 @@ from ovk.core.models import BackendClaim, VerificationEvidence, VerificationStat
 DEFAULT_GATE_NAME = "ovk-verify"
 INTENT_ID = "agent-cannot-disable-own-ci-gate"
 INTENT_TITLE = "Agent-authored PR cannot weaken its own verification gate"
+HIGH_RISK_PREFIXES = (".github/workflows/", ".github/rulesets/", ".verification/")
+HIGH_RISK_FILES = {"CODEOWNERS"}
 
 
 @dataclass(frozen=True)
@@ -40,11 +42,37 @@ class SelfProtectionViolation:
         return data
 
 
+@dataclass(frozen=True)
+class SelfProtectionUnknown:
+    """A reason the self-protection check cannot make a passing claim."""
+
+    reason: str
+    affected_file: str | None = None
+
+    def as_counterexample(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "summary": self.reason,
+            "failure_mode": "missing_required_metadata",
+        }
+        if self.affected_file:
+            data["affected_file"] = self.affected_file
+        return data
+
+
+def _phase(data: dict[str, Any], phase: str) -> dict[str, Any]:
+    value = data.get(phase, {})
+    return value if isinstance(value, dict) else {}
+
+
 def _required_checks(data: dict[str, Any], phase: str) -> set[str]:
-    checks = data.get(phase, {}).get("required_checks", [])
+    checks = _phase(data, phase).get("required_checks", [])
     if not isinstance(checks, list):
         return set()
     return {str(check) for check in checks}
+
+
+def _has_required_check_metadata(data: dict[str, Any], phase: str) -> bool:
+    return isinstance(_phase(data, phase).get("required_checks"), list)
 
 
 def _changed_files(data: dict[str, Any]) -> list[str]:
@@ -56,6 +84,18 @@ def _changed_files(data: dict[str, Any]) -> list[str]:
 
 def _actor_type(data: dict[str, Any]) -> str:
     return str(data.get("actor", {}).get("type", data.get("author_type", "unknown")))
+
+
+def _agent_id(data: dict[str, Any]) -> str:
+    return str(data.get("actor", {}).get("id", data.get("agent", "unknown")))
+
+
+def _is_high_risk_path(path: str) -> bool:
+    return path in HIGH_RISK_FILES or any(path.startswith(prefix) for prefix in HIGH_RISK_PREFIXES)
+
+
+def _high_risk_changed_files(data: dict[str, Any]) -> list[str]:
+    return [path for path in _changed_files(data) if _is_high_risk_path(path)]
 
 
 def find_self_protection_violations(data: dict[str, Any]) -> list[SelfProtectionViolation]:
@@ -90,10 +130,10 @@ def find_self_protection_violations(data: dict[str, Any]) -> list[SelfProtection
                 )
             )
 
-    permissions_after = data.get("after", {}).get("workflow_permissions", {})
-    permissions_before = data.get("before", {}).get("workflow_permissions", {})
+    permissions_after = _phase(data, "after").get("workflow_permissions", {})
+    permissions_before = _phase(data, "before").get("workflow_permissions", {})
     if isinstance(permissions_after, dict):
-        before_actions = str(permissions_before.get("actions", "read"))
+        before_actions = str(permissions_before.get("actions", "read")) if isinstance(permissions_before, dict) else "read"
         after_actions = str(permissions_after.get("actions", "read"))
         if before_actions != "write" and after_actions == "write":
             violations.append(
@@ -107,6 +147,33 @@ def find_self_protection_violations(data: dict[str, Any]) -> list[SelfProtection
     return violations
 
 
+def find_self_protection_unknowns(data: dict[str, Any]) -> list[SelfProtectionUnknown]:
+    """Return reasons OVK cannot safely claim pass for a high-risk change."""
+    if _actor_type(data) != "ai_agent":
+        return []
+
+    high_risk_files = _high_risk_changed_files(data)
+    if not high_risk_files:
+        return []
+
+    unknowns: list[SelfProtectionUnknown] = []
+    if not _has_required_check_metadata(data, "before"):
+        unknowns.append(
+            SelfProtectionUnknown(
+                reason="Before-state required-check metadata is missing for an agent-authored high-risk change.",
+                affected_file=high_risk_files[0],
+            )
+        )
+    if not _has_required_check_metadata(data, "after"):
+        unknowns.append(
+            SelfProtectionUnknown(
+                reason="After-state required-check metadata is missing for an agent-authored high-risk change.",
+                affected_file=high_risk_files[0],
+            )
+        )
+    return unknowns
+
+
 def evaluate_self_protection(
     data: dict[str, Any],
     *,
@@ -117,8 +184,20 @@ def evaluate_self_protection(
 ) -> VerificationEvidence:
     """Evaluate the self-protection policy and return OVK evidence."""
     violations = find_self_protection_violations(data)
-    status = VerificationStatus.FAIL if violations else VerificationStatus.PASS
-    merge_recommendation = "block" if violations else "allow"
+    unknowns = find_self_protection_unknowns(data)
+
+    if violations:
+        status = VerificationStatus.FAIL
+        merge_recommendation = "block"
+        human_review_required = True
+    elif unknowns:
+        status = VerificationStatus.UNKNOWN
+        merge_recommendation = "require_human_review"
+        human_review_required = True
+    else:
+        status = VerificationStatus.PASS
+        merge_recommendation = "allow"
+        human_review_required = False
 
     subject: dict[str, Any] = {"repo": repo, "head_sha": head_sha}
     if pull_request is not None:
@@ -127,6 +206,8 @@ def evaluate_self_protection(
         subject["base_sha"] = base_sha
 
     counterexamples = [violation.as_counterexample() for violation in violations]
+    if not counterexamples:
+        counterexamples = [unknown.as_counterexample() for unknown in unknowns]
 
     return VerificationEvidence(
         evidence_id="ev-agent-self-protection",
@@ -134,7 +215,7 @@ def evaluate_self_protection(
         subject=subject,
         change_origin={
             "author_type": _actor_type(data),
-            "agent": data.get("actor", {}).get("id", data.get("agent", "unknown")),
+            "agent": _agent_id(data),
             "task": data.get("task", "unknown"),
         },
         intent={
@@ -148,9 +229,9 @@ def evaluate_self_protection(
                 guarantee_type="policy_evaluation",
                 status=status,
                 assumptions=[
-                    "Required-check metadata is represented in the input object.",
+                    "Required-check metadata must be represented in the input object for pass claims.",
                     "Changed workflow and verification files are represented in changed_files.",
-                    "This Python evaluator mirrors the first Rego policy semantics for CI portability.",
+                    "This Python evaluator mirrors the first policy semantics for CI portability.",
                 ],
                 limits=[
                     "This check does not prove semantic correctness of workflow steps.",
@@ -170,8 +251,8 @@ def evaluate_self_protection(
         else [],
         decision={
             "merge_recommendation": merge_recommendation,
-            "human_review_required": bool(violations),
-            "override_allowed": bool(violations),
-            "override_requires": ["maintainer", "security-review"] if violations else [],
+            "human_review_required": human_review_required,
+            "override_allowed": human_review_required,
+            "override_requires": ["maintainer", "security-review"] if human_review_required else [],
         },
     )
