@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Run the obligation-backed authorization path."""
+"""Run the validated obligation-backed authorization path."""
 
 from __future__ import annotations
 
@@ -7,9 +7,7 @@ import argparse
 import json
 from pathlib import Path
 
-from ovk.adapters.z3.evidence import authorization_result_to_evidence
-from ovk.adapters.z3.executor import run_authorization_obligation_with_z3
-from ovk.adapters.z3.obligation import build_authorization_obligation
+from ovk.adapters.z3.validated_path import evaluate_validated_authorization_path
 from ovk.core.attestation import bundle_to_statement
 from ovk.core.bundle import make_bundle
 from ovk.core.render import render_bundle_markdown
@@ -40,17 +38,11 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     data = json.loads(args.input.read_text(encoding="utf-8"))
-    obligation = build_authorization_obligation(data)
-    raw = run_authorization_obligation_with_z3(obligation)
-    evidence = authorization_result_to_evidence(
-        raw,
-        obligation,
+    evidence = evaluate_validated_authorization_path(
+        data,
         repo=args.repo,
         head_sha=args.head_sha,
         base_sha=args.base_sha,
-        author_type=str(data.get("author_type", "unknown")),
-        agent=str(data.get("agent", "unknown")),
-        task=str(data.get("task", "unknown")),
     )
     bundle = make_bundle([evidence])
     markdown = render_bundle_markdown(bundle)
