@@ -12,6 +12,7 @@ from ovk.core.attestation import bundle_to_statement
 from ovk.core.bundle import make_bundle
 from ovk.core.check_metadata import load_required_check_metadata
 from ovk.core.changed_files import load_changed_files
+from ovk.core.github_event import load_github_event_metadata, metadata_to_self_protection_defaults
 from ovk.core.models import EvidenceBundle
 from ovk.core.render import render_bundle_markdown
 from ovk.core.self_protection_input import SelfProtectionMetadata, build_self_protection_input
@@ -42,11 +43,25 @@ def build_metadata_from_inputs(
     metadata_path: Path | None = None,
     changed_files_path: Path | None = None,
     check_metadata_path: Path | None = None,
+    github_event_path: Path | None = None,
 ) -> dict[str, Any]:
     """Build a canonical metadata dictionary from separate runner inputs."""
-    data = load_metadata(metadata_path)
+    data: dict[str, Any] = {}
+
+    if github_event_path is not None:
+        github_metadata = load_github_event_metadata(github_event_path)
+        data.update(metadata_to_self_protection_defaults(github_metadata))
+        data["github_repository"] = github_metadata.repository
+        data["github_head_sha"] = github_metadata.head_sha
+        data["github_base_sha"] = github_metadata.base_sha
+        if github_metadata.pull_request_number is not None:
+            data["github_pull_request_number"] = github_metadata.pull_request_number
+
+    data.update(load_metadata(metadata_path))
+
     if changed_files_path is not None:
         data["changed_files"] = load_changed_files(changed_files_path)
+
     check_metadata = load_required_check_metadata(check_metadata_path)
     for key, value in check_metadata.items():
         if value is not None:
@@ -62,6 +77,10 @@ def run_sprint1_self_protection(
     base_sha: str | None = None,
 ) -> Sprint1Result:
     """Run the Sprint 1 self-protection path from normalized metadata."""
+    repo = repo if repo != "unknown/repo" else str(metadata.get("github_repository", repo))
+    head_sha = head_sha if head_sha != "unknown" else str(metadata.get("github_head_sha", head_sha))
+    base_sha = base_sha if base_sha is not None else metadata.get("github_base_sha")
+
     structured = build_self_protection_input(
         SelfProtectionMetadata(
             actor_type=str(metadata.get("actor_type", metadata.get("author_type", "ai_agent"))),
