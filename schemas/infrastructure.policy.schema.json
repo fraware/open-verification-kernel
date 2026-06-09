@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/infrastructure.policy.schema.json",
+  "title": "OVK Infrastructure Exposure Policy",
+  "type": "object",
+  "properties": {
+    "blocked_public_sensitivities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["public", "internal", "confidential", "restricted"]
+      },
+      "uniqueItems": true
+    }
+  },
+  "additionalProperties": false
+}
