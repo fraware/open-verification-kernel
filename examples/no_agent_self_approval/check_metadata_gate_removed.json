@@ -1,0 +1,9 @@
+{
+  "before_required_checks": [
+    "unit-tests",
+    "ovk-verify"
+  ],
+  "after_required_checks": [
+    "unit-tests"
+  ]
+}
