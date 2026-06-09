@@ -10,6 +10,8 @@ import typer
 from jsonschema import Draft202012Validator
 
 from ovk.adapters.opa import evaluate_self_protection
+from ovk.adapters.z3.validated_path import evaluate_validated_authorization_path
+from ovk.core.attestation import bundle_to_statement
 from ovk.core.bundle import make_bundle
 from ovk.core.decision import decide
 from ovk.core.models import EvidenceBundle
@@ -147,6 +149,35 @@ def ci(
     typer.echo(f"OVK recommendation: {result.recommendation}")
     if not advisory:
         raise typer.Exit(code=EXIT_CODES.get(result.recommendation, 2))
+
+
+@app.command()
+def auth_obligation(
+    input_json: Path,
+    repo: str = typer.Option("unknown/repo", help="Repository name for evidence subject."),
+    head_sha: str = typer.Option("unknown", help="Head commit SHA."),
+    base_sha: Optional[str] = typer.Option(None, help="Base commit SHA."),
+    evidence_output: Path = typer.Option(Path("ovk-auth-evidence.json"), help="Evidence bundle output path."),
+    markdown_output: Path = typer.Option(Path("ovk-auth-comment.md"), help="Markdown output path."),
+    attestation_output: Path = typer.Option(Path("ovk-auth-attestation.json"), help="Attestation output path."),
+    advisory: bool = typer.Option(False, help="Write outputs and exit 0."),
+) -> None:
+    """Run the validated authorization obligation path."""
+    data = json.loads(input_json.read_text(encoding="utf-8"))
+    evidence = evaluate_validated_authorization_path(
+        data,
+        repo=repo,
+        head_sha=head_sha,
+        base_sha=base_sha,
+    )
+    bundle = make_bundle([evidence])
+    evidence_output.write_text(json.dumps(bundle.model_dump(mode="json"), indent=2) + "\n", encoding="utf-8")
+    markdown_output.write_text(render_bundle_markdown(bundle), encoding="utf-8")
+    attestation_output.write_text(json.dumps(bundle_to_statement(bundle), indent=2) + "\n", encoding="utf-8")
+    recommendation = str(bundle.decision.get("merge_recommendation", "require_human_review"))
+    typer.echo(f"OVK authorization recommendation: {recommendation}")
+    if not advisory:
+        raise typer.Exit(code=EXIT_CODES.get(recommendation, 2))
 
 
 @app.command()
