@@ -2,6 +2,8 @@
 
 This document summarizes the current release-readiness state after the Sprint 5, Sprint 6, and Sprint 7 cleanup work.
 
+For a fuller assessment of maturity, risks, and remaining sprint work, see `docs/CURRENT_WORK_ASSESSMENT.md`.
+
 ## Current package state
 
 - Package metadata is aligned to version `0.1.0`.
