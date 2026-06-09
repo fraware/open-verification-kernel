@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/authorization.input.schema.json",
+  "title": "OVK Authorization Route Abstraction Input",
+  "type": "object",
+  "required": ["routes"],
+  "properties": {
+    "author_type": {
+      "type": "string"
+    },
+    "agent": {
+      "type": "string"
+    },
+    "task": {
+      "type": "string"
+    },
+    "routes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["path", "admin_only_before", "admin_only_after", "reachable_after"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "admin_only_before": {
+            "type": "boolean"
+          },
+          "admin_only_after": {
+            "type": "boolean"
+          },
+          "reachable_after": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["role"],
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "via": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}
