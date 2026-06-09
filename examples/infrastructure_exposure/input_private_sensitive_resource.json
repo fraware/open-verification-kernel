@@ -1,0 +1,14 @@
+{
+  "author_type": "ai_agent",
+  "agent": "codex",
+  "task": "Keep sensitive storage private.",
+  "resources": [
+    {
+      "resource_id": "bucket-customer-exports",
+      "resource_type": "object_storage_bucket",
+      "sensitivity": "confidential",
+      "public_exposure": false,
+      "exposure_paths": []
+    }
+  ]
+}
