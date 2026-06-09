@@ -12,6 +12,19 @@ python scripts/write_standard_run_manifest.py \
   --output ovk-auth-artifact-manifest.json
 ```
 
+## Portable relative paths
+
+Use `--root` when the manifest should contain paths relative to a release-artifact directory.
+
+```bash
+python scripts/write_standard_run_manifest.py \
+  --evidence dist/ovk-auth-evidence.json \
+  --markdown dist/ovk-auth-comment.md \
+  --attestation dist/ovk-auth-attestation.json \
+  --root dist \
+  --output dist/ovk-auth-artifact-manifest.json
+```
+
 ## Output
 
 The command writes a deterministic artifact manifest with three entries:
