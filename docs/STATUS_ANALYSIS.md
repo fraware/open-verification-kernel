@@ -4,7 +4,7 @@ This document records the current engineering status of Open Verification Kernel
 
 ## Executive assessment
 
-The repository is in a credible bootstrap-to-v0 transition state. It is no longer only a concept document. It has a clear architecture, schemas, starter package, runnable demo paths, tests, CI, seed benchmark scaffolding, a documented v0 runner design, and a closed Sprint 1 self-protection path. It is not yet a production-grade verification system. The remaining work is mainly real backend execution, richer GitHub metadata collection, PR comment posting, and further hardening of evidence semantics.
+The repository is in a credible bootstrap-to-v0 transition state. It is no longer only a concept document. It has a clear architecture, schemas, starter package, runnable demo paths, tests, CI, seed benchmark scaffolding, a documented v0 runner design, a closed Sprint 1 self-protection path, substantial Sprint 2 GitHub and OPA integration work, and initial Sprint 3 authorization-obligation foundations. It is not yet a production-grade verification system. The remaining work is mainly full backend execution, external smoke testing, deeper authorization solving, and release hardening.
 
 ## Current strengths
 
@@ -20,7 +20,7 @@ The project has adopted the correct evidence rule. Backend outcomes must preserv
 
 The first path checks whether an AI-authored change weakens the verification controls that govern its own merge. This is the strongest first demo because it is agent-native, high leverage, and easy for developers to understand.
 
-The second path checks whether a non-admin principal can reach an admin-only route in a supplied authorization abstraction. This is the right second demo because it moves OVK from workflow configuration into semantic application risk.
+The second path checks whether a non-admin principal can reach an admin-only route in a supplied authorization abstraction. Sprint 3 has started moving this path from fixture checking toward explicit authorization obligations and solver-independent SMT planning.
 
 ### Handoff readiness
 
@@ -40,16 +40,22 @@ The repository already contains enough documentation, schemas, examples, tests, 
 | Evidence bundle builder | Present | Content-addressed bundle IDs added |
 | Markdown renderer | Present | PR-ready text generation exists |
 | Attestation helper | Present | Unsigned in-toto-style statement |
-| OPA-style self-protection path | Present and hardened for missing metadata | Runnable, deterministic, not real OPA yet |
-| Z3-style authorization path | Present | Runnable abstraction, optional Z3 path started |
+| OPA-style self-protection path | Present and hardened | Deterministic default with Rego fixture and optional OPA runner |
+| Backend strategy support | Present | `deterministic`, `opa`, and `both` exposed in CLI and Action |
+| GitHub event parser | Present | Extracts repository, PR number, actor, head SHA, and base SHA |
+| GitHub API metadata collector | Present | Conservative branch-protection collector returning empty metadata when unavailable |
+| PR comment posting | Present | Optional update-in-place behavior with an OVK marker |
+| Z3-style authorization path | Present | Runnable abstraction plus obligation and SMT-plan foundations |
+| Authorization obligation model | Present | Explicit obligation ID, query polarity, routes, and witnesses |
+| Solver-independent SMT plan | Present | Clause plan for future Z3 executor |
 | Change detection | Present | Maps changed files to engineering surfaces |
 | Diff parser | Present | Extracts changed paths from unified diff text |
 | Planner | Present | Joins surfaces, intents, capabilities, and routing |
 | Self-protection input builder | Present | Normalizes Sprint 1 metadata into adapter input |
 | Changed-file ingestion | Present | Accepts JSON, newline text, or unified diff |
-| Required-check metadata loader | Present | Accepts explicit before/after required-check metadata |
-| `ovk ci` | Present | Runs the Sprint 1 self-protection path |
-| Composite GitHub Action | Present | Calls `ovk ci` in advisory or strict mode |
+| Required-check metadata loader | Present | Accepts explicit and GitHub-shaped before/after required-check metadata |
+| `ovk ci` | Present | Runs the self-protection path and accepts GitHub event payloads |
+| Composite GitHub Action | Present | Calls `ovk ci`, supports comments and backend strategies |
 | v0 self-protection runner script | Present | Emits evidence, Markdown, and attestation from metadata |
 | Benchmarks | Present | Five seed cases, including missing metadata |
 | CI | Present | Runs lint, tests, seed benchmark, `ovk ci`, and artifact upload |
@@ -58,75 +64,73 @@ The repository already contains enough documentation, schemas, examples, tests, 
 
 ### Metadata dependence
 
-The Sprint 1 path can ingest changed files and required-check metadata from explicit files, but it does not yet query GitHub branch-protection settings directly. Missing required-check metadata is intentionally treated as unknown and requires human review.
+The self-protection path can ingest GitHub event metadata and GitHub-shaped branch-protection metadata. It also includes a conservative GitHub API collector, but the Action does not yet collect live branch metadata automatically by default. Missing required-check metadata is intentionally treated as unknown and requires human review.
 
 ### Backend execution
 
-The OPA path currently uses deterministic Python with OPA-style semantics. A real OPA CLI integration should be added behind the same adapter interface.
+The OPA path includes a Rego policy fixture, optional OPA runner, OPA evidence normalization, and backend strategy support. The deterministic evaluator remains the v0 fixture oracle.
 
-The Z3 path currently uses a deterministic reachability checker and an optional Z3 helper. The next version should generate real SMT obligations and record query polarity in evidence.
+The Z3 path now has explicit authorization obligations, query polarity, counterexample translation, and a solver-independent SMT plan. It still needs a high-level obligation-backed evidence adapter and a full Z3 executor.
 
-### PR integration
+### External validation
 
-The Action now calls `ovk ci` and the project CI uploads evidence artifacts, but PR comment posting is still not implemented. The project can render Markdown, but a GitHub API posting step remains future work.
+The Action is documented for external smoke testing, but an external integration repository has not yet been run.
 
 ### Benchmark depth
 
-The seed benchmark now covers pass, fail, and unknown outcomes for the first self-protection path, plus authorization pass and fail cases. It still needs adversarial cases, weak specifications, timeout behavior, unknown solver state, and multi-backend routing.
+The seed benchmark covers pass, fail, and unknown outcomes for the first self-protection path, plus authorization pass and fail cases. It still needs adversarial cases, weak specifications, timeout behavior, unknown solver state, and multi-backend routing.
 
 ## Sprint 1 status: closed
 
-Goal: make one real PR-style path work end to end for workflow and verification-control changes.
+Sprint 1 made one PR-style self-protection path work end to end for workflow and verification-control changes.
 
-### Completed
+Exit criterion met: a workflow or `.verification/` change authored by an AI agent produces one of three honest outcomes: allow, block, or require human review. Missing control metadata does not pass.
 
-- Added repository status analysis and sprint plan.
-- Hardened the self-protection adapter so missing required-check metadata on high-risk agent-authored changes returns unknown and requires human review.
-- Preserved concrete failure precedence. A `.verification/` change by an AI agent still fails even when metadata is missing.
-- Added `SelfProtectionMetadata` and canonical structured input builder.
-- Added changed-file ingestion from JSON, newline text, and unified diff.
-- Added required-check metadata normalization from explicit before/after metadata.
-- Added metadata fixtures for removed gate, missing required checks, changed files, and required-check metadata.
-- Added `scripts/run_v0_self_protection.py` to emit evidence, Markdown, and an unsigned attestation statement.
-- Added `ovk ci` as the Sprint 1 command surface.
-- Wired the composite GitHub Action to call `ovk ci`.
-- Updated CI to exercise `ovk ci` and upload OVK artifacts.
-- Added tests for pass, fail, unknown, configuration-change failure, structured input building, metadata composition, changed-file ingestion, runner outputs, and artifact writing.
-- Added a missing-metadata seed benchmark case.
-- Relaxed Ruff line length to 120 to keep bootstrap code lintable without unsafe rewrites through the connector.
+## Sprint 2 status: mostly complete
 
-### Sprint 1 exit criterion
+Sprint 2 strengthened GitHub metadata ingestion and prepared the OPA-backed self-protection path.
 
-A workflow or `.verification/` change authored by an AI agent produces one of three honest outcomes: allow, block, or require human review. Missing control metadata does not pass.
+Completed highlights:
 
-## Sprint plan
+- GitHub event parsing.
+- GitHub-shaped required-check metadata normalization.
+- Conservative branch metadata collector.
+- Rego self-protection policy fixture.
+- Optional OPA runner.
+- OPA evidence normalization.
+- Backend strategies: `deterministic`, `opa`, and `both`.
+- Optional PR comment posting with update-in-place behavior.
+- Installation, branch metadata, strict-mode, and external smoke-test docs.
 
-### Sprint 2: real OPA and stronger GitHub path
+Remaining Sprint 2 work:
 
-Goal: convert the first path from deterministic evaluator to real policy-backed execution and improve GitHub integration.
+- Run a real external-repository smoke test once an integration repository exists.
+- Optionally wire branch metadata collection directly into the Action after token permissions are deliberately configured.
+- Expand optional-backend tests when connector safety controls allow direct optional-backend monkeypatching.
 
-Deliverables:
+## Sprint 3 status: in progress
 
-- OPA CLI execution helper.
-- Rego policy fixture.
-- Unknown result when OPA binary or metadata is unavailable.
-- Direct GitHub branch-protection and required-check metadata collection where token permissions allow it.
-- Evidence and Markdown artifact flow already exists and should be hardened.
-- Optional PR comment posting.
+Sprint 3 focuses on the real Z3 authorization path.
 
-### Sprint 3: real Z3 authorization path
+Completed so far:
 
-Goal: make the second demo a true SMT-backed semantic check.
+- Authorization obligation model.
+- Explicit query polarity through `find_violation`.
+- Obligation serialization for diagnostics and evidence attachment.
+- Counterexample translation from obligation witnesses.
+- Solver-independent SMT plan and clause representation.
+- Tests for obligation construction, serialization, counterexample translation, and SMT plan generation.
 
-Deliverables:
+Remaining Sprint 3 work:
 
-- SMT obligation object.
-- Z3 encoding for admin-route reachability.
-- Model-to-counterexample translation.
-- Query polarity in evidence.
-- Regression test generation from counterexample.
+- Wire the existing authorization adapter through the obligation model.
+- Add a Z3 executor that consumes `AuthorizationObligation` or `SmtPlan`.
+- Map Z3 `sat`, `unsat`, and `unknown` into OVK evidence.
+- Record query polarity and solver model in counterexamples.
+- Generate a regression test from an authorization counterexample.
+- Add optional integration tests that run only when `z3-solver` is installed.
 
-### Sprint 4: infrastructure exposure path and benchmark hardening
+## Sprint 4: infrastructure exposure path and benchmark hardening
 
 Goal: show the platform and security value of OVK beyond application code.
 
@@ -137,7 +141,7 @@ Deliverables:
 - OPA or graph-backed evaluator.
 - Adversarial benchmark cases for missing metadata, unknowns, and vacuity.
 
-### Sprint 5: attestation and release hardening
+## Sprint 5: attestation and release hardening
 
 Goal: make v0 credible externally.
 
@@ -151,4 +155,4 @@ Deliverables:
 
 ## Current priority
 
-Sprint 1 is closed. The next priority is Sprint 2: real OPA execution behind the current self-protection adapter and stronger GitHub metadata collection without weakening the existing unknown-result discipline.
+Sprint 3 is now active. The next priority is to connect the authorization obligation model to an executable Z3-backed path while preserving query polarity and unknown-result discipline.
