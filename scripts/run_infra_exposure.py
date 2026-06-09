@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
 from ovk.adapters.infra.evidence import evaluate_infra_exposure
@@ -12,6 +11,7 @@ from ovk.adapters.infra.normalize import normalize_infra_input
 from ovk.adapters.infra.policy_config import load_policy
 from ovk.core.bundle import make_bundle
 from ovk.core.exit_codes import exit_code_for_recommendation
+from ovk.core.json_io import read_json_file
 from ovk.core.run_outputs import StandardOutputPaths, write_standard_run_outputs
 
 
@@ -33,7 +33,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    raw_data = json.loads(args.input.read_text(encoding="utf-8"))
+    raw_data = read_json_file(args.input)
     data = normalize_infra_input(raw_data, args.input_format)
     policy = load_policy(args.policy)
     evidence = evaluate_infra_exposure(
