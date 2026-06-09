@@ -4,7 +4,7 @@ This document records the current engineering status of Open Verification Kernel
 
 ## Executive assessment
 
-The repository is in a credible bootstrap-to-v0 transition state. It is no longer only a concept document. It has a clear architecture, schemas, starter package, runnable demo paths, tests, CI, seed benchmark scaffolding, and a documented v0 runner design. It is not yet a production-grade verification system. The remaining work is mainly integration, real backend execution, GitHub PR plumbing, and hardening of evidence semantics.
+The repository is in a credible bootstrap-to-v0 transition state. It is no longer only a concept document. It has a clear architecture, schemas, starter package, runnable demo paths, tests, CI, seed benchmark scaffolding, a documented v0 runner design, and a closed Sprint 1 self-protection path. It is not yet a production-grade verification system. The remaining work is mainly real backend execution, richer GitHub metadata collection, PR comment posting, and further hardening of evidence semantics.
 
 ## Current strengths
 
@@ -46,15 +46,19 @@ The repository already contains enough documentation, schemas, examples, tests, 
 | Diff parser | Present | Extracts changed paths from unified diff text |
 | Planner | Present | Joins surfaces, intents, capabilities, and routing |
 | Self-protection input builder | Present | Normalizes Sprint 1 metadata into adapter input |
+| Changed-file ingestion | Present | Accepts JSON, newline text, or unified diff |
+| Required-check metadata loader | Present | Accepts explicit before/after required-check metadata |
+| `ovk ci` | Present | Runs the Sprint 1 self-protection path |
+| Composite GitHub Action | Present | Calls `ovk ci` in advisory or strict mode |
 | v0 self-protection runner script | Present | Emits evidence, Markdown, and attestation from metadata |
 | Benchmarks | Present | Five seed cases, including missing metadata |
-| CI | Present | Runs lint, tests, and seed benchmark scorer |
+| CI | Present | Runs lint, tests, seed benchmark, `ovk ci`, and artifact upload |
 
 ## Known limitations
 
-### Fixture and metadata dependence
+### Metadata dependence
 
-The current runnable checks still depend on structured inputs or metadata files. OVK does not yet inspect a real PR, query branch-protection settings, build structured input from actual repository state, and run the appropriate adapter fully automatically.
+The Sprint 1 path can ingest changed files and required-check metadata from explicit files, but it does not yet query GitHub branch-protection settings directly. Missing required-check metadata is intentionally treated as unknown and requires human review.
 
 ### Backend execution
 
@@ -62,15 +66,15 @@ The OPA path currently uses deterministic Python with OPA-style semantics. A rea
 
 The Z3 path currently uses a deterministic reachability checker and an optional Z3 helper. The next version should generate real SMT obligations and record query polarity in evidence.
 
-### GitHub Action and PR integration
+### PR integration
 
-The Action remains scaffolded. The project can render Markdown but does not yet post PR comments or upload evidence artifacts through a production Action flow.
+The Action now calls `ovk ci` and the project CI uploads evidence artifacts, but PR comment posting is still not implemented. The project can render Markdown, but a GitHub API posting step remains future work.
 
 ### Benchmark depth
 
 The seed benchmark now covers pass, fail, and unknown outcomes for the first self-protection path, plus authorization pass and fail cases. It still needs adversarial cases, weak specifications, timeout behavior, unknown solver state, and multi-backend routing.
 
-## Sprint 1 status
+## Sprint 1 status: closed
 
 Goal: make one real PR-style path work end to end for workflow and verification-control changes.
 
@@ -80,37 +84,34 @@ Goal: make one real PR-style path work end to end for workflow and verification-
 - Hardened the self-protection adapter so missing required-check metadata on high-risk agent-authored changes returns unknown and requires human review.
 - Preserved concrete failure precedence. A `.verification/` change by an AI agent still fails even when metadata is missing.
 - Added `SelfProtectionMetadata` and canonical structured input builder.
-- Added metadata fixtures for removed gate and missing required checks.
+- Added changed-file ingestion from JSON, newline text, and unified diff.
+- Added required-check metadata normalization from explicit before/after metadata.
+- Added metadata fixtures for removed gate, missing required checks, changed files, and required-check metadata.
 - Added `scripts/run_v0_self_protection.py` to emit evidence, Markdown, and an unsigned attestation statement.
-- Added tests for pass, fail, unknown, configuration-change failure, and structured input building.
+- Added `ovk ci` as the Sprint 1 command surface.
+- Wired the composite GitHub Action to call `ovk ci`.
+- Updated CI to exercise `ovk ci` and upload OVK artifacts.
+- Added tests for pass, fail, unknown, configuration-change failure, structured input building, metadata composition, changed-file ingestion, runner outputs, and artifact writing.
 - Added a missing-metadata seed benchmark case.
 - Relaxed Ruff line length to 120 to keep bootstrap code lintable without unsafe rewrites through the connector.
 
-### Remaining in Sprint 1
-
-- Add direct PR changed-file ingestion using GitHub metadata or local `git diff`.
-- Add branch-protection and required-check metadata collection.
-- Add a single `ovk ci` command that wraps the v0 runner.
-- Wire the GitHub Action to call the v0 runner once connector or manual edit path allows it.
-- Upload evidence and Markdown artifacts in CI.
-
 ### Sprint 1 exit criterion
 
-A workflow or `.verification/` change authored by an AI agent must produce one of three honest outcomes: allow, block, or require human review. Missing control metadata must not pass.
+A workflow or `.verification/` change authored by an AI agent produces one of three honest outcomes: allow, block, or require human review. Missing control metadata does not pass.
 
 ## Sprint plan
 
-### Sprint 2: real OPA and GitHub Action path
+### Sprint 2: real OPA and stronger GitHub path
 
-Goal: convert the first path from deterministic evaluator to real policy-backed execution and wire it into the Action.
+Goal: convert the first path from deterministic evaluator to real policy-backed execution and improve GitHub integration.
 
 Deliverables:
 
 - OPA CLI execution helper.
 - Rego policy fixture.
 - Unknown result when OPA binary or metadata is unavailable.
-- GitHub Action calls OVK runner.
-- Evidence and Markdown uploaded as artifacts.
+- Direct GitHub branch-protection and required-check metadata collection where token permissions allow it.
+- Evidence and Markdown artifact flow already exists and should be hardened.
 - Optional PR comment posting.
 
 ### Sprint 3: real Z3 authorization path
@@ -150,4 +151,4 @@ Deliverables:
 
 ## Current priority
 
-The immediate priority remains Sprint 1. The most important engineering rule for this sprint is conservative evidence handling. If OVK detects a high-risk candidate intent but cannot build sufficient structured input, it must require human review instead of returning allow.
+Sprint 1 is closed. The next priority is Sprint 2: real OPA execution behind the current self-protection adapter and stronger GitHub metadata collection without weakening the existing unknown-result discipline.
