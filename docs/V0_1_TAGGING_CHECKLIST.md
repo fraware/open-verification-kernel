@@ -7,6 +7,7 @@ This checklist is for maintainers preparing a v0.1 tag.
 - Confirm the package installs locally.
 - Confirm the test suite passes locally.
 - Confirm `ovk init` creates the expected verification directories.
+- Confirm the release metadata consistency check passes.
 - Confirm the self-protection path writes evidence, Markdown, and attestation outputs.
 - Confirm the authorization path writes evidence, Markdown, and attestation outputs.
 - Confirm the infrastructure path writes evidence, Markdown, attestation, and artifact-manifest outputs.
@@ -21,6 +22,7 @@ This checklist is for maintainers preparing a v0.1 tag.
 - `docs/ATTESTATION_ENVELOPE.md`
 - `docs/RELEASE_ARTIFACT_LAYOUT.md`
 - `docs/STANDARD_RUN_MANIFEST.md`
+- `docs/RELEASE_INDEX.md`
 
 ## Known limitations to keep in release notes
 
