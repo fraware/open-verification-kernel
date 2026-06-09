@@ -1,0 +1,18 @@
+{
+  "author_type": "ai_agent",
+  "agent": "codex",
+  "task": "Malformed authorization abstraction with invalid witness.",
+  "routes": [
+    {
+      "path": "/admin/export",
+      "admin_only_before": true,
+      "admin_only_after": true,
+      "reachable_after": [
+        {
+          "role": "",
+          "via": "middleware_not_applied"
+        }
+      ]
+    }
+  ]
+}
