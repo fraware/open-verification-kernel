@@ -25,6 +25,7 @@ Sprint 2 focuses on replacing manual metadata assumptions with stronger GitHub m
 - Added update-in-place PR comment behavior using an OVK marker.
 - Updated `action.yml` with `post-comment: "true"` support.
 - Added installation guide at `docs/INSTALLATION.md` and updated it with branch metadata and comment-update behavior.
+- Added strict-mode policy documentation in `docs/STRICT_MODE_POLICY.md`.
 - Added tests for GitHub event metadata, GitHub-shaped required-check metadata, GitHub API metadata helpers, branch metadata collection fallback, OPA policy assets, optional OPA runner behavior, OPA evidence normalization, helper scripts, PR comment marker behavior, and optional OPA integration.
 
 ## Current command
@@ -52,11 +53,15 @@ python scripts/collect_branch_metadata.py \
 
 If collection fails, the script writes an empty object and OVK treats the required-check state as unknown.
 
+## Strict mode decision
+
+For v0, strict mode uses the deterministic self-protection evaluator as the authoritative decision path. The optional OPA CLI runner remains supplementary until parity is validated across the benchmark suite. Missing OPA must not break strict mode unless a future user explicitly selects OPA as a required backend.
+
 ## Remaining Sprint 2 work
 
-1. Decide whether strict mode should use deterministic evaluator, OPA CLI, or both.
-2. Add a real external-repository smoke test workflow once an integration repo exists.
-3. Optionally wire branch metadata collection directly into the Action after repository token permissions are deliberately configured.
+1. Add a real external-repository smoke test workflow once an integration repo exists.
+2. Optionally wire branch metadata collection directly into the Action after repository token permissions are deliberately configured.
+3. Add backend strategy options in a future release: deterministic, opa, and both.
 
 ## Engineering rule
 
