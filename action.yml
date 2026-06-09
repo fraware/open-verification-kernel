@@ -33,6 +33,10 @@ inputs:
     description: Path for the generated attestation statement
     required: false
     default: ovk-attestation.json
+  post-comment:
+    description: Post the Markdown report as a pull-request comment when possible
+    required: false
+    default: "false"
 
 runs:
   using: composite
@@ -57,3 +61,9 @@ runs:
         else
           ovk ci --github-event "${{ github.event_path }}" --metadata "${{ inputs.metadata }}" --changed-files "${{ inputs.changed-files }}" $EXTRA_CHECK_METADATA --evidence-output "${{ inputs.evidence-output }}" --markdown-output "${{ inputs.markdown-output }}" --attestation-output "${{ inputs.attestation-output }}"
         fi
+    - name: Post OVK pull-request comment
+      if: ${{ inputs.post-comment == 'true' }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: python scripts/post_pr_comment.py --markdown "${{ inputs.markdown-output }}" --event "${{ github.event_path }}"
