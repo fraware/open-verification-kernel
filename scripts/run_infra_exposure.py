@@ -10,10 +10,8 @@ from pathlib import Path
 from ovk.adapters.infra.evidence import evaluate_infra_exposure
 from ovk.adapters.infra.normalize import normalize_infra_input
 from ovk.adapters.infra.policy_config import load_policy
-from ovk.core.attestation import bundle_to_statement
 from ovk.core.bundle import make_bundle
-from ovk.core.render import render_bundle_markdown
-from ovk.core.standard_artifacts import standard_run_manifest
+from ovk.core.run_outputs import StandardOutputPaths, write_standard_run_outputs
 
 
 EXIT_CODES = {
@@ -54,22 +52,15 @@ def main() -> int:
         policy=policy,
     )
     bundle = make_bundle([evidence])
-    markdown = render_bundle_markdown(bundle)
-    attestation = bundle_to_statement(bundle)
-
-    args.evidence_output.write_text(
-        json.dumps(bundle.model_dump(mode="json"), indent=2) + "\n",
-        encoding="utf-8",
+    write_standard_run_outputs(
+        bundle,
+        StandardOutputPaths(
+            evidence=args.evidence_output,
+            markdown=args.markdown_output,
+            attestation=args.attestation_output,
+            manifest=args.manifest_output,
+        ),
     )
-    args.markdown_output.write_text(markdown, encoding="utf-8")
-    args.attestation_output.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
-
-    manifest = standard_run_manifest(
-        evidence_path=args.evidence_output,
-        markdown_path=args.markdown_output,
-        attestation_path=args.attestation_output,
-    )
-    args.manifest_output.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
     recommendation = str(bundle.decision.get("merge_recommendation", "require_human_review"))
     print(f"OVK infrastructure recommendation: {recommendation}")
