@@ -26,6 +26,7 @@ jobs:
       - uses: fraware/open-verification-kernel@main
         with:
           mode: advisory
+          backend-strategy: deterministic
           post-comment: "true"
 ```
 
@@ -39,10 +40,29 @@ Strict mode returns a nonzero exit code when OVK recommends `block` or `require_
 - uses: fraware/open-verification-kernel@main
   with:
     mode: strict
+    backend-strategy: deterministic
     post-comment: "true"
 ```
 
 Use strict mode only after confirming that required-check metadata is supplied or that `require_human_review` is the intended behavior for missing metadata.
+
+## Backend strategies
+
+The Action accepts:
+
+```yaml
+backend-strategy: deterministic
+```
+
+Supported values:
+
+| Value | Meaning |
+|---|---|
+| `deterministic` | Use the built-in deterministic evaluator. This is the v0 default. |
+| `opa` | Use optional OPA policy evaluation. Missing OPA returns human review. |
+| `both` | Run deterministic and OPA paths. Failures and unknowns remain conservative. |
+
+For first installation, use `deterministic`.
 
 ## Required-check metadata
 
