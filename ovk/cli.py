@@ -112,6 +112,10 @@ def ci(
     changed_files: Optional[Path] = typer.Option(None, help="Changed files as JSON, newline text, or diff."),
     check_metadata: Optional[Path] = typer.Option(None, help="Required-check metadata JSON."),
     github_event: Optional[Path] = typer.Option(None, help="Optional GitHub event payload JSON."),
+    backend_strategy: str = typer.Option(
+        "deterministic",
+        help="Backend strategy: deterministic, opa, or both.",
+    ),
     repo: str = typer.Option("unknown/repo", help="Repository name for evidence subject."),
     head_sha: str = typer.Option("unknown", help="Head commit SHA."),
     base_sha: Optional[str] = typer.Option(None, help="Base commit SHA."),
@@ -132,6 +136,7 @@ def ci(
         repo=repo,
         head_sha=head_sha,
         base_sha=base_sha,
+        backend_strategy=backend_strategy,
     )
     write_sprint1_outputs(
         result,
