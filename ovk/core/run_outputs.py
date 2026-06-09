@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ovk.core.attestation import bundle_to_statement
+from ovk.core.evidence_quality import build_evidence_quality_report
 from ovk.core.json_io import write_json_file
 from ovk.core.models import EvidenceBundle
 from ovk.core.render import render_bundle_markdown
@@ -20,10 +21,11 @@ class StandardOutputPaths:
     markdown: Path
     attestation: Path
     manifest: Path | None = None
+    quality_report: Path | None = None
 
 
 def write_standard_run_outputs(bundle: EvidenceBundle, paths: StandardOutputPaths) -> None:
-    """Write evidence, Markdown, attestation, and optionally a manifest."""
+    """Write evidence, Markdown, attestation, and optional release support artifacts."""
     markdown = render_bundle_markdown(bundle)
     attestation = bundle_to_statement(bundle)
 
@@ -38,3 +40,7 @@ def write_standard_run_outputs(bundle: EvidenceBundle, paths: StandardOutputPath
             attestation_path=paths.attestation,
         )
         write_json_file(paths.manifest, manifest)
+
+    if paths.quality_report is not None:
+        report = build_evidence_quality_report(bundle)
+        write_json_file(paths.quality_report, report.to_dict())
