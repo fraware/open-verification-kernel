@@ -13,16 +13,19 @@ Make OVK outputs reproducible, auditable, and easier to consume in CI and review
 - Added `scripts/write_artifact_manifest.py`.
 - Added artifact manifest tests.
 - Added `docs/ARTIFACT_MANIFEST.md`.
+- Integrated artifact manifest writing into `scripts/run_infra_exposure.py`.
+- Added runner tests for artifact manifest output.
 
 ## Current manifest semantics
 
 - Each artifact entry records path, kind, SHA-256 digest, and byte size.
 - Entries are sorted deterministically by kind and path.
 - The manifest does not include wall-clock timestamps.
+- The infrastructure runner emits `ovk-infra-artifact-manifest.json` by default.
 
 ## Remaining Sprint 5 work
 
-1. Integrate manifest writing into runner scripts.
+1. Integrate manifest writing into the remaining runner scripts.
 2. Add an attestation envelope that references the artifact manifest.
 3. Add a release artifact layout guide.
 4. Add example repository workflow documentation.
