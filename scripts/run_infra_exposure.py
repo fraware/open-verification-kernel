@@ -10,6 +10,7 @@ from pathlib import Path
 from ovk.adapters.infra.evidence import evaluate_infra_exposure
 from ovk.adapters.infra.normalize import normalize_infra_input
 from ovk.adapters.infra.policy_config import load_policy
+from ovk.core.artifact_manifest import artifact_entry, build_artifact_manifest
 from ovk.core.attestation import bundle_to_statement
 from ovk.core.bundle import make_bundle
 from ovk.core.render import render_bundle_markdown
@@ -35,6 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--evidence-output", type=Path, default=Path("ovk-infra-evidence.json"))
     parser.add_argument("--markdown-output", type=Path, default=Path("ovk-infra-comment.md"))
     parser.add_argument("--attestation-output", type=Path, default=Path("ovk-infra-attestation.json"))
+    parser.add_argument("--manifest-output", type=Path, default=Path("ovk-infra-artifact-manifest.json"))
     parser.add_argument("--advisory", action="store_true")
     return parser.parse_args()
 
@@ -61,6 +63,15 @@ def main() -> int:
     )
     args.markdown_output.write_text(markdown, encoding="utf-8")
     args.attestation_output.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
+
+    manifest = build_artifact_manifest(
+        [
+            artifact_entry(args.evidence_output, kind="evidence"),
+            artifact_entry(args.markdown_output, kind="markdown"),
+            artifact_entry(args.attestation_output, kind="attestation"),
+        ]
+    )
+    args.manifest_output.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
     recommendation = str(bundle.decision.get("merge_recommendation", "require_human_review"))
     print(f"OVK infrastructure recommendation: {recommendation}")
