@@ -8,18 +8,9 @@ import json
 from pathlib import Path
 
 from ovk.adapters.z3.validated_path import evaluate_validated_authorization_path
-from ovk.core.attestation import bundle_to_statement
 from ovk.core.bundle import make_bundle
-from ovk.core.render import render_bundle_markdown
-
-
-EXIT_CODES = {
-    "allow": 0,
-    "allow_with_warning": 0,
-    "block": 1,
-    "require_human_review": 2,
-    "require_stronger_check": 2,
-}
+from ovk.core.exit_codes import exit_code_for_recommendation
+from ovk.core.run_outputs import StandardOutputPaths, write_standard_run_outputs
 
 
 def parse_args() -> argparse.Namespace:
@@ -45,21 +36,20 @@ def main() -> int:
         base_sha=args.base_sha,
     )
     bundle = make_bundle([evidence])
-    markdown = render_bundle_markdown(bundle)
-    attestation = bundle_to_statement(bundle)
-
-    args.evidence_output.write_text(
-        json.dumps(bundle.model_dump(mode="json"), indent=2) + "\n",
-        encoding="utf-8",
+    write_standard_run_outputs(
+        bundle,
+        StandardOutputPaths(
+            evidence=args.evidence_output,
+            markdown=args.markdown_output,
+            attestation=args.attestation_output,
+        ),
     )
-    args.markdown_output.write_text(markdown, encoding="utf-8")
-    args.attestation_output.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
 
     recommendation = str(bundle.decision.get("merge_recommendation", "require_human_review"))
     print(f"OVK authorization recommendation: {recommendation}")
     if args.advisory:
         return 0
-    return EXIT_CODES.get(recommendation, 2)
+    return exit_code_for_recommendation(recommendation)
 
 
 if __name__ == "__main__":
