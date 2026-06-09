@@ -10,10 +10,10 @@ from pathlib import Path
 from ovk.adapters.infra.evidence import evaluate_infra_exposure
 from ovk.adapters.infra.normalize import normalize_infra_input
 from ovk.adapters.infra.policy_config import load_policy
-from ovk.core.artifact_manifest import artifact_entry, build_artifact_manifest
 from ovk.core.attestation import bundle_to_statement
 from ovk.core.bundle import make_bundle
 from ovk.core.render import render_bundle_markdown
+from ovk.core.standard_artifacts import standard_run_manifest
 
 
 EXIT_CODES = {
@@ -64,12 +64,10 @@ def main() -> int:
     args.markdown_output.write_text(markdown, encoding="utf-8")
     args.attestation_output.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
 
-    manifest = build_artifact_manifest(
-        [
-            artifact_entry(args.evidence_output, kind="evidence"),
-            artifact_entry(args.markdown_output, kind="markdown"),
-            artifact_entry(args.attestation_output, kind="attestation"),
-        ]
+    manifest = standard_run_manifest(
+        evidence_path=args.evidence_output,
+        markdown_path=args.markdown_output,
+        attestation_path=args.attestation_output,
     )
     args.manifest_output.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
