@@ -1,0 +1,13 @@
+{
+  "actor": {
+    "type": "ai_agent",
+    "id": "codex"
+  },
+  "task": "Simplify CI workflow without branch-protection metadata available.",
+  "ovk_gate_name": "ovk-verify",
+  "changed_files": [
+    ".github/workflows/verify.yml"
+  ],
+  "before": {},
+  "after": {}
+}
