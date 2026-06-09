@@ -1,0 +1,17 @@
+{
+  "before_branch_protection": {
+    "required_status_checks": {
+      "contexts": [
+        "unit-tests",
+        "ovk-verify"
+      ]
+    }
+  },
+  "after_branch_protection": {
+    "required_status_checks": {
+      "contexts": [
+        "unit-tests"
+      ]
+    }
+  }
+}
