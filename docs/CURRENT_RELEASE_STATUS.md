@@ -14,6 +14,7 @@ This document summarizes the current release-readiness state after the Sprint 5,
 - Authorization and infrastructure runners use shared standard output writing.
 - Authorization and infrastructure runners use shared recommendation exit-code mapping.
 - The infrastructure runner writes an artifact manifest directly.
+- The infrastructure runner writes an evidence-quality report directly.
 - The authorization runner emits standard evidence, Markdown, and attestation outputs; use the standard manifest wrapper to add a manifest.
 
 ## Current evidence-quality state
@@ -22,6 +23,7 @@ This document summarizes the current release-readiness state after the Sprint 5,
 - `scripts/check_evidence_invariants.py` exits non-zero when invariant issues exist.
 - `ovk.core.evidence_quality` builds structured quality reports.
 - `scripts/write_evidence_quality_report.py` writes JSON quality reports for release archives.
+- Standard manifests include quality reports under the `evidence_quality` artifact kind when a standard output path includes a quality report.
 
 ## Current preflight state
 
