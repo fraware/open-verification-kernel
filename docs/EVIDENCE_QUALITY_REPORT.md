@@ -30,10 +30,15 @@ The script reads an evidence bundle, writes a quality report, and exits non-zero
 
 The infrastructure exposure runner can write an evidence quality report directly through its `--quality-output` option.
 
+## Manifest integration
+
+When a standard runner writes both a quality report and an artifact manifest, the quality report is included in the manifest under the `evidence_quality` artifact kind.
+
 ## Tests
 
 ```text
 tests/test_evidence_quality.py
 tests/test_write_evidence_quality_report.py
 tests/test_infra_runner_quality_output.py
+tests/test_standard_manifest_quality_report.py
 ```
