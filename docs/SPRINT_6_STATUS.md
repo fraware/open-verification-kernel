@@ -18,18 +18,24 @@ Reduce duplicated runner logic, make release packaging easier to audit, and keep
 - Repository health checklist added for maintainer review.
 - Local release smoke script added.
 - Local release smoke script covered by pytest.
+- Command-surface consistency script added.
+- Release preflight script added.
+- Release preflight script covered by pytest.
 
 ## Local smoke coverage
 
 The local smoke script checks release metadata consistency, authorization evidence, infrastructure evidence, standard output generation, manifest generation, and representative recommendation behavior without relying on GitHub Actions.
 
+## Preflight coverage
+
+The release preflight script runs release metadata consistency, command-surface consistency, and local release smoke checks as one maintainer command.
+
 ## Remaining quality work
 
 1. Continue reducing local JSON serialization in scripts.
-2. Keep runner command surfaces aligned with release metadata.
-3. Review old Sprint status documents for stale limitations after refactors.
-4. Add additional smoke coverage for self-protection outputs.
-5. Add a maintainer release checklist for running smoke checks before tagging.
+2. Review old Sprint status documents for stale limitations after refactors.
+3. Add additional smoke coverage for self-protection outputs.
+4. Add release-note finalization once CI status is observable.
 
 ## Engineering rule
 
