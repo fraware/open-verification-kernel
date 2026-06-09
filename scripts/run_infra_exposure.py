@@ -27,6 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--markdown-output", type=Path, default=Path("ovk-infra-comment.md"))
     parser.add_argument("--attestation-output", type=Path, default=Path("ovk-infra-attestation.json"))
     parser.add_argument("--manifest-output", type=Path, default=Path("ovk-infra-artifact-manifest.json"))
+    parser.add_argument("--quality-output", type=Path, default=Path("ovk-infra-evidence-quality.json"))
     parser.add_argument("--advisory", action="store_true")
     return parser.parse_args()
 
@@ -51,6 +52,7 @@ def main() -> int:
             markdown=args.markdown_output,
             attestation=args.attestation_output,
             manifest=args.manifest_output,
+            quality_report=args.quality_output,
         ),
     )
 
