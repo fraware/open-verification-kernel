@@ -1,23 +1,16 @@
 #!/usr/bin/env python
-"""Run the Sprint 1 v0 self-protection path.
-
-This runner accepts a JSON metadata object, normalizes it into the canonical
-self-protection adapter input, evaluates the check, and emits evidence, Markdown,
-and an unsigned attestation statement.
-"""
+"""Run the Sprint 1 v0 self-protection path."""
 
 from __future__ import annotations
 
 import argparse
-import json
-import sys
 from pathlib import Path
 
-from ovk.adapters.opa import evaluate_self_protection
-from ovk.core.attestation import bundle_to_statement
-from ovk.core.bundle import make_bundle
-from ovk.core.render import render_bundle_markdown
-from ovk.core.self_protection_input import build_from_json_like
+from ovk.core.sprint1_runner import (
+    build_metadata_from_inputs,
+    run_sprint1_self_protection,
+    write_sprint1_outputs,
+)
 
 
 EXIT_CODES = {
@@ -31,7 +24,9 @@ EXIT_CODES = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run OVK v0 self-protection path")
-    parser.add_argument("metadata", type=Path, help="JSON metadata input")
+    parser.add_argument("metadata", type=Path, nargs="?", help="JSON metadata input")
+    parser.add_argument("--changed-files", type=Path, default=None)
+    parser.add_argument("--check-metadata", type=Path, default=None)
     parser.add_argument("--repo", default="unknown/repo")
     parser.add_argument("--head-sha", default="unknown")
     parser.add_argument("--base-sha", default=None)
@@ -44,29 +39,28 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    raw = json.loads(args.metadata.read_text(encoding="utf-8"))
-    adapter_input = build_from_json_like(raw)
-    evidence = evaluate_self_protection(
-        adapter_input,
+    metadata = build_metadata_from_inputs(
+        metadata_path=args.metadata,
+        changed_files_path=args.changed_files,
+        check_metadata_path=args.check_metadata,
+    )
+    result = run_sprint1_self_protection(
+        metadata=metadata,
         repo=args.repo,
         head_sha=args.head_sha,
         base_sha=args.base_sha,
     )
-    bundle = make_bundle([evidence])
-    statement = bundle_to_statement(bundle)
-
-    args.evidence_output.write_text(
-        json.dumps(bundle.model_dump(mode="json"), indent=2) + "\n",
-        encoding="utf-8",
+    write_sprint1_outputs(
+        result,
+        evidence_output=args.evidence_output,
+        markdown_output=args.markdown_output,
+        attestation_output=args.attestation_output,
     )
-    args.markdown_output.write_text(render_bundle_markdown(bundle), encoding="utf-8")
-    args.attestation_output.write_text(json.dumps(statement, indent=2) + "\n", encoding="utf-8")
 
-    recommendation = str(bundle.decision.get("merge_recommendation", "require_human_review"))
-    print(f"OVK recommendation: {recommendation}")
+    print(f"OVK recommendation: {result.recommendation}")
     if args.advisory:
         return 0
-    return EXIT_CODES.get(recommendation, 2)
+    return EXIT_CODES.get(result.recommendation, 2)
 
 
 if __name__ == "__main__":
