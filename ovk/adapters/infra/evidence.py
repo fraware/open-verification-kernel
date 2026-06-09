@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ovk.adapters.infra.exposure import find_exposure_counterexamples
+from ovk.adapters.infra.policy import DEFAULT_INFRA_EXPOSURE_POLICY, InfraExposurePolicy
 from ovk.adapters.infra.regression import render_infra_regression_suite
 from ovk.adapters.infra.validation import issues_to_diagnostics, validate_infra_input
 from ovk.core.models import BackendClaim, VerificationEvidence, VerificationStatus
@@ -20,6 +21,7 @@ def evaluate_infra_exposure(
     repo: str = "unknown/repo",
     head_sha: str = "unknown",
     base_sha: str | None = None,
+    policy: InfraExposurePolicy = DEFAULT_INFRA_EXPOSURE_POLICY,
 ) -> VerificationEvidence:
     """Evaluate infrastructure exposure and return OVK evidence."""
     subject: dict[str, Any] = {"repo": repo, "head_sha": head_sha}
@@ -33,7 +35,7 @@ def evaluate_infra_exposure(
         recommendation = "require_human_review"
         counterexamples = issues_to_diagnostics(issues)
     else:
-        counterexamples = find_exposure_counterexamples(data)
+        counterexamples = find_exposure_counterexamples(data, policy=policy)
         status = VerificationStatus.FAIL if counterexamples else VerificationStatus.PASS
         recommendation = "block" if counterexamples else "allow"
         if counterexamples:
@@ -45,6 +47,7 @@ def evaluate_infra_exposure(
                 }
             )
 
+    blocked = sorted(policy.blocked_public_sensitivities)
     return VerificationEvidence(
         evidence_id="ev-infra-exposure",
         schema_version="ovk.evidence.v1",
@@ -66,13 +69,13 @@ def evaluate_infra_exposure(
                 status=status,
                 assumptions=[
                     "Infrastructure exposure abstraction is supplied by the input.",
-                    "Confidential and restricted resources must not be publicly exposed.",
+                    f"Public exposure is blocked for sensitivity levels: {', '.join(blocked)}.",
                 ],
                 limits=[
                     "The checker uses normalized infrastructure abstractions from native, Terraform-style, or Kubernetes-style inputs.",
                     "Invalid infrastructure abstractions require human review.",
                 ],
-                adapter_version="0.2.0",
+                adapter_version="0.3.0",
             )
         ],
         counterexamples=counterexamples,
