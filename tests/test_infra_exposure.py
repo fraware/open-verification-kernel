@@ -21,6 +21,41 @@ def test_private_sensitive_resource_has_no_counterexample() -> None:
     assert counterexamples == []
 
 
+def test_public_restricted_resource_is_counterexample() -> None:
+    counterexamples = find_exposure_counterexamples(
+        {
+            "resources": [
+                {
+                    "resource_id": "db-prod-snapshots",
+                    "resource_type": "database_snapshot",
+                    "sensitivity": "restricted",
+                    "public_exposure": True,
+                    "exposure_paths": ["public_snapshot_share"],
+                }
+            ]
+        }
+    )
+    assert len(counterexamples) == 1
+    assert counterexamples[0]["sensitivity"] == "restricted"
+
+
+def test_public_resource_can_be_public() -> None:
+    counterexamples = find_exposure_counterexamples(
+        {
+            "resources": [
+                {
+                    "resource_id": "marketing-assets",
+                    "resource_type": "object_storage_bucket",
+                    "sensitivity": "public",
+                    "public_exposure": True,
+                    "exposure_paths": ["public_cdn"],
+                }
+            ]
+        }
+    )
+    assert counterexamples == []
+
+
 def test_missing_resources_is_validation_error() -> None:
     issues = validate_infra_input({"task": "missing resources"})
     assert len(issues) == 1
