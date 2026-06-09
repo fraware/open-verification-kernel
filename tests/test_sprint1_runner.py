@@ -48,6 +48,21 @@ def test_sprint1_runner_missing_metadata_requires_review() -> None:
     assert result.bundle.evidence[0].backend_claims[0].status.value == "unknown"
 
 
+def test_sprint1_runner_accepts_backend_strategy_argument() -> None:
+    metadata = build_metadata_from_inputs(
+        metadata_path=Path("examples/no_agent_self_approval/metadata_missing_required_checks.json"),
+        changed_files_path=Path("examples/no_agent_self_approval/changed_files_workflow.txt"),
+        check_metadata_path=Path("examples/no_agent_self_approval/check_metadata_gate_removed.json"),
+    )
+    result = run_sprint1_self_protection(
+        metadata=metadata,
+        repo="example/repo",
+        head_sha="abc",
+        backend_strategy="deterministic",
+    )
+    assert result.recommendation == "block"
+
+
 def test_sprint1_outputs_are_written(tmp_path: Path) -> None:
     metadata = json.loads(
         Path("examples/no_agent_self_approval/metadata_gate_removed.json").read_text(encoding="utf-8")
