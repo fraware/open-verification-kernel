@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ovk.adapters.infra.exposure import find_exposure_counterexamples
+from ovk.adapters.infra.regression import render_infra_regression_suite
 from ovk.adapters.infra.validation import issues_to_diagnostics, validate_infra_input
 from ovk.core.models import BackendClaim, VerificationEvidence, VerificationStatus
 
@@ -25,6 +26,7 @@ def evaluate_infra_exposure(
     if base_sha is not None:
         subject["base_sha"] = base_sha
 
+    generated_artifacts: list[dict[str, Any]] = []
     issues = validate_infra_input(data)
     if issues:
         status = VerificationStatus.UNKNOWN
@@ -34,6 +36,14 @@ def evaluate_infra_exposure(
         counterexamples = find_exposure_counterexamples(data)
         status = VerificationStatus.FAIL if counterexamples else VerificationStatus.PASS
         recommendation = "block" if counterexamples else "allow"
+        if counterexamples:
+            generated_artifacts.append(
+                {
+                    "kind": "regression_unit_test",
+                    "path": ".verification/generated_tests/test_no_public_sensitive_resource.py",
+                    "content": render_infra_regression_suite(counterexamples),
+                }
+            )
 
     return VerificationEvidence(
         evidence_id="ev-infra-exposure",
@@ -59,14 +69,14 @@ def evaluate_infra_exposure(
                     "Confidential and restricted resources must not be publicly exposed.",
                 ],
                 limits=[
-                    "The checker does not parse Terraform or Kubernetes files directly yet.",
+                    "The checker uses normalized infrastructure abstractions from native, Terraform-style, or Kubernetes-style inputs.",
                     "Invalid infrastructure abstractions require human review.",
                 ],
-                adapter_version="0.1.0",
+                adapter_version="0.2.0",
             )
         ],
         counterexamples=counterexamples,
-        generated_artifacts=[],
+        generated_artifacts=generated_artifacts,
         decision={
             "merge_recommendation": recommendation,
             "human_review_required": recommendation != "allow",
