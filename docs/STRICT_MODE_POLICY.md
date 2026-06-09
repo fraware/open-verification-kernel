@@ -4,9 +4,9 @@ This document defines the current strict-mode policy for the self-protection pat
 
 ## Decision
 
-For v0, strict mode uses the deterministic self-protection evaluator as the authoritative decision path.
+For v0, strict mode uses the deterministic self-protection evaluator as the default authoritative decision path.
 
-The optional OPA CLI runner is supplementary. It may strengthen diagnostics and future evidence, but strict mode must not depend on the presence of the OPA binary until OPA parity is tested across the benchmark suite and installation behavior is stable.
+The optional OPA CLI runner is available through the `backend-strategy` option, but strict mode does not depend on OPA unless the user explicitly selects `opa` or `both`.
 
 ## Rationale
 
@@ -16,7 +16,17 @@ The deterministic evaluator is the fixture oracle. It is available in every inst
 - missing required-check metadata returns `require_human_review`;
 - clean evidence returns `allow`.
 
-The OPA CLI path is valuable, but it introduces an external dependency. Missing binaries, invalid output, or timeouts must never become a pass. Treating OPA as mandatory before installation behavior is mature would make early strict mode fragile.
+The OPA CLI path is valuable, but it introduces an external dependency. Missing binaries, invalid output, or timeouts must never become a pass.
+
+## Backend strategies
+
+OVK now supports three self-protection backend strategies:
+
+| Strategy | Meaning |
+|---|---|
+| `deterministic` | Use the deterministic evaluator only. This is the v0 default. |
+| `opa` | Use optional OPA policy evaluation only. Missing OPA returns unknown. |
+| `both` | Run deterministic and optional OPA paths. Bundle semantics apply fail and unknown dominance. |
 
 ## Current v0 strict behavior
 
@@ -25,24 +35,29 @@ The OPA CLI path is valuable, but it introduces an external dependency. Missing 
 | Deterministic evaluator returns fail | `block` |
 | Deterministic evaluator returns unknown | `require_human_review` |
 | Deterministic evaluator returns pass | `allow` |
-| OPA binary unavailable | does not weaken deterministic result |
-| OPA returns fail in supplemental run | future policy should escalate to `block` or `require_human_review` after parity integration |
+| `backend-strategy=opa` and OPA unavailable | `require_human_review` |
+| `backend-strategy=both` and deterministic fails | `block` |
+| `backend-strategy=both` and any required path is unknown | `require_human_review`, unless another path fails |
 
-## Future policy
+## Recommended configuration
 
-Once OPA parity is validated, OVK should support a backend strategy option:
+Use the default strategy for first installation:
 
-```text
-deterministic
-opa
-both
+```bash
+ovk ci --backend-strategy deterministic
 ```
 
-Recommended future semantics:
+Use OPA for local or hardened installations where the OPA binary is installed and parity has been checked:
 
-- `deterministic`: current default v0 behavior;
-- `opa`: require OPA and return unknown when unavailable;
-- `both`: fail dominates; unknown from a required backend returns human review; pass requires all required backends to pass.
+```bash
+ovk ci --backend-strategy opa
+```
+
+Use both paths when testing backend parity:
+
+```bash
+ovk ci --backend-strategy both
+```
 
 ## Engineering rule
 
