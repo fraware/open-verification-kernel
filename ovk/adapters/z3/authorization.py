@@ -1,8 +1,8 @@
 """Z3-style authorization reachability adapter.
 
-This stable adapter now routes through the validated obligation-backed path.
-Malformed route abstractions therefore return unknown and require human review
-instead of being treated as a clean pass.
+This stable adapter uses the deterministic validated authorization path. It
+preserves the original no-external-solver contract while ensuring invalid route
+abstractions return unknown and require human review.
 """
 
 from __future__ import annotations
@@ -10,8 +10,8 @@ from __future__ import annotations
 from typing import Any
 
 from ovk.adapters.z3.counterexample import counterexamples_from_obligation
+from ovk.adapters.z3.deterministic_path import evaluate_deterministic_authorization_path
 from ovk.adapters.z3.obligation import build_authorization_obligation
-from ovk.adapters.z3.validated_path import evaluate_validated_authorization_path
 from ovk.core.models import VerificationEvidence
 
 
@@ -34,7 +34,7 @@ def evaluate_authorization_reachability(
     base_sha: str | None = None,
 ) -> VerificationEvidence:
     """Evaluate authorization reachability and return normalized OVK evidence."""
-    evidence = evaluate_validated_authorization_path(
+    evidence = evaluate_deterministic_authorization_path(
         data,
         repo=repo,
         head_sha=head_sha,
