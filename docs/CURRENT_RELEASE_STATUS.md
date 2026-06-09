@@ -1,6 +1,6 @@
 # Current Release Status
 
-This document summarizes the current release-readiness state after the Sprint 5 and Sprint 6 cleanup work.
+This document summarizes the current release-readiness state after the Sprint 5, Sprint 6, and Sprint 7 cleanup work.
 
 ## Current package state
 
@@ -15,6 +15,13 @@ This document summarizes the current release-readiness state after the Sprint 5 
 - Authorization and infrastructure runners use shared recommendation exit-code mapping.
 - The infrastructure runner writes an artifact manifest directly.
 - The authorization runner emits standard evidence, Markdown, and attestation outputs; use the standard manifest wrapper to add a manifest.
+
+## Current evidence-quality state
+
+- `ovk.core.evidence_invariants` checks evidence bundle consistency.
+- `scripts/check_evidence_invariants.py` exits non-zero when invariant issues exist.
+- `ovk.core.evidence_quality` builds structured quality reports.
+- `scripts/write_evidence_quality_report.py` writes JSON quality reports for release archives.
 
 ## Current preflight state
 
