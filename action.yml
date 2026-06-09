@@ -21,6 +21,10 @@ inputs:
     description: Optional required-check metadata JSON
     required: false
     default: ""
+  backend-strategy:
+    description: Backend strategy, one of deterministic, opa, or both
+    required: false
+    default: deterministic
   evidence-output:
     description: Path for the generated evidence bundle
     required: false
@@ -57,9 +61,9 @@ runs:
           EXTRA_CHECK_METADATA="--check-metadata ${{ inputs.check-metadata }}"
         fi
         if [ "${{ inputs.mode }}" = "advisory" ]; then
-          ovk ci --github-event "${{ github.event_path }}" --metadata "${{ inputs.metadata }}" --changed-files "${{ inputs.changed-files }}" $EXTRA_CHECK_METADATA --evidence-output "${{ inputs.evidence-output }}" --markdown-output "${{ inputs.markdown-output }}" --attestation-output "${{ inputs.attestation-output }}" --advisory
+          ovk ci --github-event "${{ github.event_path }}" --metadata "${{ inputs.metadata }}" --changed-files "${{ inputs.changed-files }}" $EXTRA_CHECK_METADATA --backend-strategy "${{ inputs.backend-strategy }}" --evidence-output "${{ inputs.evidence-output }}" --markdown-output "${{ inputs.markdown-output }}" --attestation-output "${{ inputs.attestation-output }}" --advisory
         else
-          ovk ci --github-event "${{ github.event_path }}" --metadata "${{ inputs.metadata }}" --changed-files "${{ inputs.changed-files }}" $EXTRA_CHECK_METADATA --evidence-output "${{ inputs.evidence-output }}" --markdown-output "${{ inputs.markdown-output }}" --attestation-output "${{ inputs.attestation-output }}"
+          ovk ci --github-event "${{ github.event_path }}" --metadata "${{ inputs.metadata }}" --changed-files "${{ inputs.changed-files }}" $EXTRA_CHECK_METADATA --backend-strategy "${{ inputs.backend-strategy }}" --evidence-output "${{ inputs.evidence-output }}" --markdown-output "${{ inputs.markdown-output }}" --attestation-output "${{ inputs.attestation-output }}"
         fi
     - name: Post OVK pull-request comment
       if: ${{ inputs.post-comment == 'true' }}
