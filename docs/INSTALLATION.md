@@ -83,6 +83,19 @@ Then pass it to the Action:
     check-metadata: ovk-required-checks.json
 ```
 
+## Branch metadata collection
+
+A conservative collector is available:
+
+```bash
+python scripts/collect_branch_metadata.py \
+  --repository owner/repo \
+  --branch main \
+  --output ovk-required-checks.json
+```
+
+If metadata cannot be collected, the script writes an empty JSON object. OVK then treats required-check metadata as unavailable and returns `require_human_review` for high-risk changes.
+
 ## Outputs
 
 The Action writes:
@@ -101,11 +114,11 @@ Set:
 post-comment: "true"
 ```
 
-The Action will try to post `ovk-pr-comment.md` as a pull-request comment. If the event is not a pull request or the token is unavailable, the script exits successfully without posting.
+The Action will try to post `ovk-pr-comment.md` as a pull-request comment. If an existing OVK comment is found, the script updates that comment instead of creating a duplicate. If the event is not a pull request or the token is unavailable, the script exits successfully without posting.
 
 ## Current limitations
 
 - The self-protection check is deterministic Python with a Rego policy fixture and optional OPA runner.
-- Live branch-protection collection is implemented as library support, but the Action does not yet collect it automatically.
-- PR comment posting is append-only and does not yet update an existing OVK comment.
+- Live branch-protection collection is implemented as library and script support, but the Action does not collect it automatically by default.
+- PR comment posting uses a simple marker and does not yet support rich threading or review annotations.
 - Missing required-check metadata returns `require_human_review`, by design.
