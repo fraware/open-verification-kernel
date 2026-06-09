@@ -1,0 +1,17 @@
+{
+  "author_type": "ai_agent",
+  "agent": "codex",
+  "task": "Expose a storage resource for debugging.",
+  "resources": [
+    {
+      "resource_id": "bucket-customer-exports",
+      "resource_type": "object_storage_bucket",
+      "sensitivity": "confidential",
+      "public_exposure": true,
+      "exposure_paths": [
+        "internet_gateway",
+        "public_bucket_policy"
+      ]
+    }
+  ]
+}
