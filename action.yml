@@ -5,18 +5,34 @@ description: Solver-agnostic verification evidence for AI-agent pull requests
 author: Open Verification Kernel Contributors
 
 inputs:
-  config:
-    description: Path to OVK configuration
-    required: false
-    default: .verification/config.yml
   mode:
-    description: advisory, enforce, or attest
+    description: advisory or strict
     required: false
     default: advisory
+  metadata:
+    description: Optional self-protection metadata JSON
+    required: false
+    default: examples/no_agent_self_approval/metadata_missing_required_checks.json
+  changed-files:
+    description: Changed files as JSON, newline text, or diff
+    required: false
+    default: examples/no_agent_self_approval/changed_files_workflow.txt
+  check-metadata:
+    description: Optional required-check metadata JSON
+    required: false
+    default: ""
   evidence-output:
     description: Path for the generated evidence bundle
     required: false
     default: ovk-evidence.json
+  markdown-output:
+    description: Path for the generated Markdown summary
+    required: false
+    default: ovk-pr-comment.md
+  attestation-output:
+    description: Path for the generated attestation statement
+    required: false
+    default: ovk-attestation.json
 
 runs:
   using: composite
@@ -29,7 +45,15 @@ runs:
     - name: Initialize verification directory if needed
       shell: bash
       run: ovk init
-    - name: Placeholder OVK check
+    - name: Run OVK Sprint 1 path
       shell: bash
       run: |
-        echo "OVK action scaffold installed. Full PR verification runner is planned in docs/ROADMAP.md."
+        EXTRA_CHECK_METADATA=""
+        if [ -n "${{ inputs.check-metadata }}" ]; then
+          EXTRA_CHECK_METADATA="--check-metadata ${{ inputs.check-metadata }}"
+        fi
+        if [ "${{ inputs.mode }}" = "advisory" ]; then
+          ovk ci --metadata "${{ inputs.metadata }}" --changed-files "${{ inputs.changed-files }}" $EXTRA_CHECK_METADATA --evidence-output "${{ inputs.evidence-output }}" --markdown-output "${{ inputs.markdown-output }}" --attestation-output "${{ inputs.attestation-output }}" --repo "${{ github.repository }}" --head-sha "${{ github.sha }}" --advisory
+        else
+          ovk ci --metadata "${{ inputs.metadata }}" --changed-files "${{ inputs.changed-files }}" $EXTRA_CHECK_METADATA --evidence-output "${{ inputs.evidence-output }}" --markdown-output "${{ inputs.markdown-output }}" --attestation-output "${{ inputs.attestation-output }}" --repo "${{ github.repository }}" --head-sha "${{ github.sha }}"
+        fi
