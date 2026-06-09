@@ -4,9 +4,9 @@
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
+from ovk.core.json_io import write_json_file
 from ovk.core.standard_artifacts import standard_run_manifest
 
 
@@ -28,7 +28,7 @@ def main() -> int:
         attestation_path=args.attestation,
         root=args.root,
     )
-    args.output.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    write_json_file(args.output, manifest)
     print(f"Wrote OVK standard run manifest to {args.output}")
     return 0
 
