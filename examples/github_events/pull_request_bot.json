@@ -1,0 +1,19 @@
+{
+  "action": "opened",
+  "repository": {
+    "full_name": "fraware/open-verification-kernel"
+  },
+  "sender": {
+    "login": "codex-bot",
+    "type": "Bot"
+  },
+  "pull_request": {
+    "number": 7,
+    "head": {
+      "sha": "head-demo-sha"
+    },
+    "base": {
+      "sha": "base-demo-sha"
+    }
+  }
+}
