@@ -22,6 +22,36 @@ def test_bad_witness_is_validation_error() -> None:
     assert "routes[0].reachable_after[0].via" in issue_paths
 
 
+def test_empty_routes_is_validation_error() -> None:
+    issues = validate_authorization_input({"routes": []})
+    assert len(issues) == 1
+    assert issues[0].path == "routes"
+
+
+def test_non_object_route_is_validation_error() -> None:
+    issues = validate_authorization_input({"routes": ["bad-route"]})
+    assert len(issues) == 1
+    assert issues[0].path == "routes[0]"
+
+
+def test_non_boolean_route_flags_are_validation_errors() -> None:
+    issues = validate_authorization_input(
+        {
+            "routes": [
+                {
+                    "path": "/admin/export",
+                    "admin_only_before": "yes",
+                    "admin_only_after": "yes",
+                    "reachable_after": [],
+                }
+            ]
+        }
+    )
+    issue_paths = {issue.path for issue in issues}
+    assert "routes[0].admin_only_before" in issue_paths
+    assert "routes[0].admin_only_after" in issue_paths
+
+
 def test_validated_path_malformed_input_requires_human_review() -> None:
     evidence = evaluate_validated_authorization_path(
         load_fixture("input_malformed_missing_routes.json"),
