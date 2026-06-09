@@ -12,10 +12,12 @@ Sprint 2 focuses on replacing manual metadata assumptions with stronger GitHub m
 - Extended `ovk ci` with `--github-event`.
 - Updated `action.yml` to pass `github.event_path` into `ovk ci`.
 - Updated CI to exercise the GitHub event metadata path.
+- Added conservative GitHub API metadata collector in `ovk.core.github_api_metadata`.
 - Added OPA self-protection policy asset generation in `ovk.adapters.opa.policy_assets`.
 - Added materialized Rego fixture at `adapters/opa/policies/self_protection.rego`.
 - Added optional OPA CLI runner in `ovk.adapters.opa.optional_runner`.
-- Added tests for GitHub event metadata, GitHub-shaped required-check metadata, OPA policy assets, and optional OPA runner behavior.
+- Added OPA raw-result normalization into `VerificationEvidence` in `ovk.adapters.opa.evidence`.
+- Added tests for GitHub event metadata, GitHub-shaped required-check metadata, GitHub API metadata helpers, OPA policy assets, optional OPA runner behavior, and OPA evidence normalization.
 
 ## Current command
 
@@ -33,11 +35,11 @@ ovk ci \
 
 ## Remaining Sprint 2 work
 
-1. Add live GitHub branch-protection and required-check metadata collection where token permissions allow it.
-2. Normalize optional OPA CLI results into the same `VerificationEvidence` object as the deterministic evaluator.
-3. Add a strict-mode integration test for OPA when the binary is installed, while keeping missing binary as `unknown`.
-4. Add optional PR comment posting from `ovk-pr-comment.md`.
-5. Extend documentation for real repository installation.
+1. Wire live GitHub branch-protection metadata collection into the Action where token permissions allow it.
+2. Add a strict-mode integration test for OPA when the binary is installed, while keeping missing binary as `unknown`.
+3. Add optional PR comment posting from `ovk-pr-comment.md`.
+4. Extend documentation for real repository installation.
+5. Decide whether the Action should use deterministic evaluator, OPA CLI, or both in strict mode.
 
 ## Engineering rule
 
