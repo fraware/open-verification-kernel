@@ -111,6 +111,7 @@ def ci(
     metadata: Optional[Path] = typer.Option(None, help="Optional self-protection metadata JSON."),
     changed_files: Optional[Path] = typer.Option(None, help="Changed files as JSON, newline text, or diff."),
     check_metadata: Optional[Path] = typer.Option(None, help="Required-check metadata JSON."),
+    github_event: Optional[Path] = typer.Option(None, help="Optional GitHub event payload JSON."),
     repo: str = typer.Option("unknown/repo", help="Repository name for evidence subject."),
     head_sha: str = typer.Option("unknown", help="Head commit SHA."),
     base_sha: Optional[str] = typer.Option(None, help="Base commit SHA."),
@@ -124,6 +125,7 @@ def ci(
         metadata_path=metadata,
         changed_files_path=changed_files,
         check_metadata_path=check_metadata,
+        github_event_path=github_event,
     )
     result = run_sprint1_self_protection(
         metadata=normalized,
