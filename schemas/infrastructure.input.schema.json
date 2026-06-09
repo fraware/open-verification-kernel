@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/infrastructure.input.schema.json",
+  "title": "OVK Infrastructure Exposure Input",
+  "type": "object",
+  "required": ["resources"],
+  "properties": {
+    "author_type": {
+      "type": "string"
+    },
+    "agent": {
+      "type": "string"
+    },
+    "task": {
+      "type": "string"
+    },
+    "resources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["resource_id", "resource_type", "sensitivity", "public_exposure"],
+        "properties": {
+          "resource_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resource_type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sensitivity": {
+            "type": "string",
+            "enum": ["public", "internal", "confidential", "restricted"]
+          },
+          "public_exposure": {
+            "type": "boolean"
+          },
+          "exposure_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}
