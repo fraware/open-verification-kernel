@@ -27,6 +27,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("metadata", type=Path, nargs="?", help="JSON metadata input")
     parser.add_argument("--changed-files", type=Path, default=None)
     parser.add_argument("--check-metadata", type=Path, default=None)
+    parser.add_argument("--github-event", type=Path, default=None)
+    parser.add_argument("--backend-strategy", default="deterministic", choices=["deterministic", "opa", "both"])
     parser.add_argument("--repo", default="unknown/repo")
     parser.add_argument("--head-sha", default="unknown")
     parser.add_argument("--base-sha", default=None)
@@ -43,12 +45,14 @@ def main() -> int:
         metadata_path=args.metadata,
         changed_files_path=args.changed_files,
         check_metadata_path=args.check_metadata,
+        github_event_path=args.github_event,
     )
     result = run_sprint1_self_protection(
         metadata=metadata,
         repo=args.repo,
         head_sha=args.head_sha,
         base_sha=args.base_sha,
+        backend_strategy=args.backend_strategy,
     )
     write_sprint1_outputs(
         result,
