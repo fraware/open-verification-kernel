@@ -4,7 +4,7 @@ Sprint 3 focuses on turning the authorization path into a real SMT-backed archit
 
 ## Goal
 
-Move the authorization example from a fixture-level reachability checker toward a structured proof-obligation pipeline with explicit query polarity, obligation serialization, solver-independent planning, counterexample translation, regression artifact generation, optional Z3 execution, and normalized solver-result semantics.
+Move the authorization example from a fixture-level reachability checker toward a structured proof-obligation pipeline with explicit query polarity, obligation serialization, solver-independent planning, counterexample translation, regression artifact generation, optional Z3 execution, normalized solver-result semantics, and first-class OVK evidence construction.
 
 ## Completed so far
 
@@ -23,7 +23,10 @@ Move the authorization example from a fixture-level reachability checker toward 
 - Added optional Z3 execution for `AuthorizationObligation` objects.
 - Added `ovk.adapters.z3.result`.
 - Added normalized result mapping for `pass`, `fail`, `unknown`, and `error`.
-- Added tests for obligation construction, serialization, counterexample translation, SMT plan generation, regression artifact rendering, optional Z3 execution, and result normalization.
+- Added `ovk.adapters.z3.evidence`.
+- Added first-class `VerificationEvidence` construction from normalized Z3 authorization results.
+- Added generated regression artifacts to authorization evidence when counterexamples exist.
+- Added tests for obligation construction, serialization, counterexample translation, SMT plan generation, regression artifact rendering, optional Z3 execution, result normalization, and evidence construction.
 
 ## Current architecture
 
@@ -33,22 +36,21 @@ authorization fixture
 → solver-independent SmtPlan
 → optional Z3 executor
 → normalized solver result
-→ counterexample translation
+→ VerificationEvidence
 → regression artifact generation
 ```
 
 ## Current limitation
 
-The high-level authorization evidence adapter has not yet been replaced with the obligation-backed adapter. Connector safety controls blocked the full adapter replacement in an earlier pass. The lower-level obligation, SMT-plan, executor, result-normalization, counterexample, and regression modules are present and tested, so engineers can wire them into the existing adapter manually or in a later connector-safe patch.
+The existing stable authorization adapter has not yet been replaced with the obligation-backed path. Connector safety controls blocked the full adapter replacement in an earlier pass. The obligation-backed path now exists as tested lower-level modules and can be exposed through a dedicated demo runner before replacing the stable adapter.
 
 ## Remaining Sprint 3 work
 
-1. Wire the existing authorization adapter through the obligation model.
-2. Attach normalized Z3 results to `VerificationEvidence`.
-3. Record query polarity and solver model in first-class evidence counterexamples.
-4. Attach generated regression tests to authorization evidence.
-5. Add an authorization CLI/demo runner for the obligation-backed path.
-6. Add optional integration tests that run only when `z3-solver` is installed.
+1. Add an authorization CLI/demo runner for the obligation-backed path.
+2. Optionally wire the existing authorization adapter through the obligation-backed path once safe to patch.
+3. Add optional integration tests that run only when `z3-solver` is installed.
+4. Add evidence-bundle and Markdown rendering for the authorization runner.
+5. Add benchmark cases that score query-polarity preservation and generated regression artifacts.
 
 ## Engineering rule
 
