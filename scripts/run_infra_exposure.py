@@ -11,16 +11,8 @@ from ovk.adapters.infra.evidence import evaluate_infra_exposure
 from ovk.adapters.infra.normalize import normalize_infra_input
 from ovk.adapters.infra.policy_config import load_policy
 from ovk.core.bundle import make_bundle
+from ovk.core.exit_codes import exit_code_for_recommendation
 from ovk.core.run_outputs import StandardOutputPaths, write_standard_run_outputs
-
-
-EXIT_CODES = {
-    "allow": 0,
-    "allow_with_warning": 0,
-    "block": 1,
-    "require_human_review": 2,
-    "require_stronger_check": 2,
-}
 
 
 def parse_args() -> argparse.Namespace:
@@ -66,7 +58,7 @@ def main() -> int:
     print(f"OVK infrastructure recommendation: {recommendation}")
     if args.advisory:
         return 0
-    return EXIT_CODES.get(recommendation, 2)
+    return exit_code_for_recommendation(recommendation)
 
 
 if __name__ == "__main__":
