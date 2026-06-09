@@ -4,12 +4,12 @@
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
 from ovk.adapters.z3.validated_path import evaluate_validated_authorization_path
 from ovk.core.bundle import make_bundle
 from ovk.core.exit_codes import exit_code_for_recommendation
+from ovk.core.json_io import read_json_file
 from ovk.core.run_outputs import StandardOutputPaths, write_standard_run_outputs
 
 
@@ -28,7 +28,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    data = json.loads(args.input.read_text(encoding="utf-8"))
+    data = read_json_file(args.input)
     evidence = evaluate_validated_authorization_path(
         data,
         repo=args.repo,
