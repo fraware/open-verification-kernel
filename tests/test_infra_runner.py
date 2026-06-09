@@ -142,3 +142,51 @@ def test_infra_runner_kubernetes_format_blocks(tmp_path: Path, monkeypatch) -> N
     assert infra_main() == 0
     payload = json.loads(evidence.read_text(encoding="utf-8"))
     assert payload["decision"]["merge_recommendation"] == "block"
+
+
+def test_infra_runner_policy_can_harden_internal_public_resource(tmp_path: Path, monkeypatch) -> None:
+    infra_input = tmp_path / "infra.json"
+    policy = tmp_path / "policy.json"
+    evidence = tmp_path / "evidence.json"
+    markdown = tmp_path / "comment.md"
+    attestation = tmp_path / "attestation.json"
+    infra_input.write_text(
+        json.dumps(
+            {
+                "resources": [
+                    {
+                        "resource_id": "frontend",
+                        "resource_type": "service",
+                        "sensitivity": "internal",
+                        "public_exposure": True,
+                        "exposure_paths": ["internet_accessible"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    policy.write_text(json.dumps({"blocked_public_sensitivities": ["internal", "confidential"]}), encoding="utf-8")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "run_infra_exposure.py",
+            str(infra_input),
+            "--policy",
+            str(policy),
+            "--repo",
+            "example/repo",
+            "--head-sha",
+            "abc",
+            "--evidence-output",
+            str(evidence),
+            "--markdown-output",
+            str(markdown),
+            "--attestation-output",
+            str(attestation),
+            "--advisory",
+        ],
+    )
+    assert infra_main() == 0
+    payload = json.loads(evidence.read_text(encoding="utf-8"))
+    assert payload["decision"]["merge_recommendation"] == "block"
