@@ -1,3 +1,5 @@
 """Open Verification Kernel package."""
 
-__version__ = "0.0.1"
+from ovk.core.release_metadata import OVK_RELEASE_CANDIDATE
+
+__version__ = OVK_RELEASE_CANDIDATE
