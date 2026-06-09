@@ -1,6 +1,22 @@
 # Infrastructure Normalization Hooks
 
-OVK's infrastructure exposure checker consumes a normalized infrastructure abstraction. Sprint 4 adds two narrow parser hooks that produce that abstraction.
+OVK's infrastructure exposure checker consumes a normalized infrastructure abstraction. Sprint 4 adds parser hooks that produce that abstraction from narrower source formats.
+
+## Unified normalizer
+
+Module:
+
+```text
+ovk.adapters.infra.normalize
+```
+
+Supported input formats:
+
+- `infra`: native OVK infrastructure abstraction.
+- `terraform`: Terraform-plan-style JSON subset.
+- `kubernetes`: Kubernetes Service-style JSON subset.
+
+The infrastructure runner accepts the same formats through `--input-format`.
 
 ## Terraform-plan-style hook
 
