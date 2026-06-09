@@ -7,9 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ovk.adapters.opa import evaluate_self_protection
 from ovk.core.attestation import bundle_to_statement
-from ovk.core.bundle import make_bundle
+from ovk.core.backend_strategy import run_self_protection_backends
 from ovk.core.check_metadata import load_required_check_metadata
 from ovk.core.changed_files import load_changed_files
 from ovk.core.github_event import load_github_event_metadata, metadata_to_self_protection_defaults
@@ -75,6 +74,7 @@ def run_sprint1_self_protection(
     repo: str = "unknown/repo",
     head_sha: str = "unknown",
     base_sha: str | None = None,
+    backend_strategy: str = "deterministic",
 ) -> Sprint1Result:
     """Run the Sprint 1 self-protection path from normalized metadata."""
     repo = repo if repo != "unknown/repo" else str(metadata.get("github_repository", repo))
@@ -94,13 +94,13 @@ def run_sprint1_self_protection(
             ovk_gate_name=str(metadata.get("ovk_gate_name", "ovk-verify")),
         )
     )
-    evidence = evaluate_self_protection(
+    bundle = run_self_protection_backends(
         structured,
+        strategy=backend_strategy,
         repo=repo,
         head_sha=head_sha,
         base_sha=base_sha,
     )
-    bundle = make_bundle([evidence])
     return Sprint1Result(
         bundle=bundle,
         markdown=render_bundle_markdown(bundle),
