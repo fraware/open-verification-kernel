@@ -24,3 +24,22 @@ jobs:
         run: pytest
       - name: Score seed benchmark cases
         run: python benchmarks/formal_pr_bench/score_seed_cases.py
+      - name: Exercise Sprint 1 CI command
+        run: |
+          ovk ci \
+            --metadata examples/no_agent_self_approval/metadata_missing_required_checks.json \
+            --changed-files examples/no_agent_self_approval/changed_files_workflow.txt \
+            --evidence-output ovk-evidence.json \
+            --markdown-output ovk-pr-comment.md \
+            --attestation-output ovk-attestation.json \
+            --repo fraware/open-verification-kernel \
+            --head-sha "$GITHUB_SHA" \
+            --advisory
+      - name: Upload OVK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ovk-sprint1-artifacts
+          path: |
+            ovk-evidence.json
+            ovk-pr-comment.md
+            ovk-attestation.json
