@@ -34,6 +34,52 @@ def test_non_object_route_is_validation_error() -> None:
     assert issues[0].path == "routes[0]"
 
 
+def test_missing_route_path_is_validation_error() -> None:
+    issues = validate_authorization_input(
+        {
+            "routes": [
+                {
+                    "admin_only_before": True,
+                    "admin_only_after": True,
+                    "reachable_after": [],
+                }
+            ]
+        }
+    )
+    assert {issue.path for issue in issues} == {"routes[0].path"}
+
+
+def test_missing_reachable_after_is_validation_error() -> None:
+    issues = validate_authorization_input(
+        {
+            "routes": [
+                {
+                    "path": "/admin/export",
+                    "admin_only_before": True,
+                    "admin_only_after": True,
+                }
+            ]
+        }
+    )
+    assert {issue.path for issue in issues} == {"routes[0].reachable_after"}
+
+
+def test_non_object_witness_is_validation_error() -> None:
+    issues = validate_authorization_input(
+        {
+            "routes": [
+                {
+                    "path": "/admin/export",
+                    "admin_only_before": True,
+                    "admin_only_after": True,
+                    "reachable_after": ["bad-witness"],
+                }
+            ]
+        }
+    )
+    assert {issue.path for issue in issues} == {"routes[0].reachable_after[0]"}
+
+
 def test_non_boolean_route_flags_are_validation_errors() -> None:
     issues = validate_authorization_input(
         {
