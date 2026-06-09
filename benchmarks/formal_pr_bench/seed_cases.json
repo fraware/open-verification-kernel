@@ -20,6 +20,15 @@
       "expected_counterexample_class": null
     },
     {
+      "case_id": "control_metadata_missing",
+      "input_fixture": "examples/no_agent_self_approval/input_missing_metadata.json",
+      "expected_intent": "agent-cannot-disable-own-ci-gate",
+      "expected_backend_class": "policy_engine",
+      "expected_status": "unknown",
+      "expected_merge_recommendation": "require_human_review",
+      "expected_counterexample_class": "missing_required_metadata"
+    },
+    {
       "case_id": "auth_bypass",
       "input_fixture": "examples/auth_regression/input_admin_bypass.json",
       "expected_intent": "no-admin-route-bypass",
