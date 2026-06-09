@@ -11,7 +11,7 @@ from ovk.adapters.infra.tf_plan import terraform_plan_to_infra_input
 InfraInputFormat = Literal["infra", "terraform", "kubernetes"]
 
 
-SUPPORTED_INFRA_INPUT_FORMATS = {"infra", "terraform", "kubernetes"}
+SUPPORTED_INFRA_INPUT_FORMATS: tuple[InfraInputFormat, ...] = ("infra", "terraform", "kubernetes")
 
 
 def normalize_infra_input(data: dict[str, Any], input_format: str = "infra") -> dict[str, Any]:
