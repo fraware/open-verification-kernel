@@ -2,7 +2,7 @@
 
 Sprint 2 focuses on replacing manual metadata assumptions with stronger GitHub metadata ingestion and preparing the OPA-backed self-protection path.
 
-## Completed in this pass
+## Completed so far
 
 - Added `ovk.core.github_event` to parse GitHub Actions event payloads.
 - Added event fixture `examples/github_events/pull_request_bot.json`.
@@ -13,11 +13,16 @@ Sprint 2 focuses on replacing manual metadata assumptions with stronger GitHub m
 - Updated `action.yml` to pass `github.event_path` into `ovk ci`.
 - Updated CI to exercise the GitHub event metadata path.
 - Added conservative GitHub API metadata collector in `ovk.core.github_api_metadata`.
+- Added required-check metadata normalization script at `scripts/normalize_required_checks.py`.
 - Added OPA self-protection policy asset generation in `ovk.adapters.opa.policy_assets`.
 - Added materialized Rego fixture at `adapters/opa/policies/self_protection.rego`.
 - Added optional OPA CLI runner in `ovk.adapters.opa.optional_runner`.
 - Added OPA raw-result normalization into `VerificationEvidence` in `ovk.adapters.opa.evidence`.
-- Added tests for GitHub event metadata, GitHub-shaped required-check metadata, GitHub API metadata helpers, OPA policy assets, optional OPA runner behavior, and OPA evidence normalization.
+- Added optional OPA integration tests that skip when the OPA binary is unavailable.
+- Added opt-in PR comment posting script at `scripts/post_pr_comment.py`.
+- Updated `action.yml` with `post-comment: "true"` support.
+- Added installation guide at `docs/INSTALLATION.md`.
+- Added tests for GitHub event metadata, GitHub-shaped required-check metadata, GitHub API metadata helpers, OPA policy assets, optional OPA runner behavior, OPA evidence normalization, helper scripts, and optional OPA integration.
 
 ## Current command
 
@@ -35,11 +40,10 @@ ovk ci \
 
 ## Remaining Sprint 2 work
 
-1. Wire live GitHub branch-protection metadata collection into the Action where token permissions allow it.
-2. Add a strict-mode integration test for OPA when the binary is installed, while keeping missing binary as `unknown`.
-3. Add optional PR comment posting from `ovk-pr-comment.md`.
-4. Extend documentation for real repository installation.
-5. Decide whether the Action should use deterministic evaluator, OPA CLI, or both in strict mode.
+1. Wire live GitHub branch-protection metadata collection directly into the Action when token permissions allow it.
+2. Decide whether strict mode should use deterministic evaluator, OPA CLI, or both.
+3. Add update-in-place behavior for PR comments so OVK does not create duplicate comments.
+4. Add a real external-repository smoke test workflow once an integration repo exists.
 
 ## Engineering rule
 
