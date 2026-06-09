@@ -25,12 +25,14 @@ class SmtPlan:
 
 
 def build_smt_plan(obligation: AuthorizationObligation) -> SmtPlan:
-    """Build a solver-independent plan from an authorization obligation."""
+    """Build a solver-independent violation-query plan from an authorization obligation."""
     clauses: list[SmtClause] = []
     for route_index, route in enumerate(obligation.routes):
         if not route.admin_only_before:
             continue
         for witness_index, witness in enumerate(route.reachable_after):
+            if witness.role == "admin":
+                continue
             clause_name = f"route_{route_index}_witness_{witness_index}"
             clauses.append(
                 SmtClause(
