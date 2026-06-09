@@ -21,6 +21,8 @@ Reduce duplicated runner logic, make release packaging easier to audit, and keep
 - Command-surface consistency script added.
 - Release preflight script added.
 - Release preflight script covered by pytest.
+- Structured preflight report layer added.
+- Structured preflight report can emit a JSON report artifact.
 
 ## Local smoke coverage
 
@@ -28,7 +30,7 @@ The local smoke script checks release metadata consistency, authorization eviden
 
 ## Preflight coverage
 
-The release preflight script runs release metadata consistency, command-surface consistency, and local release smoke checks as one maintainer command.
+The release preflight script runs release metadata consistency, command-surface consistency, and local release smoke checks as one maintainer command. The structured preflight report path can produce a JSON report artifact for release archives.
 
 ## Remaining quality work
 
