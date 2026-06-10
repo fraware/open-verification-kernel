@@ -1,0 +1,19 @@
+{
+  "capability_id": "cedar-policy-v1",
+  "tool": {"name": "cedar", "adapter": "ovk-adapter-cedar", "adapter_version": "0.1.0"},
+  "backend_class": "policy_engine",
+  "input_languages": ["cedar", "json"],
+  "supported_domains": ["authorization", "infrastructure", "agent_authority"],
+  "supported_property_kinds": ["access_control", "forbidden_configuration", "safety"],
+  "guarantee": {
+    "type": "policy_evaluation",
+    "meaning_of_pass": "Cedar policy permits only authorized actions.",
+    "meaning_of_fail": "Cedar policy reports a forbidden authorization.",
+    "meaning_of_unknown": "Cedar binary unavailable or input incomplete."
+  },
+  "assumptions": ["Authorization abstraction matches repository routes."],
+  "limits": ["Does not verify runtime middleware behavior."],
+  "result_format": "ovk.result.v1",
+  "counterexample_format": "policy_violation",
+  "timeout_behavior": "unknown"
+}

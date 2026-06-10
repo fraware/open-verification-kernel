@@ -1,0 +1,9 @@
+include README.md
+include LICENSE
+recursive-include schemas *.json
+recursive-include templates *.intent.json
+recursive-include adapters *.json
+recursive-include benchmarks/formal_pr_bench *.json
+recursive-include benchmarks/formal_pr_bench *.py
+recursive-include examples *
+recursive-include action.yml

@@ -1,0 +1,19 @@
+{
+  "capability_id": "alloy-relational-v1",
+  "tool": {"name": "alloy", "adapter": "ovk-adapter-alloy", "adapter_version": "0.1.0"},
+  "backend_class": "model_checker",
+  "input_languages": ["alloy"],
+  "supported_domains": ["authorization", "infrastructure", "deployment"],
+  "supported_property_kinds": ["invariant", "access_control", "forbidden_configuration"],
+  "guarantee": {
+    "type": "bounded_model_check",
+    "meaning_of_pass": "Alloy found no counterexample within scope.",
+    "meaning_of_fail": "Alloy found a violating instance.",
+    "meaning_of_unknown": "Alloy unavailable or model incomplete."
+  },
+  "assumptions": ["Relational model captures relevant configuration."],
+  "limits": ["Finite scope analysis only."],
+  "result_format": "ovk.result.v1",
+  "counterexample_format": "instance",
+  "timeout_behavior": "unknown"
+}

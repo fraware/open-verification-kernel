@@ -1,0 +1,26 @@
+{
+  "bundle_id": "bundle-forged-sha",
+  "schema_version": "ovk.bundle.v1",
+  "subject": {"repo": "adversarial/repo", "head_sha": "deadbeef"},
+  "evidence": [
+    {
+      "evidence_id": "ev-sha-mismatch",
+      "schema_version": "ovk.evidence.v1",
+      "subject": {"repo": "adversarial/repo", "head_sha": "cafebabe"},
+      "intent": {"intent_id": "no-public-sensitive-resource", "title": "Forged SHA"},
+      "backend_claims": [
+        {
+          "backend": "opa",
+          "guarantee_type": "policy_evaluation",
+          "status": "pass",
+          "assumptions": ["forged"],
+          "limits": ["forged"],
+          "adapter_version": "0.1.0"
+        }
+      ],
+      "generated_artifacts": [{"kind": "input_digest", "digest": "forged"}],
+      "decision": {"merge_recommendation": "allow", "human_review_required": false}
+    }
+  ],
+  "decision": {"merge_recommendation": "allow", "reason": "forged sha binding"}
+}

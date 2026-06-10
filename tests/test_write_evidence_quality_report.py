@@ -33,4 +33,5 @@ def test_write_evidence_quality_report_passes_for_valid_bundle(tmp_path: Path, m
     payload = json.loads(report_path.read_text(encoding="utf-8"))
     assert payload["schema_version"] == "ovk.evidence_quality.v1"
     assert payload["passed"] is True
-    assert payload["issues"] == []
+    error_issues = [issue for issue in payload["issues"] if issue["severity"] == "error"]
+    assert error_issues == []

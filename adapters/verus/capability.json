@@ -1,0 +1,19 @@
+{
+  "capability_id": "verus-rust-v1",
+  "tool": {"name": "verus", "adapter": "ovk-adapter-verus", "adapter_version": "0.1.0"},
+  "backend_class": "proof_assistant",
+  "input_languages": ["rust"],
+  "supported_domains": ["authorization", "data_boundary"],
+  "supported_property_kinds": ["invariant", "safety"],
+  "guarantee": {
+    "type": "proof_obligation",
+    "meaning_of_pass": "Verus verified the Rust harness.",
+    "meaning_of_fail": "Verus reported verification failures.",
+    "meaning_of_unknown": "Verus unavailable or harness incomplete."
+  },
+  "assumptions": ["Harness models security-critical code paths."],
+  "limits": ["Verification bounded by annotations."],
+  "result_format": "ovk.result.v1",
+  "counterexample_format": "proof_failure",
+  "timeout_behavior": "unknown"
+}

@@ -7,6 +7,7 @@ from typing import Any
 from ovk.adapters.z3.obligation import AuthorizationObligation, obligation_to_dict
 from ovk.adapters.z3.regression import render_authorization_regression_suite
 from ovk.adapters.z3.result import normalize_z3_authorization_result, recommendation_from_z3_status
+from ovk.adapters.z3.smt_plan import build_smt_plan, smt_plan_to_dict
 from ovk.core.models import BackendClaim, VerificationEvidence, VerificationStatus
 
 
@@ -40,11 +41,21 @@ def authorization_result_to_evidence(
     if base_sha is not None:
         subject["base_sha"] = base_sha
 
+    backend_name = "deterministic" if str(raw.get("reason", "")).startswith("deterministic") else "z3"
     generated_artifacts: list[dict[str, Any]] = [
         {
             "kind": "authorization_obligation",
             "obligation": obligation_to_dict(obligation),
-        }
+        },
+        {
+            "kind": "smt_plan",
+            "plan": smt_plan_to_dict(build_smt_plan(obligation)),
+        },
+        {
+            "kind": "backend_provenance",
+            "backend": backend_name,
+            "raw_status": status_text,
+        },
     ]
     if counterexamples:
         generated_artifacts.append(

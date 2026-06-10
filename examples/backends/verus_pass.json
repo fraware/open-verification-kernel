@@ -1,0 +1,4 @@
+{
+  "intent_id": "verus-harness-check",
+  "obligations": [{"name": "no_buffer_overflow", "proved": true}]
+}

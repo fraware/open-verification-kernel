@@ -19,12 +19,47 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e '.[dev]'
       - name: Lint
-        run: ruff check ovk tests benchmarks/formal_pr_bench/score_seed_cases.py
+        run: ruff check ovk tests benchmarks/formal_pr_bench
       - name: Test
         run: pytest
-      - name: Score seed benchmark cases
-        run: python benchmarks/formal_pr_bench/score_seed_cases.py
-      - name: Exercise Sprint 2 GitHub event path
+      - name: Validate intent templates
+        run: python scripts/validate_templates.py
+      - name: Score all benchmark cases
+        run: python benchmarks/formal_pr_bench/score_all_lanes.py
+      - name: Score expanded benchmark and publish leaderboard
+        run: |
+          ovk bench --expanded --leaderboard .verification/formal-pr-bench-leaderboard.json
+      - name: Pilot program
+        run: ovk pilot
+      - name: Exercise ovk check on multi-surface PR
+        run: |
+          ovk check \
+            --changed-files examples/multi_surface/pr_combined.diff \
+            --output-dir .ovk-check-test \
+            --advisory
+      - name: Release preflight
+        run: python scripts/release_preflight.py
+      - name: External smoke checklist
+        run: python scripts/external_smoke_checklist.py
+      - name: Multi-lane verify bundle
+        run: |
+          ovk verify \
+            --manifest examples/verification_manifests/full_mvp.json \
+            --output-dir ovk-full-bundle \
+            --advisory
+      - name: Validate release bundle outputs
+        run: ovk validate-outputs ovk-full-bundle
+      - name: Signed envelope smoke
+        env:
+          OVK_SIGNING_KEY: ci-signing-smoke-key
+        run: |
+          ovk release-bundle \
+            --lane infrastructure \
+            --input examples/infrastructure_exposure/input_private_sensitive_resource.json \
+            --output-dir ovk-signed-bundle
+          test -f ovk-signed-bundle/ovk-attestation-envelope.json
+          grep -q '"signature"' ovk-signed-bundle/ovk-attestation-envelope.json
+      - name: Exercise self-protection CI path
         run: |
           ovk ci \
             --github-event examples/github_events/pull_request_bot.json \
@@ -34,12 +69,40 @@ jobs:
             --evidence-output ovk-evidence.json \
             --markdown-output ovk-pr-comment.md \
             --attestation-output ovk-attestation.json \
+            --manifest-output ovk-artifact-manifest.json \
+            --quality-output ovk-evidence-quality.json \
             --advisory
+      - name: Dogfood composite action (full MVP manifest)
+        uses: ./
+        with:
+          mode: advisory
+          verification-manifest: examples/verification_manifests/full_mvp.json
+          bundle-output-dir: ovk-action-dogfood-bundle
+      - name: Validate dogfood release bundle
+        run: ovk validate-outputs ovk-action-dogfood-bundle
       - name: Upload OVK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ovk-sprint2-artifacts
+          name: ovk-ci-artifacts
           path: |
             ovk-evidence.json
             ovk-pr-comment.md
             ovk-attestation.json
+            ovk-artifact-manifest.json
+            ovk-evidence-quality.json
+            ovk-action-dogfood-bundle/**
+            .verification/formal-pr-bench-leaderboard.json
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade pip build twine
+          python scripts/sync_package_data.py
+          python -m build
+          twine check dist/*

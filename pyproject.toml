@@ -1,19 +1,35 @@
 [project]
 name = "open-verification-kernel"
-version = "0.1.0"
+version = "1.0.0"
 description = "Solver-agnostic verification kernel for AI-agent engineering workflows"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Apache-2.0" }
+license = { file = "LICENSE" }
 authors = [
   { name = "Open Verification Kernel Contributors" }
+]
+keywords = ["verification", "formal-methods", "ai-agents", "ci", "security"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Security",
+  "Topic :: Software Development :: Quality Assurance",
 ]
 dependencies = [
   "jsonschema>=4.22.0",
   "typer>=0.12.0",
   "pydantic>=2.7.0",
-  "pyyaml>=6.0.0"
+  "pyyaml>=6.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/fraware/open-verification-kernel"
+Documentation = "https://github.com/fraware/open-verification-kernel/tree/main/docs"
+Repository = "https://github.com/fraware/open-verification-kernel"
 
 [project.optional-dependencies]
 dev = [
@@ -23,15 +39,37 @@ dev = [
 solvers = [
   "z3-solver>=4.13.0"
 ]
+mcp = [
+  "mcp>=1.0.0"
+]
+backends-wave1 = []
+backends-wave2 = []
 all = [
-  "z3-solver>=4.13.0"
+  "z3-solver>=4.13.0",
+  "mcp>=1.0.0"
 ]
 
 [project.scripts]
 ovk = "ovk.cli:app"
+ovk-mcp = "ovk.mcp_stdio:main"
+ovk-mcp-legacy = "ovk.mcp_stdio:serve_stdio"
+
+[build-system]
+requires = ["setuptools>=77.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["ovk*"]
+
+[tool.setuptools.package-data]
+ovk = ["package_data/**/*"]
 
 [tool.ruff]
 line-length = 120
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]

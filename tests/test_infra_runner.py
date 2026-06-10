@@ -36,7 +36,12 @@ def test_infra_runner_public_sensitive_resource_writes_blocking_outputs(tmp_path
     assert markdown.exists()
     assert attestation.exists()
     assert manifest_payload["schema_version"] == "ovk.artifact_manifest.v1"
-    assert {item["kind"] for item in manifest_payload["artifacts"]} == {"evidence", "markdown", "attestation"}
+    assert {item["kind"] for item in manifest_payload["artifacts"]} == {
+        "evidence",
+        "markdown",
+        "attestation",
+        "evidence_quality",
+    }
 
 
 def test_infra_runner_private_sensitive_resource_allows(tmp_path: Path, monkeypatch) -> None:

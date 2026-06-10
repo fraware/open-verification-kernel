@@ -1,0 +1,19 @@
+{
+  "capability_id": "lean-proof-v1",
+  "tool": {"name": "lean", "adapter": "ovk-adapter-lean", "adapter_version": "0.1.0"},
+  "backend_class": "proof_assistant",
+  "input_languages": ["lean"],
+  "supported_domains": ["authorization", "agent_authority"],
+  "supported_property_kinds": ["invariant", "safety"],
+  "guarantee": {
+    "type": "proof_obligation",
+    "meaning_of_pass": "Lean proof completed without sorry.",
+    "meaning_of_fail": "Lean reported proof obligations.",
+    "meaning_of_unknown": "Lean unavailable or proof incomplete."
+  },
+  "assumptions": ["Formal model matches runtime policy."],
+  "limits": ["Proof effort may exceed CI budgets."],
+  "result_format": "ovk.result.v1",
+  "counterexample_format": "proof_failure",
+  "timeout_behavior": "unknown"
+}

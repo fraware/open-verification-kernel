@@ -1,0 +1,12 @@
+{
+  "schema_version": "ovk.verification_manifest.v1",
+  "name": "pilot-self-protection-only",
+  "description": "Pilot manifest: self-protection lane only for low-risk OSS adoption.",
+  "lanes": [
+    {
+      "lane": "self_protection",
+      "input": "../no_agent_self_approval/input_gate_preserved.json",
+      "input_format": "infra"
+    }
+  ]
+}

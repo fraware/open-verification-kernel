@@ -1,0 +1,25 @@
+{
+  "intent_id": "no-skipped-approval-state",
+  "version": "0.1.0",
+  "domain": "deployment",
+  "title": "Deployment changes cannot skip required approval states",
+  "description": "Deployment or release state machines must not allow production without required approval states.",
+  "property": {
+    "kind": "invariant",
+    "natural_language": "Every path to production must visit all required approval states."
+  },
+  "risk": {
+    "severity": "high",
+    "likelihood": "medium",
+    "rationale": "Skipping approval states can bypass human or policy gates."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "canonical": true
+  }
+}

@@ -29,16 +29,12 @@ The project is solver-agnostic, but never guarantee-agnostic. Every backend must
 - Backend router for selecting appropriate verification tools.
 - Adapter SDK for OPA, Z3, Kani, TLA+, Dafny, Verus, Lean, Cedar, CBMC, Alloy, and others.
 - GitHub Action for PR-level verification evidence.
-- MCP server so agents can call verification workflows directly.
+- MCP server wrappers for agent-facing verification workflows.
 - Property templates for common agentic engineering risks.
 - Counterexample-to-test and counterexample-to-repair workflow.
 - Benchmark scaffolding for agent-authored PR verification tasks.
 
-## First wedge
-
-Every agent-authored pull request should carry structured verification evidence before merge.
-
-The initial MVP focuses on five property classes:
+## MVP property classes
 
 1. Agent-authored PRs cannot weaken their own verification gate.
 2. Authorization-sensitive changes cannot create admin-route bypasses.
@@ -46,21 +42,53 @@ The initial MVP focuses on five property classes:
 4. Workflow or CI changes cannot expose secrets to untrusted contexts.
 5. State-machine and deployment changes cannot skip required approval states.
 
+## Quick start
+
+```bash
+pip install -e '.[dev]'
+ovk init
+
+# Default PR path: diff-aware multi-lane check
+ovk check --changed-files examples/multi_surface/pr_combined.diff --advisory
+ovk doctor
+
+# Multi-lane verify + release bundle
+ovk verify --manifest examples/verification_manifests/full_mvp.json --output-dir ovk-bundle --advisory
+ovk validate-outputs ovk-bundle
+
+# Pilot program (five adoption manifests)
+ovk pilot
+
+# FormalPR-Bench leaderboard
+ovk bench --leaderboard .verification/formal-pr-bench-leaderboard.json
+
+# Release gate
+ovk release-preflight
+
+# MCP agent server (official SDK transport when mcp extra is installed)
+ovk-mcp
+```
+
+Lane-by-lane commands (`ovk ci`, `ovk auth-obligation`, `ovk infra-exposure`, `ovk ci-secrets`, `ovk deployment-state`) remain available for focused workflows. See [docs/INTEGRATION.md](docs/INTEGRATION.md).
+
+Set `OVK_SIGNING_KEY` to HMAC-sign attestation envelopes in release bundles.
+
 ## Repository map
 
 ```text
 schemas/            JSON schemas for OVK objects
-docs/               architecture, formal spec, roadmap, threat model
-ovk/                starter Python package for the kernel
-adapters/           reference adapter specifications and future code
+docs/               documentation index, status, integration, specs
+ovk/                Python package for the kernel and adapters
+adapters/           reference capability manifests and Rego policies
 templates/          reusable verification-intent templates
 examples/           end-to-end demo scenarios
-.github/workflows/  CI scaffolding
+scripts/            runners, preflight, and release tooling
+.github/workflows/  CI and example workflows
 ```
 
 ## Status
 
-This repository is in project-bootstrap state. The initial commits define the system architecture, formal contracts, starter schemas, and engineering roadmap so implementation work can begin immediately.
+OVK **v1.0.0** is a local-runner-first verification kernel with five MVP evidence lanes, ten backend adapters (OPA, Z3, Cedar, TLA+, Kani, Dafny, Verus, Lean, CBMC, Alloy), `ovk check` diff-aware orchestration, FormalPR-Bench v1, optional Sigstore signing, MCP SDK transport, and a hardened GitHub Action. See [docs/STATUS.md](docs/STATUS.md) and [docs/INTEGRATION.md](docs/INTEGRATION.md).
 
 ## License
 

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/deployment_state.input.schema.json",
+  "title": "Deployment State Input",
+  "type": "object",
+  "required": ["states", "transitions", "required_states", "production_states"],
+  "properties": {
+    "author_type": { "type": "string" },
+    "agent": { "type": "string" },
+    "task": { "type": "string" },
+    "initial_state": { "type": "string" },
+    "states": { "type": "array", "items": { "type": "string" } },
+    "required_states": { "type": "array", "items": { "type": "string" } },
+    "production_states": { "type": "array", "items": { "type": "string" } },
+    "transitions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from", "to"],
+        "properties": {
+          "from": { "type": "string" },
+          "to": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": true
+}

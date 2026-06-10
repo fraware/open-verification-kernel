@@ -1,142 +1,50 @@
-# Roadmap
+# OVK Roadmap
 
-## v0 objective
+## v0.1 delivered
 
-Create a handoff-ready open-source foundation for a solver-agnostic verification kernel that AI agents and CI systems can use in pull-request workflows.
+OVK v0.1.0 ships:
 
-## Phase 0: Project bootstrap
+- five MVP evidence lanes with CLI, examples, and benchmark coverage;
+- unified release bundles with provenance and optional HMAC signing;
+- evidence-quality gates in preflight;
+- multi-lane verification manifests;
+- diff-aware planning with workflow YAML reconstruction;
+- hardened composite GitHub Action (single-lane and multi-lane);
+- MCP stdio server for agent integrations.
 
-Deliverables:
+Details: [STATUS.md](STATUS.md), [RELEASE.md](RELEASE.md).
 
-- README and license.
-- System specification.
-- Architecture document.
-- Formal specification.
-- Adapter contract.
-- Threat model.
-- Initial JSON schemas.
-- Starter Python package.
-- GitHub Action scaffold.
-- MCP server scaffold.
-- Initial templates and examples.
+## Hardening status (v1.0.0)
 
-Exit criterion:
+| Area | Status |
+|---|---|
+| Evidence honesty and quality gates | delivered |
+| OPA + deterministic self-protection | delivered |
+| Z3 authorization with deterministic fallback | delivered |
+| Release bundles, provenance, HMAC + opt-in Sigstore | delivered |
+| GitHub Action + CI dogfood (`use-check` default path) | delivered |
+| FormalPR-Bench v1 (100 cases + extended categories) | delivered |
+| Diff-aware workflow + IaC hunk parsing | delivered |
+| MCP SDK transport (`ovk-mcp`, `pip install '.[mcp]'`) | delivered |
+| Ten backend adapters (wave 1 + wave 2) | delivered |
+| Pilot program (`ovk pilot`, five manifests) | delivered |
 
-- Engineers can clone the repository, understand the design, run schema validation tests, and begin implementing adapters.
+## Post-v1.0 priorities
 
-## Phase 1: Schemas and validation
+1. PyPI publication and semver release automation.
+2. Real-world OSS pilot repositories beyond example manifests.
+3. Repository policy preferences and runtime budgets in backend routing.
+4. External-repo Action validation at scale.
+5. Deeper Z3 obligation expressiveness and counterexample minimization.
+6. Community backend contributions and expanded template library (100+ intents).
 
-Deliverables:
+## Historical phases (completed for v0.1 scope)
 
-- `verification.intent.schema.json`
-- `verification.capability.schema.json`
-- `verification.obligation.schema.json`
-- `verification.result.schema.json`
-- `verification.evidence.schema.json`
-- `verification.bundle.schema.json`
-- Golden valid and invalid examples.
-- CLI command: `ovk validate`.
-
-Exit criterion:
-
-- All core objects validate against schemas.
-- CI runs schema validation.
-
-## Phase 2: Local CLI
-
-Deliverables:
-
-- `ovk init`
-- `ovk infer`
-- `ovk plan`
-- `ovk run`
-- `ovk explain`
-- `ovk ci`
-
-Exit criterion:
-
-- The no-agent-self-disable example can be run locally and returns a block decision when the verification gate is removed.
-
-## Phase 3: OPA adapter and first template
-
-Deliverables:
-
-- OPA capability manifest.
-- OPA adapter runner.
-- CI self-protection Rego template.
-- Regression fixture for gate removal.
-
-Exit criterion:
-
-- OVK blocks a PR-like fixture that removes its own required check.
-
-## Phase 4: GitHub Action
-
-Deliverables:
-
-- `action.yml`
-- Docker or composite action wrapper.
-- PR markdown renderer.
-- Evidence artifact upload path.
-- Enforce/advisory modes.
-
-Exit criterion:
-
-- A demo repository PR receives an OVK comment and correct status conclusion.
-
-## Phase 5: Z3 adapter
-
-Deliverables:
-
-- Z3 capability manifest.
-- Simple reachability abstraction.
-- Authorization-route example.
-
-Exit criterion:
-
-- Non-admin admin-route bypass fixture returns a counterexample.
-
-## Phase 6: Kani and TLA+ adapters
-
-Deliverables:
-
-- Kani manifest and bounded model-check runner.
-- TLA+ manifest and TLC runner.
-- Rust safety example.
-- Workflow approval model example.
-
-Exit criterion:
-
-- OVK shows multiple guarantee classes across policy evaluation, SMT, bounded model checking, and model checking.
-
-## Phase 7: MCP server
-
-Deliverables:
-
-- MCP tool definitions.
-- Agent-facing methods for intent extraction, backend selection, verification, explanation, and evidence creation.
-
-Exit criterion:
-
-- Coding agents can call OVK as a verification tool without invoking raw solvers directly.
-
-## Phase 8: Benchmark seed
-
-Deliverables:
-
-- FormalPR-Bench fixture format.
-- 20 to 50 seed tasks.
-- Scoring harness for intent recall, backend selection, evidence honesty, counterexample usefulness, and merge decision.
-
-Exit criterion:
-
-- Baseline OVK run produces benchmark scores on the seed set.
+The 24-month full-vision roadmap (Phases 1–7) is complete at v1.0.0: `ovk check`, kernel orchestration, trust hardening, 10 backends, MCP agent loop, 50+ templates, FormalPR-Bench v1, and pilot program. Post-v1.0 work focuses on PyPI distribution, community backend contributions, and expanded real-world pilot metrics.
 
 ## One-year target
 
-- Stable schemas.
-- 10 to 15 backend adapters.
+- Stable schemas and 10–15 backend adapters.
 - 100 reusable property templates.
 - Public benchmark for agentic PR verification.
-- External contributors from formal methods and agent-building communities.
-- First enterprise or OSS pilot repositories.
+- Enterprise and OSS pilot repositories.

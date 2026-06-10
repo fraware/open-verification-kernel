@@ -42,3 +42,11 @@ def write_self_protection_rego(path: Path) -> None:
     """Write the self-protection Rego policy to disk."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(SELF_PROTECTION_REGO, encoding="utf-8")
+
+
+def write_infra_exposure_rego(path: Path) -> None:
+    """Write the infrastructure exposure Rego policy to disk."""
+    from ovk.adapters.opa.infra_exposure import INFRA_EXPOSURE_REGO
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(INFRA_EXPOSURE_REGO, encoding="utf-8")

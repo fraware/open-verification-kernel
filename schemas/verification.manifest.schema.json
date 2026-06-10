@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/verification.manifest.schema.json",
+  "title": "Verification Manifest",
+  "type": "object",
+  "required": ["lanes"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "repo": { "type": "string" },
+    "head_sha": { "type": "string" },
+    "lanes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["lane", "input"],
+        "properties": {
+          "lane": { "type": "string" },
+          "input": { "type": "string" },
+          "input_format": { "type": "string" },
+          "policy": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": true
+}

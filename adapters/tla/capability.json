@@ -1,0 +1,19 @@
+{
+  "capability_id": "tla-plus-v1",
+  "tool": {"name": "tla+", "adapter": "ovk-adapter-tla", "adapter_version": "0.1.0"},
+  "backend_class": "model_checker",
+  "input_languages": ["tla", "cfg"],
+  "supported_domains": ["deployment", "ci_cd"],
+  "supported_property_kinds": ["invariant", "safety", "liveness"],
+  "guarantee": {
+    "type": "bounded_model_check",
+    "meaning_of_pass": "TLC found no counterexample within configured bounds.",
+    "meaning_of_fail": "TLC found a violating trace.",
+    "meaning_of_unknown": "TLC unavailable or state space incomplete."
+  },
+  "assumptions": ["State machine abstraction matches deployment workflow."],
+  "limits": ["Bounded exploration only."],
+  "result_format": "ovk.result.v1",
+  "counterexample_format": "trace",
+  "timeout_behavior": "unknown"
+}

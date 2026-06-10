@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ovk.core.counterexample_translator import repair_hint_for_counterexample
 from ovk.core.models import EvidenceBundle, VerificationEvidence
 
 
@@ -33,6 +34,17 @@ def render_evidence_markdown(evidence: VerificationEvidence) -> str:
             affected_file = counterexample.get("affected_file")
             suffix = f" in `{affected_file}`" if affected_file else ""
             lines.append(f"- `{failure_mode}`: {summary}{suffix}")
+        lines.extend(["", "Suggested repairs:"])
+        for hint in (repair_hint_for_counterexample(item) for item in evidence.counterexamples):
+            location = ""
+            if hint.get("affected_file"):
+                location = f" (`{hint['affected_file']}`"
+                if hint.get("line_hunk") is not None:
+                    location += f", line {hint['line_hunk']}"
+                location += ")"
+            lines.append(
+                f"- `{hint['fix_class']}`: {hint['suggested_action']}{location}"
+            )
 
     recommendation = evidence.decision.get("merge_recommendation", "require_human_review")
     lines.extend(["", f"Recommendation: `{recommendation}`"])

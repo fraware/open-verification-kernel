@@ -22,11 +22,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--evidence-output", type=Path, default=Path("ovk-auth-evidence.json"))
     parser.add_argument("--markdown-output", type=Path, default=Path("ovk-auth-comment.md"))
     parser.add_argument("--attestation-output", type=Path, default=Path("ovk-auth-attestation.json"))
+    parser.add_argument("--manifest-output", type=Path, default=Path("ovk-auth-artifact-manifest.json"))
+    parser.add_argument("--quality-output", type=Path, default=Path("ovk-auth-evidence-quality.json"))
     parser.add_argument("--advisory", action="store_true")
     return parser.parse_args()
 
 
 def main() -> int:
+    from scripts._deprecation import warn_deprecated_script
+
+    warn_deprecated_script(script="scripts/run_authorization_obligation.py", replacement="ovk auth-obligation")
     args = parse_args()
     data = read_json_file(args.input)
     evidence = evaluate_validated_authorization_path(
@@ -42,6 +47,8 @@ def main() -> int:
             evidence=args.evidence_output,
             markdown=args.markdown_output,
             attestation=args.attestation_output,
+            manifest=args.manifest_output,
+            quality_report=args.quality_output,
         ),
     )
 

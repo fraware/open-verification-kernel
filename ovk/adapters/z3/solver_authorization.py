@@ -37,9 +37,9 @@ def evaluate_with_optional_z3(data: dict[str, Any]) -> dict[str, Any]:
             is_non_admin = z3.Bool(f"non_admin_{idx}_{witness_idx}")
             reachable = z3.Bool(f"reachable_{idx}_{witness_idx}")
             violation = z3.And(is_admin_route, is_non_admin, reachable)
-            solver.add(is_admin_route == True)
+            solver.add(is_admin_route)
             solver.add(is_non_admin == (role != "admin"))
-            solver.add(reachable == True)
+            solver.add(reachable)
             solver.add(violation)
             result = solver.check()
             if result == z3.sat:

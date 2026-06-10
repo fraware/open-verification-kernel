@@ -1,0 +1,4 @@
+{
+  "intent_id": "verus-harness-check",
+  "unproved_obligations": ["index stays within bounds"]
+}

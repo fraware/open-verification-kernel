@@ -1,0 +1,36 @@
+name: OVK External Consumer Example
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  ovk-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Open Verification Kernel check path
+        uses: ./
+        with:
+          mode: strict
+          use-check: "true"
+          emit-check: "true"
+          changed-files: examples/ci_secrets/workflow_secrets_on_pr.diff
+          post-comment: "false"
+
+  ovk-full-mvp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Open Verification Kernel (all five lanes)
+        uses: ./
+        with:
+          mode: advisory
+          verification-manifest: examples/verification_manifests/full_mvp.json
+          bundle-output-dir: ovk-full-mvp-bundle
+          post-comment: "false"

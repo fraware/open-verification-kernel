@@ -1,0 +1,19 @@
+{
+  "capability_id": "cbmc-c-v1",
+  "tool": {"name": "cbmc", "adapter": "ovk-adapter-cbmc", "adapter_version": "0.1.0"},
+  "backend_class": "model_checker",
+  "input_languages": ["c", "goto"],
+  "supported_domains": ["data_boundary", "infrastructure"],
+  "supported_property_kinds": ["safety", "invariant"],
+  "guarantee": {
+    "type": "bounded_model_check",
+    "meaning_of_pass": "CBMC found no violation within bounds.",
+    "meaning_of_fail": "CBMC reported a reachable bug.",
+    "meaning_of_unknown": "CBMC unavailable or harness incomplete."
+  },
+  "assumptions": ["Harness bounds loops and memory."],
+  "limits": ["Bounded verification only."],
+  "result_format": "ovk.result.v1",
+  "counterexample_format": "trace",
+  "timeout_behavior": "unknown"
+}

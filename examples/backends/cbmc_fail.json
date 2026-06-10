@@ -1,0 +1,4 @@
+{
+  "intent_id": "cbmc-harness-check",
+  "failed_assertions": ["pointer must not be null before dereference"]
+}

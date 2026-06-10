@@ -1,0 +1,4 @@
+{
+  "intent_id": "cbmc-harness-check",
+  "assertions": [{"name": "bounds_check", "status": "pass"}]
+}

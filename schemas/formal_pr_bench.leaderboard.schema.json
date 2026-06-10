@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/formal_pr_bench.leaderboard.schema.json",
+  "title": "FormalPR-Bench Leaderboard",
+  "type": "object",
+  "required": ["schema_version", "benchmark", "case_set", "summary", "timing_ms", "cases"],
+  "properties": {
+    "schema_version": { "const": "formal_pr_bench.leaderboard.v1" },
+    "benchmark": { "type": "string" },
+    "case_set": { "type": "string" },
+    "generated_at_unix_ms": { "type": "integer" },
+    "summary": {
+      "type": "object",
+      "required": ["cases_total", "cases_passed"],
+      "properties": {
+        "cases_total": { "type": "integer", "minimum": 0 },
+        "cases_passed": { "type": "integer", "minimum": 0 },
+        "merge_decision_accuracy": { "type": ["number", "null"] },
+        "status_accuracy": { "type": ["number", "null"] },
+        "counterexample_usefulness": { "type": ["number", "null"] },
+        "backend_selection_accuracy": { "type": ["number", "null"] },
+        "evidence_honesty": { "type": ["number", "null"] },
+        "intent_recall": { "type": ["number", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "timing_ms": {
+      "type": "object",
+      "required": ["p50", "p95", "max"],
+      "properties": {
+        "p50": { "type": "number" },
+        "p95": { "type": "number" },
+        "max": { "type": "number" }
+      }
+    },
+    "cases": {
+      "type": "array",
+      "items": { "type": "object", "additionalProperties": true }
+    }
+  },
+  "additionalProperties": false
+}

@@ -39,6 +39,18 @@ SURFACE_RULES = [
         "intent": "no-public-sensitive-resource",
         "reason": "change touches infrastructure, deployment, IAM, or network configuration",
     },
+    {
+        "domain": "ci_cd",
+        "patterns": [".github/workflows/*"],
+        "intent": "no-secrets-in-untrusted-context",
+        "reason": "change touches CI workflows that may expose secrets",
+    },
+    {
+        "domain": "deployment",
+        "patterns": ["*deployment*.yml", "*deployment*.yaml", "*/deploy/*", "*release*.yml"],
+        "intent": "no-skipped-approval-state",
+        "reason": "change touches deployment or release state configuration",
+    },
 ]
 
 

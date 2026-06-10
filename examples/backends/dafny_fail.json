@@ -1,0 +1,4 @@
+{
+  "intent_id": "dafny-obligation-check",
+  "unproved_obligations": ["access_invariant holds for all principals"]
+}

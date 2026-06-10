@@ -3,18 +3,33 @@
 
 from __future__ import annotations
 
-from scripts.check_command_surface import main as check_command_surface
-from scripts.check_release_metadata import main as check_release_metadata
-from scripts.smoke_release_local import run_local_release_smoke
+import subprocess
+import sys
+from pathlib import Path
+
+from scripts.release_preflight_report import build_release_preflight_report
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _run_benchmark() -> list[str]:
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "benchmarks/formal_pr_bench/score_all_lanes.py")],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        output = result.stdout.strip() or result.stderr.strip()
+        return [f"benchmark preflight failed: {output}"]
+    return []
 
 
 def main() -> int:
-    failures: list[str] = []
-    if check_release_metadata() != 0:
-        failures.append("release metadata preflight failed")
-    if check_command_surface() != 0:
-        failures.append("command surface preflight failed")
-    failures.extend(run_local_release_smoke())
+    failures = _run_benchmark()
+    report = build_release_preflight_report()
+    failures.extend(report.failures)
 
     for failure in failures:
         print(failure)

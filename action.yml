@@ -37,37 +37,169 @@ inputs:
     description: Path for the generated attestation statement
     required: false
     default: ovk-attestation.json
+  manifest-output:
+    description: Path for the generated artifact manifest
+    required: false
+    default: ovk-artifact-manifest.json
+  quality-output:
+    description: Path for the generated evidence quality report
+    required: false
+    default: ovk-evidence-quality.json
   post-comment:
     description: Post the Markdown report as a pull-request comment when possible
     required: false
     default: "false"
+  verification-manifest:
+    description: Optional multi-lane verification manifest JSON; when set, runs ovk verify instead of ovk check
+    required: false
+    default: ""
+  use-check:
+    description: When true and verification-manifest is empty, run ovk check instead of ovk ci
+    required: false
+    default: "true"
+  emit-check:
+    description: Emit a GitHub check run from the OVK evidence bundle when token permissions allow
+    required: false
+    default: "true"
+  bundle-output-dir:
+    description: Output directory for multi-lane release bundles when verification-manifest is set
+    required: false
+    default: ovk-release-bundle
 
 runs:
   using: composite
   steps:
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ovk-pip-${{ runner.os }}-${{ hashFiles('**/pyproject.toml') }}
+        restore-keys: |
+          ovk-pip-${{ runner.os }}-
     - name: Install OVK package
       shell: bash
+      working-directory: ${{ github.action_path }}
       run: |
         python -m pip install --upgrade pip
-        pip install -e .
+        pip install .
     - name: Initialize verification directory if needed
       shell: bash
+      working-directory: ${{ github.workspace }}
       run: ovk init
-    - name: Run OVK Sprint 2 metadata path
+    - name: Collect branch metadata
       shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        python "${{ github.action_path }}/scripts/collect_branch_metadata.py" \
+          --event "${{ github.event_path }}" \
+          --output ovk-branch-metadata.json || true
+    - name: Run OVK multi-lane verification
+      if: ${{ inputs.verification-manifest != '' }}
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        ADVISORY_FLAG=""
+        if [ "${{ inputs.mode }}" = "advisory" ]; then
+          ADVISORY_FLAG="--advisory"
+        fi
+        ovk verify \
+          --manifest "${{ inputs.verification-manifest }}" \
+          --output-dir "${{ inputs.bundle-output-dir }}" \
+          --repo "${{ github.repository }}" \
+          --head-sha "${{ github.sha }}" \
+          $ADVISORY_FLAG
+    - name: Run OVK check path
+      if: ${{ inputs.verification-manifest == '' && inputs.use-check == 'true' }}
+      shell: bash
+      working-directory: ${{ github.workspace }}
       run: |
         EXTRA_CHECK_METADATA=""
         if [ -n "${{ inputs.check-metadata }}" ]; then
           EXTRA_CHECK_METADATA="--check-metadata ${{ inputs.check-metadata }}"
         fi
-        if [ "${{ inputs.mode }}" = "advisory" ]; then
-          ovk ci --github-event "${{ github.event_path }}" --metadata "${{ inputs.metadata }}" --changed-files "${{ inputs.changed-files }}" $EXTRA_CHECK_METADATA --backend-strategy "${{ inputs.backend-strategy }}" --evidence-output "${{ inputs.evidence-output }}" --markdown-output "${{ inputs.markdown-output }}" --attestation-output "${{ inputs.attestation-output }}" --advisory
-        else
-          ovk ci --github-event "${{ github.event_path }}" --metadata "${{ inputs.metadata }}" --changed-files "${{ inputs.changed-files }}" $EXTRA_CHECK_METADATA --backend-strategy "${{ inputs.backend-strategy }}" --evidence-output "${{ inputs.evidence-output }}" --markdown-output "${{ inputs.markdown-output }}" --attestation-output "${{ inputs.attestation-output }}"
+        if [ -f ovk-branch-metadata.json ]; then
+          EXTRA_CHECK_METADATA="--check-metadata ovk-branch-metadata.json"
         fi
+        ADVISORY_FLAG=""
+        if [ "${{ inputs.mode }}" = "advisory" ]; then
+          ADVISORY_FLAG="--advisory"
+        fi
+        STRICT_FLAG=""
+        if [ "${{ inputs.mode }}" = "strict" ]; then
+          STRICT_FLAG="--strict"
+        fi
+        ovk check \
+          --diff "${{ inputs.changed-files }}" \
+          --github-event "${{ github.event_path }}" \
+          $EXTRA_CHECK_METADATA \
+          --repo "${{ github.repository }}" \
+          --head-sha "${{ github.sha }}" \
+          --output-dir . \
+          $ADVISORY_FLAG \
+          $STRICT_FLAG
+        ovk evidence-quality ovk-evidence.json --output ovk-evidence-quality.json || true
+        if [ "${{ inputs.mode }}" = "strict" ]; then
+          ovk evidence-quality ovk-evidence.json
+        fi
+    - name: Emit OVK GitHub check
+      if: ${{ inputs.emit-check == 'true' && inputs.verification-manifest == '' && inputs.use-check == 'true' }}
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: python "${{ github.action_path }}/scripts/emit_github_check.py" --evidence ovk-evidence.json --markdown ovk-pr-comment.md --repo "${{ github.repository }}" --head-sha "${{ github.sha }}" || true
+    - name: Run OVK self-protection CI path
+      if: ${{ inputs.verification-manifest == '' && inputs.use-check != 'true' }}
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        EXTRA_CHECK_METADATA=""
+        EXTRA_METADATA=""
+        if [ -n "${{ inputs.check-metadata }}" ]; then
+          EXTRA_CHECK_METADATA="--check-metadata ${{ inputs.check-metadata }}"
+        fi
+        if [ -f ovk-branch-metadata.json ]; then
+          EXTRA_METADATA="--check-metadata ovk-branch-metadata.json"
+        fi
+        ADVISORY_FLAG=""
+        if [ "${{ inputs.mode }}" = "advisory" ]; then
+          ADVISORY_FLAG="--advisory"
+        fi
+        ovk ci \
+          --github-event "${{ github.event_path }}" \
+          --metadata "${{ inputs.metadata }}" \
+          --changed-files "${{ inputs.changed-files }}" \
+          $EXTRA_CHECK_METADATA \
+          $EXTRA_METADATA \
+          --backend-strategy "${{ inputs.backend-strategy }}" \
+          --evidence-output "${{ inputs.evidence-output }}" \
+          --markdown-output "${{ inputs.markdown-output }}" \
+          --attestation-output "${{ inputs.attestation-output }}" \
+          --manifest-output "${{ inputs.manifest-output }}" \
+          --quality-output "${{ inputs.quality-output }}" \
+          --repo "${{ github.repository }}" \
+          --head-sha "${{ github.sha }}" \
+          $ADVISORY_FLAG
     - name: Post OVK pull-request comment
       if: ${{ inputs.post-comment == 'true' }}
       shell: bash
+      working-directory: ${{ github.workspace }}
       env:
         GITHUB_TOKEN: ${{ github.token }}
-      run: python scripts/post_pr_comment.py --markdown "${{ inputs.markdown-output }}" --event "${{ github.event_path }}"
+      run: python "${{ github.action_path }}/scripts/post_pr_comment.py" --markdown "${{ inputs.markdown-output }}" --event "${{ github.event_path }}"
+    - name: Upload OVK artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ovk-evidence-artifacts
+        path: |
+          ovk-evidence.json
+          ovk-pr-comment.md
+          ovk-attestation.json
+          ovk-artifact-manifest.json
+          ovk-evidence-quality.json
+          ovk-provenance.json
+          ovk-attestation-envelope.json
+          ovk-release-bundle/**
+          ovk-branch-metadata.json

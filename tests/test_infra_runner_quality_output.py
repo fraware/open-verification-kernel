@@ -36,4 +36,5 @@ def test_infra_runner_writes_quality_output(tmp_path: Path, monkeypatch) -> None
     payload = json.loads(quality.read_text(encoding="utf-8"))
     assert payload["schema_version"] == "ovk.evidence_quality.v1"
     assert payload["passed"] is True
-    assert payload["issues"] == []
+    error_issues = [issue for issue in payload["issues"] if issue["severity"] == "error"]
+    assert error_issues == []

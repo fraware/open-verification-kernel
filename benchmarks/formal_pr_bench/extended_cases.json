@@ -1,0 +1,106 @@
+{
+  "schema_version": "formal_pr_bench.seed.v1",
+  "cases": [
+    {
+      "case_id": "route_cedar_iam",
+      "category": "routing",
+      "expected_intent": "infra-guard-1",
+      "changed_files": ["infra/iam_policy.tf"],
+      "expected_backend": "cedar"
+    },
+    {
+      "case_id": "route_kani_rust",
+      "category": "routing",
+      "intent": {
+        "intent_id": "rust-safety-check",
+        "domain": "authorization",
+        "property": {"kind": "safety"}
+      },
+      "changed_files": ["src/parser.rs"],
+      "expected_backend": "kani"
+    },
+    {
+      "case_id": "route_alloy_model",
+      "category": "routing",
+      "expected_intent": "deploy-guard-3",
+      "changed_files": ["models/deploy.als"],
+      "expected_backend": "alloy"
+    },
+    {
+      "case_id": "route_dafny_proof",
+      "category": "routing",
+      "expected_intent": "route-guard-6",
+      "changed_files": ["proofs/access.dfy"],
+      "expected_backend": "dafny"
+    },
+    {
+      "case_id": "adversarial_forged_allow",
+      "category": "adversarial",
+      "input_fixture": "examples/evidence_quality/adversarial_allow_with_fail.json",
+      "expected_quality_passed": false
+    },
+    {
+      "case_id": "adversarial_sha_mismatch",
+      "category": "adversarial",
+      "input_fixture": "examples/evidence_quality/adversarial_sha_mismatch.json",
+      "expected_quality_passed": false
+    },
+    {
+      "case_id": "repair_loop_infra_exposure",
+      "category": "repair_loop",
+      "input_fixture": "examples/multi_surface/infra_public_s3.diff",
+      "expected_merge_recommendation": "block",
+      "expected_fix_class": "restrict_public_access"
+    },
+    {
+      "case_id": "repair_loop_deployment_skip",
+      "category": "repair_loop",
+      "input_fixture": "examples/multi_surface/deployment_skip.diff",
+      "expected_merge_recommendation": "require_human_review",
+      "expected_fix_class": "add_approval_transition"
+    },
+    {
+      "case_id": "repair_loop_ci_secrets",
+      "category": "repair_loop",
+      "input_fixture": "examples/ci_secrets/workflow_secrets_on_pr.diff",
+      "expected_merge_recommendation": "block",
+      "expected_fix_class": "remove_untrusted_secret_usage"
+    },
+    {
+      "case_id": "recall_ci_secrets_workflow_diff",
+      "category": "intent_recall",
+      "input_fixture": "examples/ci_secrets/workflow_secrets_on_pr.diff",
+      "expected_intents": ["no-secrets-in-untrusted-context", "agent-cannot-disable-own-ci-gate"]
+    },
+    {
+      "case_id": "recall_infra_terraform_diff",
+      "category": "intent_recall",
+      "input_fixture": "examples/multi_surface/infra_public_s3.diff",
+      "expected_intents": ["no-public-sensitive-resource"]
+    },
+    {
+      "case_id": "recall_multi_surface_combined",
+      "category": "intent_recall",
+      "input_fixture": "examples/multi_surface/pr_combined.diff",
+      "expected_intents": [
+        "no-secrets-in-untrusted-context",
+        "no-public-sensitive-resource",
+        "agent-cannot-disable-own-ci-gate"
+      ]
+    },
+    {
+      "case_id": "repair_loop_auth_bypass",
+      "category": "repair_loop",
+      "input_fixture": "examples/multi_surface/auth_route_bypass.diff",
+      "expected_merge_recommendation": "block",
+      "expected_fix_class": "add_route_guard"
+    },
+    {
+      "case_id": "multi_surface_combined_pr",
+      "category": "multi_backend",
+      "input_fixture": "examples/multi_surface/pr_combined.diff",
+      "expected_merge_recommendation": "block",
+      "expected_lane_count_min": 3
+    }
+  ]
+}

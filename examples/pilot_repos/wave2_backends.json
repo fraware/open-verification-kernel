@@ -1,0 +1,64 @@
+{
+
+  "schema_version": "ovk.verification_manifest.v1",
+
+  "name": "pilot-wave2-backends",
+
+  "description": "Pilot manifest: wave-2 proof and model-checking backend fixtures.",
+
+  "lanes": [
+
+    {
+
+      "lane": "backend",
+
+      "input": "../backends/dafny_pass.json",
+
+      "input_format": "backend"
+
+    },
+
+    {
+
+      "lane": "backend",
+
+      "input": "../backends/verus_pass.json",
+
+      "input_format": "backend"
+
+    },
+
+    {
+
+      "lane": "backend",
+
+      "input": "../backends/lean_pass.json",
+
+      "input_format": "backend"
+
+    },
+
+    {
+
+      "lane": "backend",
+
+      "input": "../backends/cbmc_pass.json",
+
+      "input_format": "backend"
+
+    },
+
+    {
+
+      "lane": "backend",
+
+      "input": "../backends/alloy_pass.json",
+
+      "input_format": "backend"
+
+    }
+
+  ]
+
+}
+

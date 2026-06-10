@@ -1,0 +1,25 @@
+{
+  "intent_id": "data-guard-16",
+  "version": "0.1.0",
+  "domain": "data_boundary",
+  "title": "Data Guard 16",
+  "description": "Template guard for data_boundary surface 16.",
+  "property": {
+    "kind": "data_boundary",
+    "natural_language": "Property 16 must hold."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "generated": true
+  },
+  "risk": {
+    "severity": "medium",
+    "likelihood": "low",
+    "rationale": "Template library guard intent."
+  }
+}

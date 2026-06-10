@@ -1,0 +1,12 @@
+diff --git a/src/parser.rs b/src/parser.rs
+new file mode 100644
+index 0000000..5555555
+--- /dev/null
++++ b/src/parser.rs
+@@ -0,0 +1,6 @@
++pub fn parse(input: &str) -> &str {
++    unsafe {
++        let ptr = input.as_ptr();
++        std::slice::from_raw_parts(ptr, input.len()).first().unwrap()
++    }
++}

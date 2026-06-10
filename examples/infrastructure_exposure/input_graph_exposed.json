@@ -1,0 +1,12 @@
+{
+  "author_type": "ai_agent",
+  "agent": "codex",
+  "task": "Expose confidential storage through edge ingress.",
+  "nodes": [
+    {"id": "internet", "kind": "external", "external": true},
+    {"id": "data-store", "kind": "storage", "sensitivity": "confidential"}
+  ],
+  "edges": [
+    {"from": "internet", "to": "data-store"}
+  ]
+}

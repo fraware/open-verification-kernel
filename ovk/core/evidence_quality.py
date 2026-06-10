@@ -33,8 +33,9 @@ class EvidenceQualityReport:
 def build_evidence_quality_report(bundle: EvidenceBundle) -> EvidenceQualityReport:
     """Build a structured quality report for an evidence bundle."""
     issues = tuple(check_evidence_bundle_invariants(bundle))
+    failed = any(issue.severity == "error" for issue in issues)
     return EvidenceQualityReport(
         bundle_id=bundle.bundle_id,
-        passed=not issues,
+        passed=not failed,
         issues=issues,
     )

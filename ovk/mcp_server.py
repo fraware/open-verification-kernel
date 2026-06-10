@@ -1,16 +1,32 @@
-"""MCP server scaffold for Open Verification Kernel.
-
-This file documents the intended agent-facing tool surface. The first implementation
-should wire these handlers to the core kernel functions once the MCP SDK choice is finalized.
-"""
+"""MCP server surface for Open Verification Kernel."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
+
+from ovk.adapters.ci_secrets.evidence import evaluate_ci_secrets_exposure
+from ovk.adapters.deployment.evidence import evaluate_approval_state_machine
+from ovk.adapters.infra.evidence import evaluate_infra_exposure
+from ovk.adapters.opa import evaluate_self_protection
+from ovk.adapters.z3.validated_path import evaluate_validated_authorization_path
+from ovk.core.bundle import make_bundle
+from ovk.core.changed_files import load_changed_files
+from ovk.core.decision import decide
+from ovk.core.evidence_quality import build_evidence_quality_report
+from ovk.core.models import EvidenceBundle
+from ovk.adapters.workflow.diff_extract import workflow_inputs_from_diff
+from ovk.adapters.workflow.yaml_extract import workflow_yaml_to_ci_secrets_input
+from ovk.core.diff_parser import is_unified_diff
+from ovk.core.planner import plan_from_changed_files, plan_from_diff_text
+from ovk.core.release_metadata import release_metadata
 
 
 TOOLS = [
     "ovk.extract_intents",
+    "ovk.plan_from_diff",
+    "ovk.extract_workflow_yaml",
+    "ovk.extract_workflows_from_diff",
     "ovk.rank_intents",
     "ovk.list_capabilities",
     "ovk.select_backends",
@@ -23,20 +39,184 @@ TOOLS = [
 ]
 
 
-def extract_intents(diff: str, repo_context: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Placeholder for agent-facing intent extraction."""
-    return {"intents": [], "repo_context": repo_context or {}, "diff_length": len(diff)}
+def extract_intents(changed_files: list[str] | str | Path) -> dict[str, Any]:
+    """Extract candidate intents from changed file paths."""
+    if isinstance(changed_files, (str, Path)):
+        path = Path(changed_files)
+        text = path.read_text(encoding="utf-8")
+        if is_unified_diff(text):
+            plan = plan_from_diff_text(text)
+        else:
+            plan = plan_from_changed_files(load_changed_files(path))
+    else:
+        plan = plan_from_changed_files(changed_files)
+    payload = {
+        "intents": plan.get("candidate_intents", []),
+        "intent_plans": plan.get("intent_plans", []),
+        "surfaces": plan.get("surfaces", []),
+    }
+    if plan.get("workflow_inputs"):
+        payload["workflow_inputs"] = plan["workflow_inputs"]
+    return payload
+
+
+def plan_from_diff(diff_text: str, *, trust_context: str = "untrusted_fork_pr") -> dict[str, Any]:
+    """Create a verification plan from unified diff text."""
+    return plan_from_diff_text(diff_text, trust_context=trust_context)
+
+
+def extract_workflow_yaml(yaml_text: str, *, workflow_id: str = "workflow") -> dict[str, Any]:
+    """Convert workflow YAML into a CI secrets lane input."""
+    return workflow_yaml_to_ci_secrets_input(yaml_text, workflow_id=workflow_id)
+
+
+def extract_workflows_from_diff(diff_text: str, *, trust_context: str = "untrusted_fork_pr") -> dict[str, Any]:
+    """Extract CI secrets lane inputs from workflow files in a unified diff."""
+    return {
+        "workflow_inputs": workflow_inputs_from_diff(diff_text, trust_context=trust_context),
+    }
 
 
 def list_capabilities() -> dict[str, Any]:
-    """Placeholder for capability discovery."""
-    return {"capabilities": []}
+    """Return release metadata and supported lanes."""
+    return release_metadata()
+
+
+def run_verification(lane: str, input_data: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+    """Run a lane evaluator and return evidence JSON."""
+    repo = str(kwargs.get("repo", "unknown/repo"))
+    head_sha = str(kwargs.get("head_sha", "unknown"))
+    base_sha = kwargs.get("base_sha")
+    evaluators = {
+        "self_protection": evaluate_self_protection,
+        "authorization": evaluate_validated_authorization_path,
+        "infrastructure": evaluate_infra_exposure,
+        "ci_secrets": evaluate_ci_secrets_exposure,
+        "deployment": evaluate_approval_state_machine,
+    }
+    evaluator = evaluators.get(lane)
+    if evaluator is None:
+        raise ValueError(f"unsupported lane: {lane}")
+    evidence = evaluator(input_data, repo=repo, head_sha=head_sha, base_sha=base_sha)
+    return evidence.model_dump(mode="json")
+
+
+def create_evidence_bundle(evidence_items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Create an evidence bundle from evidence dicts."""
+    from ovk.core.models import VerificationEvidence
+
+    evidence = [VerificationEvidence.model_validate(item) for item in evidence_items]
+    return make_bundle(evidence).model_dump(mode="json")
 
 
 def get_merge_recommendation(evidence_bundle: dict[str, Any]) -> dict[str, Any]:
-    """Placeholder for MCP-facing merge recommendation."""
+    """Compute merge recommendation from an evidence bundle."""
+    bundle = EvidenceBundle.model_validate(evidence_bundle)
+    recommendation = decide(bundle, enforce=True)
+    quality = build_evidence_quality_report(bundle)
     return {
-        "merge_recommendation": evidence_bundle.get("decision", {}).get(
-            "merge_recommendation", "require_human_review"
-        )
+        "merge_recommendation": recommendation.value,
+        "quality_passed": quality.passed,
+        "quality_issues": [issue.to_dict() for issue in quality.issues],
     }
+
+
+def explain_result(evidence_bundle: dict[str, Any]) -> dict[str, Any]:
+    """Summarize evidence bundle decisions, counterexamples, and repair hints."""
+    from ovk.core.counterexample_translator import repair_hint_for_counterexample
+
+    bundle = EvidenceBundle.model_validate(evidence_bundle)
+    counterexamples = [
+        counterexample
+        for evidence in bundle.evidence
+        for counterexample in evidence.counterexamples
+    ]
+    repair_hints = [repair_hint_for_counterexample(item) for item in counterexamples]
+    return {
+        "bundle_id": bundle.bundle_id,
+        "decision": bundle.decision,
+        "merge_recommendation": bundle.decision.get("merge_recommendation", "require_human_review"),
+        "counterexamples": counterexamples,
+        "repair_hints": repair_hints,
+        "repair_plan": {
+            "blocked": bundle.decision.get("merge_recommendation") == "block",
+            "actions": repair_hints,
+        },
+    }
+
+
+def rank_intents_tool(changed_files: list[str] | None = None, diff_text: str | None = None) -> dict[str, Any]:
+    """Rank candidate intents by risk."""
+    from ovk.core.context import build_repository_context
+    from ovk.core.risk_ranker import rank_intents
+
+    if diff_text:
+        plan = plan_from_diff_text(diff_text)
+        files = plan.get("changed_files", [])
+    else:
+        plan = plan_from_changed_files(changed_files or [])
+        files = changed_files or []
+    context = build_repository_context(changed_files=files)
+    ranked = rank_intents(plan.get("candidate_intents", []), context=context)
+    return {"plan": plan, "ranked_intents": ranked}
+
+
+def compile_obligation(
+    changed_files: list[str] | None = None,
+    diff_text: str | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Compile lane obligations from a plan."""
+    from ovk.core.context import build_repository_context
+    from ovk.core.obligation_compiler import compile_obligations
+
+    if diff_text:
+        plan = plan_from_diff_text(diff_text)
+        files = plan.get("changed_files", [])
+    else:
+        plan = plan_from_changed_files(changed_files or [])
+        files = changed_files or []
+    context = build_repository_context(
+        changed_files=files,
+        repo=str(kwargs.get("repo", "unknown/repo")),
+        head_sha=str(kwargs.get("head_sha", "unknown")),
+        base_sha=kwargs.get("base_sha"),
+    )
+    obligations = compile_obligations(plan, context=context, diff_text=diff_text)
+    return {"obligations": obligations}
+
+
+def select_backends(
+    intent_id: str,
+    *,
+    changed_files: list[str] | None = None,
+) -> dict[str, Any]:
+    """Select backends for one intent using capability manifests and repo memory."""
+    from pathlib import Path
+
+    from ovk.core.capabilities import CapabilityRegistry
+    from ovk.core.intent_registry import IntentRegistry
+    from ovk.core.repo_memory import router_historical_priors
+    from ovk.core.router import route_intent
+    from ovk.core.surface_routing import surface_backend_bonuses
+
+    intents = IntentRegistry.from_directory(Path("templates"))
+    capabilities = CapabilityRegistry.from_directory(Path("adapters"))
+    intent = intents.get(intent_id)
+    if intent is None:
+        raise ValueError(f"unknown intent: {intent_id}")
+    bonuses = surface_backend_bonuses(changed_files or [])
+    return route_intent(
+        intent,
+        capabilities.all(),
+        historical_priors=router_historical_priors(),
+        surface_bonuses=bonuses,
+    )
+
+
+def generate_regression_artifact(evidence_bundle: dict[str, Any]) -> dict[str, Any]:
+    """Generate regression artifacts from bundle counterexamples."""
+    from ovk.core.counterexample_translator import generate_regression_artifacts
+
+    bundle = EvidenceBundle.model_validate(evidence_bundle)
+    return {"artifacts": generate_regression_artifacts(bundle)}

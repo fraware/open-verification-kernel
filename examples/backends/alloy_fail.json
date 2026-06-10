@@ -1,0 +1,4 @@
+{
+  "intent_id": "alloy-model-check",
+  "counterexample_instances": ["role grants admin without approval transition"]
+}

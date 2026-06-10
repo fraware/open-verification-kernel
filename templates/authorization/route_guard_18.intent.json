@@ -1,0 +1,25 @@
+{
+  "intent_id": "route-guard-18",
+  "version": "0.1.0",
+  "domain": "authorization",
+  "title": "Route Guard 18",
+  "description": "Template guard for authorization surface 18.",
+  "property": {
+    "kind": "access_control",
+    "natural_language": "Property 18 must hold."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "generated": true
+  },
+  "risk": {
+    "severity": "medium",
+    "likelihood": "low",
+    "rationale": "Template library guard intent."
+  }
+}

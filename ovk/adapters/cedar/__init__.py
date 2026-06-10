@@ -1,0 +1,1 @@
+"""Cedar policy backend adapter."""

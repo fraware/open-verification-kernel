@@ -25,8 +25,10 @@ def _valid_bundle() -> EvidenceBundle:
     return make_bundle([evidence])
 
 
-def test_valid_bundle_has_no_invariant_issues() -> None:
-    assert check_evidence_bundle_invariants(_valid_bundle()) == []
+def test_valid_bundle_has_no_invariant_errors() -> None:
+    issues = check_evidence_bundle_invariants(_valid_bundle())
+    errors = [issue for issue in issues if issue.severity == "error"]
+    assert errors == []
 
 
 def test_duplicate_evidence_ids_are_rejected() -> None:

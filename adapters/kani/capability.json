@@ -1,0 +1,19 @@
+{
+  "capability_id": "kani-rust-v1",
+  "tool": {"name": "kani", "adapter": "ovk-adapter-kani", "adapter_version": "0.1.0"},
+  "backend_class": "model_checker",
+  "input_languages": ["rust"],
+  "supported_domains": ["authorization", "data_boundary"],
+  "supported_property_kinds": ["safety", "invariant"],
+  "guarantee": {
+    "type": "bounded_model_check",
+    "meaning_of_pass": "Kani found no safety violation in bounded harness.",
+    "meaning_of_fail": "Kani reported a reachable violation.",
+    "meaning_of_unknown": "Kani unavailable or harness incomplete."
+  },
+  "assumptions": ["Rust harness captures relevant unsafe paths."],
+  "limits": ["Bounded loops and memory model approximations."],
+  "result_format": "ovk.result.v1",
+  "counterexample_format": "trace",
+  "timeout_behavior": "unknown"
+}

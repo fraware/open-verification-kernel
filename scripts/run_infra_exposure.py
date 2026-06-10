@@ -18,7 +18,7 @@ from ovk.core.run_outputs import StandardOutputPaths, write_standard_run_outputs
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run OVK infrastructure exposure path")
     parser.add_argument("input", type=Path, help="Infrastructure input JSON")
-    parser.add_argument("--input-format", default="infra", choices=["infra", "terraform", "kubernetes"])
+    parser.add_argument("--input-format", default="infra", choices=["infra", "terraform", "kubernetes", "graph"])
     parser.add_argument("--policy", type=Path, default=None, help="Optional infrastructure exposure policy JSON")
     parser.add_argument("--repo", default="unknown/repo")
     parser.add_argument("--head-sha", default="unknown")
@@ -33,6 +33,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    from scripts._deprecation import warn_deprecated_script
+
+    warn_deprecated_script(script="scripts/run_infra_exposure.py", replacement="ovk infra-exposure")
     args = parse_args()
     raw_data = read_json_file(args.input)
     data = normalize_infra_input(raw_data, args.input_format)

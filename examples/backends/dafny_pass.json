@@ -1,0 +1,4 @@
+{
+  "intent_id": "dafny-obligation-check",
+  "obligations": [{"name": "access_invariant", "proved": true}]
+}

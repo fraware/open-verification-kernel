@@ -28,29 +28,57 @@ The CLI provides local reproducibility for developers and CI runners.
 
 ```bash
 ovk init
-ovk infer --base origin/main --head HEAD
-ovk plan --intents .verification/intents/inferred.json
-ovk run --plan .verification/plan.json
-ovk explain --evidence .verification/evidence/latest.json
-ovk ci --mode enforce
+ovk ci --metadata <metadata.json> --advisory
+ovk verify --manifest examples/verification_manifests/full_mvp.json --advisory
+ovk infer --changed-files pr.patch
+ovk plan --changed-files changed.txt
+ovk release-bundle --lane infrastructure --input <input.json> --output-dir ovk-bundle
+ovk validate-outputs ovk-bundle
 ```
+
+See [STATUS.md](STATUS.md) for the full command surface.
 
 ### MCP server
 
-The MCP server exposes verification as agent-callable tools.
+`ovk-mcp` exposes verification as agent-callable tools over stdio JSON-RPC:
 
 ```text
 ovk.extract_intents
-ovk.rank_intents
-ovk.list_capabilities
-ovk.select_backends
-ovk.compile_obligation
+ovk.plan_from_diff
+ovk.extract_workflow_yaml
+ovk.extract_workflows_from_diff
 ovk.run_verification
-ovk.explain_result
-ovk.generate_regression_artifact
 ovk.create_evidence_bundle
 ovk.get_merge_recommendation
+ovk.list_capabilities
 ```
+
+## Runner flows
+
+### Single-lane
+
+1. Load lane input.
+2. Evaluate via `ovk.core.multi_lane.evaluate_lane`.
+3. Build bundle with `make_bundle`.
+4. Write standard artifacts via `write_standard_run_outputs` or full release bundle via `write_release_bundle`.
+
+### Multi-lane verify
+
+1. Load verification manifest; schema-validate.
+2. Evaluate each lane; combine evidence.
+3. Write release bundle with material provenance.
+
+### Planning
+
+1. Ingest changed files (JSON, paths, or unified diff).
+2. Detect surfaces and candidate intents.
+3. Route to backends; for diffs, reconstruct workflow YAML for CI-secrets inputs.
+
+### GitHub Action
+
+Install OVK → `ovk init` → collect metadata → `ovk ci` or `ovk verify` → optional PR comment → upload artifacts.
+
+Details: [INTEGRATION.md](INTEGRATION.md).
 
 ## Internal data flow
 

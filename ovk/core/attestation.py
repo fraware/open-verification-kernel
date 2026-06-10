@@ -9,6 +9,10 @@ from __future__ import annotations
 
 from typing import Any
 
+import sys
+
+from ovk import __version__
+from ovk.core.bundle import content_digest
 from ovk.core.models import EvidenceBundle
 
 
@@ -44,9 +48,14 @@ def bundle_to_statement(bundle: EvidenceBundle) -> dict[str, Any]:
         ],
         "predicateType": PREDICATE_TYPE,
         "predicate": {
-            "builder": {"id": "open-verification-kernel"},
+            "builder": {
+                "id": "open-verification-kernel",
+                "version": __version__,
+                "runtime": f"python/{sys.version.split()[0]}",
+            },
             "verification": {
                 "bundle_id": bundle.bundle_id,
+                "bundle_digest": content_digest(bundle.model_dump(mode="json")),
                 "schema_version": bundle.schema_version,
                 "evidence": evidence_items,
                 "decision": bundle.decision,

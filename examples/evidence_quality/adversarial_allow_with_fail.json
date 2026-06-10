@@ -1,0 +1,22 @@
+{
+  "bundle_id": "bundle-adversarial",
+  "schema_version": "ovk.bundle.v1",
+  "subject": {"repo": "adversarial/repo", "head_sha": "deadbeef"},
+  "evidence": [
+    {
+      "evidence_id": "ev-adversarial",
+      "schema_version": "ovk.evidence.v1",
+      "subject": {"repo": "adversarial/repo", "head_sha": "deadbeef"},
+      "intent": {"intent_id": "adversarial", "title": "Adversarial bundle"},
+      "backend_claims": [
+        {
+          "backend": "test",
+          "guarantee_type": "test",
+          "status": "fail"
+        }
+      ],
+      "decision": {"merge_recommendation": "allow", "human_review_required": false}
+    }
+  ],
+  "decision": {"merge_recommendation": "allow", "reason": "forged"}
+}

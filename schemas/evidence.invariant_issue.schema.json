@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/evidence.invariant_issue.schema.json",
+  "title": "Evidence Invariant Issue",
+  "type": "object",
+  "required": ["path", "message", "severity"],
+  "properties": {
+    "path": { "type": "string" },
+    "message": { "type": "string" },
+    "severity": { "type": "string", "enum": ["error", "warning"] }
+  },
+  "additionalProperties": false
+}

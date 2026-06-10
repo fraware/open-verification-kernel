@@ -1,5 +1,5 @@
 {
-  "schema_version": "formal_pr_bench.seed.v0",
+  "schema_version": "formal_pr_bench.seed.v1",
   "cases": [
     {
       "case_id": "control_removed",
@@ -45,6 +45,267 @@
       "expected_status": "pass",
       "expected_merge_recommendation": "allow",
       "expected_counterexample_class": null
+    },
+    {
+      "case_id": "auth_malformed",
+      "input_fixture": "examples/auth_regression/input_malformed_missing_routes.json",
+      "expected_intent": "no-admin-route-bypass",
+      "expected_backend_class": "smt_solver",
+      "expected_status": "unknown",
+      "expected_merge_recommendation": "require_human_review",
+      "expected_counterexample_class": "authorization_abstraction_invalid"
+    },
+    {
+      "case_id": "infra_public_sensitive",
+      "input_fixture": "examples/infrastructure_exposure/input_public_sensitive_resource.json",
+      "expected_intent": "no-public-sensitive-resource",
+      "expected_backend_class": "policy_engine",
+      "expected_status": "fail",
+      "expected_merge_recommendation": "block",
+      "expected_counterexample_class": "sensitive_resource_publicly_exposed"
+    },
+    {
+      "case_id": "infra_private_sensitive",
+      "input_fixture": "examples/infrastructure_exposure/input_private_sensitive_resource.json",
+      "expected_intent": "no-public-sensitive-resource",
+      "expected_backend_class": "policy_engine",
+      "expected_status": "pass",
+      "expected_merge_recommendation": "allow",
+      "expected_counterexample_class": null
+    },
+    {
+      "case_id": "ci_secrets_exposed",
+      "input_fixture": "examples/ci_secrets/input_secrets_exposed.json",
+      "expected_intent": "no-secrets-in-untrusted-context",
+      "expected_backend_class": "policy_engine",
+      "expected_status": "fail",
+      "expected_merge_recommendation": "block",
+      "expected_counterexample_class": "secrets_exposed_in_untrusted_context"
+    },
+    {
+      "case_id": "ci_secrets_safe",
+      "input_fixture": "examples/ci_secrets/input_secrets_safe.json",
+      "expected_intent": "no-secrets-in-untrusted-context",
+      "expected_backend_class": "policy_engine",
+      "expected_status": "pass",
+      "expected_merge_recommendation": "allow",
+      "expected_counterexample_class": null
+    },
+    {
+      "case_id": "deployment_skipped_approval",
+      "input_fixture": "examples/deployment_state/input_skipped_approval.json",
+      "expected_intent": "no-skipped-approval-state",
+      "expected_backend_class": "policy_engine",
+      "expected_status": "fail",
+      "expected_merge_recommendation": "block",
+      "expected_counterexample_class": "required_approval_state_skipped"
+    },
+    {
+      "case_id": "deployment_valid_path",
+      "input_fixture": "examples/deployment_state/input_valid_approval_path.json",
+      "expected_intent": "no-skipped-approval-state",
+      "expected_backend_class": "policy_engine",
+      "expected_status": "pass",
+      "expected_merge_recommendation": "allow",
+      "expected_counterexample_class": null
+    },
+    {
+      "case_id": "cedar_pass",
+      "input_fixture": "examples/backends/cedar_pass.json",
+      "expected_intent": "cedar-policy-check",
+      "expected_backend_class": "policy_engine",
+      "expected_status": "pass",
+      "expected_merge_recommendation": "allow",
+      "expected_counterexample_class": null
+    },
+    {
+      "case_id": "cedar_fail",
+      "input_fixture": "examples/backends/cedar_fail.json",
+      "expected_intent": "cedar-policy-check",
+      "expected_backend_class": "policy_engine",
+      "expected_status": "fail",
+      "expected_merge_recommendation": "block",
+      "expected_counterexample_class": "policy_violation"
+    },
+    {
+      "case_id": "cedar_unknown",
+      "input_fixture": "examples/backends/cedar_unknown.json",
+      "expected_intent": "cedar-policy-check",
+      "expected_backend_class": "policy_engine",
+      "expected_status": "unknown",
+      "expected_merge_recommendation": "require_human_review",
+      "expected_counterexample_class": "malformed_input"
+    },
+    {
+      "case_id": "cedar_malformed",
+      "input_fixture": "examples/backends/cedar_malformed.json",
+      "expected_intent": "cedar-policy-check",
+      "expected_backend_class": "policy_engine",
+      "expected_status": "unknown",
+      "expected_merge_recommendation": "require_human_review",
+      "expected_counterexample_class": "malformed_input"
+    },
+    {
+      "case_id": "tla_pass",
+      "input_fixture": "examples/backends/tla_pass.json",
+      "expected_intent": "tla-state-check",
+      "expected_backend_class": "model_checker",
+      "expected_status": "pass",
+      "expected_merge_recommendation": "allow",
+      "expected_counterexample_class": null
+    },
+    {
+      "case_id": "tla_fail",
+      "input_fixture": "examples/backends/tla_fail.json",
+      "expected_intent": "tla-state-check",
+      "expected_backend_class": "model_checker",
+      "expected_status": "fail",
+      "expected_merge_recommendation": "block",
+      "expected_counterexample_class": "required_approval_state_skipped"
+    },
+    {
+      "case_id": "tla_unknown",
+      "input_fixture": "examples/backends/tla_unknown.json",
+      "expected_intent": "tla-state-check",
+      "expected_backend_class": "model_checker",
+      "expected_status": "unknown",
+      "expected_merge_recommendation": "require_human_review",
+      "expected_counterexample_class": "malformed_state_machine"
+    },
+    {
+      "case_id": "tla_malformed",
+      "input_fixture": "examples/backends/tla_malformed.json",
+      "expected_intent": "tla-state-check",
+      "expected_backend_class": "model_checker",
+      "expected_status": "unknown",
+      "expected_merge_recommendation": "require_human_review",
+      "expected_counterexample_class": "malformed_state_machine"
+    },
+    {
+      "case_id": "kani_pass",
+      "input_fixture": "examples/backends/kani_pass.json",
+      "expected_intent": "kani-harness-check",
+      "expected_backend_class": "model_checker",
+      "expected_status": "pass",
+      "expected_merge_recommendation": "allow",
+      "expected_counterexample_class": null
+    },
+    {
+      "case_id": "kani_fail",
+      "input_fixture": "examples/backends/kani_fail.json",
+      "expected_intent": "kani-harness-check",
+      "expected_backend_class": "model_checker",
+      "expected_status": "fail",
+      "expected_merge_recommendation": "block",
+      "expected_counterexample_class": "policy_violation"
+    },
+    {
+      "case_id": "kani_unknown",
+      "input_fixture": "examples/backends/kani_unknown.json",
+      "expected_intent": "kani-harness-check",
+      "expected_backend_class": "model_checker",
+      "expected_status": "unknown",
+      "expected_merge_recommendation": "require_human_review",
+      "expected_counterexample_class": "malformed_input"
+    },
+    {
+      "case_id": "kani_malformed",
+      "input_fixture": "examples/backends/kani_malformed.json",
+      "expected_intent": "kani-harness-check",
+      "expected_backend_class": "model_checker",
+      "expected_status": "unknown",
+      "expected_merge_recommendation": "require_human_review",
+      "expected_counterexample_class": "malformed_input"
+    },
+    {
+      "case_id": "dafny_pass",
+      "input_fixture": "examples/backends/dafny_pass.json",
+      "expected_intent": "dafny-obligation-check",
+      "expected_backend_class": "proof_assistant",
+      "expected_status": "pass",
+      "expected_merge_recommendation": "allow",
+      "expected_counterexample_class": null
+    },
+    {
+      "case_id": "dafny_fail",
+      "input_fixture": "examples/backends/dafny_fail.json",
+      "expected_intent": "dafny-obligation-check",
+      "expected_backend_class": "proof_assistant",
+      "expected_status": "fail",
+      "expected_merge_recommendation": "block",
+      "expected_counterexample_class": "dafny_obligation_unproved"
+    },
+    {
+      "case_id": "verus_pass",
+      "input_fixture": "examples/backends/verus_pass.json",
+      "expected_intent": "verus-harness-check",
+      "expected_backend_class": "proof_assistant",
+      "expected_status": "pass",
+      "expected_merge_recommendation": "allow",
+      "expected_counterexample_class": null
+    },
+    {
+      "case_id": "verus_fail",
+      "input_fixture": "examples/backends/verus_fail.json",
+      "expected_intent": "verus-harness-check",
+      "expected_backend_class": "proof_assistant",
+      "expected_status": "fail",
+      "expected_merge_recommendation": "block",
+      "expected_counterexample_class": "verus_proof_failed"
+    },
+    {
+      "case_id": "lean_pass",
+      "input_fixture": "examples/backends/lean_pass.json",
+      "expected_intent": "lean-proof-check",
+      "expected_backend_class": "proof_assistant",
+      "expected_status": "pass",
+      "expected_merge_recommendation": "allow",
+      "expected_counterexample_class": null
+    },
+    {
+      "case_id": "lean_fail",
+      "input_fixture": "examples/backends/lean_fail.json",
+      "expected_intent": "lean-proof-check",
+      "expected_backend_class": "proof_assistant",
+      "expected_status": "fail",
+      "expected_merge_recommendation": "block",
+      "expected_counterexample_class": "lean_proof_failed"
+    },
+    {
+      "case_id": "cbmc_pass",
+      "input_fixture": "examples/backends/cbmc_pass.json",
+      "expected_intent": "cbmc-harness-check",
+      "expected_backend_class": "model_checker",
+      "expected_status": "pass",
+      "expected_merge_recommendation": "allow",
+      "expected_counterexample_class": null
+    },
+    {
+      "case_id": "cbmc_fail",
+      "input_fixture": "examples/backends/cbmc_fail.json",
+      "expected_intent": "cbmc-harness-check",
+      "expected_backend_class": "model_checker",
+      "expected_status": "fail",
+      "expected_merge_recommendation": "block",
+      "expected_counterexample_class": "cbmc_assertion_failed"
+    },
+    {
+      "case_id": "alloy_pass",
+      "input_fixture": "examples/backends/alloy_pass.json",
+      "expected_intent": "alloy-model-check",
+      "expected_backend_class": "model_checker",
+      "expected_status": "pass",
+      "expected_merge_recommendation": "allow",
+      "expected_counterexample_class": null
+    },
+    {
+      "case_id": "alloy_fail",
+      "input_fixture": "examples/backends/alloy_fail.json",
+      "expected_intent": "alloy-model-check",
+      "expected_backend_class": "model_checker",
+      "expected_status": "fail",
+      "expected_merge_recommendation": "block",
+      "expected_counterexample_class": "alloy_counterexample_found"
     }
   ]
 }

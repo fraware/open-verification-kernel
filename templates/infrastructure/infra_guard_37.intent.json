@@ -1,0 +1,25 @@
+{
+  "intent_id": "infra-guard-37",
+  "version": "0.1.0",
+  "domain": "infrastructure",
+  "title": "Infra Guard 37",
+  "description": "Template guard for infrastructure surface 37.",
+  "property": {
+    "kind": "forbidden_configuration",
+    "natural_language": "Property 37 must hold."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "generated": true
+  },
+  "risk": {
+    "severity": "medium",
+    "likelihood": "low",
+    "rationale": "Template library guard intent."
+  }
+}

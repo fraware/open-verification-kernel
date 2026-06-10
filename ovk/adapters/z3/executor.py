@@ -35,8 +35,8 @@ def run_authorization_obligation_with_z3(obligation: AuthorizationObligation) ->
             non_admin = z3.Bool(f"non_admin_{route_index}_{witness_index}")
             violation = z3.And(admin_route, reachable, non_admin)
 
-            solver.add(admin_route == True)
-            solver.add(reachable == True)
+            solver.add(admin_route)
+            solver.add(reachable)
             solver.add(non_admin == (witness.role != "admin"))
             solver.add(violation)
             result = solver.check()

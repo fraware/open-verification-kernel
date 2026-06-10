@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ovk.adapters.z3.deterministic_path import evaluate_deterministic_authorization_path
 from ovk.adapters.z3.evidence import authorization_result_to_evidence
 from ovk.adapters.z3.executor import run_authorization_obligation_with_z3
 from ovk.adapters.z3.obligation import build_authorization_obligation
@@ -39,6 +40,13 @@ def evaluate_validated_authorization_path(
         )
 
     raw = run_authorization_obligation_with_z3(obligation)
+    if raw.get("status") == "unknown" and raw.get("reason") == "z3-solver is not installed":
+        return evaluate_deterministic_authorization_path(
+            data,
+            repo=repo,
+            head_sha=head_sha,
+            base_sha=base_sha,
+        )
     return authorization_result_to_evidence(
         raw,
         obligation,

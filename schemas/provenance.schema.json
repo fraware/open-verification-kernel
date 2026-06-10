@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/provenance.schema.json",
+  "title": "OVK Provenance",
+  "type": "object",
+  "required": ["schema_version", "builder", "bundle"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "ovk.provenance.v1" },
+    "builder": {
+      "type": "object",
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "type": "string" },
+        "version": { "type": "string" }
+      }
+    },
+    "bundle": {
+      "type": "object",
+      "required": ["bundle_id", "digest"],
+      "properties": {
+        "bundle_id": { "type": "string" },
+        "digest": {
+          "type": "object",
+          "required": ["sha256"],
+          "properties": {
+            "sha256": { "type": "string" }
+          }
+        },
+        "decision": { "type": "object" }
+      }
+    },
+    "materials": { "type": "array" },
+    "invocation": { "type": "object" },
+    "vcs": { "type": "object" }
+  },
+  "additionalProperties": true
+}

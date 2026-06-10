@@ -1,0 +1,25 @@
+{
+  "intent_id": "agent-guard-41",
+  "version": "0.1.0",
+  "domain": "agent_authority",
+  "title": "Agent Guard 41",
+  "description": "Template guard for agent_authority surface 41.",
+  "property": {
+    "kind": "invariant",
+    "natural_language": "Property 41 must hold."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "generated": true
+  },
+  "risk": {
+    "severity": "medium",
+    "likelihood": "low",
+    "rationale": "Template library guard intent."
+  }
+}

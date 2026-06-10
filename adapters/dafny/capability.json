@@ -1,0 +1,19 @@
+{
+  "capability_id": "dafny-proof-v1",
+  "tool": {"name": "dafny", "adapter": "ovk-adapter-dafny", "adapter_version": "0.1.0"},
+  "backend_class": "proof_assistant",
+  "input_languages": ["dafny"],
+  "supported_domains": ["authorization", "data_boundary", "infrastructure"],
+  "supported_property_kinds": ["invariant", "safety", "access_control"],
+  "guarantee": {
+    "type": "proof_obligation",
+    "meaning_of_pass": "Dafny verified the obligation.",
+    "meaning_of_fail": "Dafny reported unproved obligations.",
+    "meaning_of_unknown": "Dafny unavailable or obligation incomplete."
+  },
+  "assumptions": ["Specification matches intended behavior."],
+  "limits": ["Requires complete specifications."],
+  "result_format": "ovk.result.v1",
+  "counterexample_format": "proof_failure",
+  "timeout_behavior": "unknown"
+}

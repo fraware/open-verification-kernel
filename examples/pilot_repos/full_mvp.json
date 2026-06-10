@@ -1,0 +1,32 @@
+{
+  "schema_version": "ovk.verification_manifest.v1",
+  "name": "pilot-full-mvp",
+  "description": "Pilot manifest: all five MVP lanes for production OSS repositories.",
+  "lanes": [
+    {
+      "lane": "self_protection",
+      "input": "../no_agent_self_approval/input_gate_preserved.json",
+      "input_format": "infra"
+    },
+    {
+      "lane": "authorization",
+      "input": "../auth_regression/input_admin_protected.json",
+      "input_format": "infra"
+    },
+    {
+      "lane": "infrastructure",
+      "input": "../infrastructure_exposure/input_private_sensitive_resource.json",
+      "input_format": "infra"
+    },
+    {
+      "lane": "ci_secrets",
+      "input": "../ci_secrets/input_secrets_safe.json",
+      "input_format": "infra"
+    },
+    {
+      "lane": "deployment",
+      "input": "../deployment_state/input_valid_approval_path.json",
+      "input_format": "infra"
+    }
+  ]
+}

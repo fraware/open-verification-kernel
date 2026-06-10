@@ -28,7 +28,8 @@ def test_evidence_quality_report_passes_for_valid_bundle() -> None:
     payload = report.to_dict()
     assert payload["schema_version"] == EVIDENCE_QUALITY_SCHEMA_VERSION
     assert payload["passed"] is True
-    assert payload["issues"] == []
+    error_issues = [issue for issue in payload["issues"] if issue["severity"] == "error"]
+    assert error_issues == []
 
 
 def test_evidence_quality_report_records_issues() -> None:

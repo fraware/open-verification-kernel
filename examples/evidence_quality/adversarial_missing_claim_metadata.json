@@ -1,0 +1,22 @@
+{
+  "bundle_id": "bundle-missing-metadata",
+  "schema_version": "ovk.bundle.v1",
+  "subject": {"repo": "adversarial/repo", "head_sha": "deadbeef"},
+  "evidence": [
+    {
+      "evidence_id": "ev-missing-metadata",
+      "schema_version": "ovk.evidence.v1",
+      "subject": {"repo": "adversarial/repo", "head_sha": "deadbeef"},
+      "intent": {"intent_id": "forged", "title": "Missing claim metadata"},
+      "backend_claims": [
+        {
+          "backend": "forged",
+          "guarantee_type": "none",
+          "status": "pass"
+        }
+      ],
+      "decision": {"merge_recommendation": "allow"}
+    }
+  ],
+  "decision": {"merge_recommendation": "allow"}
+}

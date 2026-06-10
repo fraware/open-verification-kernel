@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/attestation.envelope.schema.json",
+  "title": "Attestation Envelope",
+  "type": "object",
+  "required": ["schema_version", "statement", "artifact_manifest"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "ovk.attestation_envelope.v1" },
+    "statement": { "type": "object" },
+    "artifact_manifest": {
+      "type": "object",
+      "required": ["path", "kind", "sha256"],
+      "properties": {
+        "path": { "type": "string" },
+        "kind": { "type": "string" },
+        "sha256": { "type": "string", "minLength": 64, "maxLength": 64 }
+      },
+      "additionalProperties": false
+    },
+    "signature": {
+      "type": "object",
+      "required": ["algorithm", "digest"],
+      "properties": {
+        "algorithm": { "type": "string", "const": "hmac-sha256" },
+        "digest": { "type": "string", "minLength": 64, "maxLength": 64 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,27 @@
+{
+  "schema_version": "ovk.verification_manifest.v1",
+  "repo": "example/repo",
+  "head_sha": "abc123",
+  "lanes": [
+    {
+      "lane": "self_protection",
+      "input": "../no_agent_self_approval/input_gate_preserved.json"
+    },
+    {
+      "lane": "authorization",
+      "input": "../auth_regression/input_admin_protected.json"
+    },
+    {
+      "lane": "infrastructure",
+      "input": "../infrastructure_exposure/input_private_sensitive_resource.json"
+    },
+    {
+      "lane": "ci_secrets",
+      "input": "../ci_secrets/input_secrets_safe.json"
+    },
+    {
+      "lane": "deployment",
+      "input": "../deployment_state/input_valid_approval_path.json"
+    }
+  ]
+}

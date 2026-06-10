@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from ovk.core.bundle import content_digest
 from ovk.core.models import EvidenceBundle, VerificationStatus
 
 
@@ -54,7 +55,23 @@ def check_evidence_bundle_invariants(bundle: EvidenceBundle) -> list[EvidenceInv
                 )
             )
 
+        intent_risk = str(evidence.intent.get("risk", {}).get("severity", "medium")).lower()
+        provenance = evidence.intent.get("provenance", {}) or {}
+        inferred_intent = provenance.get("inferred") is True
         evidence_recommendation = _decision_value(evidence.decision, "merge_recommendation")
+        if intent_risk in {"high", "critical"} and inferred_intent:
+            for claim_index, claim in enumerate(evidence.backend_claims):
+                if claim.status == VerificationStatus.PASS and evidence_recommendation == "allow":
+                    if evidence.decision.get("human_review_required") is not True:
+                        issues.append(
+                            EvidenceInvariantIssue(
+                                path=f"{evidence_path}.backend_claims[{claim_index}].status",
+                                message=(
+                                    "inferred high-risk intent cannot produce allow without template "
+                                    "provenance or human confirmation (OVK-INV-005)"
+                                ),
+                            )
+                        )
         if evidence_recommendation is None:
             issues.append(
                 EvidenceInvariantIssue(
@@ -63,8 +80,49 @@ def check_evidence_bundle_invariants(bundle: EvidenceBundle) -> list[EvidenceInv
                 )
             )
 
+        evidence_head = str(evidence.subject.get("head_sha", ""))
+        bundle_head = str(bundle.subject.get("head_sha", ""))
+        if evidence_head and bundle_head and evidence_head != bundle_head:
+            issues.append(
+                EvidenceInvariantIssue(
+                    path=f"{evidence_path}.subject.head_sha",
+                    message="evidence subject head_sha must match bundle subject (OVK-INV-008)",
+                )
+            )
+
+        has_input_digest = any(artifact.get("kind") == "input_digest" for artifact in evidence.generated_artifacts)
+        if not has_input_digest:
+            issues.append(
+                EvidenceInvariantIssue(
+                    path=f"{evidence_path}.generated_artifacts",
+                    message="evidence must include an input_digest artifact (OVK-INV-003)",
+                    severity="warning",
+                )
+            )
+
         for claim_index, claim in enumerate(evidence.backend_claims):
             claim_path = f"{evidence_path}.backend_claims[{claim_index}]"
+            if not claim.assumptions:
+                issues.append(
+                    EvidenceInvariantIssue(
+                        path=f"{claim_path}.assumptions",
+                        message="backend claim must declare assumptions (OVK-INV-003)",
+                    )
+                )
+            if not claim.limits:
+                issues.append(
+                    EvidenceInvariantIssue(
+                        path=f"{claim_path}.limits",
+                        message="backend claim must declare limits (OVK-INV-003)",
+                    )
+                )
+            if not claim.adapter_version and not claim.tool_version:
+                issues.append(
+                    EvidenceInvariantIssue(
+                        path=f"{claim_path}.adapter_version",
+                        message="backend claim must include adapter_version or tool_version (OVK-INV-003)",
+                    )
+                )
             if claim.status in {VerificationStatus.UNKNOWN, VerificationStatus.ERROR}:
                 if evidence_recommendation == "allow":
                     issues.append(
@@ -103,4 +161,18 @@ def check_evidence_bundle_invariants(bundle: EvidenceBundle) -> list[EvidenceInv
                 message="bundle with invariant errors must not recommend allow",
             )
         )
+
+    if bundle.evidence:
+        subject = bundle.evidence[0].subject
+        fingerprint = content_digest(
+            {"subject": subject, "evidence": [item.model_dump(mode="json") for item in bundle.evidence]}
+        )[:16]
+        expected_bundle_id = f"bundle-{fingerprint}"
+        if bundle.bundle_id != expected_bundle_id:
+            issues.append(
+                EvidenceInvariantIssue(
+                    path="bundle_id",
+                    message="bundle_id must be content-addressed from subject and evidence (OVK-INV-008)",
+                )
+            )
     return issues

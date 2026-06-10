@@ -23,7 +23,7 @@ def main() -> int:
     issues = check_evidence_bundle_invariants(bundle)
     for issue in issues:
         print(f"{issue.severity}: {issue.path}: {issue.message}")
-    if issues:
+    if any(issue.severity == "error" for issue in issues):
         return 1
     print("OVK evidence bundle invariants passed")
     return 0

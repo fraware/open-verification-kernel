@@ -9,4 +9,12 @@ def test_release_preflight_report_is_serializable() -> None:
         "release_metadata",
         "command_surface",
         "local_release_smoke",
+        "evidence_quality",
+        "adversarial_quality_gate",
+        "multi_lane_manifest",
+        "external_smoke_checklist",
+        "ovk_check_latency",
+        "formal_pr_bench",
+        "template_validation",
+        "pilot_program",
     }

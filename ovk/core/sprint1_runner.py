@@ -14,6 +14,7 @@ from ovk.core.changed_files import load_changed_files
 from ovk.core.github_event import load_github_event_metadata, metadata_to_self_protection_defaults
 from ovk.core.models import EvidenceBundle
 from ovk.core.render import render_bundle_markdown
+from ovk.core.run_outputs import StandardOutputPaths, write_standard_run_outputs
 from ovk.core.self_protection_input import SelfProtectionMetadata, build_self_protection_input
 
 
@@ -114,11 +115,17 @@ def write_sprint1_outputs(
     evidence_output: Path,
     markdown_output: Path,
     attestation_output: Path,
+    manifest_output: Path | None = None,
+    quality_output: Path | None = None,
 ) -> None:
     """Write Sprint 1 outputs to disk."""
-    evidence_output.write_text(
-        json.dumps(result.bundle.model_dump(mode="json"), indent=2) + "\n",
-        encoding="utf-8",
+    write_standard_run_outputs(
+        result.bundle,
+        StandardOutputPaths(
+            evidence=evidence_output,
+            markdown=markdown_output,
+            attestation=attestation_output,
+            manifest=manifest_output,
+            quality_report=quality_output,
+        ),
     )
-    markdown_output.write_text(result.markdown, encoding="utf-8")
-    attestation_output.write_text(json.dumps(result.attestation, indent=2) + "\n", encoding="utf-8")

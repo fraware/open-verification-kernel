@@ -14,4 +14,5 @@ def read_json_file(path: Path) -> Any:
 
 def write_json_file(path: Path, data: Any) -> None:
     """Write pretty JSON with a trailing newline."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")

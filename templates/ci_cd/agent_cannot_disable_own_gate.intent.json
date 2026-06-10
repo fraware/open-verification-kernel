@@ -56,6 +56,10 @@
     "on_fail": "block",
     "on_unknown": "require_human_review"
   },
+  "provenance": {
+    "source": "ovk-template-library",
+    "canonical": true
+  },
   "faithfulness": {
     "source": ["changed_files", "branch_protection", "workflow_config", "repo_invariants"],
     "anti_vacuity_checks": [

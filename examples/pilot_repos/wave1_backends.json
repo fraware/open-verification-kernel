@@ -1,0 +1,44 @@
+{
+
+  "schema_version": "ovk.verification_manifest.v1",
+
+  "name": "pilot-wave1-backends",
+
+  "description": "Pilot manifest: Cedar, TLA+, and Kani backend fixtures for multi-backend validation.",
+
+  "lanes": [
+
+    {
+
+      "lane": "backend",
+
+      "input": "../backends/cedar_pass.json",
+
+      "input_format": "backend"
+
+    },
+
+    {
+
+      "lane": "backend",
+
+      "input": "../backends/tla_pass.json",
+
+      "input_format": "backend"
+
+    },
+
+    {
+
+      "lane": "backend",
+
+      "input": "../backends/kani_pass.json",
+
+      "input_format": "backend"
+
+    }
+
+  ]
+
+}
+

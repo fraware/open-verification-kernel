@@ -43,3 +43,20 @@ def validate_against_schema(instance: dict[str, Any], schema: dict[str, Any]) ->
 def validate_file(instance_path: Path, schema_path: Path) -> ValidationReport:
     """Validate one JSON file against one JSON schema file."""
     return validate_against_schema(load_json(instance_path), load_json(schema_path))
+
+
+def require_schema_valid(
+    instance: dict[str, Any],
+    schema: dict[str, Any],
+    *,
+    context: str = "payload",
+) -> None:
+    """Raise ``ValueError`` when *instance* does not satisfy *schema*."""
+    report = validate_against_schema(instance, schema)
+    if report.valid:
+        return
+    issues = "; ".join(
+        f"{'/'.join(str(part) for part in issue.path) or '$'}: {issue.message}"
+        for issue in report.issues
+    )
+    raise ValueError(f"{context} failed schema validation: {issues}")

@@ -1,0 +1,4 @@
+{
+  "intent_id": "lean-proof-check",
+  "unproved_obligations": ["sensitive data never crosses public boundary"]
+}

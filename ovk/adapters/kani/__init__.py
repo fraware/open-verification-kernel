@@ -1,0 +1,1 @@
+"""Kani Rust backend adapter."""
