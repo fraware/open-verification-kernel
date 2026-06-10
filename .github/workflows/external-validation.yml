@@ -82,7 +82,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Document release pin consumer path
         run: |
-          echo "Fork consumers should pin: uses: fraware/open-verification-kernel@v1.0.0"
+          echo "Fork consumers should pin: uses: fraware/open-verification-kernel@v1.1.0"
           test -f examples/github_workflows/external_consumer.yml
 
   attestation_smoke:

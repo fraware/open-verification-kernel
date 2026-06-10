@@ -4,7 +4,13 @@ OVK is security-sensitive infrastructure because it may influence pull-request m
 
 ## Supported versions
 
-The project is pre-v1. Report security issues against `main` until formal releases begin.
+| Version | Supported |
+|---|---|
+| 1.1.x | yes |
+| 1.0.x | yes |
+| &lt; 1.0 | no |
+
+Report security issues against `main` or the latest release tag.
 
 ## Reporting a vulnerability
 

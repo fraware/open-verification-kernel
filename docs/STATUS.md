@@ -25,9 +25,7 @@ OVK is a solver-agnostic verification kernel for AI-agent pull requests. v1.1 bu
 
 Lane details: [LANES.md](LANES.md).
 
-## Backends (10)
-
-`opa`, `z3`, `cedar`, `tla+`, `kani`, `dafny`, `verus`, `lean`, `cbmc`, `alloy` — each with capability manifest and deterministic CI fallback. Tier-1 native jobs (OPA, Z3, CBMC, Cedar) are required in CI when binaries are installed.
+Backends (10): see [BACKENDS.md](BACKENDS.md). Tier-1 native jobs (OPA, Z3, CBMC, Cedar) are required in CI when binaries are installed.
 
 ## Key CLI commands
 
@@ -59,16 +57,17 @@ python scripts/validate_templates.py
 
 ## Benchmark
 
-- 34 canonical lane/backend cases + extended routing/adversarial/repair-loop/intent-recall cases.
-- 16-case `benchmarks/real_diffs/` corpus for realistic PR diff coverage.
-- 100-case expanded set for load coverage.
-- Leaderboard schema: `schemas/formal_pr_bench.leaderboard.schema.json`.
+FormalPR-Bench scores lane correctness, routing, adversarial resilience, repair loops, intent recall, and real-diff coverage. Details: [BENCHMARK.md](BENCHMARK.md).
+
+```bash
+ovk bench --leaderboard .verification/formal-pr-bench-leaderboard.json
+```
 
 ## Pilots
 
-In-repo manifests: [PILOT_CASE_STUDIES.md](PILOT_CASE_STUDIES.md) and `examples/pilot_repos/`.
+In-repo manifests and measured outcomes: [PILOT_CASE_STUDIES.md](PILOT_CASE_STUDIES.md) (`examples/pilot_repos/`).
 
-External OSS adoption: [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md).
+External OSS rollout: [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md).
 
 ## Migration
 

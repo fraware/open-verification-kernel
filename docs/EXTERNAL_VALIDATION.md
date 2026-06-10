@@ -11,13 +11,13 @@ OVK ships a scheduled external validation matrix in `.github/workflows/external-
 
 The workflow also includes:
 
-- `matrix_release_pin`: smoke run against `fraware/open-verification-kernel@v1.0.0`.
+- `matrix_release_pin`: documents the pinned consumer path (`fraware/open-verification-kernel@v1.1.0`).
 - `attestation_smoke`: signed bundle generation (`OVK_SIGNING_KEY`) plus `ovk validate-outputs`.
 
 ## Fork procedure
 
 1. Copy `examples/github_workflows/external_consumer.yml` into your fork.
-2. Replace local `uses: ./` with a pinned release tag (`uses: fraware/open-verification-kernel@v1.0.0` or newer).
+2. Replace local `uses: ./` with a pinned release tag (`uses: fraware/open-verification-kernel@v1.1.0` or newer).
 3. Start with advisory mode, verify evidence artifacts, then roll specific repos to strict mode.
 
 ## Strict rollout checklist
