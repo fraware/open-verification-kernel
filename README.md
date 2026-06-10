@@ -47,6 +47,10 @@ The project is solver-agnostic, but never guarantee-agnostic. Every backend must
 ## Quick start
 
 ```bash
+# PyPI
+pip install open-verification-kernel==1.1.0
+
+# development
 pip install -e '.[dev]'
 ovk init
 
@@ -90,7 +94,7 @@ scripts/            runners, preflight, and release tooling
 
 ## Status
 
-OVK **v1.0.0** is a local-runner-first verification kernel with five MVP evidence lanes, ten backend adapters (OPA, Z3, Cedar, TLA+, Kani, Dafny, Verus, Lean, CBMC, Alloy), `ovk check` diff-aware orchestration, FormalPR-Bench v1, optional Sigstore signing, MCP SDK transport, and a hardened GitHub Action. See [docs/STATUS.md](docs/STATUS.md) and [docs/INTEGRATION.md](docs/INTEGRATION.md).
+OVK **v1.1.0** is a local-runner-first verification kernel with five MVP evidence lanes, ten backend adapters (OPA, Z3, Cedar, TLA+, Kani, Dafny, Verus, Lean, CBMC, Alloy), `ovk check` diff-aware orchestration, FormalPR-Bench v1, optional Sigstore signing, MCP SDK transport, and a hardened GitHub Action. See [docs/STATUS.md](docs/STATUS.md) and [docs/INTEGRATION.md](docs/INTEGRATION.md).
 
 ## License
 

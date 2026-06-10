@@ -12,7 +12,13 @@ ovk init
 ovk release-preflight
 ```
 
-PyPI (when published): `pip install open-verification-kernel`
+PyPI release:
+
+```bash
+pip install open-verification-kernel==1.1.0
+# optional solvers
+pip install "open-verification-kernel[solvers]==1.1.0"
+```
 
 Optional Z3: `pip install -e '.[solvers]'`
 
@@ -61,7 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: fraware/open-verification-kernel@v1.0.0
+      - uses: fraware/open-verification-kernel@v1.1.0
         with:
           mode: advisory
           use-check: "true"
@@ -74,7 +80,7 @@ Development reference: `uses: ./`
 ### Multi-lane (all five MVP properties)
 
 ```yaml
-- uses: fraware/open-verification-kernel@v1.0.0
+- uses: fraware/open-verification-kernel@v1.1.0
   with:
     mode: advisory
     verification-manifest: .verification/full_mvp.json
@@ -123,7 +129,7 @@ Explicit metadata (most reliable):
 ```
 
 ```yaml
-- uses: fraware/open-verification-kernel@v1.0.0
+- uses: fraware/open-verification-kernel@v1.1.0
   with:
     check-metadata: ovk-required-checks.json
 ```
