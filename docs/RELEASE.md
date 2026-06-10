@@ -73,7 +73,7 @@ twine check dist/*
 
 ### Tests and release readiness
 
-- [x] `pytest` passes (374 passed, 12 skipped).
+- [x] `pytest` passes (376 passed, 12 skipped).
 - [x] `ruff check` passes.
 - [x] `release-preflight` passes (12 required checks + optional pilot metrics dry-run).
 - [x] `ovk bench --expanded` and `ovk pilot` pass.

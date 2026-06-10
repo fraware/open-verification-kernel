@@ -116,23 +116,30 @@ runs:
       if: ${{ inputs.verification-manifest != '' }}
       shell: bash
       working-directory: ${{ github.workspace }}
+      env:
+        OVK_MODE: ${{ inputs.mode }}
+        OVK_VERIFICATION_MANIFEST: ${{ inputs.verification-manifest }}
+        OVK_BUNDLE_OUTPUT_DIR: ${{ inputs.bundle-output-dir }}
+        OVK_REPO: ${{ github.repository }}
+        OVK_HEAD_SHA: ${{ github.sha }}
       run: |
         ADVISORY_FLAG=""
-        if [ "${{ inputs.mode }}" = "advisory" ]; then
+        if [ "$OVK_MODE" = "advisory" ]; then
           ADVISORY_FLAG="--advisory"
         fi
         set +e
         ovk verify \
-          --manifest "${{ inputs.verification-manifest }}" \
-          --output-dir "${{ inputs.bundle-output-dir }}" \
-          --repo "${{ github.repository }}" \
-          --head-sha "${{ github.sha }}" \
+          --manifest "$OVK_VERIFICATION_MANIFEST" \
+          --output-dir "$OVK_BUNDLE_OUTPUT_DIR" \
+          --repo "$OVK_REPO" \
+          --head-sha "$OVK_HEAD_SHA" \
           $ADVISORY_FLAG
         ACTION_RC=$?
-        ovk evidence-quality "${{ inputs.bundle-output-dir }}/ovk-evidence.json" \
-          --output "${{ inputs.bundle-output-dir }}/ovk-evidence-quality.json"
-        if [ "$ACTION_RC" -eq 0 ]; then
-          ACTION_RC=$?
+        ovk evidence-quality "$OVK_BUNDLE_OUTPUT_DIR/ovk-evidence.json" \
+          --output "$OVK_BUNDLE_OUTPUT_DIR/ovk-evidence-quality.json"
+        QUALITY_RC=$?
+        if [ "$ACTION_RC" -eq 0 ] && [ "$QUALITY_RC" -ne 0 ]; then
+          ACTION_RC=$QUALITY_RC
         fi
         set -e
         echo "$ACTION_RC" > .ovk-action-exit-code
@@ -141,35 +148,43 @@ runs:
       if: ${{ inputs.verification-manifest == '' && inputs.use-check == 'true' }}
       shell: bash
       working-directory: ${{ github.workspace }}
+      env:
+        OVK_MODE: ${{ inputs.mode }}
+        OVK_CHANGED_FILES: ${{ inputs.changed-files }}
+        OVK_CHECK_METADATA: ${{ inputs.check-metadata }}
+        OVK_GITHUB_EVENT: ${{ github.event_path }}
+        OVK_REPO: ${{ github.repository }}
+        OVK_HEAD_SHA: ${{ github.sha }}
       run: |
         EXTRA_CHECK_METADATA=""
-        if [ -n "${{ inputs.check-metadata }}" ]; then
-          EXTRA_CHECK_METADATA="--check-metadata ${{ inputs.check-metadata }}"
+        if [ -n "$OVK_CHECK_METADATA" ]; then
+          EXTRA_CHECK_METADATA="--check-metadata $OVK_CHECK_METADATA"
         elif [ -f ovk-branch-metadata.json ]; then
           EXTRA_CHECK_METADATA="--check-metadata ovk-branch-metadata.json"
         fi
         ADVISORY_FLAG=""
-        if [ "${{ inputs.mode }}" = "advisory" ]; then
+        if [ "$OVK_MODE" = "advisory" ]; then
           ADVISORY_FLAG="--advisory"
         fi
         STRICT_FLAG=""
-        if [ "${{ inputs.mode }}" = "strict" ]; then
+        if [ "$OVK_MODE" = "strict" ]; then
           STRICT_FLAG="--strict"
         fi
         set +e
         ovk check \
-          --diff "${{ inputs.changed-files }}" \
-          --github-event "${{ github.event_path }}" \
+          --diff "$OVK_CHANGED_FILES" \
+          --github-event "$OVK_GITHUB_EVENT" \
           $EXTRA_CHECK_METADATA \
-          --repo "${{ github.repository }}" \
-          --head-sha "${{ github.sha }}" \
+          --repo "$OVK_REPO" \
+          --head-sha "$OVK_HEAD_SHA" \
           --output-dir . \
           $ADVISORY_FLAG \
           $STRICT_FLAG
         ACTION_RC=$?
         ovk evidence-quality ovk-evidence.json --output ovk-evidence-quality.json
-        if [ "$ACTION_RC" -eq 0 ]; then
-          ACTION_RC=$?
+        QUALITY_RC=$?
+        if [ "$ACTION_RC" -eq 0 ] && [ "$QUALITY_RC" -ne 0 ]; then
+          ACTION_RC=$QUALITY_RC
         fi
         set -e
         echo "$ACTION_RC" > .ovk-action-exit-code
@@ -201,15 +216,18 @@ runs:
       working-directory: ${{ github.workspace }}
       env:
         GITHUB_TOKEN: ${{ github.token }}
+        OVK_BUNDLE_OUTPUT_DIR: ${{ inputs.bundle-output-dir }}
+        OVK_REPO: ${{ github.repository }}
+        OVK_HEAD_SHA: ${{ github.sha }}
       run: |
-        EVIDENCE="${{ inputs.bundle-output-dir }}/ovk-evidence.json"
-        MARKDOWN="${{ inputs.bundle-output-dir }}/ovk-pr-comment.md"
+        EVIDENCE="$OVK_BUNDLE_OUTPUT_DIR/ovk-evidence.json"
+        MARKDOWN="$OVK_BUNDLE_OUTPUT_DIR/ovk-pr-comment.md"
         set +e
         python "${{ github.action_path }}/scripts/emit_github_check.py" \
           --evidence "$EVIDENCE" \
           --markdown "$MARKDOWN" \
-          --repo "${{ github.repository }}" \
-          --head-sha "${{ github.sha }}"
+          --repo "$OVK_REPO" \
+          --head-sha "$OVK_HEAD_SHA"
         EMIT_RC=$?
         set -e
         if [ "$EMIT_RC" -eq 0 ]; then
@@ -222,31 +240,45 @@ runs:
       if: ${{ inputs.verification-manifest == '' && inputs.use-check != 'true' }}
       shell: bash
       working-directory: ${{ github.workspace }}
+      env:
+        OVK_MODE: ${{ inputs.mode }}
+        OVK_CHECK_METADATA: ${{ inputs.check-metadata }}
+        OVK_GITHUB_EVENT: ${{ github.event_path }}
+        OVK_METADATA: ${{ inputs.metadata }}
+        OVK_CHANGED_FILES: ${{ inputs.changed-files }}
+        OVK_BACKEND_STRATEGY: ${{ inputs.backend-strategy }}
+        OVK_EVIDENCE_OUTPUT: ${{ inputs.evidence-output }}
+        OVK_MARKDOWN_OUTPUT: ${{ inputs.markdown-output }}
+        OVK_ATTESTATION_OUTPUT: ${{ inputs.attestation-output }}
+        OVK_MANIFEST_OUTPUT: ${{ inputs.manifest-output }}
+        OVK_QUALITY_OUTPUT: ${{ inputs.quality-output }}
+        OVK_REPO: ${{ github.repository }}
+        OVK_HEAD_SHA: ${{ github.sha }}
       run: |
         EXTRA_CHECK_METADATA=""
-        if [ -n "${{ inputs.check-metadata }}" ]; then
-          EXTRA_CHECK_METADATA="--check-metadata ${{ inputs.check-metadata }}"
+        if [ -n "$OVK_CHECK_METADATA" ]; then
+          EXTRA_CHECK_METADATA="--check-metadata $OVK_CHECK_METADATA"
         elif [ -f ovk-branch-metadata.json ]; then
           EXTRA_CHECK_METADATA="--check-metadata ovk-branch-metadata.json"
         fi
         ADVISORY_FLAG=""
-        if [ "${{ inputs.mode }}" = "advisory" ]; then
+        if [ "$OVK_MODE" = "advisory" ]; then
           ADVISORY_FLAG="--advisory"
         fi
         set +e
         ovk ci \
-          --github-event "${{ github.event_path }}" \
-          --metadata "${{ inputs.metadata }}" \
-          --changed-files "${{ inputs.changed-files }}" \
+          --github-event "$OVK_GITHUB_EVENT" \
+          --metadata "$OVK_METADATA" \
+          --changed-files "$OVK_CHANGED_FILES" \
           $EXTRA_CHECK_METADATA \
-          --backend-strategy "${{ inputs.backend-strategy }}" \
-          --evidence-output "${{ inputs.evidence-output }}" \
-          --markdown-output "${{ inputs.markdown-output }}" \
-          --attestation-output "${{ inputs.attestation-output }}" \
-          --manifest-output "${{ inputs.manifest-output }}" \
-          --quality-output "${{ inputs.quality-output }}" \
-          --repo "${{ github.repository }}" \
-          --head-sha "${{ github.sha }}" \
+          --backend-strategy "$OVK_BACKEND_STRATEGY" \
+          --evidence-output "$OVK_EVIDENCE_OUTPUT" \
+          --markdown-output "$OVK_MARKDOWN_OUTPUT" \
+          --attestation-output "$OVK_ATTESTATION_OUTPUT" \
+          --manifest-output "$OVK_MANIFEST_OUTPUT" \
+          --quality-output "$OVK_QUALITY_OUTPUT" \
+          --repo "$OVK_REPO" \
+          --head-sha "$OVK_HEAD_SHA" \
           $ADVISORY_FLAG
         ACTION_RC=$?
         set -e
@@ -257,7 +289,9 @@ runs:
       working-directory: ${{ github.workspace }}
       env:
         GITHUB_TOKEN: ${{ github.token }}
-      run: python "${{ github.action_path }}/scripts/post_pr_comment.py" --markdown "${{ inputs.markdown-output }}" --event "${{ github.event_path }}"
+        OVK_MARKDOWN_OUTPUT: ${{ inputs.markdown-output }}
+        OVK_GITHUB_EVENT: ${{ github.event_path }}
+      run: python "${{ github.action_path }}/scripts/post_pr_comment.py" --markdown "$OVK_MARKDOWN_OUTPUT" --event "$OVK_GITHUB_EVENT"
     - name: Set action outputs
       id: set-outputs
       if: always()
@@ -304,11 +338,14 @@ runs:
       if: always()
       shell: bash
       working-directory: ${{ github.workspace }}
+      env:
+        OVK_MODE: ${{ inputs.mode }}
+        OVK_EMIT_CHECK: ${{ inputs.emit-check }}
       run: |
-        if [ "${{ inputs.mode }}" != "strict" ]; then
+        if [ "$OVK_MODE" != "strict" ]; then
           exit 0
         fi
-        if [ -f .ovk-emit-exit-code ] && [ "${{ inputs.emit-check }}" = "true" ]; then
+        if [ -f .ovk-emit-exit-code ] && [ "$OVK_EMIT_CHECK" = "true" ]; then
           exit "$(cat .ovk-emit-exit-code)"
         fi
         if [ -f .ovk-action-exit-code ]; then

@@ -18,6 +18,7 @@ Use this index as the canonical entry point. Each guide covers one topic; cross-
 | Document | Purpose |
 |---|---|
 | [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md) | Adoption dashboard — can I pin strict mode today? |
+| [RELEASE_AUDIT.md](RELEASE_AUDIT.md) | Engineering audit responses and metric provenance |
 | [STATUS.md](STATUS.md) | Capabilities, CLI surface, and trust model |
 | [INTEGRATION.md](INTEGRATION.md) | Install locally or in GitHub Actions |
 | [RELEASE.md](RELEASE.md) | Maintainer release guide and known limitations |

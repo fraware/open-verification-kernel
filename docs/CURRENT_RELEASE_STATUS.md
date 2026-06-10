@@ -4,17 +4,19 @@ Living adoption dashboard for Open Verification Kernel.
 
 **Last updated:** 2026-06-10
 
+**Release judgment:** v1.2.0 **release candidate** — core loop is implemented; confirm CI on the current SHA and external pilot metrics before calling production-stable. Audit responses: [RELEASE_AUDIT.md](RELEASE_AUDIT.md).
+
 ## At a glance
 
 | Signal | Current state |
 |---|---|
-| **Released version** | v1.2.0 (Action pin `@v1.2.0`; PyPI pending maintainer tag — [RELEASE.md](RELEASE.md)) |
+| **Released version** | v1.2.0 RC (Action pin `@v1.2.0`; PyPI pending maintainer tag — [RELEASE.md](RELEASE.md)) |
 | **FormalPR-Bench** | 130/130 pass ([latest summary](benchmarks/latest-leaderboard-summary.json)) |
 | **Realistic PR diff score** | 100% ([adoption-summary](benchmarks/adoption-summary.json)) |
 | **Check types** | 5 (self-protection, authorization, infrastructure, CI secrets, deployment) |
 | **Release readiness** | 12 required checks + 1 optional (`ovk release-preflight`) |
-| **Unit tests** | 374 passed, 12 skipped (`pytest`) |
-| **CI** | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) on `main` and PRs |
+| **Unit tests** | 376 passed, 12 skipped — provenance: [RELEASE_AUDIT.md](RELEASE_AUDIT.md) |
+| **CI** | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) — verify green run on current SHA (badge `[skip ci]` commits do not run CI) |
 | **External validation** | Weekly — [EXTERNAL_VALIDATION.md](EXTERNAL_VALIDATION.md) |
 
 OVK is **not** complete formal verification of arbitrary code. It ships targeted, explainable checks for high-risk PR changes, with explicit unknowns and human-review paths.
@@ -26,7 +28,7 @@ Latest deep audit after the engineer push: [LATEST_CODE_AUDIT.md](LATEST_CODE_AU
 | Mode | Safe today? | Notes |
 |---|---|---|
 | **Advisory** | Yes | Default Action setting — reports findings without failing the job. Start here. |
-| **Strict** | Yes, with setup | Use after advisory runs on your repo's diffs. Needs `checks: write` when publishing GitHub check runs. See [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md). |
+| **Strict** | Yes, after calibration | Enable only after advisory runs on **your** repo's diffs (under 5% false positives). Needs `checks: write` when publishing GitHub check runs. See [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md). |
 
 **Suggested rollout:** advisory only → advisory with check run / PR comment → strict with required check on protected branches.
 

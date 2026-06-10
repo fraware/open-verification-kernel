@@ -4,6 +4,8 @@ OVK connects to ten formal-methods tools. Every backend has a **built-in fallbac
 
 When a native binary is installed, OVK can use it and records that fact in evidence. CI verifies that native results match the built-in fallback and that evidence does not falsely claim native execution.
 
+**Important:** a required-in-CI job proves the native install path works and stays consistent with the built-in evaluator. It does not mean every consumer run uses a native binary. Evidence must state which path ran.
+
 ## Required in CI (OPA, Z3, CBMC, Cedar)
 
 Workflow: [`.github/workflows/native-backends-tier1.yml`](../.github/workflows/native-backends-tier1.yml) (required native backends; filename is historical)
@@ -12,7 +14,7 @@ Workflow: [`.github/workflows/native-backends-tier1.yml`](../.github/workflows/n
 |---------|---------|------------------|
 | `opa` | OPA `v0.67.0` static release | Yes |
 | `z3` | `z3-solver` Python package `4.13.4.0` | Yes |
-| `cbmc` | CBMC Debian `6.4.1` | Contract check today; full harness planned |
+| `cbmc` | CBMC Debian `6.4.1` | Binary probe + contract check today; full harness execution planned |
 | `cedar` | `cedar-policy-cli` `4.8.2` | Yes |
 
 Installer: [`scripts/ci/install_backend.sh`](../scripts/ci/install_backend.sh)

@@ -18,14 +18,21 @@
   "$defs": {
     "check": {
       "type": "object",
-      "required": ["name", "passed", "messages"],
+      "required": ["name", "passed"],
       "properties": {
         "name": { "type": "string" },
         "passed": { "type": "boolean" },
-        "messages": { "type": "array", "items": { "type": "string" } }
+        "messages": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "failures": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
       },
-      "additionalProperties": false
+      "additionalProperties": true
     }
   },
-  "additionalProperties": false
+  "additionalProperties": true
 }

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -100,7 +100,6 @@ def execute_obligations(
     if not obligations:
         return []
     if parallel and len(obligations) > 1:
-        evidence_items: list[VerificationEvidence] = []
         with ThreadPoolExecutor(max_workers=min(len(obligations), 5)) as pool:
             futures = [
                 pool.submit(
@@ -115,9 +114,7 @@ def execute_obligations(
                 )
                 for obligation in obligations
             ]
-            for future in as_completed(futures):
-                evidence_items.append(future.result())
-        return evidence_items
+            return [future.result() for future in futures]
 
     return [
         _evaluate_obligation(
