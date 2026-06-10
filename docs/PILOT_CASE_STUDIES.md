@@ -24,9 +24,13 @@ Structured outcomes from the v1.0 pilot manifests in `examples/pilot_repos/`. Me
 **Reproduction:**
 
 ```bash
-ovk pilot --output pilot-report.json
-python scripts/collect_pilot_metrics.py --pilot-report pilot-report.json --source pilot_dogfood --ovk-version 1.1.0 --output pilot-metrics.json
-python scripts/render_pilot_metrics.py --pilot-metrics pilot-metrics.json
+ovk pilot --output pilot-program-report.json
+python scripts/collect_pilot_metrics.py \
+  --pilot-report pilot-dogfood-report.json \
+  --input-pilot-report pilot-program-report.json \
+  --source pilot-dogfood \
+  --ovk-version 1.1.0
+python scripts/render_pilot_metrics.py --metrics pilot-dogfood-report.json
 ```
 
 **Notes:** Pilot Zero is the in-repo maximum deliverable before community OSS repos complete advisory rollout. Metrics feed `docs/benchmarks/adoption-summary.json` via `scripts/render_pilot_metrics.py`.
