@@ -16,7 +16,7 @@ This directory demonstrates the OVK agent repair loop for the **ci_secrets** lan
 ovk check --changed-files examples/repair_loops/ci_secrets/failing.diff --repo example/repo --head-sha seed
 
 # 2. Inspect repair hints
-ovk repair-suggest ovk-evidence.json
+ovk repair-suggest --evidence ovk-evidence.json
 
 # 3. Apply the passing diff (or follow the hint), rerun
 ovk check --changed-files examples/repair_loops/ci_secrets/passing.diff --repo example/repo --head-sha repaired

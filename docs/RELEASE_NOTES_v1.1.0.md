@@ -4,7 +4,7 @@ Depth-first release of the Open Verification Kernel: native proof ladder, real d
 
 ## Highlights
 
-- **Tier-1 native CI** — OPA, Z3, and CBMC run as required jobs when installed; evidence honesty gates flag oracle-only claims
+- **Tier-1 native CI** — OPA, Z3, CBMC, and Cedar run as required jobs when installed; evidence honesty gates flag oracle-only claims
 - **Real diff corpus** — 16 sanitized PR diffs in `benchmarks/real_diffs/` for lane recall and compiler regression
 - **FormalPR-Bench depth** — `real_diff` category, repair-loop cases across ci_secrets, authorization, infra, and deployment lanes
 - **PyPI-pinned Action** — `OVK_PACKAGE_VERSION=1.1.0` installs `open-verification-kernel==1.1.0`; local dev still uses `pip install .`
@@ -13,7 +13,7 @@ Depth-first release of the Open Verification Kernel: native proof ladder, real d
 ## Quick start
 
 ```bash
-pip install open-verification-kernel==1.1.0
+pip install -e '.[dev]'   # or pip install open-verification-kernel==1.1.0 after PyPI publish
 ovk doctor
 ovk check --changed-files benchmarks/real_diffs/multi_surface_combined.diff --advisory
 ovk pilot

@@ -2,6 +2,8 @@
 
 Documentation for Open Verification Kernel **v1.1.0**.
 
+Use this index as the canonical entry point. Each guide covers one topic; cross-links replace duplicated content across files.
+
 ## Start here
 
 | Document | Purpose |
@@ -22,6 +24,7 @@ Documentation for Open Verification Kernel **v1.1.0**.
 | [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md) | Advisory→strict rollout on external OSS repos |
 | [PILOT_CASE_STUDIES.md](PILOT_CASE_STUDIES.md) | In-repo pilot metrics and external pilot reporting template |
 | [AGENT_REPAIR_LOOP.md](AGENT_REPAIR_LOOP.md) | Counterexample-to-repair workflow for MCP agents |
+| [benchmarks/adoption-summary.json](benchmarks/adoption-summary.json) | Public adoption metrics template (bench + pilot dogfood) |
 
 ## Design and specification
 

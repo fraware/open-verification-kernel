@@ -12,13 +12,15 @@ ovk init
 ovk release-preflight
 ```
 
-PyPI release:
+PyPI release (after maintainers publish `v1.1.0`; see [RELEASE.md](RELEASE.md)):
 
 ```bash
 pip install open-verification-kernel==1.1.0
 # optional solvers
 pip install "open-verification-kernel[solvers]==1.1.0"
 ```
+
+Until the wheel is on PyPI, use `pip install -e '.[dev]'` from a checkout or pin the GitHub Action at `@v1.1.0` with `OVK_PACKAGE_VERSION` once published.
 
 Optional Z3: `pip install -e '.[solvers]'`
 
@@ -168,9 +170,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: fraware/open-verification-kernel@main
+      - uses: fraware/open-verification-kernel@v1.1.0
+        env:
+          OVK_PACKAGE_VERSION: "1.1.0"
         with:
           mode: advisory
+          use-check: "true"
           backend-strategy: deterministic
           post-comment: "true"
       - uses: actions/upload-artifact@v4
@@ -223,7 +228,18 @@ ovk extract-workflow .github/workflows/deploy.yml
 ovk-mcp
 ```
 
-Optional Sigstore signing: set `OVK_SIGSTORE=1` and install cosign. Optional HMAC signing: set `OVK_SIGNING_KEY`.
+Optional Sigstore signing: set `OVK_SIGSTORE_SIGNING=1` and install cosign. Optional HMAC signing: set `OVK_SIGNING_KEY`.
+
+## Repair loop
+
+After a blocked `ovk check`, extract machine-readable repair hints:
+
+```bash
+ovk check --changed-files examples/repair_loops/ci_secrets/failing.diff --output-dir .ovk-check
+ovk repair-suggest --evidence .ovk-check/ovk-evidence.json
+```
+
+See [AGENT_REPAIR_LOOP.md](AGENT_REPAIR_LOOP.md) for multi-lane demos and MCP session flow.
 
 ## Rollout recommendation
 

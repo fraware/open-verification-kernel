@@ -2,17 +2,19 @@
 
 The five MVP evidence lanes and their input contracts.
 
+**Autonomous path:** `ovk check --changed-files <diff>` infers and evaluates all affected lanes from a unified diff. Lane-specific CLI commands below remain for focused debugging and manifest-driven workflows.
+
 ## Lane overview
 
-| Lane | Intent ID | CLI | Input schema |
+| Lane | Intent ID | Focused CLI | Autonomous path |
 |---|---|---|---|
-| Self-protection | `agent-cannot-disable-own-ci-gate` | `ovk ci` | metadata + changed files |
-| Authorization | `no-admin-route-bypass` | `ovk auth-obligation` | `authorization.input` |
-| Infrastructure | `no-public-sensitive-resource` | `ovk infra-exposure` | `infrastructure.input` |
-| CI secrets | `no-secrets-in-untrusted-context` | `ovk ci-secrets` | `ci_secrets.input` |
-| Deployment state | `no-skipped-approval-state` | `ovk deployment-state` | `deployment_state.input` |
+| Self-protection | `agent-cannot-disable-own-ci-gate` | `ovk ci` | `ovk check` |
+| Authorization | `no-admin-route-bypass` | `ovk auth-obligation` | `ovk check` |
+| Infrastructure | `no-public-sensitive-resource` | `ovk infra-exposure` | `ovk check` |
+| CI secrets | `no-secrets-in-untrusted-context` | `ovk ci-secrets` | `ovk check` |
+| Deployment state | `no-skipped-approval-state` | `ovk deployment-state` | `ovk check` |
 
-Multi-lane: `ovk verify --manifest <manifest.json>`
+Multi-lane manifest: `ovk verify --manifest <manifest.json>`
 
 ## Self-protection
 

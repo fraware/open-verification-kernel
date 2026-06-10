@@ -24,10 +24,12 @@ The first production surface is a GitHub Action that runs on pull requests, emit
 
 ### CLI
 
-The CLI provides local reproducibility for developers and CI runners.
+The CLI provides local reproducibility for developers and CI runners. **`ovk check`** is the primary autonomous path: it infers intents from a diff, compiles obligations, routes to backends, and writes standard artifacts (`ovk-evidence.json`, PR comment, attestation, quality report).
 
 ```bash
 ovk init
+ovk check --changed-files pr.patch --advisory
+ovk repair-suggest --evidence ovk-evidence.json
 ovk ci --metadata <metadata.json> --advisory
 ovk verify --manifest examples/verification_manifests/full_mvp.json --advisory
 ovk infer --changed-files pr.patch
@@ -47,11 +49,18 @@ ovk.extract_intents
 ovk.plan_from_diff
 ovk.extract_workflow_yaml
 ovk.extract_workflows_from_diff
+ovk.rank_intents
+ovk.list_capabilities
+ovk.select_backends
+ovk.compile_obligation
 ovk.run_verification
+ovk.explain_result
+ovk.generate_regression_artifact
 ovk.create_evidence_bundle
 ovk.get_merge_recommendation
-ovk.list_capabilities
 ```
+
+Repair hints and regression artifacts are available via CLI (`ovk repair-suggest`, `ovk generate-test`) until dedicated MCP tools ship.
 
 ## Runner flows
 
@@ -68,6 +77,16 @@ ovk.list_capabilities
 2. Evaluate each lane; combine evidence.
 3. Write release bundle with material provenance.
 
+### Kernel check (`ovk check`)
+
+1. Ingest changed files or unified diff; optional GitHub event and check metadata.
+2. Detect surfaces and candidate intents via planner.
+3. Route obligations through `ovk.core.kernel` and `ovk.core.router` (policy from `.verification/config.yml`).
+4. Evaluate affected lanes; merge evidence and merge recommendation.
+5. Write standard run outputs; enforce exit code in strict mode.
+
+On block, agents call `ovk repair-suggest` (or MCP `ovk_repair_suggest`) for counterexample-derived fix classes. See [AGENT_REPAIR_LOOP.md](AGENT_REPAIR_LOOP.md).
+
 ### Planning
 
 1. Ingest changed files (JSON, paths, or unified diff).
@@ -76,7 +95,7 @@ ovk.list_capabilities
 
 ### GitHub Action
 
-Install OVK → `ovk init` → collect metadata → `ovk ci` or `ovk verify` → optional PR comment → upload artifacts.
+Install OVK → `ovk init` → `ovk check` (default via `use-check: "true"`) or legacy `ovk ci` / `ovk verify` → optional PR comment → upload artifacts.
 
 Details: [INTEGRATION.md](INTEGRATION.md).
 

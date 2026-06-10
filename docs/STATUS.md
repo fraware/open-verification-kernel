@@ -4,7 +4,7 @@ Current state of Open Verification Kernel **v1.1.0**.
 
 ## Summary
 
-OVK is a solver-agnostic verification kernel for AI-agent pull requests. v1.1 builds on the v1.0 baseline with depth-first improvements: tier-1 native backend CI (OPA, Z3, CBMC), a real-diff benchmark corpus, expanded FormalPR-Bench repair-loop cases, PyPI-pinned GitHub Action installs, and external pilot playbooks.
+OVK is a solver-agnostic verification kernel for AI-agent pull requests. v1.1 builds on the v1.0 baseline with depth-first improvements: tier-1 native backend CI (OPA, Z3, CBMC, Cedar), a real-diff benchmark corpus, expanded FormalPR-Bench repair-loop cases, PyPI-pinned GitHub Action installs, and external pilot playbooks.
 
 ## Package
 
@@ -36,7 +36,8 @@ Backends (10): see [BACKENDS.md](BACKENDS.md). Tier-1 native jobs (OPA, Z3, CBMC
 | `ovk doctor` | Environment and layout validation |
 | `ovk bench` | FormalPR-Bench + leaderboard artifact |
 | `ovk generate-test` | Counterexample → regression artifacts |
-| `ovk template list/show/apply` | Template library (100+ intents) |
+| `ovk repair-suggest` | Machine-readable repair hints from evidence bundle |
+| `ovk template list/show/apply` | Template library (100 intents) |
 | `ovk release-preflight` | Structured release readiness checks |
 | `ovk-mcp` | MCP SDK server (optional `mcp` extra) |
 

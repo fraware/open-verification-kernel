@@ -9,7 +9,7 @@ pip install -e '.[dev]'
 ovk init
 ```
 
-Optional: run the MCP server (`ovk-mcp` or `python -m ovk.mcp_stdio`) so your agent can call `ovk_check`, `ovk_repair_suggest`, and `ovk_generate_test`.
+Optional: run the MCP server (`ovk-mcp` or `python -m ovk.mcp_stdio`) for planning and verification tools (`ovk.plan_from_diff`, `ovk.run_verification`, `ovk.get_merge_recommendation`). Use the CLI for `ovk check`, `ovk repair-suggest`, and `ovk generate-test` in the repair loop today.
 
 ## Multi-lane repair loops
 
@@ -51,7 +51,7 @@ Expected:
 ### Step 2 — Read repair hints
 
 ```bash
-ovk repair-suggest ovk-evidence.json
+ovk repair-suggest --evidence ovk-evidence.json
 ```
 
 Expected hint:
@@ -63,7 +63,7 @@ Expected hint:
 }
 ```
 
-MCP equivalent: call the repair-suggest tool with the evidence bundle path.
+MCP equivalent (today): run `ovk repair-suggest --evidence <path>` from the agent shell after `ovk.run_verification` or `ovk check` produces a bundle.
 
 ### Step 3 — Apply the fix and rerun
 
@@ -94,7 +94,7 @@ ovk check \
   --repo example/oss-repo \
   --head-sha agent-pr-1
 
-ovk repair-suggest ovk-evidence.json
+ovk repair-suggest --evidence ovk-evidence.json
 
 ovk check \
   --changed-files examples/repair_loops/authorization/passing.diff \
@@ -112,7 +112,7 @@ ovk check \
   --repo example/oss-repo \
   --head-sha agent-pr-1
 
-ovk repair-suggest ovk-evidence.json
+ovk repair-suggest --evidence ovk-evidence.json
 
 ovk check \
   --changed-files examples/repair_loops/infrastructure/passing.diff \

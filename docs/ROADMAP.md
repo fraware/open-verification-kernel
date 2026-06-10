@@ -46,7 +46,7 @@ Changelog: [RELEASE_NOTES_v1.0.0.md](RELEASE_NOTES_v1.0.0.md).
 | Weekly external validation matrix workflow | delivered |
 | Native backend CI matrix (10 backends, tier-2 informational) | delivered |
 | Router policy schema, recipes ([POLICY.md](POLICY.md)), `ovk doctor` config validation | delivered |
-| PyPI publication and semver release automation | delivered |
+| PyPI publish workflow and semver release automation | ready (publication pending GitHub release + `PYPI_API_TOKEN`) |
 
 ## Future priorities
 

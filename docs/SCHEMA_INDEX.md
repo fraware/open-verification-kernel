@@ -1,6 +1,7 @@
 # OVK Schema Index
 
 JSON schemas for OVK objects. See also [ARTIFACTS.md](ARTIFACTS.md).
+
 | Schema | Version | Example |
 |---|---|---|
 | [verification.evidence.schema.json](../schemas/verification.evidence.schema.json) | ovk.evidence.v1 | `examples/no_agent_self_approval/failing_evidence.json` |

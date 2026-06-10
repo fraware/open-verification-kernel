@@ -28,7 +28,7 @@ OVK is an open interoperability layer. Contributions should make formal methods 
 ```bash
 pip install -e '.[dev]'
 pytest
-python scripts/release_preflight.py
+ovk release-preflight
 ```
 
 ## Key code paths
@@ -36,17 +36,19 @@ python scripts/release_preflight.py
 | Area | Location |
 |---|---|
 | CLI | `ovk/cli.py` |
+| Kernel orchestration | `ovk/core/kernel.py`, `ovk/core/router.py` |
 | Lane evaluation | `ovk/core/multi_lane.py` |
 | Release bundles | `ovk/core/release_bundle.py` |
-| Evidence quality | `ovk/core/evidence_quality.py` |
+| Evidence quality | `ovk/core/evidence_quality.py`, `ovk/core/evidence_invariants.py` |
 | Planning | `ovk/core/planner.py`, `ovk/core/change_detection.py` |
-| Diff parsing | `ovk/core/diff_parser.py`, `ovk/adapters/workflow/` |
-| Adapters | `ovk/adapters/{opa,z3,infra,ci_secrets,deployment}/` |
+| Diff parsing | `ovk/core/diff_parser.py`, `ovk/adapters/workflow/`, `benchmarks/real_diffs/` |
+| External adapters | `ovk/adapters/{cedar,tla,kani,dafny,verus,lean,cbmc,alloy}/` |
+| MVP lane adapters | `ovk/adapters/{opa,z3,infra,ci_secrets,deployment}/` |
 | MCP | `ovk/mcp_server.py`, `ovk/mcp_stdio.py` |
 | GitHub Action | `action.yml` |
 | Schemas | `schemas/` |
-| Examples | `examples/` |
-| Benchmark | `benchmarks/formal_pr_bench/` |
+| Examples | `examples/`, `examples/repair_loops/` |
+| Benchmark | `benchmarks/formal_pr_bench/`, `benchmarks/real_diffs/` |
 
 ## Adding a new lane
 
@@ -65,7 +67,7 @@ python scripts/release_preflight.py
 pip install -e '.[dev]'
 pytest
 ruff check ovk tests benchmarks scripts
-python scripts/release_preflight.py
+ovk release-preflight
 ```
 
 ## Adding an adapter

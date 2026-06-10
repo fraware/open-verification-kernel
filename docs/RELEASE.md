@@ -6,7 +6,7 @@ Release notes and maintainer checklists for Open Verification Kernel v1.1.0.
 
 OVK v1.1 is the depth-first release after v1.0 ecosystem hardening. It ships technical improvements for real PR verification and external adoption readiness:
 
-- **Tier-1 native CI** — blocking OPA, Z3, and CBMC jobs in `native-backends-tier1.yml` with pinned install scripts and evidence honesty checks
+- **Tier-1 native CI** — blocking OPA, Z3, CBMC, and Cedar jobs in `native-backends-tier1.yml` with pinned install scripts and evidence honesty checks
 - **Real diff corpus** — 16 sanitized unified diffs in `benchmarks/real_diffs/` covering secrets, auth, infra, deployment, and multi-surface patterns
 - **FormalPR-Bench depth** — `real_diff` leaderboard category, repair-loop cases for ci_secrets/auth/infra/deployment lanes
 - **PyPI-pinned Action** — set `OVK_PACKAGE_VERSION=1.1.0` to install `open-verification-kernel==1.1.0` from PyPI; defaults to `pip install .` for local development
@@ -74,6 +74,8 @@ Confirm:
 - [x] HMAC and optional Sigstore signing verified in CI.
 
 ## PyPI publication
+
+**Status:** workflow and package metadata are ready; the wheel is not on PyPI until a maintainer creates the GitHub release below.
 
 1. Create a GitHub release for tag `v1.1.0`.
 2. Ensure repository secrets: `PYPI_API_TOKEN` (PyPI trusted publishing or API token).
