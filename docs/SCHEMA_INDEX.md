@@ -20,5 +20,7 @@ JSON schemas for OVK objects. See also [ARTIFACTS.md](ARTIFACTS.md).
 | [verification.config.schema.json](../schemas/verification.config.schema.json) | ovk.config.v1 | `.verification/config.yml` policy routing config |
 | [formal_pr_bench.leaderboard.schema.json](../schemas/formal_pr_bench.leaderboard.schema.json) | formal_pr_bench.leaderboard.v1 | `ovk bench --leaderboard` |
 | [pilot.report.schema.json](../schemas/pilot.report.schema.json) | ovk.pilot_report.v1 | `ovk pilot --output report.json` |
+| [pilot.metrics.schema.json](../schemas/pilot.metrics.schema.json) | ovk.pilot_metrics.v1 | `scripts/collect_pilot_metrics.py --output pilot-metrics.json` |
+| [adoption.summary.schema.json](../schemas/adoption.summary.schema.json) | ovk.adoption_summary.v1 | `docs/benchmarks/adoption-summary.json` |
 
 Generated evidence bundles are validated at write time using the canonical Pydantic `EvidenceBundle` model. Release bundles are additionally checked with `ovk validate-outputs`.

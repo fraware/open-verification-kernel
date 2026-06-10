@@ -1,0 +1,31 @@
+{
+  "schema_version": "ovk.adoption_summary.v1",
+  "ovk_version": "1.1.0",
+  "updated_at": null,
+  "formal_pr_bench": {
+    "cases_total": 100,
+    "cases_passed": 100,
+    "pass_rate": 1.0,
+    "by_category": {
+      "lane": {
+        "cases_total": 100,
+        "cases_passed": 100,
+        "pass_rate": 1.0
+      }
+    }
+  },
+  "real_diff_recall": null,
+  "pilot_dogfood": {
+    "source": null,
+    "last_run": null,
+    "manifests_passed": null,
+    "manifests_total": null,
+    "median_elapsed_ms": null,
+    "false_positive_rate": null,
+    "external_manifest": "examples/pilot_repos/external_oss_ci_secrets.json",
+    "weekly_schedule": "0 7 * * 1",
+    "workflow": ".github/workflows/pilot-dogfood.yml",
+    "ovk_version_pin": "1.1.0"
+  },
+  "external_pilots": []
+}

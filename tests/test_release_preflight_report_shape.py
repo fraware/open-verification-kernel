@@ -19,3 +19,6 @@ def test_release_preflight_report_is_serializable() -> None:
         "template_validation",
         "pilot_program",
     }
+    optional_names = {check["name"] for check in payload.get("optional_checks", [])}
+    assert optional_names == {"pilot_metrics_dry_run"}
+    assert all(check["passed"] for check in payload.get("optional_checks", []))

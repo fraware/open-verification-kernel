@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ovk.adapters.cedar.deterministic import evaluate_cedar_input
+from ovk.adapters.cedar.optional_runner import probe_cedar_binary
 from ovk.adapters.opa.optional_runner import run_opa_policy
 from ovk.adapters.opa.self_protection import evaluate_self_protection
 from ovk.adapters.z3.deterministic_path import evaluate_deterministic_authorization_path
@@ -42,8 +44,8 @@ class NativeBackendSummary:
     fixture_matches_oracle: bool
 
 
-TIER1_NATIVE_EXECUTION_BACKENDS = frozenset({"opa", "z3"})
-TIER1_REQUIRED_BACKENDS = frozenset({"opa", "z3", "cbmc"})
+TIER1_NATIVE_EXECUTION_BACKENDS = frozenset({"opa", "z3", "cedar"})
+TIER1_REQUIRED_BACKENDS = frozenset({"opa", "z3", "cbmc", "cedar"})
 
 
 BACKEND_FIXTURES: dict[str, tuple[str, ...]] = {
@@ -116,6 +118,23 @@ def _probe_opa(fixture_path: str) -> NativeBackendProbeResult:
     )
 
 
+def _probe_cedar(fixture_path: str) -> NativeBackendProbeResult:
+    payload = _read_fixture(fixture_path)
+    oracle_status, _ = evaluate_cedar_input(payload)
+    probe = probe_cedar_binary()
+    binary_present = bool(probe.get("used_native_binary"))
+    runtime_status = oracle_status
+    return NativeBackendProbeResult(
+        backend="cedar",
+        fixture_path=fixture_path,
+        runtime_status=runtime_status,
+        oracle_status=oracle_status,
+        binary_name="cedar",
+        binary_present=binary_present,
+        used_native_binary=binary_present,
+    )
+
+
 def _probe_z3(fixture_path: str) -> NativeBackendProbeResult:
     payload = _read_fixture(fixture_path)
     oracle = evaluate_deterministic_authorization_path(payload, repo="probe/repo", head_sha="probe-sha")
@@ -147,6 +166,8 @@ def probe_native_backend(backend: str) -> list[NativeBackendProbeResult]:
     fixture_paths = BACKEND_FIXTURES[backend]
     if backend == "opa":
         return [_probe_opa(path) for path in fixture_paths]
+    if backend == "cedar":
+        return [_probe_cedar(path) for path in fixture_paths]
     if backend == "z3":
         return [_probe_z3(path) for path in fixture_paths]
     return [_probe_external_adapter(backend, path) for path in fixture_paths]

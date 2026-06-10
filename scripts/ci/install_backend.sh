@@ -11,6 +11,7 @@ fi
 OPA_VERSION="0.67.0"
 Z3_SOLVER_VERSION="4.13.4.0"
 CBMC_APT_VERSION="6.4.1"
+CEDAR_CLI_VERSION="4.8.2"
 
 verify_binary() {
   local name="$1"
@@ -43,7 +44,19 @@ PY
 }
 
 install_cedar() {
-  cargo install cedar-cli --locked 2>/dev/null || echo "cedar-cli install skipped (cargo unavailable)"
+  if ! command -v cargo >/dev/null 2>&1; then
+    curl -fsSL https://sh.rustup.rs -o /tmp/rustup-init.sh
+    bash /tmp/rustup-init.sh -y --default-toolchain stable --profile minimal
+    # shellcheck disable=SC1091
+    source "${HOME}/.cargo/env"
+    echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
+  fi
+  cargo install cedar-policy-cli --version "${CEDAR_CLI_VERSION}" --locked
+  if [[ -x "${HOME}/.cargo/bin/cedar" ]]; then
+    sudo ln -sf "${HOME}/.cargo/bin/cedar" /usr/local/bin/cedar
+  fi
+  verify_binary cedar
+  cedar --version | grep -F "${CEDAR_CLI_VERSION%.*}" >/dev/null
 }
 
 install_tla() {

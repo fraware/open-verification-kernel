@@ -27,6 +27,7 @@ class PreflightReport:
     """Aggregate preflight report."""
 
     checks: tuple[PreflightCheck, ...]
+    optional_checks: tuple[PreflightCheck, ...] = ()
 
     @property
     def passed(self) -> bool:
@@ -40,11 +41,22 @@ class PreflightReport:
                 messages.extend(check.messages or (f"{check.name} failed",))
         return tuple(messages)
 
+    @property
+    def optional_failures(self) -> tuple[str, ...]:
+        messages: list[str] = []
+        for check in self.optional_checks:
+            if not check.passed:
+                messages.extend(check.messages or (f"{check.name} failed",))
+        return tuple(messages)
+
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "passed": self.passed,
             "checks": [check.to_dict() for check in self.checks],
         }
+        if self.optional_checks:
+            payload["optional_checks"] = [check.to_dict() for check in self.optional_checks]
+        return payload
 
 
 def check_from_exit_code(name: str, exit_code: int, failure_message: str) -> PreflightCheck:

@@ -11,6 +11,25 @@ ovk init
 
 Optional: run the MCP server (`ovk-mcp` or `python -m ovk.mcp_stdio`) so your agent can call `ovk_check`, `ovk_repair_suggest`, and `ovk_generate_test`.
 
+## Multi-lane repair loops
+
+OVK ships reproducible repair-loop fixtures for four lanes. Each lane includes `failing.diff`, `repair.patch`, `passing.diff`, and `demo_repair_loop.py`.
+
+| Lane | Fixture directory | Expected `fix_class` |
+|------|-------------------|----------------------|
+| CI secrets | `examples/repair_loops/ci_secrets/` | `remove_untrusted_secret_usage` |
+| Authorization | `examples/repair_loops/authorization/` | `add_route_guard` |
+| Infrastructure | `examples/repair_loops/infrastructure/` | `restrict_public_access` |
+| Deployment | `examples/multi_surface/deployment_skip.diff` | `add_approval_transition` |
+
+Run a lane demo:
+
+```bash
+python examples/repair_loops/authorization/demo_repair_loop.py
+python examples/repair_loops/infrastructure/demo_repair_loop.py
+python examples/repair_loops/ci_secrets/demo_repair_loop.py
+```
+
 ## CI secrets lane walkthrough
 
 Use the reproducible fixtures in `examples/repair_loops/ci_secrets/`.
@@ -67,6 +86,42 @@ ovk generate-test --evidence ovk-evidence.json
 
 Writes minimized counterexample fixtures under `.verification/generated_tests/`.
 
+## Authorization lane walkthrough
+
+```bash
+ovk check \
+  --changed-files examples/repair_loops/authorization/failing.diff \
+  --repo example/oss-repo \
+  --head-sha agent-pr-1
+
+ovk repair-suggest ovk-evidence.json
+
+ovk check \
+  --changed-files examples/repair_loops/authorization/passing.diff \
+  --repo example/oss-repo \
+  --head-sha agent-pr-2
+```
+
+Expected: initial block with `admin_route_reachable_by_non_admin`, repair hint `add_route_guard`, repaired allow.
+
+## Infrastructure lane walkthrough
+
+```bash
+ovk check \
+  --changed-files examples/repair_loops/infrastructure/failing.diff \
+  --repo example/oss-repo \
+  --head-sha agent-pr-1
+
+ovk repair-suggest ovk-evidence.json
+
+ovk check \
+  --changed-files examples/repair_loops/infrastructure/passing.diff \
+  --repo example/oss-repo \
+  --head-sha agent-pr-2
+```
+
+Expected: initial block with `sensitive_resource_publicly_exposed`, repair hint `restrict_public_access`, repaired allow.
+
 ## FormalPR-Bench repair_loop category
 
 Extended benchmark cases score:
@@ -80,13 +135,13 @@ Run locally:
 ovk bench --expanded
 ```
 
-Repair-loop cases include ci_secrets, auth bypass, infra exposure, and deployment skip lanes.
+Repair-loop cases include ci_secrets, authorization, infrastructure, and deployment skip lanes. Auth and infra cases use `examples/repair_loops/` fixtures sourced from `benchmarks/real_diffs/`.
 
 ## MCP session sketch
 
 1. Agent opens PR with a workflow diff.
 2. Agent calls `ovk check` (or GitHub Action runs in strict mode).
-3. On block, agent calls `ovk repair-suggest` and reads `fix_class`.
+3. On block, agent calls `ovk repair-suggest` and reads `fix_class`, `lane`, and `affected_file` when present.
 4. Agent patches the workflow file.
 5. Agent reruns `ovk check` until recommendation is `allow`.
 6. Agent optionally commits generated regression tests from `ovk generate-test`.

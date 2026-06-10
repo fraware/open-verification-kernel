@@ -48,8 +48,10 @@
     {
       "case_id": "repair_loop_infra_exposure",
       "category": "repair_loop",
-      "input_fixture": "examples/multi_surface/infra_public_s3.diff",
+      "input_fixture": "examples/repair_loops/infrastructure/failing.diff",
+      "passing_fixture": "examples/repair_loops/infrastructure/passing.diff",
       "expected_merge_recommendation": "block",
+      "expected_pass_recommendation": "allow",
       "expected_fix_class": "restrict_public_access"
     },
     {
@@ -93,8 +95,10 @@
     {
       "case_id": "repair_loop_auth_bypass",
       "category": "repair_loop",
-      "input_fixture": "examples/multi_surface/auth_route_bypass.diff",
+      "input_fixture": "examples/repair_loops/authorization/failing.diff",
+      "passing_fixture": "examples/repair_loops/authorization/passing.diff",
       "expected_merge_recommendation": "block",
+      "expected_pass_recommendation": "allow",
       "expected_fix_class": "add_route_guard"
     },
     {

@@ -1,0 +1,65 @@
+name: Pilot Dogfood
+
+on:
+  schedule:
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  OVK_PACKAGE_VERSION: "1.1.0"
+
+jobs:
+  external-consumer-simulation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Document external consumer pin
+        run: |
+          echo "Simulating fork consumer: uses ./ with OVK_PACKAGE_VERSION=${OVK_PACKAGE_VERSION}"
+          test -f examples/pilot_repos/external_oss_ci_secrets.json
+      - name: Advisory check on unsafe workflow diff
+        uses: ./
+        with:
+          mode: advisory
+          use-check: "true"
+          changed-files: examples/ci_secrets/workflow_secrets_on_pr.diff
+          post-comment: "false"
+        continue-on-error: true
+      - name: Advisory verify on external OSS manifest
+        uses: ./
+        with:
+          mode: advisory
+          verification-manifest: examples/pilot_repos/external_oss_ci_secrets.json
+          bundle-output-dir: .verification/pilot-dogfood-bundle
+          post-comment: "false"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install package for metrics collection
+        run: pip install -e '.[dev]'
+      - name: Run pilot program
+        run: ovk pilot --output .verification/pilot-program-report.json
+      - name: Collect pilot metrics
+        run: |
+          python scripts/collect_pilot_metrics.py \
+            --pilot-report .verification/pilot-dogfood-report.json \
+            --input-pilot-report .verification/pilot-program-report.json \
+            --evidence ovk-evidence.json \
+            --bundle-dir .verification/pilot-dogfood-bundle \
+            --source pilot-dogfood \
+            --ovk-version "${OVK_PACKAGE_VERSION}"
+          python scripts/render_pilot_metrics.py --metrics .verification/pilot-dogfood-report.json
+      - name: Upload pilot metrics artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pilot-dogfood-metrics
+          path: |
+            .verification/pilot-program-report.json
+            .verification/pilot-dogfood-report.json
+            docs/benchmarks/adoption-summary.json
+            ovk-evidence.json
+            .verification/pilot-dogfood-bundle/**
+          retention-days: 90

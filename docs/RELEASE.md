@@ -91,20 +91,20 @@ twine check dist/*
 
 ## GitHub release (maintainer)
 
-After pushing tag 1.1.0 to origin:
+After pushing tag `v1.1.0` to origin:
 
-`ash
+```bash
 gh release create v1.1.0 --title "OVK v1.1.0" --notes-file docs/RELEASE_NOTES_v1.1.0.md
-`
+```
 
-Publishing the release triggers the Publish workflow (PyPI upload). If gh is not authenticated on your machine:
+Publishing the release triggers the Publish workflow (PyPI upload). If `gh` is not authenticated on your machine:
 
-`ash
+```bash
 gh auth login
 git push origin main
 git push origin v1.1.0
 gh release create v1.1.0 --title "OVK v1.1.0" --notes-file docs/RELEASE_NOTES_v1.1.0.md
-`
+```
 
 Verify the release at https://github.com/fraware/open-verification-kernel/releases/tag/v1.1.0.
 

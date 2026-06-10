@@ -13,13 +13,14 @@ Blocking workflow: [`.github/workflows/native-backends-tier1.yml`](../.github/wo
 | `opa` | `opa` | `v0.67.0` static release | Yes — `run_opa_policy` |
 | `z3` | `z3-solver` (Python) | `4.13.4.0` | Yes — `run_authorization_obligation_with_z3` |
 | `cbmc` | `cbmc` | Debian `6.4.1` | Contract + deterministic oracle today; native CBMC invocation is future work |
+| `cedar` | `cedar` | `cedar-policy-cli` `4.8.2` | Yes — `probe_cedar_binary` contract probe with oracle cross-check |
 
 Installer: [`scripts/ci/install_backend.sh`](../scripts/ci/install_backend.sh) runs post-install `which` checks and version assertions for all tier-1 backends.
 
 Tests:
 
 - Matrix probe: `tests/test_native_backends.py`
-- Per-backend integration: `tests/test_opa_optional_integration.py`, `tests/test_z3_native_integration.py`, `tests/test_cbmc_native_integration.py`
+- Per-backend integration: `tests/test_opa_optional_integration.py`, `tests/test_z3_native_integration.py`, `tests/test_cbmc_native_integration.py`, `tests/test_cedar_native_integration.py`
 
 Evidence honesty: `ovk/core/evidence_invariants.py` rejects `native_tool` claims when deterministic-oracle assumptions are present.
 
@@ -27,7 +28,7 @@ Evidence honesty: `ovk/core/evidence_invariants.py` rejects `native_tool` claims
 
 Scheduled / manual workflow: [`.github/workflows/native-backends.yml`](../.github/workflows/native-backends.yml) (`continue-on-error: true`)
 
-Backends: `cedar`, `tla+`, `kani`, `dafny`, `verus`, `lean`, `alloy`
+Backends: `tla+`, `kani`, `dafny`, `verus`, `lean`, `alloy`
 
 These adapters use deterministic evaluators as the stable oracle path. Missing native binaries do not block verification; probes report `used_native_binary=False` unless a native runner exists.
 
@@ -42,7 +43,7 @@ These adapters use deterministic evaluators as the stable oracle path. Missing n
   - Fixture coverage: `examples/auth_regression`
 
 - `cedar` (binary: `cedar`)
-  - Guarantee class: deterministic fallback + optional native binary presence
+  - Guarantee class: deterministic fallback + native contract probe when installed
   - Fixture coverage: `examples/backends/cedar_*.json`
 
 - `tla+` (binary: `tlc`)
@@ -79,7 +80,7 @@ These adapters use deterministic evaluators as the stable oracle path. Missing n
 - OPA and Z3 lanes also preserve deterministic behavior via:
   - `ovk.adapters.opa.self_protection.evaluate_self_protection`
   - `ovk.adapters.z3.deterministic_path.evaluate_deterministic_authorization_path`
-- Tier-1 probes assert `used_native_binary=True` for OPA and Z3 when the backend is available. CBMC and tier-2 backends must not claim native execution while using the oracle.
+- Tier-1 probes assert `used_native_binary=True` for OPA, Z3, and Cedar when the backend is available. CBMC uses contract probing without full native harness execution. Tier-2 backends must not claim native execution while using the oracle alone.
 
 ## CI Entry Points
 

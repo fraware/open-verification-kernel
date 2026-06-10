@@ -185,6 +185,14 @@ def _check_external_validation_matrix() -> list[str]:
     return validate_external_validation_matrix()
 
 
+def _check_pilot_metrics_dry_run() -> list[str]:
+    """Dry-run pilot metrics collection and adoption summary rendering."""
+    ensure_repo_on_path()
+    from scripts.validate_pilot_metrics_tooling import validate_pilot_metrics_dry_run
+
+    return validate_pilot_metrics_dry_run()
+
+
 def build_release_preflight_report() -> PreflightReport:
     """Run release preflight checks and return a structured report."""
     ensure_repo_on_path()
@@ -210,7 +218,10 @@ def build_release_preflight_report() -> PreflightReport:
             check_from_failures("formal_pr_bench", _check_formal_pr_bench()),
             check_from_failures("template_validation", _check_template_validation()),
             check_from_failures("pilot_program", _check_pilot_program()),
-        )
+        ),
+        optional_checks=(
+            check_from_failures("pilot_metrics_dry_run", _check_pilot_metrics_dry_run()),
+        ),
     )
 
 

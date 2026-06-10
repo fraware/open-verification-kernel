@@ -1,0 +1,14 @@
+diff --git a/infra/storage.tf b/infra/storage.tf
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/infra/storage.tf
+@@ -0,0 +1,8 @@
++resource "aws_s3_bucket" "customer_data" {
++  bucket = "customer-data"
++  acl    = "public-read"
++}
++
++resource "aws_s3_bucket" "customer_data_acl" {
++  publicly_accessible = true
++}

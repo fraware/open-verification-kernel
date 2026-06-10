@@ -2,6 +2,35 @@
 
 Structured outcomes from the v1.0 pilot manifests in `examples/pilot_repos/`. Metrics are measured on a developer workstation (Windows 11, Python 3.11) using `ovk check` and `ovk verify` in advisory mode.
 
+## Pilot Zero: In-repo dogfood (external consumer simulation)
+
+**Workflow:** `.github/workflows/pilot-dogfood.yml` (weekly + `workflow_dispatch`)
+
+**Manifest:** `examples/pilot_repos/external_oss_ci_secrets.json`
+
+**Consumer path:** local Action (`./`) with `OVK_PACKAGE_VERSION: "1.1.0"` to mirror fork adopters pinning `@v1.1.0` and PyPI install.
+
+| Metric | Target | Measured |
+|--------|--------|----------|
+| Advisory mode | yes | yes |
+| Unsafe workflow diff block rate | 100% | _from weekly artifact_ |
+| Safe manifest pass rate | 100% | _from weekly artifact_ |
+| False positive rate (fixtures) | 0% | _from pilot-metrics.json_ |
+| Median manifest latency | — | _from pilot-metrics.json_ |
+| Adoption summary | published | `docs/benchmarks/adoption-summary.json` |
+
+**Artifacts:** `pilot-dogfood-metrics` workflow artifact (`pilot-report.json`, `pilot-metrics.json`, `ovk-evidence.json`, `pilot-dogfood-bundle/`).
+
+**Reproduction:**
+
+```bash
+ovk pilot --output pilot-report.json
+python scripts/collect_pilot_metrics.py --pilot-report pilot-report.json --source pilot_dogfood --ovk-version 1.1.0 --output pilot-metrics.json
+python scripts/render_pilot_metrics.py --pilot-metrics pilot-metrics.json
+```
+
+**Notes:** Pilot Zero is the in-repo maximum deliverable before community OSS repos complete advisory rollout. Metrics feed `docs/benchmarks/adoption-summary.json` via `scripts/render_pilot_metrics.py`.
+
 ## Pilot 1: Self-protection only
 
 **Manifest:** `examples/pilot_repos/self_protection_only.json`

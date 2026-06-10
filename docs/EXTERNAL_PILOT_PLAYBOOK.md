@@ -62,11 +62,66 @@ Require the OVK check on `main` / `release/*` only; keep advisory on experimenta
 
 After ci_secrets is stable, add lanes one at a time using manifests from `examples/pilot_repos/`. Re-run advisory for each new lane before strict enforcement.
 
+## Fork adopter workflow (copy-paste)
+
+Copy this workflow to `.github/workflows/ovk-pilot.yml` in your repository. It pins the published Action and package version, runs advisory mode for two weeks, and uploads metrics artifacts for your pilot report.
+
+```yaml
+name: OVK External Pilot
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+env:
+  OVK_PACKAGE_VERSION: "1.1.0"
+
+jobs:
+  ovk-advisory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: OVK advisory check
+        uses: fraware/open-verification-kernel@v1.1.0
+        with:
+          mode: advisory
+          use-check: "true"
+          changed-files: ${{ github.event.pull_request.diff_url }}
+          post-comment: "false"
+      - name: OVK advisory verify (CI secrets lane)
+        uses: fraware/open-verification-kernel@v1.1.0
+        with:
+          mode: advisory
+          verification-manifest: .verification/ci_secrets_pilot.json
+          bundle-output-dir: ovk-pilot-bundle
+          post-comment: "false"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ovk-pilot-artifacts
+          path: |
+            ovk-evidence.json
+            ovk-pilot-bundle/**
+          retention-days: 30
+```
+
+Starter manifest for the verify step: copy [pilot_manifest_ci_secrets.template.json](templates/pilot_manifest_ci_secrets.template.json) to `.verification/ci_secrets_pilot.json` and point `input` at your lane fixture JSON.
+
+In-repo dogfood reference: `.github/workflows/pilot-dogfood.yml` (weekly advisory simulation with `OVK_PACKAGE_VERSION` and `scripts/collect_pilot_metrics.py`).
+
 ## Support artifacts
 
 - Repair loop demo: [AGENT_REPAIR_LOOP.md](AGENT_REPAIR_LOOP.md)
 - Realistic diff corpus: `benchmarks/real_diffs/`
 - External consumer workflow: `examples/github_workflows/external_consumer.yml`
+- External OSS manifest: `examples/pilot_repos/external_oss_ci_secrets.json`
+- Metrics collector: `scripts/collect_pilot_metrics.py`
+- Adoption summary: `docs/benchmarks/adoption-summary.json`
 
 ## Reporting template
 

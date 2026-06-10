@@ -11,6 +11,7 @@ on:
       - 'tests/test_opa_optional_integration.py'
       - 'tests/test_z3_native_integration.py'
       - 'tests/test_cbmc_native_integration.py'
+      - 'tests/test_cedar_native_integration.py'
       - '.github/workflows/native-backends-tier1.yml'
   pull_request:
     paths:
@@ -21,6 +22,7 @@ on:
       - 'tests/test_opa_optional_integration.py'
       - 'tests/test_z3_native_integration.py'
       - 'tests/test_cbmc_native_integration.py'
+      - 'tests/test_cedar_native_integration.py'
       - '.github/workflows/native-backends-tier1.yml'
   workflow_dispatch:
 
@@ -30,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [opa, z3, cbmc]
+        backend: [opa, z3, cbmc, cedar]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -42,6 +44,15 @@ jobs:
         with:
           path: ~/.cache/pip
           key: z3-solver-4.13.4.0-${{ runner.os }}-py3.11
+      - name: Cache cargo registry
+        if: matrix.backend == 'cedar'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/cedar
+          key: cedar-policy-cli-4.8.2-${{ runner.os }}
       - name: Install backend
         run: bash scripts/ci/install_backend.sh ${{ matrix.backend }}
       - name: Install package
@@ -56,6 +67,7 @@ jobs:
             opa) pytest tests/test_opa_optional_integration.py -v ;;
             z3) pytest tests/test_z3_native_integration.py -v ;;
             cbmc) pytest tests/test_cbmc_native_integration.py -v ;;
+            cedar) pytest tests/test_cedar_native_integration.py -v ;;
           esac
 
   native-tier1-summary:
@@ -74,7 +86,7 @@ jobs:
           python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
           from ovk.core.native_backend_probe import probe_all_native_backends
 
-          tier1 = {"opa", "z3", "cbmc"}
+          tier1 = {"opa", "z3", "cbmc", "cedar"}
           print("## Native Backend Tier 1 (required)")
           print("| Backend | Binary | Contract | Native Used | Fixture Match |")
           print("|---------|--------|----------|-------------|---------------|")

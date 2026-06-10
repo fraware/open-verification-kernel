@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/adoption.summary.schema.json",
+  "title": "Adoption Summary",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "ovk_version",
+    "formal_pr_bench",
+    "real_diff_recall",
+    "pilot_dogfood",
+    "external_pilots"
+  ],
+  "properties": {
+    "schema_version": { "const": "ovk.adoption_summary.v1" },
+    "ovk_version": { "type": "string", "minLength": 1 },
+    "updated_at": { "type": ["string", "null"] },
+    "formal_pr_bench": {
+      "type": "object",
+      "required": ["cases_total", "cases_passed", "pass_rate"],
+      "properties": {
+        "cases_total": { "type": ["integer", "null"], "minimum": 0 },
+        "cases_passed": { "type": ["integer", "null"], "minimum": 0 },
+        "pass_rate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "intent_recall": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "by_category": { "type": "object" },
+        "timing_ms": {
+          "type": "object",
+          "properties": {
+            "p50": { "type": ["number", "null"] },
+            "p95": { "type": ["number", "null"] },
+            "max": { "type": ["number", "null"] }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": true
+    },
+    "real_diff_recall": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+    "pilot_dogfood": {
+      "type": "object",
+      "required": ["external_manifest", "weekly_schedule"],
+      "properties": {
+        "source": { "type": ["string", "null"] },
+        "last_run": { "type": ["string", "null"] },
+        "manifests_passed": { "type": ["integer", "null"], "minimum": 0 },
+        "manifests_total": { "type": ["integer", "null"], "minimum": 0 },
+        "median_elapsed_ms": { "type": ["number", "null"], "minimum": 0 },
+        "false_positive_rate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "external_manifest": { "type": "string", "minLength": 1 },
+        "weekly_schedule": { "type": "string", "minLength": 1 },
+        "workflow": { "type": "string" },
+        "ovk_version_pin": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "external_pilots": {
+      "type": "array",
+      "items": { "type": "object" }
+    }
+  },
+  "additionalProperties": false
+}

@@ -60,6 +60,7 @@ def render_summary(leaderboard: dict[str, Any]) -> dict[str, Any]:
         "backend_selection_accuracy": summary.get("backend_selection_accuracy"),
         "evidence_honesty": summary.get("evidence_honesty"),
         "intent_recall": summary.get("intent_recall"),
+        "real_diff_recall": summary.get("real_diff_recall"),
         "by_category": summary.get("by_category", {}),
         "timing_ms": {
             "p50": timing.get("p50"),

@@ -1,0 +1,14 @@
+--- a/infra/storage.tf
++++ b/infra/storage.tf
+@@ -1,8 +1,6 @@
+ resource "aws_s3_bucket" "customer_data" {
+-  bucket = "customer-data"
+-  acl    = "public-read"
++  bucket = "customer-data-private"
++  acl    = "private"
++  tags = { sensitivity = "confidential" }
+ }
+-
+-resource "aws_s3_bucket" "customer_data_acl" {
+-  publicly_accessible = true
+-}

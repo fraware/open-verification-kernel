@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/pilot.metrics.schema.json",
+  "title": "Pilot Metrics Report",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "collected_at",
+    "source",
+    "ovk_version",
+    "pilot_report",
+    "adoption"
+  ],
+  "properties": {
+    "schema_version": { "const": "ovk.pilot_metrics.v1" },
+    "collected_at": { "type": "string", "format": "date-time" },
+    "source": { "type": "string", "minLength": 1 },
+    "ovk_version": { "type": "string", "minLength": 1 },
+    "pilot_report": {
+      "type": "object",
+      "required": ["manifests_total", "manifests_passed", "results"],
+      "properties": {
+        "manifests_total": { "type": "integer", "minimum": 0 },
+        "manifests_passed": { "type": "integer", "minimum": 0 },
+        "results": { "type": "array" }
+      }
+    },
+    "adoption": {
+      "type": "object",
+      "required": ["real_diff_recall", "pilot_dogfood"],
+      "properties": {
+        "real_diff_recall": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "pilot_dogfood": {
+          "type": "object",
+          "required": ["manifests_passed", "manifests_total"],
+          "properties": {
+            "manifests_passed": { "type": "integer", "minimum": 0 },
+            "manifests_total": { "type": "integer", "minimum": 0 },
+            "median_elapsed_ms": { "type": ["number", "null"], "minimum": 0 },
+            "false_positive_rate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+            "block_rate_on_unsafe_fixture": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+            "external_manifest": { "type": "string" }
+          }
+        }
+      }
+    },
+    "bundle_artifacts": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": false
+}

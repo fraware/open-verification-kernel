@@ -27,7 +27,7 @@ Lane details: [LANES.md](LANES.md).
 
 ## Backends (10)
 
-`opa`, `z3`, `cedar`, `tla+`, `kani`, `dafny`, `verus`, `lean`, `cbmc`, `alloy` — each with capability manifest and deterministic CI fallback. Tier-1 native jobs (OPA, Z3, CBMC) are required in CI when binaries are installed.
+`opa`, `z3`, `cedar`, `tla+`, `kani`, `dafny`, `verus`, `lean`, `cbmc`, `alloy` — each with capability manifest and deterministic CI fallback. Tier-1 native jobs (OPA, Z3, CBMC, Cedar) are required in CI when binaries are installed.
 
 ## Key CLI commands
 

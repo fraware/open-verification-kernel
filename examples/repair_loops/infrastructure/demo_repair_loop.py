@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Demonstrate MCP-style agent repair loop for ci_secrets lane."""
+"""Demonstrate agent repair loop for infrastructure lane."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[3]
-FAILING = ROOT / "examples/repair_loops/ci_secrets/failing.diff"
-PASSING = ROOT / "examples/repair_loops/ci_secrets/passing.diff"
+FAILING = ROOT / "examples/repair_loops/infrastructure/failing.diff"
+PASSING = ROOT / "examples/repair_loops/infrastructure/passing.diff"
 
 
 def _run_check(diff_path: Path, head_sha: str) -> dict:
@@ -35,8 +35,7 @@ def _run_check(diff_path: Path, head_sha: str) -> dict:
     )
     if result.returncode not in {0, 1}:
         raise RuntimeError(result.stdout + result.stderr)
-    evidence = json.loads((ROOT / "ovk-evidence.json").read_text(encoding="utf-8"))
-    return evidence
+    return json.loads((ROOT / "ovk-evidence.json").read_text(encoding="utf-8"))
 
 
 def main() -> int:
@@ -53,8 +52,8 @@ def main() -> int:
         check=False,
     )
     hints = json.loads(suggest.stdout)
-    if not any(item.get("fix_class") == "remove_untrusted_secret_usage" for item in hints.get("repair_hints", [])):
-        print("expected remove_untrusted_secret_usage hint", file=sys.stderr)
+    if not any(item.get("fix_class") == "restrict_public_access" for item in hints.get("repair_hints", [])):
+        print("expected restrict_public_access hint", file=sys.stderr)
         return 1
 
     second = _run_check(PASSING, "agent-pr-2")
@@ -62,7 +61,7 @@ def main() -> int:
         print("expected repaired allow", file=sys.stderr)
         return 1
 
-    print("repair loop demo: block -> hint -> allow")
+    print("infrastructure repair loop: block -> restrict_public_access -> allow")
     return 0
 
 

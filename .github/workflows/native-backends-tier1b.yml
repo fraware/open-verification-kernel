@@ -1,0 +1,47 @@
+name: Native Backends Tier 1b
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ovk/**'
+      - 'adapters/**'
+      - 'scripts/ci/install_backend.sh'
+      - 'tests/test_cedar_native_integration.py'
+      - 'tests/test_native_backends.py'
+      - '.github/workflows/native-backends-tier1b.yml'
+  pull_request:
+    paths:
+      - 'ovk/**'
+      - 'adapters/**'
+      - 'scripts/ci/install_backend.sh'
+      - 'tests/test_cedar_native_integration.py'
+      - 'tests/test_native_backends.py'
+      - '.github/workflows/native-backends-tier1b.yml'
+  workflow_dispatch:
+
+jobs:
+  native-backend-cedar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-cedar-${{ runner.os }}
+      - name: Install Cedar CLI
+        run: bash scripts/ci/install_backend.sh cedar
+      - name: Install package
+        run: pip install -e '.[dev]'
+      - name: Run Cedar native backend probe
+        run: pytest tests/test_native_backends.py -m native_backend -v -k cedar
+        env:
+          OVK_NATIVE_BACKEND: cedar
+      - name: Run Cedar integration tests
+        run: pytest tests/test_cedar_native_integration.py -v

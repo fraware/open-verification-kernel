@@ -112,11 +112,23 @@ def repair_hint_for_counterexample(counterexample: dict[str, Any]) -> dict[str, 
         "fix_class": fix_class,
         "suggested_action": suggested_action,
         "summary": counterexample.get("summary", ""),
+        "lane": lane_for_counterexample(counterexample),
     }
     if affected_file:
         repair_plan["affected_file"] = affected_file
     if line_hunk is not None:
         repair_plan["line_hunk"] = line_hunk
+    route = counterexample.get("route")
+    if route:
+        repair_plan["route"] = route
+        if not affected_file:
+            repair_plan["affected_file"] = f"src/routes/{str(route).strip('/').split('/')[0]}.ts"
+    resource_id = counterexample.get("resource_id")
+    if resource_id:
+        repair_plan["resource_id"] = resource_id
+    workflow_id = counterexample.get("workflow_id")
+    if workflow_id:
+        repair_plan["workflow_id"] = workflow_id
     return repair_plan
 
 
