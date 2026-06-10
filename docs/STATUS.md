@@ -1,16 +1,17 @@
 # OVK Status
 
-Current state of Open Verification Kernel **v1.0.0**.
+Current state of Open Verification Kernel **v1.1.0**.
 
 ## Summary
 
-OVK is a solver-agnostic verification kernel for AI-agent pull requests. v1.0 delivers autonomous `ovk check` on unified diffs, ten optional backends with deterministic fallbacks, kernel orchestration (`Infer → Rank → Route → Run → Decide`), MCP agent tools, Sigstore-ready signing, FormalPR-Bench v1 with multi-dimensional scoring, and production preflight gates.
+OVK is a solver-agnostic verification kernel for AI-agent pull requests. v1.1 builds on the v1.0 baseline with depth-first improvements: tier-1 native backend CI (OPA, Z3, CBMC), a real-diff benchmark corpus, expanded FormalPR-Bench repair-loop cases, PyPI-pinned GitHub Action installs, and external pilot playbooks.
 
 ## Package
 
-- Version `1.0.0` with setuptools package discovery (`ovk*`).
+- Version `1.1.0` with setuptools package discovery (`ovk*`).
 - Optional dependency groups: `dev`, `solvers`, `mcp`, `backends-wave1`, `backends-wave2`.
 - Primary command: `ovk check --changed-files <diff>`.
+- GitHub Action supports `OVK_PACKAGE_VERSION` for PyPI wheel installs (`open-verification-kernel==1.1.0`).
 
 ## Evidence lanes
 
@@ -26,7 +27,7 @@ Lane details: [LANES.md](LANES.md).
 
 ## Backends (10)
 
-`opa`, `z3`, `cedar`, `tla+`, `kani`, `dafny`, `verus`, `lean`, `cbmc`, `alloy` — each with capability manifest and deterministic CI fallback.
+`opa`, `z3`, `cedar`, `tla+`, `kani`, `dafny`, `verus`, `lean`, `cbmc`, `alloy` — each with capability manifest and deterministic CI fallback. Tier-1 native jobs (OPA, Z3, CBMC) are required in CI when binaries are installed.
 
 ## Key CLI commands
 
@@ -59,13 +60,16 @@ python scripts/validate_templates.py
 ## Benchmark
 
 - 34 canonical lane/backend cases + extended routing/adversarial/repair-loop/intent-recall cases.
+- 16-case `benchmarks/real_diffs/` corpus for realistic PR diff coverage.
 - 100-case expanded set for load coverage.
 - Leaderboard schema: `schemas/formal_pr_bench.leaderboard.schema.json`.
 
 ## Pilots
 
-See [PILOT_CASE_STUDIES.md](PILOT_CASE_STUDIES.md) and `examples/pilot_repos/`.
+In-repo manifests: [PILOT_CASE_STUDIES.md](PILOT_CASE_STUDIES.md) and `examples/pilot_repos/`.
+
+External OSS adoption: [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md).
 
 ## Migration
 
-Upgrading from v0.1 or `1.0.0-rc1`: [MIGRATION.md](MIGRATION.md).
+Upgrading from v1.0.0: [MIGRATION.md](MIGRATION.md). See [RELEASE_NOTES_v1.1.0.md](RELEASE_NOTES_v1.1.0.md).

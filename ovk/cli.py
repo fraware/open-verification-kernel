@@ -44,7 +44,7 @@ from ovk.core.sprint1_runner import (
 )
 from ovk.core.check import load_diff_or_changed_files, run_check
 from ovk.core.context import build_repository_context
-from ovk.core.counterexample_translator import write_generated_tests
+from ovk.core.counterexample_translator import repair_hint_for_counterexample, write_generated_tests
 from ovk.core.doctor import run_doctor
 from ovk.core.repo_memory import record_run
 from ovk.core.run import run_from_changed_files
@@ -732,6 +732,32 @@ def generate_test(
     written = write_generated_tests(bundle, output_dir)
     for path in written:
         typer.echo(str(path))
+
+
+@app.command("repair-suggest")
+def repair_suggest(
+    evidence_bundle: Path = typer.Option(..., "--evidence", help="Evidence bundle JSON."),
+) -> None:
+    """Emit machine-readable repair hints from bundle counterexamples."""
+    bundle = EvidenceBundle.model_validate(read_json_file(evidence_bundle))
+    counterexamples = [
+        counterexample
+        for evidence in bundle.evidence
+        for counterexample in evidence.counterexamples
+    ]
+    if not counterexamples:
+        typer.echo(json.dumps({"repair_hints": [], "blocked": bundle.decision.get("merge_recommendation") == "block"}))
+        return
+    hints = [repair_hint_for_counterexample(item) for item in counterexamples]
+    typer.echo(
+        json.dumps(
+            {
+                "blocked": bundle.decision.get("merge_recommendation") == "block",
+                "repair_hints": hints,
+            },
+            indent=2,
+        )
+    )
 
 
 @template_app.command("list")

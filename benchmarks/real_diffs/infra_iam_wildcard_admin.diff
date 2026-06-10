@@ -1,0 +1,17 @@
+diff --git a/infra/iam_policy.tf b/infra/iam_policy.tf
+new file mode 100644
+index 0000000..4444444
+--- /dev/null
++++ b/infra/iam_policy.tf
+@@ -0,0 +1,12 @@
++resource "aws_iam_policy" "admin_open" {
++  name = "admin-open"
++  policy = jsonencode({
++    Version = "2012-10-17"
++    Statement = [{
++      Effect = "Allow"
++      Principal = "*"
++      Action = "admin:*"
++    }]
++  })
++}

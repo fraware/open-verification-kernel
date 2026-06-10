@@ -3,8 +3,8 @@ from ovk.core.release_metadata import release_metadata
 
 def test_release_metadata_contains_release_candidate() -> None:
     metadata = release_metadata()
-    assert metadata["version"] == "1.0.0"
-    assert metadata["release_candidate"] == "1.0.0"
+    assert metadata["version"] == "1.1.0"
+    assert metadata["release_candidate"] == "1.1.0"
 
 
 def test_release_metadata_lists_core_commands() -> None:

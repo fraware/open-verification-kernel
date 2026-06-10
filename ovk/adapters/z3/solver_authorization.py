@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from ovk.adapters.z3.counterexample import counterexamples_from_obligation
+from ovk.adapters.z3.obligation import build_authorization_obligation
+
 
 def evaluate_with_optional_z3(data: dict[str, Any]) -> dict[str, Any]:
     """Check whether a non-admin actor can reach an admin-only route.
@@ -17,9 +20,17 @@ def evaluate_with_optional_z3(data: dict[str, Any]) -> dict[str, Any]:
     intentionally small: each supplied reachability edge is treated as a witness
     candidate. Z3 is used to establish whether a non-admin witness exists.
     """
+    obligation = build_authorization_obligation(data)
+    deterministic = counterexamples_from_obligation(obligation)
     try:
         import z3  # type: ignore
     except Exception:
+        if deterministic:
+            return {
+                "status": "fail",
+                "reason": "deterministic witness found; z3-solver is not installed",
+                "counterexamples": deterministic,
+            }
         return {
             "status": "unknown",
             "reason": "z3-solver is not installed",

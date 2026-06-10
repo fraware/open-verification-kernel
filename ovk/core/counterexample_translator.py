@@ -9,6 +9,7 @@ from typing import Any, Callable
 from ovk.adapters.ci_secrets.regression import render_ci_secrets_regression_suite
 from ovk.adapters.deployment.regression import render_deployment_regression_suite
 from ovk.adapters.infra.regression import render_infra_regression_suite
+from ovk.adapters.z3.minimize import minimize_counterexample
 from ovk.adapters.z3.regression import render_authorization_regression_suite
 from ovk.core.models import EvidenceBundle
 
@@ -16,12 +17,14 @@ from ovk.core.models import EvidenceBundle
 FAILURE_MODE_TO_LANE: dict[str, str] = {
     "admin_route_reachable_by_non_admin": "authorization",
     "authorization_abstraction_invalid": "authorization",
+    "privilege_escalation": "authorization",
     "sensitive_resource_publicly_exposed": "infrastructure",
     "infrastructure_abstraction_invalid": "infrastructure",
     "secrets_exposed_in_untrusted_context": "ci_secrets",
     "required_check_removed": "self_protection",
     "missing_required_metadata": "self_protection",
     "verification_config_changed_by_agent": "self_protection",
+    "required_approval_state_skipped": "deployment",
     "skipped_required_approval_state": "deployment",
     "opa_policy_violation": "self_protection",
 }
@@ -31,6 +34,8 @@ FIX_CLASSES: dict[str, str] = {
     "secrets_exposed_in_untrusted_context": "remove_untrusted_secret_usage",
     "sensitive_resource_publicly_exposed": "restrict_public_access",
     "admin_route_reachable_by_non_admin": "add_route_guard",
+    "privilege_escalation": "revoke_privileged_grant",
+    "required_approval_state_skipped": "add_approval_transition",
     "skipped_required_approval_state": "add_approval_transition",
     "missing_state_machine_abstraction": "add_approval_transition",
     "missing_required_metadata": "add_required_metadata",
@@ -45,6 +50,8 @@ REPAIR_SUGGESTIONS: dict[str, str] = {
     "secrets_exposed_in_untrusted_context": "Remove secret references from untrusted workflow triggers.",
     "sensitive_resource_publicly_exposed": "Restrict public access on the sensitive resource.",
     "admin_route_reachable_by_non_admin": "Block non-admin reachability to admin routes.",
+    "privilege_escalation": "Revoke newly granted privileged roles or restore least-privilege assignments.",
+    "required_approval_state_skipped": "Add the missing approval transition in the deployment state machine.",
     "skipped_required_approval_state": "Add the missing approval transition in the deployment state machine.",
     "missing_state_machine_abstraction": "Provide a complete deployment state machine with required approvals.",
     "missing_required_metadata": "Provide required check metadata for self-protection evaluation.",
@@ -80,12 +87,13 @@ def lane_for_counterexample(counterexample: dict[str, Any], *, intent_id: str = 
 
 def regression_artifact_for_counterexample(counterexample: dict[str, Any], *, lane: str) -> dict[str, Any]:
     """Build a regression artifact payload from a counterexample."""
+    minimized = minimize_counterexample(counterexample)
     return {
         "schema_version": "ovk.regression.v1",
         "lane": lane,
-        "failure_mode": counterexample.get("failure_mode", "unknown"),
-        "summary": counterexample.get("summary", ""),
-        "fixture": counterexample,
+        "failure_mode": minimized.get("failure_mode", "unknown"),
+        "summary": minimized.get("summary", ""),
+        "fixture": minimized,
     }
 
 

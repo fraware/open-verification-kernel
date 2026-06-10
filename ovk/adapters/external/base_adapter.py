@@ -55,13 +55,12 @@ class BaseExternalAdapter:
     def run(self, obligation: ProofObligation) -> RawBackendResult:
         evaluator = self._deterministic_evaluator()
         status, counterexamples = evaluator(obligation.input)
-        import shutil
 
         return RawBackendResult(
             backend=self.backend_name,
             status=status,
             counterexamples=counterexamples,
-            used_native_binary=shutil.which(self.binary_name) is not None,
+            used_native_binary=False,
         )
 
     def normalize(self, raw: RawBackendResult, obligation: ProofObligation) -> VerificationResult:

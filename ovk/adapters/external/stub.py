@@ -26,8 +26,9 @@ def evaluate_with_optional_binary(
     status = VerificationStatus(status_raw)
     claim_assumptions = list(assumptions)
     claim_assumptions.append(f"{backend_name} adapter uses deterministic fallback when binary is absent.")
+    claim_assumptions.append(f"{binary_name} deterministic oracle result used.")
     if not binary_available:
-        claim_assumptions.append(f"{binary_name} binary unavailable; deterministic oracle result used.")
+        claim_assumptions.append(f"{binary_name} binary unavailable.")
     merge_by_status = {
         VerificationStatus.PASS: "allow",
         VerificationStatus.FAIL: "block",
@@ -51,7 +52,7 @@ def evaluate_with_optional_binary(
         backend_claims=[
             BackendClaim(
                 backend=backend_name,
-                guarantee_type="deterministic_fallback" if not binary_available else "native_tool",
+                guarantee_type="deterministic_fallback",
                 status=status,
                 assumptions=claim_assumptions,
                 limits=limits,

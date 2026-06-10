@@ -150,7 +150,18 @@ def score_repair_loop_case(case: dict[str, Any], *, elapsed_ms: float) -> Dimens
     hints = [repair_hint_for_counterexample(item) for item in counterexamples]
     expected_fix = case.get("expected_fix_class")
     fix_ok = any(hint.get("fix_class") == expected_fix for hint in hints) if expected_fix else bool(counterexamples)
-    passed = merge_ok and fix_ok
+    repair_ok = True
+    if case.get("passing_fixture"):
+        passing_diff = (ROOT / case["passing_fixture"]).read_text(encoding="utf-8")
+        pass_result = run_check(
+            diff_text=passing_diff,
+            repo="bench/repo",
+            head_sha="seed-repaired",
+            use_cache=False,
+        )
+        expected_pass = case.get("expected_pass_recommendation", "allow")
+        repair_ok = str(pass_result.bundle.decision.get("merge_recommendation", "unknown")) == expected_pass
+    passed = merge_ok and fix_ok and repair_ok
     return DimensionScore(
         case_id=str(case["case_id"]),
         category="repair_loop",
@@ -165,6 +176,7 @@ def score_repair_loop_case(case: dict[str, Any], *, elapsed_ms: float) -> Dimens
             "merge_recommendation": recommendation,
             "repair_hints": hints,
             "counterexample_count": len(counterexamples),
+            "repair_loop_passed": repair_ok if case.get("passing_fixture") else None,
         },
     )
 
@@ -189,6 +201,45 @@ def score_intent_recall_case(case: dict[str, Any], *, elapsed_ms: float) -> Dime
         evidence_honest=recall_ok,
         elapsed_ms=elapsed_ms,
         details={"expected_intents": sorted(expected), "actual_intents": sorted(actual)},
+    )
+
+
+def score_real_diff_case(case: dict[str, Any], *, elapsed_ms: float) -> DimensionScore:
+    """Score real_diff corpus cases: intent recall, lane coverage, and merge decision."""
+    from ovk.core.check import run_check
+    from ovk.core.planner import plan_from_diff_text
+
+    diff_text = (ROOT / case["input_fixture"]).read_text(encoding="utf-8")
+    plan = plan_from_diff_text(diff_text)
+    expected_intents = set(case.get("expected_intents", []))
+    actual_intents = set(plan.get("candidate_intents", []))
+    intent_ok = expected_intents.issubset(actual_intents)
+
+    result = run_check(diff_text=diff_text, repo="bench/repo", head_sha="seed", use_cache=False)
+    actual_lanes = {job.get("lane") for job in result.jobs}
+    expected_lanes = set(case.get("expected_lanes", []))
+    lanes_ok = actual_lanes == expected_lanes
+
+    recommendation = str(result.bundle.decision.get("merge_recommendation", "unknown"))
+    merge_ok = recommendation == case["expected_merge_recommendation"]
+    passed = intent_ok and lanes_ok and merge_ok
+    return DimensionScore(
+        case_id=str(case["case_id"]),
+        category="real_diff",
+        passed=passed,
+        merge_decision_correct=merge_ok,
+        status_correct=intent_ok and lanes_ok,
+        counterexample_useful=None,
+        backend_selection_correct=lanes_ok,
+        evidence_honest=merge_ok,
+        elapsed_ms=elapsed_ms,
+        details={
+            "expected_intents": sorted(expected_intents),
+            "actual_intents": sorted(actual_intents),
+            "expected_lanes": sorted(expected_lanes),
+            "actual_lanes": sorted(actual_lanes),
+            "merge_recommendation": recommendation,
+        },
     )
 
 
@@ -248,6 +299,10 @@ def score_case(
         elapsed_ms = (time.perf_counter() - started) * 1000
         return score_intent_recall_case(case, elapsed_ms=elapsed_ms)
 
+    if category == "real_diff":
+        score = score_real_diff_case(case, elapsed_ms=0.0)
+        return DimensionScore(**{**asdict(score), "elapsed_ms": (time.perf_counter() - started) * 1000})
+
     if lane_evaluator is None:
         raise ValueError("lane_evaluator is required for lane cases")
     status, recommendation, counterexample_class = lane_evaluator(case)
@@ -287,6 +342,10 @@ def aggregate_dimensions(scores: list[DimensionScore]) -> dict[str, Any]:
         "backend_selection_accuracy": _rate([score.backend_selection_correct for score in scores]),
         "evidence_honesty": _rate([score.evidence_honest for score in scores]),
         "intent_recall": _rate([score.status_correct for score in scores if score.category == "intent_recall"]),
+        "real_diff_recall": _rate([score.status_correct for score in scores if score.category == "real_diff"]),
+        "real_diff_intent_recall": _rate(
+            [score.status_correct for score in scores if score.category == "real_diff"]
+        ),
         "by_category": {
             category: {
                 "cases_total": len(items),

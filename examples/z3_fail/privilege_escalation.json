@@ -1,0 +1,12 @@
+{
+  "author_type": "ai_agent",
+  "agent": "codex",
+  "task": "Grant analytics team temporary admin access.",
+  "principals": [
+    {
+      "id": "analytics-bot",
+      "roles_before": ["reader", "analyst"],
+      "roles_after": ["reader", "analyst", "admin"]
+    }
+  ]
+}

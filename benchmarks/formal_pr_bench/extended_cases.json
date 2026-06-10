@@ -56,14 +56,16 @@
       "case_id": "repair_loop_deployment_skip",
       "category": "repair_loop",
       "input_fixture": "examples/multi_surface/deployment_skip.diff",
-      "expected_merge_recommendation": "require_human_review",
+      "expected_merge_recommendation": "block",
       "expected_fix_class": "add_approval_transition"
     },
     {
       "case_id": "repair_loop_ci_secrets",
       "category": "repair_loop",
-      "input_fixture": "examples/ci_secrets/workflow_secrets_on_pr.diff",
+      "input_fixture": "examples/repair_loops/ci_secrets/failing.diff",
+      "passing_fixture": "examples/repair_loops/ci_secrets/passing.diff",
       "expected_merge_recommendation": "block",
+      "expected_pass_recommendation": "allow",
       "expected_fix_class": "remove_untrusted_secret_usage"
     },
     {

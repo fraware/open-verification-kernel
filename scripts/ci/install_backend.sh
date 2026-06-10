@@ -8,14 +8,38 @@ if [[ -z "${BACKEND}" ]]; then
   exit 1
 fi
 
+OPA_VERSION="0.67.0"
+Z3_SOLVER_VERSION="4.13.4.0"
+CBMC_APT_VERSION="6.4.1"
+
+verify_binary() {
+  local name="$1"
+  if ! command -v "${name}" >/dev/null 2>&1; then
+    echo "post-install check failed: ${name} not found on PATH"
+    exit 1
+  fi
+  echo "post-install check: $(command -v "${name}")"
+}
+
 install_opa() {
-  curl -fsSL -o opa https://openpolicyagent.org/downloads/v0.68.0/opa_linux_amd64_static
+  curl -fsSL -o opa "https://openpolicyagent.org/downloads/v${OPA_VERSION}/opa_linux_amd64_static"
   chmod +x opa
   sudo mv opa /usr/local/bin/opa
+  verify_binary opa
+  opa version | grep -F "${OPA_VERSION}" >/dev/null
 }
 
 install_z3() {
-  python -m pip install 'z3-solver>=4.13.0'
+  python -m pip install "z3-solver==${Z3_SOLVER_VERSION}"
+  python - <<'PY'
+import z3
+
+version = z3.get_version_string()
+expected = "4.13.4"
+if not version.startswith(expected):
+    raise SystemExit(f"post-install check failed: z3 version {version!r} does not start with {expected!r}")
+print(f"post-install check: z3 {version}")
+PY
 }
 
 install_cedar() {
@@ -58,7 +82,11 @@ install_lean() {
 
 install_cbmc() {
   sudo apt-get update -qq
-  sudo apt-get install -y -qq cbmc
+  if ! sudo apt-get install -y -qq "cbmc=${CBMC_APT_VERSION}*" 2>/dev/null; then
+    sudo apt-get install -y -qq cbmc
+  fi
+  verify_binary cbmc
+  cbmc --version | grep -E "${CBMC_APT_VERSION%.*}" >/dev/null
 }
 
 install_alloy() {

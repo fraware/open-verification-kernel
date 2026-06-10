@@ -32,7 +32,39 @@ def test_evidence_quality_report_passes_for_valid_bundle() -> None:
     assert error_issues == []
 
 
-def test_evidence_quality_report_records_issues() -> None:
+def test_native_evidence_honesty_rejects_oracle_with_native_claim() -> None:
+    from ovk.core.evidence_quality import build_evidence_quality_report
+    from ovk.core.models import EvidenceBundle
+
+    bundle = EvidenceBundle.model_validate(
+        {
+            "bundle_id": "bundle-test-native-honesty",
+            "subject": {"repo": "example/repo", "head_sha": "abc123"},
+            "decision": {"merge_recommendation": "block"},
+            "evidence": [
+                {
+                    "evidence_id": "ev-native-honesty",
+                    "subject": {"repo": "example/repo", "head_sha": "abc123"},
+                    "intent": {"intent_id": "test", "risk": {"severity": "medium"}},
+                    "backend_claims": [
+                        {
+                            "backend": "cbmc",
+                            "guarantee_type": "native_tool",
+                            "status": "fail",
+                            "assumptions": ["cbmc deterministic oracle result used."],
+                            "limits": ["test"],
+                            "adapter_version": "0.1.0",
+                        }
+                    ],
+                    "decision": {"merge_recommendation": "block"},
+                    "generated_artifacts": [{"kind": "input_digest", "digest": "abc"}],
+                }
+            ],
+        }
+    )
+    report = build_evidence_quality_report(bundle)
+    assert report.passed is False
+    assert any("OVK-INV-NATIVE-HONESTY" in issue.message for issue in report.issues)
     payload = _bundle().model_dump(mode="json")
     payload["evidence"][0]["backend_claims"][0]["status"] = "fail"
     payload["evidence"][0]["decision"]["merge_recommendation"] = "allow"

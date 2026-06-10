@@ -1,0 +1,207 @@
+{
+  "schema_version": "formal_pr_bench.real_diff.v1",
+  "cases": [
+    {
+      "case_id": "rd_ci_secrets_pr_preview",
+      "category": "real_diff",
+      "input_fixture": "benchmarks/real_diffs/ci_secrets_pr_preview.diff",
+      "expected_lanes": [
+        "ci_secrets",
+        "self_protection"
+      ],
+      "expected_intents": [
+        "no-secrets-in-untrusted-context",
+        "agent-cannot-disable-own-ci-gate"
+      ],
+      "expected_merge_recommendation": "block"
+    },
+    {
+      "case_id": "rd_ci_secrets_workflow_dispatch_safe",
+      "category": "real_diff",
+      "input_fixture": "benchmarks/real_diffs/ci_secrets_workflow_dispatch_safe.diff",
+      "expected_lanes": [
+        "ci_secrets",
+        "self_protection"
+      ],
+      "expected_intents": [
+        "agent-cannot-disable-own-ci-gate",
+        "no-secrets-in-untrusted-context"
+      ],
+      "expected_merge_recommendation": "allow"
+    },
+    {
+      "case_id": "rd_auth_admin_route_unguarded",
+      "category": "real_diff",
+      "input_fixture": "benchmarks/real_diffs/auth_admin_route_unguarded.diff",
+      "expected_lanes": [
+        "authorization"
+      ],
+      "expected_intents": [
+        "no-admin-route-bypass"
+      ],
+      "expected_merge_recommendation": "block"
+    },
+    {
+      "case_id": "rd_auth_admin_route_guarded",
+      "category": "real_diff",
+      "input_fixture": "benchmarks/real_diffs/auth_admin_route_guarded.diff",
+      "expected_lanes": [
+        "authorization"
+      ],
+      "expected_intents": [
+        "no-admin-route-bypass"
+      ],
+      "expected_merge_recommendation": "allow"
+    },
+    {
+      "case_id": "rd_infra_s3_public_acl",
+      "category": "real_diff",
+      "input_fixture": "benchmarks/real_diffs/infra_s3_public_acl.diff",
+      "expected_lanes": [
+        "infrastructure"
+      ],
+      "expected_intents": [
+        "no-public-sensitive-resource"
+      ],
+      "expected_merge_recommendation": "block"
+    },
+    {
+      "case_id": "rd_infra_iam_wildcard_admin",
+      "category": "real_diff",
+      "input_fixture": "benchmarks/real_diffs/infra_iam_wildcard_admin.diff",
+      "expected_lanes": [
+        "infrastructure"
+      ],
+      "expected_intents": [
+        "no-public-sensitive-resource"
+      ],
+      "expected_merge_recommendation": "block"
+    },
+    {
+      "case_id": "rd_infra_k8s_loadbalancer",
+      "category": "real_diff",
+      "input_fixture": "benchmarks/real_diffs/infra_k8s_loadbalancer.diff",
+      "expected_lanes": [
+        "infrastructure"
+      ],
+      "expected_intents": [
+        "no-public-sensitive-resource"
+      ],
+      "expected_merge_recommendation": "block"
+    },
+    {
+      "case_id": "rd_infra_private_bucket",
+      "category": "real_diff",
+      "input_fixture": "benchmarks/real_diffs/infra_private_bucket.diff",
+      "expected_lanes": [
+        "infrastructure"
+      ],
+      "expected_intents": [
+        "no-public-sensitive-resource"
+      ],
+      "expected_merge_recommendation": "allow"
+    },
+    {
+      "case_id": "rd_infra_rds_public_partial_hunk",
+      "category": "real_diff",
+      "input_fixture": "benchmarks/real_diffs/infra_rds_public_partial_hunk.diff",
+      "expected_lanes": [
+        "infrastructure"
+      ],
+      "expected_intents": [
+        "no-public-sensitive-resource"
+      ],
+      "expected_merge_recommendation": "block"
+    },
+    {
+      "case_id": "rd_deployment_direct_skip",
+      "category": "real_diff",
+      "input_fixture": "benchmarks/real_diffs/deployment_direct_skip.diff",
+      "expected_lanes": [
+        "deployment"
+      ],
+      "expected_intents": [
+        "no-skipped-approval-state"
+      ],
+      "expected_merge_recommendation": "block"
+    },
+    {
+      "case_id": "rd_deployment_valid_chain",
+      "category": "real_diff",
+      "input_fixture": "benchmarks/real_diffs/deployment_valid_chain.diff",
+      "expected_lanes": [
+        "deployment"
+      ],
+      "expected_intents": [
+        "no-skipped-approval-state"
+      ],
+      "expected_merge_recommendation": "allow"
+    },
+    {
+      "case_id": "rd_self_protection_workflow_touch",
+      "category": "real_diff",
+      "input_fixture": "benchmarks/real_diffs/self_protection_workflow_touch.diff",
+      "expected_lanes": [
+        "ci_secrets",
+        "self_protection"
+      ],
+      "expected_intents": [
+        "agent-cannot-disable-own-ci-gate",
+        "no-secrets-in-untrusted-context"
+      ],
+      "expected_merge_recommendation": "allow"
+    },
+    {
+      "case_id": "rd_multi_surface_combined",
+      "category": "real_diff",
+      "input_fixture": "benchmarks/real_diffs/multi_surface_combined.diff",
+      "expected_lanes": [
+        "authorization",
+        "ci_secrets",
+        "infrastructure",
+        "self_protection"
+      ],
+      "expected_intents": [
+        "no-secrets-in-untrusted-context",
+        "no-public-sensitive-resource",
+        "no-admin-route-bypass",
+        "agent-cannot-disable-own-ci-gate"
+      ],
+      "expected_merge_recommendation": "block"
+    },
+    {
+      "case_id": "rd_workflow_secrets_partial_hunk",
+      "category": "real_diff",
+      "input_fixture": "benchmarks/real_diffs/workflow_secrets_partial_hunk.diff",
+      "expected_lanes": [
+        "ci_secrets",
+        "self_protection"
+      ],
+      "expected_intents": [
+        "no-secrets-in-untrusted-context",
+        "agent-cannot-disable-own-ci-gate"
+      ],
+      "expected_merge_recommendation": "block"
+    },
+    {
+      "case_id": "rd_auth_route_partial_hunk",
+      "category": "real_diff",
+      "input_fixture": "benchmarks/real_diffs/auth_route_partial_hunk.diff",
+      "expected_lanes": [
+        "authorization"
+      ],
+      "expected_intents": [
+        "no-admin-route-bypass"
+      ],
+      "expected_merge_recommendation": "block"
+    },
+    {
+      "case_id": "rd_docs_only_change",
+      "category": "real_diff",
+      "input_fixture": "benchmarks/real_diffs/docs_only_change.diff",
+      "expected_lanes": [],
+      "expected_intents": [],
+      "expected_merge_recommendation": "require_human_review"
+    }
+  ]
+}

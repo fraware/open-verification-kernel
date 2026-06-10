@@ -1,6 +1,6 @@
 import pytest
 
-from ovk.core.native_backend_probe import probe_native_backend
+from ovk.core.native_backend_probe import TIER1_NATIVE_EXECUTION_BACKENDS, probe_native_backend
 
 
 def _assert_backend(backend: str) -> None:
@@ -11,7 +11,7 @@ def _assert_backend(backend: str) -> None:
             f"{backend} fixture {result.fixture_path} diverged from oracle: "
             f"runtime={result.runtime_status}, oracle={result.oracle_status}"
         )
-        if result.binary_present:
+        if result.binary_present and backend in TIER1_NATIVE_EXECUTION_BACKENDS:
             assert result.used_native_binary, (
                 f"{backend} detected {result.binary_name} "
                 "but did not report native use"

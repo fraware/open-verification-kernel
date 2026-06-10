@@ -1,0 +1,11 @@
+--- a/.github/workflows/preview.yml
++++ b/.github/workflows/preview.yml
+@@ -2,7 +2,7 @@
+ name: Preview
+ 
+ on:
+-  pull_request:
++  workflow_dispatch:
+ 
+ permissions:
+   contents: read

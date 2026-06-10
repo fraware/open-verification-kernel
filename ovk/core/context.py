@@ -59,11 +59,16 @@ def budget_from_policy(policy: dict[str, Any]) -> VerificationBudget:
     denied_set = frozenset(str(item) for item in denied) if isinstance(denied, (list, tuple)) else frozenset()
     max_wall = float(budget_section.get("max_wall_time_seconds", policy.get("max_wall_time_seconds", 30.0)))
     max_memory = int(budget_section.get("max_memory_mb", policy.get("max_memory_mb", 512)))
+    routing_section = policy.get("routing", {})
+    prefer_deterministic = False
+    if isinstance(routing_section, dict):
+        prefer_deterministic = bool(routing_section.get("prefer_deterministic", False))
     return VerificationBudget(
         max_wall_time_seconds=max_wall,
         max_memory_mb=max_memory,
         allowed_backends=allowed_set,
         denied_backends=denied_set,
+        prefer_deterministic=prefer_deterministic,
     )
 
 

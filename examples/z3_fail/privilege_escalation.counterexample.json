@@ -1,0 +1,11 @@
+{
+  "summary": "Principal analytics-bot gained privileged role admin without holding it before the change.",
+  "failure_mode": "privilege_escalation",
+  "principal": "analytics-bot",
+  "gained_role": "admin",
+  "roles_before": ["analyst", "reader"],
+  "roles_after": ["admin", "analyst", "reader"],
+  "was_privileged_before": false,
+  "obligation_id": "obl-auth-privilege-escalation",
+  "minimized": true
+}

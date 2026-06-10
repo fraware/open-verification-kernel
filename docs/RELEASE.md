@@ -1,40 +1,40 @@
-# OVK v1.0.0 Release
+# OVK v1.1.0 Release
 
-Release notes and maintainer checklists for Open Verification Kernel v1.0.0.
+Release notes and maintainer checklists for Open Verification Kernel v1.1.0.
 
 ## Release notes
 
-OVK v1.0 is the first production-ready release of the full 24-month vision baseline:
+OVK v1.1 is the depth-first release after v1.0 ecosystem hardening. It ships technical improvements for real PR verification and external adoption readiness:
 
-- **Autonomous PR verification** via `ovk check` on unified diffs
-- **10 backends** with deterministic fallbacks (Cedar, TLA+, Kani, Dafny, Verus, Lean, CBMC, Alloy, OPA, Z3)
-- **Kernel orchestration** with context builder, risk ranker, budget-aware router, obligation compiler
-- **Agent loop** via MCP SDK tools, repair hints, regression artifact generation, repo memory
-- **FormalPR-Bench v1** with multi-dimensional leaderboard JSON
-- **50+ intent templates** with schema validation CI
-- **Second OPA domain pack** for infrastructure exposure Rego policies
-- **Pilot program** manifests and case studies
+- **Tier-1 native CI** — blocking OPA, Z3, and CBMC jobs in `native-backends-tier1.yml` with pinned install scripts and evidence honesty checks
+- **Real diff corpus** — 16 sanitized unified diffs in `benchmarks/real_diffs/` covering secrets, auth, infra, deployment, and multi-surface patterns
+- **FormalPR-Bench depth** — `real_diff` leaderboard category, repair-loop cases for ci_secrets/auth/infra/deployment lanes
+- **PyPI-pinned Action** — set `OVK_PACKAGE_VERSION=1.1.0` to install `open-verification-kernel==1.1.0` from PyPI; defaults to `pip install .` for local development
+- **External pilot kit** — [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md), `external_oss_ci_secrets.json` manifest template, advisory→strict rollout guidance
+
+See [RELEASE_NOTES_v1.1.0.md](RELEASE_NOTES_v1.1.0.md) for the full changelog.
 
 ### Known limitations
 
-- IaC and auth diff compilation is conservative; partial hunks may yield `require_human_review`.
-- Native backend binaries remain optional; deterministic oracles are used in CI without them.
-- PyPI publication is automated via `.github/workflows/publish.yml` on GitHub release (requires `PYPI_API_TOKEN` and `pypi` environment).
+- IaC and auth diff compilation remains conservative; partial hunks may yield `require_human_review`.
+- Tier-2 native backends (Cedar, TLA+, Kani, Dafny, Verus, Lean, Alloy) remain informational in CI.
+- External OSS pilot metrics are template-only until community repos complete advisory runs.
 
 ## Readiness checklist
 
-All items satisfied for v1.0.0:
+All items satisfied for v1.1.0:
 
-- [x] `ovk check` on multi-surface diffs in &lt;45s (typically &lt;200ms locally)
-- [x] 10 capability manifests; 50+ templates validated against JSON schema
-- [x] FormalPR-Bench canonical + extended cases green; 100-case expanded set green
-- [x] Release preflight: metadata, command surface, smoke, quality, adversarial, multi-lane, latency, bench, templates
-- [x] GitHub Action dogfooded with `use-check: true` default
-- [x] Migration guide and pilot case studies published
+- [x] `ovk check` on multi-surface and real_diff fixtures in &lt;45s
+- [x] 10 capability manifests; 100 templates validated against JSON schema
+- [x] FormalPR-Bench canonical + extended + real_diff cases green
+- [x] Release preflight: metadata, command surface, smoke, quality, adversarial, multi-lane, latency, bench, templates, external validation
+- [x] GitHub Action supports PyPI install via `OVK_PACKAGE_VERSION`
+- [x] External consumer example pins `@v1.1.0`
+- [x] External pilot playbook and case-study metrics template published
 
 ## Tagging checklist
 
-Before tagging `v1.0.0`:
+Before tagging `v1.1.0`:
 
 ```bash
 pip install -e '.[dev]'
@@ -48,7 +48,7 @@ ovk bench --expanded
 
 Confirm:
 
-- [x] Package version matches `ovk/core/release_metadata.py` (`1.0.0`).
+- [x] Package version matches `ovk/core/release_metadata.py` (`1.1.0`).
 - [x] `SUPPORTED_COMMANDS` matches `ovk/cli.py`.
 - [x] Documentation in `docs/STATUS.md`, `docs/INTEGRATION.md`, `docs/MIGRATION.md` is current.
 
@@ -64,7 +64,7 @@ Confirm:
 
 - [x] `pytest` passes.
 - [x] `ruff check` passes.
-- [x] `release-preflight` passes (includes `pilot_program`).
+- [x] `release-preflight` passes (includes `pilot_program` and `external_validation_matrix`).
 - [x] `ovk bench` and `ovk pilot` pass.
 
 ### Artifacts
@@ -75,7 +75,7 @@ Confirm:
 
 ## PyPI publication
 
-1. Create a GitHub release for tag `v1.0.0`.
+1. Create a GitHub release for tag `v1.1.0`.
 2. Ensure repository secrets: `PYPI_API_TOKEN` (PyPI trusted publishing or API token).
 3. Configure GitHub Environment `pypi` with required reviewers if desired.
 4. The `Publish` workflow runs release gates, builds the wheel/sdist, and uploads to PyPI.
@@ -88,3 +88,21 @@ python scripts/sync_package_data.py
 python -m build
 twine check dist/*
 ```
+
+## External consumer pin
+
+Fork consumers should use:
+
+```yaml
+env:
+  OVK_PACKAGE_VERSION: "1.1.0"
+jobs:
+  ovk:
+    steps:
+      - uses: fraware/open-verification-kernel@v1.1.0
+        with:
+          mode: advisory
+          use-check: "true"
+```
+
+See `examples/github_workflows/external_consumer.yml`.

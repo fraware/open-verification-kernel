@@ -79,3 +79,27 @@ def test_load_verification_policy_from_yaml(tmp_path: Path) -> None:
     config.write_text(yaml.dump(recipe), encoding="utf-8")
     loaded = load_verification_policy(config)
     assert loaded["mode"] == "advisory"
+
+
+def test_prefer_deterministic_routing() -> None:
+    recipes = _load_recipe_map()
+    registry = CapabilityRegistry.from_directory(Path("adapters"))
+    intent = json.loads(Path("templates/authorization/no_admin_route_bypass.intent.json").read_text(encoding="utf-8"))
+
+    prefer_budget = budget_from_policy(recipes["Deterministic-only CI"])
+    assert prefer_budget.prefer_deterministic is True
+    prefer_decision = route_intent(intent, registry.all(), budget=prefer_budget)
+    prefer_top = prefer_decision["selected"][0]["backend"]
+
+    formal_budget = budget_from_policy(recipes["Full formal stack"])
+    assert formal_budget.prefer_deterministic is False
+    formal_decision = route_intent(intent, registry.all(), budget=formal_budget)
+    formal_top = formal_decision["selected"][0]["backend"]
+
+    assert prefer_top in {"opa", "z3", "deterministic"}
+    assert prefer_decision["selected"][0]["score"] > formal_decision["selected"][0]["score"] or prefer_top != formal_top
+    prefer_scores = {item["backend"]: item["score"] for item in prefer_decision["selected"]}
+    formal_scores = {item["backend"]: item["score"] for item in formal_decision["selected"]}
+    for backend in {"opa", "z3"}:
+        if backend in prefer_scores and backend in formal_scores:
+            assert prefer_scores[backend] > formal_scores[backend]

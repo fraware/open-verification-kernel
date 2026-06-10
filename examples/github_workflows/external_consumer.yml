@@ -9,13 +9,16 @@ permissions:
   pull-requests: write
   checks: write
 
+env:
+  OVK_PACKAGE_VERSION: "1.1.0"
+
 jobs:
   ovk-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Run Open Verification Kernel check path
-        uses: ./
+        uses: fraware/open-verification-kernel@v1.1.0
         with:
           mode: strict
           use-check: "true"
@@ -28,7 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run Open Verification Kernel (all five lanes)
-        uses: ./
+        uses: fraware/open-verification-kernel@v1.1.0
         with:
           mode: advisory
           verification-manifest: examples/verification_manifests/full_mvp.json

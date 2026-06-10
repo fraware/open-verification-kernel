@@ -1,0 +1,23 @@
+diff --git a/.github/workflows/preview.yml b/.github/workflows/preview.yml
+new file mode 100644
+index 0000000..1234567
+--- /dev/null
++++ b/.github/workflows/preview.yml
+@@ -0,0 +1,17 @@
++name: Preview
++
++on:
++  pull_request:
++
++permissions:
++  contents: read
++
++jobs:
++  deploy-preview:
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++      - name: Deploy
++        env:
++          API_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
++        run: echo "deploy"

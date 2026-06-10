@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
 CASES = ROOT / "benchmarks/formal_pr_bench/seed_cases.json"
 CASES_EXPANDED = ROOT / "benchmarks/formal_pr_bench/seed_cases_expanded.json"
 EXTENDED_CASES = ROOT / "benchmarks/formal_pr_bench/extended_cases.json"
+REAL_DIFF_CASES = ROOT / "benchmarks/formal_pr_bench/real_diff_cases.json"
 P95_BUDGET_MS = 5000
 
 
@@ -85,6 +86,10 @@ def load_cases(*, expanded: bool, include_extended: bool) -> tuple[list[dict[str
         extended = json.loads(EXTENDED_CASES.read_text(encoding="utf-8"))
         cases.extend(extended["cases"])
         case_set = f"{case_set}+extended_cases.json"
+    if include_extended and REAL_DIFF_CASES.exists():
+        real_diff = json.loads(REAL_DIFF_CASES.read_text(encoding="utf-8"))
+        cases.extend(real_diff["cases"])
+        case_set = f"{case_set}+real_diff_cases.json"
     return cases, case_set
 
 

@@ -28,6 +28,20 @@ def _decision_value(data: dict[str, Any], key: str) -> str | None:
     return str(value)
 
 
+def _assumption_texts(claim: Any) -> str:
+    return " ".join(str(item) for item in claim.assumptions).lower()
+
+
+def _backend_provenance_names(evidence: Any) -> set[str]:
+    names: set[str] = set()
+    for artifact in evidence.generated_artifacts:
+        if artifact.get("kind") == "backend_provenance":
+            backend = artifact.get("backend")
+            if backend is not None:
+                names.add(str(backend).lower())
+    return names
+
+
 def check_evidence_bundle_invariants(bundle: EvidenceBundle) -> list[EvidenceInvariantIssue]:
     """Check conservative invariants over an evidence bundle."""
     issues: list[EvidenceInvariantIssue] = []
@@ -145,6 +159,36 @@ def check_evidence_bundle_invariants(bundle: EvidenceBundle) -> list[EvidenceInv
                         message="failing backend claim must not produce allow recommendation",
                     )
                 )
+            assumptions_text = " ".join(claim.assumptions).lower()
+            if claim.guarantee_type == "native_tool" and (
+                "deterministic oracle" in assumptions_text
+                or "deterministic fallback" in assumptions_text
+                or "binary unavailable" in assumptions_text
+            ):
+                issues.append(
+                    EvidenceInvariantIssue(
+                        path=f"{claim_path}.guarantee_type",
+                        message=(
+                            "backend claim must not advertise native_tool when deterministic "
+                            "oracle or fallback assumptions are present (OVK-INV-NATIVE-HONESTY)"
+                        ),
+                    )
+                )
+            for artifact in evidence.generated_artifacts:
+                if artifact.get("kind") != "backend_provenance":
+                    continue
+                if artifact.get("backend") and str(artifact.get("backend")).lower() != claim.backend.lower():
+                    continue
+                if artifact.get("used_native_binary") is True and "deterministic oracle" in assumptions_text:
+                    issues.append(
+                        EvidenceInvariantIssue(
+                            path=f"{evidence_path}.generated_artifacts",
+                            message=(
+                                "backend provenance must not claim native execution when "
+                                "deterministic oracle assumptions are present (OVK-INV-NATIVE-HONESTY)"
+                            ),
+                        )
+                    )
 
     bundle_recommendation = _decision_value(bundle.decision, "merge_recommendation")
     if bundle_recommendation is None:

@@ -49,7 +49,11 @@ def run_pilot_program(
     head_sha: str = "pilot-head",
 ) -> dict[str, Any]:
     """Run all pilot manifests under a directory."""
-    manifests = sorted(pilot_dir.glob("*.json"))
+    manifests = sorted(
+        path
+        for path in pilot_dir.glob("*.json")
+        if not path.name.startswith("external_") and not path.name.endswith(".template.json")
+    )
     if not manifests:
         raise FileNotFoundError(f"no pilot manifests found in {pilot_dir}")
     results = [run_pilot_manifest(path, repo=repo, head_sha=head_sha) for path in manifests]

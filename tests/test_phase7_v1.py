@@ -26,8 +26,10 @@ def test_expanded_benchmark_scores_green() -> None:
 
 def test_extended_benchmark_categories_present() -> None:
     extended = json.loads(Path("benchmarks/formal_pr_bench/extended_cases.json").read_text(encoding="utf-8"))
+    real_diff = json.loads(Path("benchmarks/formal_pr_bench/real_diff_cases.json").read_text(encoding="utf-8"))
     categories = {case["category"] for case in extended["cases"]}
-    assert {"routing", "adversarial", "repair_loop", "multi_backend", "intent_recall"}.issubset(categories)
+    categories.update(case["category"] for case in real_diff["cases"])
+    assert {"routing", "adversarial", "repair_loop", "multi_backend", "intent_recall", "real_diff"}.issubset(categories)
 
 
 def test_bench_cli_writes_leaderboard(tmp_path: Path) -> None:
@@ -54,7 +56,7 @@ def test_v1_readiness_checklist() -> None:
     required_backends = {"opa", "z3", "cedar", "tla+", "kani", "dafny", "verus", "lean", "cbmc", "alloy"}
     assert required_backends.issubset(backends)
     assert len(list_templates()) >= 100
-    assert metadata["version"] == "1.0.0"
+    assert metadata["version"] == "1.1.0"
     assert "ovk bench" in metadata["supported_commands"]
 
 

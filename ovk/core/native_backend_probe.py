@@ -31,6 +31,21 @@ class NativeBackendProbeResult:
     used_native_binary: bool
 
 
+@dataclass(frozen=True)
+class NativeBackendSummary:
+    """Aggregated probe status for one backend (CI matrix summaries)."""
+
+    backend: str
+    binary_present: bool
+    contract_roundtrip_ok: bool
+    native_binary_used: bool
+    fixture_matches_oracle: bool
+
+
+TIER1_NATIVE_EXECUTION_BACKENDS = frozenset({"opa", "z3"})
+TIER1_REQUIRED_BACKENDS = frozenset({"opa", "z3", "cbmc"})
+
+
 BACKEND_FIXTURES: dict[str, tuple[str, ...]] = {
     "opa": (
         "examples/no_agent_self_approval/input_gate_removed.json",
@@ -135,3 +150,27 @@ def probe_native_backend(backend: str) -> list[NativeBackendProbeResult]:
     if backend == "z3":
         return [_probe_z3(path) for path in fixture_paths]
     return [_probe_external_adapter(backend, path) for path in fixture_paths]
+
+
+def probe_all_native_backends() -> list[NativeBackendSummary]:
+    """Aggregate native probe status for every supported backend."""
+    summaries: list[NativeBackendSummary] = []
+    for backend in sorted(BACKEND_FIXTURES):
+        results = probe_native_backend(backend)
+        if not results:
+            continue
+        binary_present = any(item.binary_present for item in results)
+        fixture_matches = all(item.runtime_status == item.oracle_status for item in results)
+        native_used = all(item.used_native_binary for item in results if item.binary_present) if binary_present else False
+        if backend in TIER1_NATIVE_EXECUTION_BACKENDS and binary_present:
+            native_used = all(item.used_native_binary for item in results)
+        summaries.append(
+            NativeBackendSummary(
+                backend=backend,
+                binary_present=binary_present,
+                contract_roundtrip_ok=fixture_matches,
+                native_binary_used=native_used,
+                fixture_matches_oracle=fixture_matches,
+            )
+        )
+    return summaries

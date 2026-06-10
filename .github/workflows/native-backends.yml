@@ -1,4 +1,4 @@
-name: Native Backends Matrix
+name: Native Backends Tier 2
 
 on:
   schedule:
@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [opa, z3, cedar, tla, kani, dafny, verus, lean, cbmc, alloy]
+        backend: [cedar, tla, kani, dafny, verus, lean, alloy]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -51,10 +51,13 @@ jobs:
         run: |
           python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
           from ovk.core.native_backend_probe import probe_all_native_backends
-          print("## Native Backend Matrix")
+          tier2 = {"cedar", "tla+", "kani", "dafny", "verus", "lean", "alloy"}
+          print("## Native Backend Tier 2 (informational)")
           print("| Backend | Binary | Contract | Native Used | Fixture Match |")
           print("|---------|--------|----------|-------------|---------------|")
           for result in probe_all_native_backends():
+              if result.backend not in tier2:
+                  continue
               print(
                   f"| {result.backend} | "
                   f"{'yes' if result.binary_present else 'no'} | "

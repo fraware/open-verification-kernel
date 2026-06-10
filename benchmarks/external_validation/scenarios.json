@@ -36,6 +36,15 @@
       "input_bundle": "examples/evidence_quality/adversarial_allow_with_fail.json",
       "expected_recommendation": "quality_fail",
       "expect_exit_code": 0
+    },
+    {
+      "id": "external_pilot_advisory",
+      "kind": "action_check",
+      "description": "External pilot advisory path reports block without failing the job",
+      "mode": "advisory",
+      "changed_files": "examples/ci_secrets/workflow_secrets_on_pr.diff",
+      "expected_recommendation": "block",
+      "expect_exit_code": 0
     }
   ]
 }

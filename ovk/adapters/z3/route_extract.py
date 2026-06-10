@@ -11,7 +11,7 @@ ROUTE_MARKERS = ("/routes/", "/middleware/", "/auth/", "/controllers/")
 ROUTE_PATTERN = re.compile(r'["\'](/[^"\']+)["\']')
 ADMIN_PATTERN = re.compile(r"admin|requireAdmin|is_admin|role.*admin", re.IGNORECASE)
 GUARD_PATTERN = re.compile(
-    r"requireAuth|authenticate|authorize|middleware|guard|isAdmin|checkRole|@admin",
+    r"requireAuth|requireAdmin|authenticate|authorize|middleware|guard|isAdmin|checkRole|@admin",
     re.IGNORECASE,
 )
 

@@ -1,0 +1,6 @@
+diff --git a/infra/db.tf b/infra/db.tf
+--- a/infra/db.tf
++++ b/infra/db.tf
+@@ -12,1 +12,2 @@
+   instance_class = "db.t3.micro"
++  publicly_accessible = true

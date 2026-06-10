@@ -1,0 +1,14 @@
+{
+  "summary": "Non-admin role user can reach admin-only route /admin/export.",
+  "failure_mode": "admin_route_reachable_by_non_admin",
+  "route": "/admin/export",
+  "user_role": "user",
+  "path": [
+    "route_group_added",
+    "middleware_not_applied",
+    "handler_reachable"
+  ],
+  "obligation_id": "obl-auth-admin-route-reachability",
+  "query_polarity": "find_violation",
+  "minimized": true
+}

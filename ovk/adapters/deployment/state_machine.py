@@ -32,8 +32,19 @@ def find_skipped_approval_paths(data: dict[str, Any]) -> list[dict[str, Any]]:
     required_states = {str(state) for state in data.get("required_states", []) if isinstance(state, str)}
     initial = str(data.get("initial_state", "draft"))
     production_states = {str(state) for state in data.get("production_states", ["deployed"]) if isinstance(state, str)}
+    state_metadata = data.get("state_metadata", {})
+    if isinstance(state_metadata, dict):
+        approval_required = {
+            str(name)
+            for name, meta in state_metadata.items()
+            if isinstance(meta, dict) and meta.get("requires_approval")
+        }
+    else:
+        approval_required = set()
 
-    if not states or not transitions or not required_states:
+    if not states or not transitions:
+        return []
+    if not required_states and not approval_required:
         return []
 
     adjacency: dict[str, list[str]] = {state: [] for state in states}
@@ -54,7 +65,7 @@ def find_skipped_approval_paths(data: dict[str, Any]) -> list[dict[str, Any]]:
 
         if state in production_states:
             visited_required = {item for item in required_states if item in path}
-            if visited_required != required_states:
+            if required_states and visited_required != required_states:
                 skipped = sorted(required_states - visited_required)
                 counterexamples.append(
                     {
@@ -65,6 +76,22 @@ def find_skipped_approval_paths(data: dict[str, Any]) -> list[dict[str, Any]]:
                         "production_state": state,
                     }
                 )
+            elif len(path) >= 2:
+                previous = path[-2]
+                previous_meta = state_metadata.get(previous, {}) if isinstance(state_metadata, dict) else {}
+                if approval_required and not previous_meta.get("requires_approval"):
+                    counterexamples.append(
+                        {
+                            "summary": (
+                                f"Production state {state} is reachable from {previous} "
+                                "without a prior approval gate."
+                            ),
+                            "failure_mode": FAILURE_MODE,
+                            "path": path,
+                            "skipped_required_states": sorted(approval_required - set(path[:-1])),
+                            "production_state": state,
+                        }
+                    )
             continue
 
         for next_state in adjacency.get(state, []):

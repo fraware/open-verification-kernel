@@ -1,6 +1,6 @@
 # FormalPR-Bench
 
-FormalPR-Bench scores OVK behavior across deterministic lane fixtures plus extended categories that exercise routing, adversarial resilience, repair loops, and planner recall.
+FormalPR-Bench scores OVK behavior across deterministic lane fixtures plus extended categories that exercise routing, adversarial resilience, repair loops, planner recall, and the real diff corpus.
 
 ## Public artifacts
 
@@ -17,7 +17,32 @@ FormalPR-Bench scores OVK behavior across deterministic lane fixtures plus exten
 - `backend_selection_accuracy`: routing correctness where a backend choice is evaluated.
 - `evidence_honesty`: quality/evidence consistency checks, especially for adversarial fixtures.
 - `intent_recall`: planner recall signal for expected intents on diff-driven cases.
+- `real_diff_recall`: lane + intent + merge correctness on the `benchmarks/real_diffs/` corpus.
+
+## Categories
+
+| Category | Source | What it measures |
+|----------|--------|------------------|
+| `lane` | `seed_cases*.json` | Deterministic lane fixture evaluation |
+| `routing` | `extended_cases.json` | Backend routing from changed files |
+| `adversarial` | `extended_cases.json` | Evidence quality gate resilience |
+| `repair_loop` | `extended_cases.json` | Block + repair hint usefulness |
+| `intent_recall` | `extended_cases.json` | Planner intent recall on example diffs |
+| `multi_backend` | `extended_cases.json` | Multi-lane PR integration |
+| `real_diff` | `real_diff_cases.json` | End-to-end `ovk check` on sanitized PR diffs |
+
+## Real diff corpus
+
+- Manifest: `benchmarks/real_diffs/manifest.json` (16 cases covering secrets, auth, infra, deployment, partial hunks, multi-surface).
+- Bench cases: `benchmarks/formal_pr_bench/real_diff_cases.json` (generated from the manifest via `scripts/sync_real_diff_cases.py`).
+- Integration tests: `tests/test_real_diffs.py` (per-case `ovk check` assertions + ≥95% intent recall gate).
+
+Run focused real-diff tests:
+
+```bash
+pytest tests/test_real_diffs.py -v
+```
 
 ## Category pass rates
 
-`latest-leaderboard-summary.json` includes `category_pass_rates` extracted from leaderboard `summary.by_category` so external dashboards can track trends by category without parsing full case payloads.
+`latest-leaderboard-summary.json` includes `category_pass_rates` extracted from leaderboard `summary.by_category` so external dashboards can track trends by category without parsing full case payloads. The `real_diff` category is reported separately from synthetic `intent_recall` cases.

@@ -25,6 +25,11 @@ class BackendRejection:
     reason: str
 
 
+DETERMINISTIC_PREFERRED_BACKENDS: frozenset[str] = frozenset({"deterministic", "opa", "z3"})
+PREFER_DETERMINISTIC_BONUS = 0.3
+PREFER_DETERMINISTIC_PENALTY = 0.15
+
+
 @dataclass(frozen=True)
 class VerificationBudget:
     """Runtime budget for backend execution."""
@@ -33,6 +38,7 @@ class VerificationBudget:
     max_memory_mb: int = 512
     allowed_backends: frozenset[str] | None = None
     denied_backends: frozenset[str] = frozenset()
+    prefer_deterministic: bool = False
 
 
 BACKEND_COST_PRIORS: dict[str, float] = {
@@ -64,6 +70,7 @@ def _utility_score(
     surface_bonus = (surface_bonuses or {}).get(tool_name, 0.0)
     cost = BACKEND_COST_PRIORS.get(tool_name, 0.4)
     budget_penalty = 0.0
+    deterministic_adjustment = 0.0
     if budget is not None:
         if budget.allowed_backends is not None and tool_name not in budget.allowed_backends:
             return -1.0
@@ -71,7 +78,20 @@ def _utility_score(
             return -1.0
         if cost * 30 > budget.max_wall_time_seconds:
             budget_penalty = 0.3
-    return relevance + guarantee_strength + (0.15 * historical_success) + surface_bonus - cost - budget_penalty
+        if tool_name in DETERMINISTIC_PREFERRED_BACKENDS:
+            if budget.prefer_deterministic:
+                deterministic_adjustment = PREFER_DETERMINISTIC_BONUS
+            else:
+                deterministic_adjustment = -PREFER_DETERMINISTIC_PENALTY
+    return (
+        relevance
+        + guarantee_strength
+        + (0.15 * historical_success)
+        + surface_bonus
+        + deterministic_adjustment
+        - cost
+        - budget_penalty
+    )
 
 
 def route_intent(

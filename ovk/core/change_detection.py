@@ -35,7 +35,7 @@ SURFACE_RULES = [
     },
     {
         "domain": "infrastructure",
-        "patterns": ["*.tf", "*.tf.json", "*/k8s/*", "*/kubernetes/*", "*deployment*.yml", "*iam*"],
+        "patterns": ["*.tf", "*.tf.json", "*/k8s/*", "k8s/*", "*/kubernetes/*", "*deployment*.yml", "*iam*"],
         "intent": "no-public-sensitive-resource",
         "reason": "change touches infrastructure, deployment, IAM, or network configuration",
     },
