@@ -164,8 +164,9 @@ def run_verification_manifest(
     evidence_items: list[VerificationEvidence] = []
 
     if parallel and len(entries) > 1:
+        evidence_by_index: dict[int, VerificationEvidence] = {}
         with ThreadPoolExecutor(max_workers=min(len(entries), 5)) as pool:
-            futures = [
+            futures = {
                 pool.submit(
                     _evaluate_manifest_entry,
                     entry,
@@ -173,13 +174,14 @@ def run_verification_manifest(
                     repo=repo,
                     head_sha=head_sha,
                     base_sha=base_sha,
-                )
-                for entry in entries
-            ]
+                ): index
+                for index, entry in enumerate(entries)
+            }
             for future in as_completed(futures):
                 item = future.result()
                 if item is not None:
-                    evidence_items.append(item)
+                    evidence_by_index[futures[future]] = item
+        evidence_items = [evidence_by_index[index] for index in range(len(entries)) if index in evidence_by_index]
     else:
         for entry in entries:
             item = _evaluate_manifest_entry(
