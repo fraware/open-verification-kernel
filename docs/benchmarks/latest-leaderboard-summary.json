@@ -1,8 +1,8 @@
 {
   "schema_version": "formal_pr_bench.summary.v1",
   "generated_from": "formal_pr_bench.leaderboard.v1",
-  "cases_total": 114,
-  "cases_passed": 114,
+  "cases_total": 130,
+  "cases_passed": 130,
   "pass_rate": 1.0,
   "merge_decision_accuracy": 1.0,
   "status_accuracy": 1.0,
@@ -31,6 +31,11 @@
       "cases_passed": 1,
       "pass_rate": 1.0
     },
+    "real_diff": {
+      "cases_total": 16,
+      "cases_passed": 16,
+      "pass_rate": 1.0
+    },
     "repair_loop": {
       "cases_total": 4,
       "cases_passed": 4,
@@ -43,8 +48,8 @@
     }
   },
   "timing_ms": {
-    "p50": 0.13598500000000513,
-    "p95": 1.9926030000050332,
-    "max": 11.14858100000049
+    "p50": 0.10020400000598784,
+    "p95": 8.864383999991787,
+    "max": 20.515591999981098
   }
 }
