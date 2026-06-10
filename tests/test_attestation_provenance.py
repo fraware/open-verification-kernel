@@ -22,5 +22,5 @@ def test_attestation_includes_builder_provenance() -> None:
     assert verification["bundle_digest"]
     builder = statement["predicate"]["builder"]
     assert builder["id"] == "open-verification-kernel"
-    assert builder["version"] == "1.1.0"
+    assert builder["version"] == "1.2.0"
     assert builder["runtime"].startswith("python/")

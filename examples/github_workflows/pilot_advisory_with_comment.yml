@@ -1,0 +1,29 @@
+name: OVK Pilot (Advisory + Check)
+
+# Phase 1: advisory mode with GitHub check observability (no merge blocking).
+# Copy to .github/workflows/ovk-advisory-check.yml in your repository.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+env:
+  OVK_PACKAGE_VERSION: "1.2.0"
+
+jobs:
+  ovk-advisory-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: OVK advisory check with emitted GitHub check
+        uses: fraware/open-verification-kernel@v1.2.0
+        with:
+          mode: advisory
+          use-check: "true"
+          emit-check: "true"
+          post-comment: "true"

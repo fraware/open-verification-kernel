@@ -8,7 +8,12 @@
       "mode": "strict",
       "changed_files": "examples/ci_secrets/workflow_secrets_on_pr.diff",
       "expected_recommendation": "block",
-      "expect_exit_code": 1
+      "expect_exit_code": 1,
+      "action_inputs": {
+        "use-check": "true",
+        "changed-files": "examples/ci_secrets/workflow_secrets_on_pr.diff",
+        "emit-check": "true"
+      }
     },
     {
       "id": "check_advisory_allow",
@@ -18,7 +23,13 @@
       "changed_files": "examples/no_agent_self_approval/changed_files_workflow.txt",
       "metadata": "examples/no_agent_self_approval/metadata_missing_required_checks.json",
       "expected_recommendation": "allow",
-      "expect_exit_code": 0
+      "expect_exit_code": 0,
+      "action_inputs": {
+        "use-check": "false",
+        "changed-files": "examples/no_agent_self_approval/changed_files_workflow.txt",
+        "metadata": "examples/no_agent_self_approval/metadata_missing_required_checks.json",
+        "emit-check": "false"
+      }
     },
     {
       "id": "mvp_manifest_allow",
@@ -27,7 +38,13 @@
       "mode": "advisory",
       "verification_manifest": "examples/verification_manifests/full_mvp.json",
       "expected_recommendation": "allow",
-      "expect_exit_code": 0
+      "expect_exit_code": 0,
+      "validate_bundle": true,
+      "action_inputs": {
+        "verification-manifest": "examples/verification_manifests/full_mvp.json",
+        "bundle-output-dir": "external-validation-mvp-bundle",
+        "emit-check": "false"
+      }
     },
     {
       "id": "forged_bundle_rejected",
@@ -44,7 +61,26 @@
       "mode": "advisory",
       "changed_files": "examples/ci_secrets/workflow_secrets_on_pr.diff",
       "expected_recommendation": "block",
-      "expect_exit_code": 0
+      "expect_exit_code": 0,
+      "action_inputs": {
+        "use-check": "true",
+        "changed-files": "examples/ci_secrets/workflow_secrets_on_pr.diff",
+        "emit-check": "false"
+      }
+    },
+    {
+      "id": "check_strict_emit_check",
+      "kind": "action_check",
+      "description": "Strict mode with emit-check blocks and requires check emission",
+      "mode": "strict",
+      "changed_files": "examples/ci_secrets/workflow_secrets_on_pr.diff",
+      "expected_recommendation": "block",
+      "expect_exit_code": 1,
+      "action_inputs": {
+        "use-check": "true",
+        "changed-files": "examples/ci_secrets/workflow_secrets_on_pr.diff",
+        "emit-check": "true"
+      }
     }
   ]
 }

@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![FormalPR-Bench](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/fraware/open-verification-kernel/main/docs/benchmarks/leaderboard-badge.json)](docs/benchmarks/latest-leaderboard-summary.json)
-[![Docs](https://img.shields.io/badge/docs-v1.1.0-green.svg)](docs/README.md)
+[![Docs](https://img.shields.io/badge/docs-v1.2.0-green.svg)](docs/README.md)
 
 [Quick start](#quick-start) · [Add to CI](#github-actions) · [Contribute](#contribute) · [Documentation](docs/README.md)
 
@@ -112,17 +112,19 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  checks: write   # required when emit-check: true
 
 jobs:
   ovk:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: fraware/open-verification-kernel@v1.1.0
+      - uses: fraware/open-verification-kernel@v1.2.0
         with:
           mode: advisory          # switch to strict when ready
           use-check: "true"       # analyze the PR diff automatically
-          post-comment: "true"
+          emit-check: "true"      # optional; requires checks: write
+          post-comment: "true"    # requires pull-requests: write
 ```
 
 Copy a full consumer example: [`examples/github_workflows/external_consumer.yml`](examples/github_workflows/external_consumer.yml)
@@ -178,12 +180,14 @@ Questions, ideas, or a first PR — you are welcome. See [docs/ARCHITECTURE.md](
 
 | I want to… | Read |
 |---|---|
+| See adoption readiness before pinning | [CURRENT_RELEASE_STATUS.md](docs/CURRENT_RELEASE_STATUS.md) |
 | Install locally or wire up CI | [INTEGRATION.md](docs/INTEGRATION.md) |
 | Tune strictness and checker selection | [POLICY.md](docs/POLICY.md) |
 | Understand checkers and fallbacks | [BACKENDS.md](docs/BACKENDS.md) |
 | Run or extend the benchmark | [BENCHMARK.md](docs/BENCHMARK.md) |
 | Roll out on an external OSS repo | [EXTERNAL_PILOT_PLAYBOOK.md](docs/EXTERNAL_PILOT_PLAYBOOK.md) |
 | See current capabilities | [STATUS.md](docs/STATUS.md) |
+| Known limitations | [RELEASE.md](docs/RELEASE.md#known-limitations) |
 | Upgrade from an older version | [MIGRATION.md](docs/MIGRATION.md) |
 
 Full index: [docs/README.md](docs/README.md)

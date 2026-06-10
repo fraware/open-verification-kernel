@@ -1,55 +1,79 @@
 # External OSS Pilot Playbook
 
-Guide for landing OVK on an external open-source repository with advisory rollout, measured false-positive rate, and optional strict mode on protected branches.
+Guide for adding OVK to an external open-source repository: start in advisory mode, measure false positives, then optionally enforce on protected branches.
 
-## Scope recommendation
+## Start with one check type
 
-Start with **one lane only**:
-
-| Lane | Best for | Starter manifest |
+| Check type | Best for | Starter manifest |
 |------|----------|------------------|
 | CI secrets | Repos with agent-authored workflow PRs | [pilot_manifest_ci_secrets.template.json](templates/pilot_manifest_ci_secrets.template.json) |
 | Self-protection | Repos adding agent CI gates | `examples/pilot_repos/self_protection_only.json` |
 
-Do not enable all five lanes until native/compiler depth is validated on your diffs.
+Enable additional check types one at a time after each is stable on your diffs.
 
-## Phase 0 — Fork and wire advisory mode
+## Step 1 — Advisory mode (no merge blocking)
 
 1. Copy `docs/templates/pilot_manifest_ci_secrets.template.json` to `.verification/ci_secrets_pilot.json` in the target repo.
-2. Add lane input JSON under `.verification/ci_secrets/` (see `examples/ci_secrets/input_secrets_safe.json` for shape).
-3. Install OVK in CI (advisory):
+2. Add check input JSON under `.verification/ci_secrets/` (see `examples/ci_secrets/input_secrets_safe.json` for shape).
+3. Add OVK to CI in advisory mode. Build the PR diff locally — OVK reads files, not URLs:
 
 ```yaml
-env:
-  OVK_PACKAGE_VERSION: "1.1.0"
+name: OVK Pilot
+on:
+  pull_request:
+    branches: [main]
 
-- uses: fraware/open-verification-kernel@v1.1.0
-  with:
-    mode: advisory
-    use-check: "true"
-    changed-files: ${{ github.event.pull_request.diff_url }}  # or a checked-in diff artifact
+env:
+  OVK_PACKAGE_VERSION: "1.2.0"
+
+jobs:
+  ovk-advisory:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build PR diff for OVK
+        run: |
+          git fetch origin "${{ github.base_ref }}"
+          git diff "origin/${{ github.base_ref }}...HEAD" > ovk-pr.diff
+      - name: OVK advisory check
+        uses: fraware/open-verification-kernel@v1.2.0
+        with:
+          mode: advisory
+          use-check: "true"
+          changed-files: ovk-pr.diff
+          post-comment: "false"
+      - name: OVK advisory verify (CI secrets check)
+        uses: fraware/open-verification-kernel@v1.2.0
+        with:
+          mode: advisory
+          verification-manifest: .verification/ci_secrets_pilot.json
+          bundle-output-dir: ovk-pilot-bundle
+          post-comment: "false"
 ```
 
-4. Run for **2 weeks** on all agent PRs without blocking merges.
+4. Run for **two weeks** on all agent PRs without blocking merges.
 
-## Phase 1 — Measure
-
-Track per PR:
+## Step 2 — Measure
 
 | Metric | Target before strict |
 |--------|----------------------|
-| False positive rate | &lt; 5% |
-| Time to first green after repair | &lt; 5 minutes |
+| False positive rate | under 5% |
+| Time to first green after repair | under 5 minutes |
 | Block rate on known-bad fixtures | 100% |
 
 Publish results in [PILOT_CASE_STUDIES.md](PILOT_CASE_STUDIES.md) under **External pilots**.
 
-## Phase 2 — Strict on protected branch
+## Step 3 — Strict on protected branches
 
 When false positives stay below 5%:
 
 ```yaml
-- uses: fraware/open-verification-kernel@v1.1.0
+- uses: fraware/open-verification-kernel@v1.2.0
   with:
     mode: strict
     use-check: "true"
@@ -58,49 +82,15 @@ When false positives stay below 5%:
 
 Require the OVK check on `main` / `release/*` only; keep advisory on experimental branches if needed.
 
-## Phase 3 — Expand lanes
+## Step 4 — Add more check types
 
-After ci_secrets is stable, add lanes one at a time using manifests from `examples/pilot_repos/`. Re-run advisory for each new lane before strict enforcement.
+After CI secrets is stable, add check types one at a time using manifests from `examples/pilot_repos/`. Re-run advisory for each new check before strict enforcement.
 
-## Fork adopter workflow (copy-paste)
+## Copy-paste workflow
 
-Copy this workflow to `.github/workflows/ovk-pilot.yml` in your repository. It pins the published Action and package version, runs advisory mode for two weeks, and uploads metrics artifacts for your pilot report.
+See `examples/github_workflows/pilot_fork_adopter.yml` and the full example in Step 1 above. Upload artifacts for your pilot report:
 
 ```yaml
-name: OVK External Pilot
-
-on:
-  pull_request:
-    branches: [main]
-  workflow_dispatch:
-
-permissions:
-  contents: read
-  pull-requests: write
-  checks: write
-
-env:
-  OVK_PACKAGE_VERSION: "1.1.0"
-
-jobs:
-  ovk-advisory:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: OVK advisory check
-        uses: fraware/open-verification-kernel@v1.1.0
-        with:
-          mode: advisory
-          use-check: "true"
-          changed-files: ${{ github.event.pull_request.diff_url }}
-          post-comment: "false"
-      - name: OVK advisory verify (CI secrets lane)
-        uses: fraware/open-verification-kernel@v1.1.0
-        with:
-          mode: advisory
-          verification-manifest: .verification/ci_secrets_pilot.json
-          bundle-output-dir: ovk-pilot-bundle
-          post-comment: "false"
       - uses: actions/upload-artifact@v4
         with:
           name: ovk-pilot-artifacts
@@ -110,28 +100,24 @@ jobs:
           retention-days: 30
 ```
 
-Starter manifest for the verify step: copy [pilot_manifest_ci_secrets.template.json](templates/pilot_manifest_ci_secrets.template.json) to `.verification/ci_secrets_pilot.json` and point `input` at your lane fixture JSON.
+## Reference in this repo
 
-In-repo dogfood reference: `.github/workflows/pilot-dogfood.yml` (weekly advisory simulation with `OVK_PACKAGE_VERSION` and `scripts/collect_pilot_metrics.py`).
+Weekly in-repo pilot workflow: `.github/workflows/pilot-dogfood.yml` with `scripts/collect_pilot_metrics.py`.
 
 ## Support artifacts
 
-- Repair loop demo: [AGENT_REPAIR_LOOP.md](AGENT_REPAIR_LOOP.md)
-- Realistic diff corpus: `benchmarks/real_diffs/`
-- External consumer workflow: `examples/github_workflows/external_consumer.yml`
-- External OSS manifest: `examples/pilot_repos/external_oss_ci_secrets.json`
-- Metrics collector: `scripts/collect_pilot_metrics.py`
-- Adoption summary: `docs/benchmarks/adoption-summary.json`
+- Repair loop walkthrough: [AGENT_REPAIR_LOOP.md](AGENT_REPAIR_LOOP.md)
+- Realistic PR diffs: `benchmarks/real_diffs/`
+- Example workflows: `examples/github_workflows/`
+- Metrics: `scripts/collect_pilot_metrics.py`, `docs/benchmarks/adoption-summary.json`
 
-## Reporting template
-
-When publishing pilot metrics, include:
+## What to report
 
 - Repository name (link)
-- Lane(s) enabled
+- Check type(s) enabled
 - Advisory duration (dates)
 - PRs evaluated / blocked / false positives
 - Median `ovk check` latency
 - Strict mode enabled (yes/no)
 
-Add entries to the **External pilots** section of [PILOT_CASE_STUDIES.md](PILOT_CASE_STUDIES.md).
+Add entries to [PILOT_CASE_STUDIES.md](PILOT_CASE_STUDIES.md).

@@ -40,6 +40,6 @@ def test_collect_from_artifacts_dir(tmp_path: Path) -> None:
     bundle_dir.mkdir()
     (bundle_dir / "marker.txt").write_text("bundle", encoding="utf-8")
 
-    parsed = collect_from_artifacts_dir(tmp_path, source="pilot_dogfood", ovk_version="1.1.0")
+    parsed = collect_from_artifacts_dir(tmp_path, source="pilot_dogfood", ovk_version="1.2.0")
     validate_metrics(parsed)
     assert parsed["bundle_artifacts"]

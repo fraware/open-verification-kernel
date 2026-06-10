@@ -12,6 +12,7 @@ from ovk.core.bundle import make_bundle
 from ovk.core.capabilities import CapabilityRegistry
 from ovk.core.compilation_evidence import compilation_failure_evidence
 from ovk.core.context import RepositoryContext, budget_from_policy, build_repository_context
+from ovk.core.policy_config import bundle_decision_options
 from ovk.core.intent_registry import IntentRegistry
 from ovk.core.lane_compiler import build_plan_from_inputs
 from ovk.core.models import EvidenceBundle
@@ -124,6 +125,7 @@ def execute_kernel(
         github_event_path=github_event_path,
     )
 
+    decision_options = bundle_decision_options(ctx.policy)
     if not obligations:
         bundle = make_bundle(
             [
@@ -134,7 +136,8 @@ def execute_kernel(
                     intents=list(plan.get("candidate_intents", [])),
                     reason="No lane inputs could be compiled for the detected change surfaces.",
                 )
-            ]
+            ],
+            **decision_options,
         )
     else:
         evidence_items = execute_obligations(
@@ -147,7 +150,7 @@ def execute_kernel(
             use_cache=use_cache,
             parallel=parallel,
         )
-        bundle = make_bundle(evidence_items)
+        bundle = make_bundle(evidence_items, **decision_options)
 
     ranked = rank_intents(plan.get("candidate_intents", []), context=ctx)
     elapsed_ms = (time.perf_counter() - started) * 1000

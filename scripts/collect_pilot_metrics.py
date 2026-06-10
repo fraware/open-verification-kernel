@@ -128,6 +128,13 @@ def collect_from_artifacts_dir(
     )
 
 
+def _repo_relative(path: Path) -> str:
+    try:
+        return path.relative_to(ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
 def collect_pilot_metrics(
     *,
     source: str,
@@ -174,7 +181,7 @@ def collect_pilot_metrics(
                 "median_elapsed_ms": median_elapsed,
                 "false_positive_rate": _false_positive_rate(results),
                 "block_rate_on_unsafe_fixture": block_rate,
-                "external_manifest": str(manifest_path),
+                "external_manifest": _repo_relative(manifest_path),
             },
         },
         "bundle_artifacts": _bundle_artifacts(bundle_dir),

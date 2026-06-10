@@ -15,7 +15,10 @@ def test_render_adoption_summary_shape() -> None:
     validate_metrics(metrics)
     summary = render_adoption_summary(metrics)
     validate_summary(summary)
-    assert summary["real_diff_recall"] is not None or summary["real_diff_recall"] is None
+    assert summary["real_diff_recall"] == 1.0
+    assert summary["formal_pr_bench"]["cases_total"] == 130
+    assert summary["formal_pr_bench"]["pass_rate"] == 1.0
+    assert summary["updated_at"] is not None
     assert summary["pilot_dogfood"]["ovk_version_pin"] == metrics["ovk_version"]
     assert summary["pilot_dogfood"]["manifests_passed"] == metrics["adoption"]["pilot_dogfood"]["manifests_passed"]
 

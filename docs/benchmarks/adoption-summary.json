@@ -1,31 +1,67 @@
 {
   "schema_version": "ovk.adoption_summary.v1",
-  "ovk_version": "1.1.0",
-  "updated_at": null,
+  "ovk_version": "1.2.0",
+  "updated_at": "2026-06-10T21:55:08Z",
   "formal_pr_bench": {
-    "cases_total": 100,
-    "cases_passed": 100,
+    "cases_total": 130,
+    "cases_passed": 130,
     "pass_rate": 1.0,
+    "intent_recall": 1.0,
     "by_category": {
+      "adversarial": {
+        "cases_total": 2,
+        "cases_passed": 2,
+        "pass_rate": 1.0
+      },
+      "intent_recall": {
+        "cases_total": 3,
+        "cases_passed": 3,
+        "pass_rate": 1.0
+      },
       "lane": {
         "cases_total": 100,
         "cases_passed": 100,
         "pass_rate": 1.0
+      },
+      "multi_backend": {
+        "cases_total": 1,
+        "cases_passed": 1,
+        "pass_rate": 1.0
+      },
+      "real_diff": {
+        "cases_total": 16,
+        "cases_passed": 16,
+        "pass_rate": 1.0
+      },
+      "repair_loop": {
+        "cases_total": 4,
+        "cases_passed": 4,
+        "pass_rate": 1.0
+      },
+      "routing": {
+        "cases_total": 4,
+        "cases_passed": 4,
+        "pass_rate": 1.0
       }
+    },
+    "timing_ms": {
+      "p50": 0.143287000000214,
+      "p95": 13.238509999993653,
+      "max": 24.929643999996642
     }
   },
-  "real_diff_recall": null,
+  "real_diff_recall": 1.0,
   "pilot_dogfood": {
-    "source": null,
-    "last_run": null,
-    "manifests_passed": null,
-    "manifests_total": null,
-    "median_elapsed_ms": null,
-    "false_positive_rate": null,
+    "source": "local",
+    "last_run": "2026-06-10T21:55:08Z",
+    "manifests_passed": 5,
+    "manifests_total": 5,
+    "median_elapsed_ms": 13.955099999293452,
+    "false_positive_rate": 0.0,
     "external_manifest": "examples/pilot_repos/external_oss_ci_secrets.json",
     "weekly_schedule": "0 7 * * 1",
     "workflow": ".github/workflows/pilot-dogfood.yml",
-    "ovk_version_pin": "1.1.0"
+    "ovk_version_pin": "1.2.0"
   },
   "external_pilots": []
 }

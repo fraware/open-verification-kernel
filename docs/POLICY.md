@@ -1,12 +1,14 @@
-# OVK Router Policy Recipes
+# Verification routing configuration
 
 Use `.verification/config.yml` to tune routing strictness, runtime budget, and backend allow/deny controls.
 
 Schema: `schemas/verification.config.schema.json`.
 
-Reference behavior check: `tests/test_phase2_kernel.py` (`test_budget_from_policy_denies_expensive_backends`).
+When you run `ovk check`, OVK reads `default_on_unknown` from `.verification/config.yml` and uses it for merge recommendations. Focused per-check commands (`ovk ci-secrets`, etc.) use the schema default unless you load policy explicitly.
 
-## Recipe 1: Advisory OSS default
+Tests: `tests/test_policy_config.py` and routing tests under `tests/`.
+
+## Example 1: Advisory OSS default
 
 Use this for initial rollout where OVK should provide signals but not break contributor flow.
 
@@ -23,9 +25,9 @@ routing:
   prefer_deterministic: false
 ```
 
-Expected router behavior: routes to compatible backends, allows unknowns to degrade to human review.
+Expected behavior: routes to compatible backends, allows unknowns to degrade to human review.
 
-## Recipe 2: Strict production
+## Example 2: Strict production
 
 Use this in protected branches where ambiguous outcomes must block merge.
 
@@ -42,9 +44,9 @@ routing:
   prefer_deterministic: true
 ```
 
-Expected router behavior: expensive assistants are excluded; unknown outcomes are blocking.
+Expected behavior: expensive assistants are excluded; unknown outcomes are blocking.
 
-## Recipe 3: Deterministic-only CI
+## Example 3: Deterministic-only CI
 
 Use this when CI predictability and runtime consistency are higher priority than exhaustive proving.
 
@@ -60,9 +62,9 @@ routing:
   prefer_deterministic: true
 ```
 
-Expected router behavior: proof-assistant backends are rejected by budget policy; deterministic and lightweight engines dominate.
+Expected behavior: proof-assistant backends are rejected by budget policy; deterministic and lightweight engines dominate.
 
-## Recipe 4: Security-sensitive bot PRs
+## Example 4: Security-sensitive bot PRs
 
 Use this for automation-authored changes where fast, high-signal checks should gate merges.
 
@@ -79,9 +81,9 @@ routing:
   prefer_deterministic: true
 ```
 
-Expected router behavior: only security-focused engines are considered, and unrecognized situations require manual reviewer sign-off.
+Expected behavior: only security-focused engines are considered, and unrecognized situations require manual reviewer sign-off.
 
-## Recipe 5: Full formal stack
+## Example 5: Full formal stack
 
 Use this for deep validation windows (nightly or release candidate verification) where longer execution is acceptable.
 
@@ -97,4 +99,4 @@ routing:
   prefer_deterministic: false
 ```
 
-Expected router behavior: broad backend coverage, including higher-cost formal engines.
+Expected behavior: broad backend coverage, including higher-cost formal engines.

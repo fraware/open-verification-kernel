@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 
-OVK_VERSION = "1.1.0"
+OVK_VERSION = "1.2.0"
 OVK_RELEASE_CANDIDATE = OVK_VERSION
 
 

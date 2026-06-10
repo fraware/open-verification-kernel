@@ -24,7 +24,7 @@ ovk-attestation-envelope.json
 | `markdown` | `ovk-pr-comment.md` | Pull-request review summary |
 | `attestation` | `ovk-attestation.json` | in-toto-style attestation statement |
 | `artifact_manifest` | `ovk-artifact-manifest.json` | SHA-256 digests for all artifacts |
-| `evidence_quality` | `ovk-evidence-quality.json` | Evidence invariant report |
+| `evidence_quality` | `ovk-evidence-quality.json` | Evidence quality report |
 | `provenance` | `ovk-provenance.json` | SLSA-style provenance statement |
 | `attestation_envelope` | `ovk-attestation-envelope.json` | Statement bound to manifest digest |
 
@@ -92,7 +92,7 @@ Records builder identity, bundle digest, input materials, git metadata, and invo
 
 Schema: `ovk.evidence_quality.v1`
 
-Records whether an evidence bundle satisfies OVK invariants:
+Records whether an evidence bundle satisfies OVK quality rules:
 
 - at least one evidence item;
 - unique evidence IDs;

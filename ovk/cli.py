@@ -467,15 +467,15 @@ def infra_exposure(
 @app.command("ci-secrets")
 def ci_secrets(
     input_json: Path,
-    repo: str = typer.Option("unknown/repo"),
-    head_sha: str = typer.Option("unknown"),
-    base_sha: Optional[str] = typer.Option(None),
-    evidence_output: Path = typer.Option(Path("ovk-ci-secrets-evidence.json")),
-    markdown_output: Path = typer.Option(Path("ovk-ci-secrets-comment.md")),
-    attestation_output: Path = typer.Option(Path("ovk-ci-secrets-attestation.json")),
-    manifest_output: Path = typer.Option(Path("ovk-ci-secrets-artifact-manifest.json")),
-    quality_output: Path = typer.Option(Path("ovk-ci-secrets-evidence-quality.json")),
-    advisory: bool = typer.Option(False),
+    repo: str = typer.Option("unknown/repo", help="Repository name for evidence subject."),
+    head_sha: str = typer.Option("unknown", help="Head commit SHA."),
+    base_sha: Optional[str] = typer.Option(None, help="Base commit SHA."),
+    evidence_output: Path = typer.Option(Path("ovk-ci-secrets-evidence.json"), help="Evidence bundle output path."),
+    markdown_output: Path = typer.Option(Path("ovk-ci-secrets-comment.md"), help="Markdown output path."),
+    attestation_output: Path = typer.Option(Path("ovk-ci-secrets-attestation.json"), help="Attestation output path."),
+    manifest_output: Path = typer.Option(Path("ovk-ci-secrets-artifact-manifest.json"), help="Artifact manifest output path."),
+    quality_output: Path = typer.Option(Path("ovk-ci-secrets-evidence-quality.json"), help="Evidence quality report output path."),
+    advisory: bool = typer.Option(False, help="Write outputs and exit 0."),
 ) -> None:
     """Run the CI secrets exposure path."""
     evidence = evaluate_ci_secrets_exposure(read_json_file(input_json), repo=repo, head_sha=head_sha, base_sha=base_sha)
@@ -494,15 +494,15 @@ def ci_secrets(
 @app.command("deployment-state")
 def deployment_state(
     input_json: Path,
-    repo: str = typer.Option("unknown/repo"),
-    head_sha: str = typer.Option("unknown"),
-    base_sha: Optional[str] = typer.Option(None),
-    evidence_output: Path = typer.Option(Path("ovk-deployment-evidence.json")),
-    markdown_output: Path = typer.Option(Path("ovk-deployment-comment.md")),
-    attestation_output: Path = typer.Option(Path("ovk-deployment-attestation.json")),
-    manifest_output: Path = typer.Option(Path("ovk-deployment-artifact-manifest.json")),
-    quality_output: Path = typer.Option(Path("ovk-deployment-evidence-quality.json")),
-    advisory: bool = typer.Option(False),
+    repo: str = typer.Option("unknown/repo", help="Repository name for evidence subject."),
+    head_sha: str = typer.Option("unknown", help="Head commit SHA."),
+    base_sha: Optional[str] = typer.Option(None, help="Base commit SHA."),
+    evidence_output: Path = typer.Option(Path("ovk-deployment-evidence.json"), help="Evidence bundle output path."),
+    markdown_output: Path = typer.Option(Path("ovk-deployment-comment.md"), help="Markdown output path."),
+    attestation_output: Path = typer.Option(Path("ovk-deployment-attestation.json"), help="Attestation output path."),
+    manifest_output: Path = typer.Option(Path("ovk-deployment-artifact-manifest.json"), help="Artifact manifest output path."),
+    quality_output: Path = typer.Option(Path("ovk-deployment-evidence-quality.json"), help="Evidence quality report output path."),
+    advisory: bool = typer.Option(False, help="Write outputs and exit 0."),
 ) -> None:
     """Run the deployment approval state machine path."""
     evidence = evaluate_approval_state_machine(read_json_file(input_json), repo=repo, head_sha=head_sha, base_sha=base_sha)

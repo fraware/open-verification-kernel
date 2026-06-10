@@ -6,6 +6,8 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from ovk.adapters.ci_secrets.evidence import evaluate_ci_secrets_exposure
+from ovk.adapters.deployment.evidence import evaluate_approval_state_machine
 from ovk.adapters.infra.evidence import evaluate_infra_exposure
 from ovk.adapters.z3.validated_path import evaluate_validated_authorization_path
 from ovk.core.bundle import make_bundle
@@ -72,6 +74,28 @@ def run_local_release_smoke() -> list[str]:
         if self_protection_result.recommendation != "block":
             failures.append("self-protection smoke check did not block expected fixture")
 
+        ci_secrets_data = read_json_file(Path("examples/ci_secrets/input_secrets_safe.json"))
+        ci_secrets_evidence = evaluate_ci_secrets_exposure(
+            ci_secrets_data,
+            repo="smoke/repo",
+            head_sha="smoke-head",
+        )
+        ci_secrets_bundle = make_bundle([ci_secrets_evidence])
+        _write_lane_outputs(ci_secrets_bundle, root, "ci-secrets")
+        if ci_secrets_bundle.decision.get("merge_recommendation") != "allow":
+            failures.append("ci-secrets smoke check did not allow expected fixture")
+
+        deployment_data = read_json_file(Path("examples/deployment_state/input_valid_approval_path.json"))
+        deployment_evidence = evaluate_approval_state_machine(
+            deployment_data,
+            repo="smoke/repo",
+            head_sha="smoke-head",
+        )
+        deployment_bundle = make_bundle([deployment_evidence])
+        _write_lane_outputs(deployment_bundle, root, "deployment")
+        if deployment_bundle.decision.get("merge_recommendation") != "allow":
+            failures.append("deployment smoke check did not allow expected fixture")
+
         expected = [
             "authorization-evidence.json",
             "authorization-comment.md",
@@ -88,12 +112,22 @@ def run_local_release_smoke() -> list[str]:
             "self-protection-attestation.json",
             "self-protection-manifest.json",
             "self-protection-quality.json",
+            "ci-secrets-evidence.json",
+            "ci-secrets-comment.md",
+            "ci-secrets-attestation.json",
+            "ci-secrets-manifest.json",
+            "ci-secrets-quality.json",
+            "deployment-evidence.json",
+            "deployment-comment.md",
+            "deployment-attestation.json",
+            "deployment-manifest.json",
+            "deployment-quality.json",
         ]
         for name in expected:
             if not (root / name).exists():
                 failures.append(f"missing smoke output: {name}")
 
-        for prefix in ("authorization", "infrastructure", "self-protection"):
+        for prefix in ("authorization", "infrastructure", "self-protection", "ci-secrets", "deployment"):
             quality_path = root / f"{prefix}-quality.json"
             bundle_path = root / f"{prefix}-evidence.json"
             from ovk.core.models import EvidenceBundle

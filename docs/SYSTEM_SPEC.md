@@ -4,7 +4,7 @@
 
 Open Verification Kernel (OVK) is a solver-agnostic verification kernel for AI-agent engineering workflows. It receives an engineering change, derives verification intents, selects appropriate formal backends, runs backend-specific obligations, normalizes results, and produces evidence for pull-request decisions.
 
-OVK is not a prover, solver, static analyzer, or policy language. It is the orchestration and evidence layer that lets existing formal methods tools become native to coding agents and CI/CD workflows.
+OVK is not a prover, solver, static analyzer, or policy language. It is the routing and evidence layer that lets existing formal methods tools plug into coding agents and CI/CD workflows.
 
 ## Core separation
 
@@ -34,7 +34,7 @@ The system must never jump directly from a natural-language issue to a prover wi
 10. If a counterexample exists, the agent can repair the PR and rerun OVK.
 ```
 
-## Kernel components
+## Core components
 
 | Component | Responsibility |
 |---|---|
@@ -43,7 +43,7 @@ The system must never jump directly from a natural-language issue to a prover wi
 | Intent Engine | Generates or selects verification intents |
 | Risk Ranker | Scores intents by severity, affected surface, agent authority, and confidence |
 | Capability Registry | Stores backend capability manifests |
-| Verification Router | Selects backend and budget for each intent |
+| Backend selector | Chooses backend and budget for each intent |
 | Adapter Runtime | Runs OPA, Z3, Kani, TLA+, Dafny, Verus, Lean, Cedar, CBMC, Alloy, and others |
 | Result Normalizer | Converts backend-specific outputs into common results |
 | Counterexample Translator | Converts traces, models, and violations into engineering explanations |
@@ -59,9 +59,9 @@ All backend results must normalize to one of five outcomes.
 | fail | Concrete violation, model, trace, policy violation, or proof failure found |
 | unknown | Backend could not decide within budget or lacked sufficient context |
 | error | Tool or adapter failed |
-| skipped | Router intentionally skipped the backend and recorded why |
+| skipped | OVK intentionally skipped the backend and recorded why |
 
-The kernel must never treat `unknown`, `error`, or `skipped` as `pass` in enforce mode.
+OVK must never treat `unknown`, `error`, or `skipped` as `pass` in strict mode.
 
 ## Default merge policy
 
@@ -78,7 +78,7 @@ else:
     require_human_review
 ```
 
-## Design invariant
+## Design principle
 
 Every agentic engineering action that changes authority, deployment, data flow, security, or control logic should produce a structured answer to four questions.
 

@@ -66,6 +66,17 @@ inputs:
     required: false
     default: ovk-release-bundle
 
+outputs:
+  recommendation:
+    description: Merge recommendation from the evidence bundle (allow, block, require_human_review, etc.)
+    value: ${{ steps.set-outputs.outputs.recommendation }}
+  exit_code:
+    description: Process exit code implied by the recommendation (0 allow, 1 block, 2 require_human_review)
+    value: ${{ steps.set-outputs.outputs.exit_code }}
+  check_emitted:
+    description: Whether a GitHub check run was successfully emitted
+    value: ${{ steps.set-outputs.outputs.check_emitted }}
+
 runs:
   using: composite
   steps:
@@ -84,6 +95,7 @@ runs:
         if [ -n "${OVK_PACKAGE_VERSION:-}" ]; then
           pip install "open-verification-kernel==${OVK_PACKAGE_VERSION}"
         else
+          # Local composite action (uses: ./) installs from checkout; consumers set OVK_PACKAGE_VERSION=1.2.0
           pip install .
         fi
     - name: Initialize verification directory if needed
@@ -100,6 +112,7 @@ runs:
           --event "${{ github.event_path }}" \
           --output ovk-branch-metadata.json || true
     - name: Run OVK multi-lane verification
+      id: verify
       if: ${{ inputs.verification-manifest != '' }}
       shell: bash
       working-directory: ${{ github.workspace }}
@@ -108,13 +121,23 @@ runs:
         if [ "${{ inputs.mode }}" = "advisory" ]; then
           ADVISORY_FLAG="--advisory"
         fi
+        set +e
         ovk verify \
           --manifest "${{ inputs.verification-manifest }}" \
           --output-dir "${{ inputs.bundle-output-dir }}" \
           --repo "${{ github.repository }}" \
           --head-sha "${{ github.sha }}" \
           $ADVISORY_FLAG
+        ACTION_RC=$?
+        ovk evidence-quality "${{ inputs.bundle-output-dir }}/ovk-evidence.json" \
+          --output "${{ inputs.bundle-output-dir }}/ovk-evidence-quality.json"
+        if [ "$ACTION_RC" -eq 0 ]; then
+          ACTION_RC=$?
+        fi
+        set -e
+        echo "$ACTION_RC" > .ovk-action-exit-code
     - name: Run OVK check path
+      id: check
       if: ${{ inputs.verification-manifest == '' && inputs.use-check == 'true' }}
       shell: bash
       working-directory: ${{ github.workspace }}
@@ -122,8 +145,7 @@ runs:
         EXTRA_CHECK_METADATA=""
         if [ -n "${{ inputs.check-metadata }}" ]; then
           EXTRA_CHECK_METADATA="--check-metadata ${{ inputs.check-metadata }}"
-        fi
-        if [ -f ovk-branch-metadata.json ]; then
+        elif [ -f ovk-branch-metadata.json ]; then
           EXTRA_CHECK_METADATA="--check-metadata ovk-branch-metadata.json"
         fi
         ADVISORY_FLAG=""
@@ -134,6 +156,7 @@ runs:
         if [ "${{ inputs.mode }}" = "strict" ]; then
           STRICT_FLAG="--strict"
         fi
+        set +e
         ovk check \
           --diff "${{ inputs.changed-files }}" \
           --github-event "${{ github.event_path }}" \
@@ -143,40 +166,79 @@ runs:
           --output-dir . \
           $ADVISORY_FLAG \
           $STRICT_FLAG
-        ovk evidence-quality ovk-evidence.json --output ovk-evidence-quality.json || true
-        if [ "${{ inputs.mode }}" = "strict" ]; then
-          ovk evidence-quality ovk-evidence.json
+        ACTION_RC=$?
+        ovk evidence-quality ovk-evidence.json --output ovk-evidence-quality.json
+        if [ "$ACTION_RC" -eq 0 ]; then
+          ACTION_RC=$?
         fi
-    - name: Emit OVK GitHub check
+        set -e
+        echo "$ACTION_RC" > .ovk-action-exit-code
+    - name: Emit OVK GitHub check (check path)
+      id: emit-check-run
       if: ${{ inputs.emit-check == 'true' && inputs.verification-manifest == '' && inputs.use-check == 'true' }}
       shell: bash
       working-directory: ${{ github.workspace }}
       env:
         GITHUB_TOKEN: ${{ github.token }}
-      run: python "${{ github.action_path }}/scripts/emit_github_check.py" --evidence ovk-evidence.json --markdown ovk-pr-comment.md --repo "${{ github.repository }}" --head-sha "${{ github.sha }}" || true
+      run: |
+        set +e
+        python "${{ github.action_path }}/scripts/emit_github_check.py" \
+          --evidence ovk-evidence.json \
+          --markdown ovk-pr-comment.md \
+          --repo "${{ github.repository }}" \
+          --head-sha "${{ github.sha }}"
+        EMIT_RC=$?
+        set -e
+        if [ "$EMIT_RC" -eq 0 ]; then
+          echo "true" > .ovk-check-emitted
+        else
+          echo "$EMIT_RC" > .ovk-emit-exit-code
+        fi
+    - name: Emit OVK GitHub check (verify path)
+      id: emit-check-verify
+      if: ${{ inputs.emit-check == 'true' && inputs.verification-manifest != '' }}
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        EVIDENCE="${{ inputs.bundle-output-dir }}/ovk-evidence.json"
+        MARKDOWN="${{ inputs.bundle-output-dir }}/ovk-pr-comment.md"
+        set +e
+        python "${{ github.action_path }}/scripts/emit_github_check.py" \
+          --evidence "$EVIDENCE" \
+          --markdown "$MARKDOWN" \
+          --repo "${{ github.repository }}" \
+          --head-sha "${{ github.sha }}"
+        EMIT_RC=$?
+        set -e
+        if [ "$EMIT_RC" -eq 0 ]; then
+          echo "true" > .ovk-check-emitted
+        else
+          echo "$EMIT_RC" > .ovk-emit-exit-code
+        fi
     - name: Run OVK self-protection CI path
+      id: ci
       if: ${{ inputs.verification-manifest == '' && inputs.use-check != 'true' }}
       shell: bash
       working-directory: ${{ github.workspace }}
       run: |
         EXTRA_CHECK_METADATA=""
-        EXTRA_METADATA=""
         if [ -n "${{ inputs.check-metadata }}" ]; then
           EXTRA_CHECK_METADATA="--check-metadata ${{ inputs.check-metadata }}"
-        fi
-        if [ -f ovk-branch-metadata.json ]; then
-          EXTRA_METADATA="--check-metadata ovk-branch-metadata.json"
+        elif [ -f ovk-branch-metadata.json ]; then
+          EXTRA_CHECK_METADATA="--check-metadata ovk-branch-metadata.json"
         fi
         ADVISORY_FLAG=""
         if [ "${{ inputs.mode }}" = "advisory" ]; then
           ADVISORY_FLAG="--advisory"
         fi
+        set +e
         ovk ci \
           --github-event "${{ github.event_path }}" \
           --metadata "${{ inputs.metadata }}" \
           --changed-files "${{ inputs.changed-files }}" \
           $EXTRA_CHECK_METADATA \
-          $EXTRA_METADATA \
           --backend-strategy "${{ inputs.backend-strategy }}" \
           --evidence-output "${{ inputs.evidence-output }}" \
           --markdown-output "${{ inputs.markdown-output }}" \
@@ -186,6 +248,9 @@ runs:
           --repo "${{ github.repository }}" \
           --head-sha "${{ github.sha }}" \
           $ADVISORY_FLAG
+        ACTION_RC=$?
+        set -e
+        echo "$ACTION_RC" > .ovk-action-exit-code
     - name: Post OVK pull-request comment
       if: ${{ inputs.post-comment == 'true' }}
       shell: bash
@@ -193,7 +258,64 @@ runs:
       env:
         GITHUB_TOKEN: ${{ github.token }}
       run: python "${{ github.action_path }}/scripts/post_pr_comment.py" --markdown "${{ inputs.markdown-output }}" --event "${{ github.event_path }}"
+    - name: Set action outputs
+      id: set-outputs
+      if: always()
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        python - <<'PY'
+        import json
+        import os
+        from pathlib import Path
+
+        evidence_candidates = [
+            Path("ovk-evidence.json"),
+            Path("${{ inputs.evidence-output }}"),
+            Path("${{ inputs.bundle-output-dir }}") / "ovk-evidence.json",
+        ]
+        evidence_path = next((path for path in evidence_candidates if path.exists()), None)
+
+        recommendation = ""
+        exit_code = "0"
+        if evidence_path is not None:
+            bundle = json.loads(evidence_path.read_text(encoding="utf-8"))
+            recommendation = str(bundle.get("decision", {}).get("merge_recommendation", ""))
+            exit_codes = {
+                "allow": 0,
+                "allow_with_warning": 0,
+                "block": 1,
+                "require_human_review": 2,
+                "require_stronger_check": 2,
+            }
+            exit_code = str(exit_codes.get(recommendation, 2))
+
+        check_emitted = "false"
+        if Path(".ovk-check-emitted").exists():
+            check_emitted = "true"
+
+        github_output = os.environ["GITHUB_OUTPUT"]
+        with open(github_output, "a", encoding="utf-8") as handle:
+            handle.write(f"recommendation={recommendation}\n")
+            handle.write(f"exit_code={exit_code}\n")
+            handle.write(f"check_emitted={check_emitted}\n")
+        PY
+    - name: Enforce strict exit
+      if: always()
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        if [ "${{ inputs.mode }}" != "strict" ]; then
+          exit 0
+        fi
+        if [ -f .ovk-emit-exit-code ] && [ "${{ inputs.emit-check }}" = "true" ]; then
+          exit "$(cat .ovk-emit-exit-code)"
+        fi
+        if [ -f .ovk-action-exit-code ]; then
+          exit "$(cat .ovk-action-exit-code)"
+        fi
     - name: Upload OVK artifacts
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: ovk-evidence-artifacts
@@ -207,3 +329,4 @@ runs:
           ovk-attestation-envelope.json
           ovk-release-bundle/**
           ovk-branch-metadata.json
+          .ovk-check-emitted

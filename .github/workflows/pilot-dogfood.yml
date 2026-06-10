@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  OVK_PACKAGE_VERSION: "1.1.0"
+  OVK_PACKAGE_VERSION: "1.2.0"
 
 jobs:
   external-consumer-simulation:

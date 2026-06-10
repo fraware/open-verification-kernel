@@ -43,5 +43,5 @@ def test_mcp_run_verification_tool() -> None:
         }
     )
     payload = json.loads(response["result"]["content"][0]["text"])
-    assert payload["release_candidate"] == "1.1.0"
+    assert payload["release_candidate"] == "1.2.0"
     assert len(payload["supported_evidence_lanes"]) == 5

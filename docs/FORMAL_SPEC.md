@@ -1,6 +1,6 @@
 # Formal Specification
 
-This document defines the formal kernel semantics. It is intentionally modest. OVK does not claim to verify all software. It makes verification claims explicit, routed, and auditable.
+This document defines OVK's formal verification semantics. It is intentionally modest. OVK does not claim to verify all software. It makes verification claims explicit, routed, and auditable.
 
 ## Repository state and change
 
@@ -34,7 +34,7 @@ A verification intent is:
 I = (scope, actor, operation, property, failure_modes, acceptable_evidence, merge_policy)
 ```
 
-Supported property kinds for v0:
+Supported property kinds today:
 
 | Kind | Meaning |
 |---|---|
@@ -70,9 +70,9 @@ Run(B, Obligation) -> RawResult
 Normalize(B, RawResult) -> VerificationResult
 ```
 
-## Router utility
+## Backend selection
 
-The router selects backends by practical utility.
+OVK selects backends by practical utility.
 
 ```text
 Utility(B, I, C, budget) =
@@ -152,18 +152,9 @@ else:
     require_human_review
 ```
 
-## Kernel invariants
+## Security rules
 
-```text
-OVK-INV-001: An agent-authored PR cannot modify OVK enforcement configuration without human review.
-OVK-INV-002: unknown, timeout, adapter error, and missing-context results cannot be treated as pass in enforce mode.
-OVK-INV-003: Every evidence claim must include backend, version, assumptions, limits, input digest, and result.
-OVK-INV-004: Every critical failed intent must block merge unless an authorized human override is recorded.
-OVK-INV-005: An inferred high-risk intent cannot become an authoritative passing claim without template provenance or human confirmation.
-OVK-INV-006: A generated proof obligation must reference the intent and changed scope it claims to check.
-OVK-INV-007: The same actor that authored a change cannot be the sole approver of an override for that change.
-OVK-INV-008: Evidence artifacts must be content-addressed and bound to the commit SHA they evaluate.
-```
+These match the rules in [THREAT_MODEL.md](THREAT_MODEL.md): agents cannot self-disable checks; unknowns never pass in strict mode; evidence is complete and content-addressed; critical failures block unless a human override is recorded; high-risk runtime checks need template provenance or human review.
 
 ## Minimal TLA+ decision model
 

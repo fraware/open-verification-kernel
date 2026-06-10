@@ -1,12 +1,12 @@
-# OVK Evidence Lanes
+# OVK Check Types
 
-The five MVP evidence lanes and their input contracts.
+The five check types OVK ships today and their input contracts.
 
-**Autonomous path:** `ovk check --changed-files <diff>` infers and evaluates all affected lanes from a unified diff. Lane-specific CLI commands below remain for focused debugging and manifest-driven workflows.
+**Default path:** `ovk check --changed-files <diff>` infers and evaluates all affected checks from a unified diff. Focused CLI commands below remain for debugging and manifest-driven workflows.
 
-## Lane overview
+## Overview
 
-| Lane | Intent ID | Focused CLI | Autonomous path |
+| Check type | Intent ID | Focused CLI | Via `ovk check` |
 |---|---|---|---|
 | Self-protection | `agent-cannot-disable-own-ci-gate` | `ovk ci` | `ovk check` |
 | Authorization | `no-admin-route-bypass` | `ovk auth-obligation` | `ovk check` |
@@ -14,7 +14,7 @@ The five MVP evidence lanes and their input contracts.
 | CI secrets | `no-secrets-in-untrusted-context` | `ovk ci-secrets` | `ovk check` |
 | Deployment state | `no-skipped-approval-state` | `ovk deployment-state` | `ovk check` |
 
-Multi-lane manifest: `ovk verify --manifest <manifest.json>`
+Multi-check manifest: `ovk verify --manifest <manifest.json>`
 
 ## Self-protection
 
@@ -67,7 +67,7 @@ Input schema: `schemas/infrastructure.input.schema.json`
 
 ### Input formats
 
-`ovk infra-exposure` and `scripts/run_infra_exposure.py` accept:
+`ovk infra-exposure` accepts:
 
 | Format | Flag |
 |---|---|
@@ -129,6 +129,10 @@ Uses graph reachability over deployment states. Skipped required approval → `b
 
 ## Conservative rule
 
-Invalid input must not produce `allow`. Unknown and error states require human review across all lanes.
+Invalid input must not produce `allow`. Unknown and error states require human review for every check type.
 
-Examples: `examples/` per lane. Benchmark: `benchmarks/formal_pr_bench/score_all_lanes.py`.
+Examples: `examples/` per check type. Benchmark scorer: `benchmarks/formal_pr_bench/score_all_lanes.py` (internal script name).
+
+## Older wrapper scripts
+
+Deprecated `scripts/run_*.py` runners mirror the focused CLI commands above (`ovk ci`, `ovk auth-obligation`, `ovk infra-exposure`, `ovk ci-secrets`, `ovk deployment-state`) with identical flags. Prefer `ovk` for new integrations; see [MIGRATION.md](MIGRATION.md).

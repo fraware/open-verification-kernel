@@ -71,12 +71,21 @@ def test_sprint1_outputs_are_written(tmp_path: Path) -> None:
     evidence_output = tmp_path / "evidence.json"
     markdown_output = tmp_path / "comment.md"
     attestation_output = tmp_path / "attestation.json"
+    manifest_output = tmp_path / "manifest.json"
+    quality_output = tmp_path / "quality.json"
     write_sprint1_outputs(
         result,
         evidence_output=evidence_output,
         markdown_output=markdown_output,
         attestation_output=attestation_output,
+        manifest_output=manifest_output,
+        quality_output=quality_output,
     )
     assert evidence_output.exists()
     assert markdown_output.exists()
     assert attestation_output.exists()
+    assert manifest_output.exists()
+    assert quality_output.exists()
+    payload = json.loads(quality_output.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == "ovk.evidence_quality.v1"
+    assert payload["passed"] is True

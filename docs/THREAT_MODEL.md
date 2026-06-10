@@ -33,31 +33,29 @@ OVK focuses on agentic engineering risk. The first threat model covers AI coding
 | Policy regression | Agent weakens auth, IAM, routing, or deployment constraints | Fail evidence and block high-risk PRs |
 | Specification gaming | Agent generates weak property that trivially passes | Anti-vacuity checks and template provenance |
 | Evidence forgery | Agent edits evidence artifacts or claims | Content addressing and CI-generated evidence |
-| Backend misuse | Agent chooses inappropriate verifier | Router and capability manifests |
+| Backend misuse | Agent chooses inappropriate verifier | Backend selection rules and capability manifests |
 | Counterexample suppression | Agent hides failing trace or generated test | Evidence bundle must include raw result reference |
-| Context omission | Kernel checks incomplete metadata | Missing context becomes unknown |
+| Context omission | OVK checks incomplete metadata | Missing context becomes unknown |
 | Timeout laundering | Backend timeout treated as pass | Timeout becomes unknown |
 | Prompt injection | Repo files instruct agent to skip verification | OVK policy independent of model instruction following |
 
-## OVK security invariants
+## Security rules OVK enforces
 
-```text
-OVK-INV-001: Agent-authored PRs cannot modify OVK enforcement configuration without human review.
-OVK-INV-002: Unknown, timeout, adapter error, and missing-context results cannot be treated as pass in enforce mode.
-OVK-INV-003: Every evidence claim must include backend, version, assumptions, limits, input digest, and result.
-OVK-INV-004: Every critical failed intent blocks merge unless authorized human override is recorded.
-OVK-INV-005: Inferred high-risk intents cannot become authoritative passing claims without template provenance or human confirmation.
-OVK-INV-006: Proof obligations must reference the intent and changed scope they claim to check.
-OVK-INV-007: The same actor that authored a change cannot be the sole approver of an override.
-OVK-INV-008: Evidence artifacts must be content-addressed and bound to the commit SHA they evaluate.
-```
+1. Agent-authored PRs cannot weaken OVK or CI enforcement without human review.
+2. Unknown, timed-out, errored, or incomplete checks cannot count as pass in strict mode.
+3. Every evidence claim states which backend ran, its version, assumptions, limits, input digest, and result.
+4. Critical failures block merge unless an authorized human override is recorded.
+5. High-risk checks inferred at runtime cannot return pass without template provenance or human confirmation.
+6. Each proof obligation references the check and code scope it claims to cover.
+7. The change author cannot be the sole approver of their own override.
+8. Evidence artifacts are content-addressed and bound to the commit SHA they evaluate.
 
 ## Initial mitigations
 
-- Enforce-mode default for critical templates.
+- Strict mode default for critical templates.
 - Human review requirement for OVK config changes.
 - Evidence schema validation before PR output.
 - Explicit unknown state for missing metadata.
 - Adapter manifests with assumptions and limits.
-- Golden adversarial tests for self-disable and timeout cases.
+- Adversarial regression tests for self-disable and timeout cases.
 - Optional in-toto-compatible evidence predicate.

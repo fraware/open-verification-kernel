@@ -58,6 +58,8 @@ def _check_smoke_quality_reports() -> list[str]:
     """Re-run lane smoke outputs in a temp dir and verify quality reports pass."""
     from tempfile import TemporaryDirectory
 
+    from ovk.adapters.ci_secrets.evidence import evaluate_ci_secrets_exposure
+    from ovk.adapters.deployment.evidence import evaluate_approval_state_machine
     from ovk.adapters.infra.evidence import evaluate_infra_exposure
     from ovk.adapters.z3.validated_path import evaluate_validated_authorization_path
     from ovk.core.bundle import make_bundle
@@ -110,6 +112,38 @@ def _check_smoke_quality_reports() -> list[str]:
                     repo="smoke/repo",
                     head_sha="smoke-head",
                 ).bundle,
+            ),
+            (
+                "ci_secrets",
+                make_bundle(
+                    [
+                        evaluate_ci_secrets_exposure(
+                            read_json_file(
+                                resource_path("examples", "ci_secrets", "input_secrets_safe.json")
+                            ),
+                            repo="smoke/repo",
+                            head_sha="smoke-head",
+                        )
+                    ]
+                ),
+            ),
+            (
+                "deployment",
+                make_bundle(
+                    [
+                        evaluate_approval_state_machine(
+                            read_json_file(
+                                resource_path(
+                                    "examples",
+                                    "deployment_state",
+                                    "input_valid_approval_path.json",
+                                )
+                            ),
+                            repo="smoke/repo",
+                            head_sha="smoke-head",
+                        )
+                    ]
+                ),
             ),
         ]
         for name, bundle in lanes:

@@ -5,9 +5,6 @@ from __future__ import annotations
 from ovk.core.models import EvidenceBundle, MergeRecommendation, VerificationStatus
 
 
-CRITICAL = "critical"
-
-
 def evidence_has_status(bundle: EvidenceBundle, status: VerificationStatus) -> bool:
     """Return true if any backend claim in the bundle has the given status."""
     return any(
@@ -31,17 +28,24 @@ def evidence_has_unknown_like(bundle: EvidenceBundle) -> bool:
     )
 
 
-def has_critical_intent(bundle: EvidenceBundle) -> bool:
-    """Best-effort critical-risk detector for starter implementation."""
-    return any(
-        evidence.intent.get("risk", {}).get("severity") == CRITICAL
-        or evidence.intent.get("severity") == CRITICAL
-        for evidence in bundle.evidence
-    )
+def _unknown_like_recommendation(
+    *,
+    enforce: bool,
+    default_on_unknown: str,
+) -> MergeRecommendation:
+    if not enforce:
+        return MergeRecommendation.ALLOW_WITH_WARNING
+    if default_on_unknown == "block":
+        return MergeRecommendation.BLOCK
+    if default_on_unknown == "allow_with_warning":
+        return MergeRecommendation.ALLOW_WITH_WARNING
+    return MergeRecommendation.REQUIRE_HUMAN_REVIEW
 
 
-def _decision_reason(recommendation: MergeRecommendation) -> str:
+def _decision_reason(recommendation: MergeRecommendation, *, from_unknown: bool = False) -> str:
     if recommendation == MergeRecommendation.BLOCK:
+        if from_unknown:
+            return "one or more verification intents returned an unknown-like result"
         return "one or more verification intents failed"
     if recommendation in {
         MergeRecommendation.REQUIRE_HUMAN_REVIEW,
@@ -53,18 +57,20 @@ def _decision_reason(recommendation: MergeRecommendation) -> str:
     return "all evaluated verification intents passed"
 
 
-def decide(bundle: EvidenceBundle, enforce: bool = True) -> MergeRecommendation:
+def decide(
+    bundle: EvidenceBundle,
+    enforce: bool = True,
+    default_on_unknown: str = "require_human_review",
+) -> MergeRecommendation:
     """Compute a conservative merge recommendation.
 
-    Critical failures block. Unknown-like critical results require human review.
-    In enforce mode, any failure blocks by default until risk-aware policies are implemented.
+    Critical failures block. Unknown-like outcomes follow ``default_on_unknown`` when
+    ``enforce`` is true (from ``.verification/config.yml`` in the kernel path).
     """
     if evidence_has_status(bundle, VerificationStatus.FAIL):
         return MergeRecommendation.BLOCK if enforce else MergeRecommendation.ALLOW_WITH_WARNING
 
     if evidence_has_unknown_like(bundle):
-        if has_critical_intent(bundle):
-            return MergeRecommendation.REQUIRE_HUMAN_REVIEW if enforce else MergeRecommendation.ALLOW_WITH_WARNING
         skipped_only = all(
             claim.status in {VerificationStatus.SKIPPED, VerificationStatus.PASS}
             for evidence in bundle.evidence
@@ -72,15 +78,24 @@ def decide(bundle: EvidenceBundle, enforce: bool = True) -> MergeRecommendation:
         ) and evidence_has_status(bundle, VerificationStatus.SKIPPED)
         if skipped_only and not enforce:
             return MergeRecommendation.ALLOW_WITH_WARNING
-        return MergeRecommendation.REQUIRE_HUMAN_REVIEW if enforce else MergeRecommendation.ALLOW_WITH_WARNING
+        return _unknown_like_recommendation(enforce=enforce, default_on_unknown=default_on_unknown)
 
     return MergeRecommendation.ALLOW
 
 
-def decide_with_reason(bundle: EvidenceBundle, enforce: bool = True) -> dict[str, str]:
+def decide_with_reason(
+    bundle: EvidenceBundle,
+    enforce: bool = True,
+    default_on_unknown: str = "require_human_review",
+) -> dict[str, str]:
     """Return merge recommendation and human-readable reason for bundle construction."""
-    recommendation = decide(bundle, enforce=enforce)
+    recommendation = decide(bundle, enforce=enforce, default_on_unknown=default_on_unknown)
+    from_unknown = recommendation in {
+        MergeRecommendation.BLOCK,
+        MergeRecommendation.REQUIRE_HUMAN_REVIEW,
+        MergeRecommendation.ALLOW_WITH_WARNING,
+    } and evidence_has_unknown_like(bundle) and not evidence_has_status(bundle, VerificationStatus.FAIL)
     return {
         "merge_recommendation": recommendation.value,
-        "reason": _decision_reason(recommendation),
+        "reason": _decision_reason(recommendation, from_unknown=from_unknown),
     }

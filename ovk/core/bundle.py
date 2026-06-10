@@ -18,7 +18,12 @@ def content_digest(value: object) -> str:
     return sha256(_stable_json(value).encode("utf-8")).hexdigest()
 
 
-def make_bundle(evidence: list[VerificationEvidence]) -> EvidenceBundle:
+def make_bundle(
+    evidence: list[VerificationEvidence],
+    *,
+    enforce: bool = True,
+    default_on_unknown: str = "require_human_review",
+) -> EvidenceBundle:
     """Create a conservative content-addressed bundle from evidence objects."""
     if not evidence:
         raise ValueError("cannot create an evidence bundle without evidence")
@@ -34,7 +39,11 @@ def make_bundle(evidence: list[VerificationEvidence]) -> EvidenceBundle:
         evidence=evidence,
         decision={"merge_recommendation": "require_human_review", "reason": "pending"},
     )
-    decision = decide_with_reason(provisional, enforce=True)
+    decision = decide_with_reason(
+        provisional,
+        enforce=enforce,
+        default_on_unknown=default_on_unknown,
+    )
     return EvidenceBundle(
         bundle_id=provisional.bundle_id,
         schema_version=provisional.schema_version,

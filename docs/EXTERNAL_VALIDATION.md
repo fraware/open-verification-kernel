@@ -1,39 +1,51 @@
 # External Validation Matrix
 
-OVK ships a scheduled external validation matrix in `.github/workflows/external-validation.yml` to continuously verify that third-party consumers can run the action in strict and advisory modes.
+Weekly CI job that verifies external repos can run the OVK GitHub Action in advisory and strict modes.
 
-## What the matrix runs
+Scenario definitions: `benchmarks/external_validation/scenarios.json`.
 
-- `check_strict_block`: runs `uses: ./` with `use-check: "true"` and a failing secrets diff; expected recommendation is `block`.
-- `check_advisory_allow`: runs `uses: ./` with preserved gate metadata in advisory mode; expected recommendation is `allow`.
-- `mvp_manifest_allow`: runs `uses: ./` with `verification-manifest` (`full_mvp`) in advisory mode; expected recommendation is `allow` and bundle generation.
-- `forged_bundle_rejected`: runs `ovk evidence-quality` on an adversarial fixture and requires a failing quality gate.
+## Scenarios
 
-The workflow also includes:
+Scenario IDs (first column) are stable test names in `scenarios.json`. Names such as `mvp_manifest_allow` are historical identifiers; see the **What runs** column for plain-language meaning.
 
-- `matrix_release_pin`: documents the pinned consumer path (`fraware/open-verification-kernel@v1.1.0`).
-- `attestation_smoke`: signed bundle generation (`OVK_SIGNING_KEY`) plus `ovk validate-outputs`.
+| Scenario | Mode | What runs | Expected |
+|---|---|---|---|
+| `check_strict_block` | strict | `ovk check` on secrets diff | `block`, job fails |
+| `check_strict_emit_check` | strict | `ovk check` + publish check run | `block`, check published |
+| `check_advisory_allow` | advisory | `ovk ci` with preserved metadata | `allow`, job passes |
+| `external_pilot_advisory` | advisory | `ovk check` on secrets diff | `block` reported, job passes |
+| `mvp_manifest_allow` | advisory | Five-check manifest (`full_mvp.json` layout) | `allow`, valid bundle |
+| `forged_bundle_rejected` | n/a | Tampered evidence quality gate | rejected |
+
+Also runs:
+
+- **Release pin check** — documents `@v1.2.0` consumer path.
+- **Signed bundle smoke** — HMAC signing and `ovk validate-outputs`.
+
+Each scenario asserts the merge recommendation and job exit behavior after the Action runs.
 
 ## Fork procedure
 
-1. Copy `examples/github_workflows/external_consumer.yml` into your fork.
-2. Replace local `uses: ./` with a pinned release tag (`uses: fraware/open-verification-kernel@v1.1.0` or newer).
-3. Start with advisory mode, verify evidence artifacts, then roll specific repos to strict mode.
+1. Copy a workflow from `examples/github_workflows/` (start with `pilot_fork_adopter.yml`).
+2. Pin the Action: `uses: fraware/open-verification-kernel@v1.2.0`.
+3. Start advisory; move to strict per [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md).
 
 ## Strict rollout checklist
 
-- Keep `use-check: "true"` for diff-aware routing.
-- Start strict mode on high-risk repositories only after advisory baselines are stable.
-- Validate generated bundles with `ovk validate-outputs`.
-- Keep evidence quality checks enabled for adversarial tampering detection.
+- Use `use-check: "true"` for diff-aware analysis.
+- Grant `checks: write` when `emit-check: "true"`.
+- Enable strict only after advisory baselines are stable.
+- Validate bundles with `ovk validate-outputs`.
 
-## Workflow run history
+## Run history
 
-Use the Actions view for [`External Validation Matrix`](https://github.com/fraware/open-verification-kernel/actions/workflows/external-validation.yml) to inspect weekly runs and scenario artifacts.
+[External Validation Matrix](https://github.com/fraware/open-verification-kernel/actions/workflows/external-validation.yml)
 
-## Required permissions
+## Permissions
 
-Expected workflow permissions:
-
-- `checks: write`
-- `pull-requests: write`
+```yaml
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+```

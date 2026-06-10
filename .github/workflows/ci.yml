@@ -72,6 +72,36 @@ jobs:
             --manifest-output ovk-artifact-manifest.json \
             --quality-output ovk-evidence-quality.json \
             --advisory
+      - name: Exercise auth-obligation with quality output
+        run: |
+          ovk auth-obligation \
+            examples/auth_regression/input_admin_protected.json \
+            --evidence-output ovk-auth-evidence.json \
+            --markdown-output ovk-auth-comment.md \
+            --attestation-output ovk-auth-attestation.json \
+            --manifest-output ovk-auth-artifact-manifest.json \
+            --quality-output ovk-auth-evidence-quality.json \
+            --advisory
+      - name: Exercise ci-secrets with quality output
+        run: |
+          ovk ci-secrets \
+            examples/ci_secrets/input_secrets_safe.json \
+            --evidence-output ovk-ci-secrets-evidence.json \
+            --markdown-output ovk-ci-secrets-comment.md \
+            --attestation-output ovk-ci-secrets-attestation.json \
+            --manifest-output ovk-ci-secrets-artifact-manifest.json \
+            --quality-output ovk-ci-secrets-evidence-quality.json \
+            --advisory
+      - name: Exercise deployment-state with quality output
+        run: |
+          ovk deployment-state \
+            examples/deployment_state/input_valid_approval_path.json \
+            --evidence-output ovk-deployment-evidence.json \
+            --markdown-output ovk-deployment-comment.md \
+            --attestation-output ovk-deployment-attestation.json \
+            --manifest-output ovk-deployment-artifact-manifest.json \
+            --quality-output ovk-deployment-evidence-quality.json \
+            --advisory
       - name: Dogfood composite action (full MVP manifest)
         uses: ./
         with:
@@ -90,8 +120,33 @@ jobs:
             ovk-attestation.json
             ovk-artifact-manifest.json
             ovk-evidence-quality.json
+            ovk-auth-evidence-quality.json
+            ovk-ci-secrets-evidence-quality.json
+            ovk-deployment-evidence-quality.json
             ovk-action-dogfood-bundle/**
             .verification/formal-pr-bench-leaderboard.json
+
+  action_strict_dogfood:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Strict emit-check on known-bad diff
+        id: ovk
+        uses: ./
+        with:
+          mode: strict
+          use-check: "true"
+          emit-check: "true"
+          changed-files: examples/ci_secrets/workflow_secrets_on_pr.diff
+          post-comment: "false"
+      - name: Assert strict block and observable check
+        run: |
+          test "${{ steps.ovk.outcome }}" = "failure"
+          test "${{ steps.ovk.outputs.recommendation }}" = "block"
+          test "${{ steps.ovk.outputs.exit_code }}" = "1"
 
   package:
     runs-on: ubuntu-latest

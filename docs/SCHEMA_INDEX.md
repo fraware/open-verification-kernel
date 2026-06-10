@@ -13,7 +13,7 @@ JSON schemas for OVK objects. See also [ARTIFACTS.md](ARTIFACTS.md).
 | [preflight.report.schema.json](../schemas/preflight.report.schema.json) | n/a | `ovk release-preflight --output report.json` |
 | [release.layout.schema.json](../schemas/release.layout.schema.json) | ovk.release_layout.v1 | `ovk/core/release_layout.py` |
 | [evidence.invariant_issue.schema.json](../schemas/evidence.invariant_issue.schema.json) | n/a | embedded in quality reports |
-| [verification.manifest.schema.json](../schemas/verification.manifest.schema.json) | ovk.verification_manifest.v1 | `examples/verification_manifests/full_mvp.json` |
+| [verification.manifest.schema.json](../schemas/verification.manifest.schema.json) | ovk.verification_manifest.v1 | `examples/verification_manifests/full_mvp.json` (five-check manifest) |
 | [provenance.schema.json](../schemas/provenance.schema.json) | ovk.provenance.v1 | `ovk-provenance.json` in release bundles |
 | [attestation.envelope.schema.json](../schemas/attestation.envelope.schema.json) | ovk.attestation_envelope.v1 | `ovk-attestation-envelope.json`; validated by `ovk validate-outputs` |
 | [infrastructure.input.schema.json](../schemas/infrastructure.input.schema.json) | ovk.infrastructure.input.v1 | `examples/infrastructure_exposure/` |

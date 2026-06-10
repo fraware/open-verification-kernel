@@ -20,6 +20,8 @@ jobs:
           - check_strict_block
           - check_advisory_allow
           - mvp_manifest_allow
+          - external_pilot_advisory
+          - check_strict_emit_check
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,25 +35,74 @@ jobs:
           python - <<'PY'
           import json
           from pathlib import Path
+
           scenarios = json.loads(Path("benchmarks/external_validation/scenarios.json").read_text())
           target = "${{ matrix.scenario }}"
           match = next(s for s in scenarios["scenarios"] if s["id"] == target)
-          print(f"mode={match.get('mode', 'advisory')}")
-          inputs = match.get("action_inputs", {})
+
+          def emit(name: str, value: str) -> None:
+              with open("${GITHUB_OUTPUT}", "a", encoding="utf-8") as handle:
+                  handle.write(f"{name}={value}\n")
+
+          emit("mode", match.get("mode", "advisory"))
+          emit("expected_recommendation", match.get("expected_recommendation", ""))
+          emit("expect_exit_code", str(match.get("expect_exit_code", 0)))
+          emit("validate_bundle", str(match.get("validate_bundle", False)).lower())
+
+          inputs = dict(match.get("action_inputs", {}))
+          flat_fallback = {
+              "use-check": "true" if match.get("kind") == "action_check" else "false",
+              "changed-files": match.get("changed_files", ""),
+              "metadata": match.get("metadata", ""),
+              "verification-manifest": match.get("verification_manifest", ""),
+              "bundle-output-dir": match.get("bundle_output_dir", "external-validation-bundle"),
+              "emit-check": "false",
+          }
+          for key, value in flat_fallback.items():
+              inputs.setdefault(key, value)
+
           for key, value in inputs.items():
-              print(f"{key}={value}")
-          print(f"validate_bundle={str(match.get('validate_bundle', False)).lower()}")
+              emit(key.replace("-", "_"), str(value))
           PY
       - name: Run OVK Action scenario
+        id: ovk
         uses: ./
         with:
           mode: ${{ steps.scenario.outputs.mode == 'strict' && 'strict' || 'advisory' }}
-          use-check: ${{ steps.scenario.outputs.use-check || 'false' }}
-          changed-files: ${{ steps.scenario.outputs.changed-files || '' }}
-          verification-manifest: ${{ steps.scenario.outputs.verification-manifest || '' }}
-          bundle-output-dir: ${{ steps.scenario.outputs.bundle-output-dir || 'external-validation-bundle' }}
+          use-check: ${{ steps.scenario.outputs.use_check || 'false' }}
+          changed-files: ${{ steps.scenario.outputs.changed_files || '' }}
+          metadata: ${{ steps.scenario.outputs.metadata || '' }}
+          verification-manifest: ${{ steps.scenario.outputs.verification_manifest || '' }}
+          bundle-output-dir: ${{ steps.scenario.outputs.bundle_output_dir || 'external-validation-bundle' }}
+          emit-check: ${{ steps.scenario.outputs.emit_check || 'false' }}
           post-comment: 'false'
-        continue-on-error: ${{ matrix.scenario == 'check_strict_block' }}
+        continue-on-error: ${{ steps.scenario.outputs.expect_exit_code != '0' }}
+      - name: Assert scenario recommendation and exit behavior
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          expected = "${{ steps.scenario.outputs.expected_recommendation }}"
+          expect_exit = int("${{ steps.scenario.outputs.expect_exit_code }}")
+          outcome = "${{ steps.ovk.outcome }}"
+          actual_exit = 0 if outcome == "success" else 1
+
+          evidence_paths = [
+              Path("ovk-evidence.json"),
+              Path("external-validation-mvp-bundle/ovk-evidence.json"),
+              Path("external-validation-bundle/ovk-evidence.json"),
+          ]
+          evidence_path = next((path for path in evidence_paths if path.exists()), None)
+          assert evidence_path is not None, "expected ovk-evidence.json artifact"
+          recommendation = json.loads(evidence_path.read_text(encoding="utf-8"))["decision"]["merge_recommendation"]
+          assert recommendation == expected, f"expected recommendation {expected}, got {recommendation}"
+          assert actual_exit == (0 if expect_exit == 0 else 1), (
+              f"expected exit behavior {expect_exit}, step outcome was {outcome}"
+          )
+          print(f"scenario ${{ matrix.scenario }} passed: {recommendation}, exit={actual_exit}")
+          PY
       - name: Validate MVP bundle when required
         if: steps.scenario.outputs.validate_bundle == 'true'
         run: ovk validate-outputs external-validation-mvp-bundle
@@ -82,7 +133,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Document release pin consumer path
         run: |
-          echo "Fork consumers should pin: uses: fraware/open-verification-kernel@v1.1.0"
+          echo "Fork consumers should pin: uses: fraware/open-verification-kernel@v1.2.0"
           test -f examples/github_workflows/external_consumer.yml
 
   attestation_smoke:

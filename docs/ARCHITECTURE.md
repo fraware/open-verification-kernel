@@ -2,7 +2,7 @@
 
 ## Architectural role
 
-OVK is the thin waist between AI-agent engineering workflows and formal methods backends.
+OVK is the shared interface between AI-agent engineering workflows and formal methods backends.
 
 ```text
 AI agents, CI systems, reviewers, security bots
@@ -24,7 +24,7 @@ The first production surface is a GitHub Action that runs on pull requests, emit
 
 ### CLI
 
-The CLI provides local reproducibility for developers and CI runners. **`ovk check`** is the primary autonomous path: it infers intents from a diff, compiles obligations, routes to backends, and writes standard artifacts (`ovk-evidence.json`, PR comment, attestation, quality report).
+The CLI provides local reproducibility for developers and CI runners. **`ovk check`** is the default entry point: it infers intents from a diff, compiles obligations, routes to backends, and writes standard artifacts (`ovk-evidence.json`, PR comment, attestation, quality report).
 
 ```bash
 ovk init
@@ -64,25 +64,25 @@ Repair hints and regression artifacts are available via CLI (`ovk repair-suggest
 
 ## Runner flows
 
-### Single-lane
+### Single check type
 
-1. Load lane input.
+1. Load check input.
 2. Evaluate via `ovk.core.multi_lane.evaluate_lane`.
 3. Build bundle with `make_bundle`.
 4. Write standard artifacts via `write_standard_run_outputs` or full release bundle via `write_release_bundle`.
 
-### Multi-lane verify
+### Multi-check verify
 
 1. Load verification manifest; schema-validate.
-2. Evaluate each lane; combine evidence.
+2. Evaluate each check type; combine evidence.
 3. Write release bundle with material provenance.
 
-### Kernel check (`ovk check`)
+### Diff-based check (`ovk check`)
 
 1. Ingest changed files or unified diff; optional GitHub event and check metadata.
 2. Detect surfaces and candidate intents via planner.
 3. Route obligations through `ovk.core.kernel` and `ovk.core.router` (policy from `.verification/config.yml`).
-4. Evaluate affected lanes; merge evidence and merge recommendation.
+4. Evaluate affected check types; merge evidence and merge recommendation.
 5. Write standard run outputs; enforce exit code in strict mode.
 
 On block, agents call `ovk repair-suggest` (or MCP `ovk_repair_suggest`) for counterexample-derived fix classes. See [AGENT_REPAIR_LOOP.md](AGENT_REPAIR_LOOP.md).
@@ -95,11 +95,13 @@ On block, agents call `ovk repair-suggest` (or MCP `ovk_repair_suggest`) for cou
 
 ### GitHub Action
 
-Install OVK → `ovk init` → `ovk check` (default via `use-check: "true"`) or legacy `ovk ci` / `ovk verify` → optional PR comment → upload artifacts.
+Install OVK → `ovk init` → `ovk check` (default via `use-check: "true"`) or focused `ovk ci` / manifest `ovk verify` → optional GitHub check run (`emit-check`) → optional PR comment → standard artifacts.
 
-Details: [INTEGRATION.md](INTEGRATION.md).
+Action outputs (v1.2+): `recommendation`, `exit_code`, `check_emitted`. Strict mode fails the job on `block` or `require_human_review`; strict `emit-check` fails if the check run cannot be created.
 
-## Internal data flow
+Example rollout workflows: `examples/github_workflows/`. Details: [INTEGRATION.md](INTEGRATION.md).
+
+## Data flow
 
 ```text
 Change

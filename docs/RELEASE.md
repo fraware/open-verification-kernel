@@ -1,40 +1,22 @@
-# OVK v1.1.0 Release
+# OVK Release
 
-Release notes and maintainer checklists for Open Verification Kernel v1.1.0.
+Maintainer guide for shipping Open Verification Kernel. For adoption readiness see [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md). For consumer changelogs see [RELEASE_NOTES_v1.2.0.md](RELEASE_NOTES_v1.2.0.md) and older notes in [Release history](#release-history).
 
-## Release notes
+## Current release: v1.2.0
 
-OVK v1.1 is the depth-first release after v1.0 ecosystem hardening. It ships technical improvements for real PR verification and external adoption readiness:
+v1.2.0 improves adoption tooling: quality checks on all five check types, clearer GitHub Action outputs, and example rollout workflows.
 
-- **Tier-1 native CI** — blocking OPA, Z3, CBMC, and Cedar jobs in `native-backends-tier1.yml` with pinned install scripts and evidence honesty checks
-- **Real diff corpus** — 16 sanitized unified diffs in `benchmarks/real_diffs/` covering secrets, auth, infra, deployment, and multi-surface patterns
-- **FormalPR-Bench depth** — `real_diff` leaderboard category, repair-loop cases for ci_secrets/auth/infra/deployment lanes
-- **PyPI-pinned Action** — set `OVK_PACKAGE_VERSION=1.1.0` to install `open-verification-kernel==1.1.0` from PyPI; defaults to `pip install .` for local development
-- **External pilot kit** — [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md), `external_oss_ci_secrets.json` manifest template, advisory→strict rollout guidance
+Changelog: [RELEASE_NOTES_v1.2.0.md](RELEASE_NOTES_v1.2.0.md).
 
-See [RELEASE_NOTES_v1.1.0.md](RELEASE_NOTES_v1.1.0.md) for the full changelog.
-
-### Known limitations
+## Known limitations
 
 - IaC and auth diff compilation remains conservative; partial hunks may yield `require_human_review`.
-- Tier-2 native backends (Cedar, TLA+, Kani, Dafny, Verus, Lean, Alloy) remain informational in CI.
+- Optional native checkers (TLA+, Kani, Dafny, Verus, Lean, Alloy) remain informational in CI.
 - External OSS pilot metrics are template-only until community repos complete advisory runs.
+- Auto-collected branch-protection metadata sets identical before/after required checks; detecting check **removal** requires explicit `check-metadata` with before/after JSON.
+- PyPI wheel is not live until a maintainer creates the GitHub release and Publish workflow runs.
 
-## Readiness checklist
-
-All items satisfied for v1.1.0:
-
-- [x] `ovk check` on multi-surface and real_diff fixtures in &lt;45s
-- [x] 10 capability manifests; 100 templates validated against JSON schema
-- [x] FormalPR-Bench canonical + extended + real_diff cases green
-- [x] Release preflight: metadata, command surface, smoke, quality, adversarial, multi-lane, latency, bench, templates, external validation
-- [x] GitHub Action supports PyPI install via `OVK_PACKAGE_VERSION`
-- [x] External consumer example pins `@v1.1.0`
-- [x] External pilot playbook and case-study metrics template published
-
-## Tagging checklist
-
-Before tagging `v1.1.0`:
+## Maintainer: tag v1.2.0
 
 ```bash
 pip install -e '.[dev]'
@@ -43,41 +25,31 @@ ruff check ovk tests benchmarks scripts
 python scripts/check_release_metadata.py
 python scripts/validate_templates.py
 ovk release-preflight
-ovk bench --expanded
+ovk bench --expanded --leaderboard .verification/formal-pr-bench-leaderboard.json
+python scripts/external_smoke_checklist.py
 ```
 
-Confirm:
+Before tagging:
 
-- [x] Package version matches `ovk/core/release_metadata.py` (`1.1.0`).
-- [x] `SUPPORTED_COMMANDS` matches `ovk/cli.py`.
-- [x] Documentation in `docs/STATUS.md`, `docs/INTEGRATION.md`, `docs/MIGRATION.md` is current.
+- [ ] Package version matches `ovk/core/release_metadata.py` (`1.2.0`).
+- [ ] `SUPPORTED_COMMANDS` matches `ovk/cli.py`.
+- [ ] Consumer examples pin `@v1.2.0` and `OVK_PACKAGE_VERSION: "1.2.0"`.
+- [ ] [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md) reflects shipped state.
+- [ ] `docs/benchmarks/adoption-summary.json` refreshed: `python scripts/render_pilot_metrics.py`.
 
-## Repository health checklist
+```bash
+git push origin main
+git push origin v1.2.0
+gh release create v1.2.0 --title "OVK v1.2.0" --notes-file docs/RELEASE_NOTES_v1.2.0.md
+```
 
-### Package
+Verify: https://github.com/fraware/open-verification-kernel/releases/tag/v1.2.0
 
-- [x] `pip install -e '.[dev]'` succeeds.
-- [x] Console scripts `ovk` and `ovk-mcp` registered.
-- [x] `python -m build` and `twine check dist/*` pass in CI `package` job.
-
-### Tests and release gates
-
-- [x] `pytest` passes.
-- [x] `ruff check` passes.
-- [x] `release-preflight` passes (includes `pilot_program` and `external_validation_matrix`).
-- [x] `ovk bench` and `ovk pilot` pass.
-
-### Artifacts
-
-- [x] Invalid input never produces `allow`.
-- [x] Release bundles pass `ovk validate-outputs`.
-- [x] HMAC and optional Sigstore signing verified in CI.
-
-## PyPI publication
+## Maintainer: PyPI publication
 
 **Status:** workflow and package metadata are ready; the wheel is not on PyPI until a maintainer creates the GitHub release below.
 
-1. Create a GitHub release for tag `v1.1.0`.
+1. Create a GitHub release for tag `v1.2.0`.
 2. Ensure repository secrets: `PYPI_API_TOKEN` (PyPI trusted publishing or API token).
 3. Configure GitHub Environment `pypi` with required reviewers if desired.
 4. The `Publish` workflow runs release gates, builds the wheel/sdist, and uploads to PyPI.
@@ -91,39 +63,55 @@ python -m build
 twine check dist/*
 ```
 
-## GitHub release (maintainer)
+## Maintainer: repository health
 
-After pushing tag `v1.1.0` to origin:
+### Package
 
-```bash
-gh release create v1.1.0 --title "OVK v1.1.0" --notes-file docs/RELEASE_NOTES_v1.1.0.md
-```
+- [x] `pip install -e '.[dev]'` succeeds.
+- [x] Console scripts `ovk` and `ovk-mcp` registered.
+- [x] `python -m build` and `twine check dist/*` pass in CI `package` job.
 
-Publishing the release triggers the Publish workflow (PyPI upload). If `gh` is not authenticated on your machine:
+### Tests and release readiness
 
-```bash
-gh auth login
-git push origin main
-git push origin v1.1.0
-gh release create v1.1.0 --title "OVK v1.1.0" --notes-file docs/RELEASE_NOTES_v1.1.0.md
-```
+- [x] `pytest` passes (374 passed, 12 skipped).
+- [x] `ruff check` passes.
+- [x] `release-preflight` passes (12 required checks + optional pilot metrics dry-run).
+- [x] `ovk bench --expanded` and `ovk pilot` pass.
+- [x] External validation matrix exercises Action scenarios weekly.
 
-Verify the release at https://github.com/fraware/open-verification-kernel/releases/tag/v1.1.0.
+### Artifacts
+
+- [x] Invalid input never produces `allow`.
+- [x] Release bundles pass `ovk validate-outputs`.
+- [x] HMAC and optional Sigstore signing verified in CI.
 
 ## External consumer pin
 
-Fork consumers should use:
-
 ```yaml
 env:
-  OVK_PACKAGE_VERSION: "1.1.0"
+  OVK_PACKAGE_VERSION: "1.2.0"
 jobs:
   ovk:
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
     steps:
-      - uses: fraware/open-verification-kernel@v1.1.0
+      - uses: fraware/open-verification-kernel@v1.2.0
         with:
           mode: advisory
           use-check: "true"
+          emit-check: "true"
 ```
 
-See `examples/github_workflows/external_consumer.yml`.
+Example rollout workflows: `examples/github_workflows/`. Integration guide: [INTEGRATION.md](INTEGRATION.md).
+
+## Release history
+
+| Version | Changelog |
+|---|---|
+| v1.2.0 | [RELEASE_NOTES_v1.2.0.md](RELEASE_NOTES_v1.2.0.md) |
+| v1.1.0 | [RELEASE_NOTES_v1.1.0.md](RELEASE_NOTES_v1.1.0.md) |
+| v1.0.0 | [RELEASE_NOTES_v1.0.0.md](RELEASE_NOTES_v1.0.0.md) |
+
+Upgrade paths: [MIGRATION.md](MIGRATION.md).

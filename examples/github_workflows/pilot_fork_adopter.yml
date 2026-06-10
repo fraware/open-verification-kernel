@@ -1,6 +1,7 @@
 name: OVK Pilot (Fork Adopter)
 
 # Copy to .github/workflows/ovk-pilot.yml in your repository.
+# Phase 0: zero-risk advisory manifest verify (no use-check; manifest path wins).
 # See docs/EXTERNAL_PILOT_PLAYBOOK.md for advisory → strict rollout.
 
 on:
@@ -10,20 +11,19 @@ on:
 permissions:
   contents: read
   pull-requests: write
-  checks: write
 
 env:
-  OVK_PACKAGE_VERSION: "1.1.0"
+  OVK_PACKAGE_VERSION: "1.2.0"
 
 jobs:
   ovk-ci-secrets-pilot:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: OVK advisory check (ci_secrets lane)
-        uses: fraware/open-verification-kernel@v1.1.0
+      - name: OVK advisory verify (ci_secrets lane manifest)
+        uses: fraware/open-verification-kernel@v1.2.0
         with:
           mode: advisory
-          use-check: "true"
           verification-manifest: .verification/ci_secrets_pilot.json
+          bundle-output-dir: ovk-pilot-bundle
           post-comment: "true"

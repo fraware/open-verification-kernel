@@ -1,0 +1,35 @@
+name: OVK Branch Protection (Strict Required Check)
+
+# Phase 2+: strict enforcement with required check "Open Verification Kernel".
+# Add the check name to branch protection after this workflow runs green on a sample PR.
+
+on:
+  pull_request:
+    branches: [main, release/*]
+
+permissions:
+  contents: read
+  checks: write
+
+env:
+  OVK_PACKAGE_VERSION: "1.2.0"
+
+jobs:
+  ovk-required-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build PR diff for OVK
+        run: |
+          git fetch origin "${{ github.base_ref }}"
+          git diff "origin/${{ github.base_ref }}...HEAD" > ovk-pr.diff
+      - name: Run OVK strict check (required)
+        uses: fraware/open-verification-kernel@v1.2.0
+        with:
+          mode: strict
+          use-check: "true"
+          emit-check: "true"
+          changed-files: ovk-pr.diff
+          post-comment: "false"

@@ -11,18 +11,18 @@ ovk init
 
 Optional: run the MCP server (`ovk-mcp` or `python -m ovk.mcp_stdio`) for planning and verification tools (`ovk.plan_from_diff`, `ovk.run_verification`, `ovk.get_merge_recommendation`). Use the CLI for `ovk check`, `ovk repair-suggest`, and `ovk generate-test` in the repair loop today.
 
-## Multi-lane repair loops
+## Repair loops by check type
 
-OVK ships reproducible repair-loop fixtures for four lanes. Each lane includes `failing.diff`, `repair.patch`, `passing.diff`, and `demo_repair_loop.py`.
+OVK ships reproducible repair-loop fixtures for four check types. Each includes `failing.diff`, `repair.patch`, `passing.diff`, and `demo_repair_loop.py`.
 
-| Lane | Fixture directory | Expected `fix_class` |
+| Check type | Fixture directory | Expected `fix_class` |
 |------|-------------------|----------------------|
 | CI secrets | `examples/repair_loops/ci_secrets/` | `remove_untrusted_secret_usage` |
 | Authorization | `examples/repair_loops/authorization/` | `add_route_guard` |
 | Infrastructure | `examples/repair_loops/infrastructure/` | `restrict_public_access` |
-| Deployment | `examples/multi_surface/deployment_skip.diff` | `add_approval_transition` |
+| Deployment | `examples/deployment_state/input_skipped_approval.json` (focused CLI) or multi-surface diffs | `add_approval_transition` |
 
-Run a lane demo:
+Run a demo:
 
 ```bash
 python examples/repair_loops/authorization/demo_repair_loop.py
@@ -30,7 +30,7 @@ python examples/repair_loops/infrastructure/demo_repair_loop.py
 python examples/repair_loops/ci_secrets/demo_repair_loop.py
 ```
 
-## CI secrets lane walkthrough
+## CI secrets check walkthrough
 
 Use the reproducible fixtures in `examples/repair_loops/ci_secrets/`.
 
@@ -86,7 +86,7 @@ ovk generate-test --evidence ovk-evidence.json
 
 Writes minimized counterexample fixtures under `.verification/generated_tests/`.
 
-## Authorization lane walkthrough
+## Authorization check walkthrough
 
 ```bash
 ovk check \
@@ -104,7 +104,7 @@ ovk check \
 
 Expected: initial block with `admin_route_reachable_by_non_admin`, repair hint `add_route_guard`, repaired allow.
 
-## Infrastructure lane walkthrough
+## Infrastructure check walkthrough
 
 ```bash
 ovk check \
@@ -135,7 +135,7 @@ Run locally:
 ovk bench --expanded
 ```
 
-Repair-loop cases include ci_secrets, authorization, infrastructure, and deployment skip lanes. Auth and infra cases use `examples/repair_loops/` fixtures sourced from `benchmarks/real_diffs/`.
+Repair-loop cases cover ci_secrets, authorization, infrastructure, and deployment checks. Auth and infra cases use `examples/repair_loops/` fixtures sourced from `benchmarks/real_diffs/`.
 
 ## MCP session sketch
 
@@ -146,4 +146,4 @@ Repair-loop cases include ci_secrets, authorization, infrastructure, and deploym
 5. Agent reruns `ovk check` until recommendation is `allow`.
 6. Agent optionally commits generated regression tests from `ovk generate-test`.
 
-See [SYSTEM_SPEC.md](SYSTEM_SPEC.md) step 10 for the north-star behavior this demonstrates.
+See [SYSTEM_SPEC.md](SYSTEM_SPEC.md) step 10 for the end-to-end behavior this demonstrates.

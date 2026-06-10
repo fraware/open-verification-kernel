@@ -18,12 +18,12 @@ OVK is an open interoperability layer. Contributions should make formal methods 
 - Do not collapse `unknown`, `error`, or `skipped` into `pass`.
 - Do not claim generic verification without assumptions and limits.
 - Prefer narrow, useful property templates over broad unverifiable claims.
-- Keep the kernel backend-neutral and guarantee-aware.
+- Keep OVK backend-neutral: every adapter must state what its pass/fail results mean.
 
 ## Start here
 
-1. Read [ARCHITECTURE.md](ARCHITECTURE.md) and [STATUS.md](STATUS.md).
-2. Run the release gate:
+1. Read [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md), [ARCHITECTURE.md](ARCHITECTURE.md), and [STATUS.md](STATUS.md).
+2. Run release readiness checks:
 
 ```bash
 pip install -e '.[dev]'
@@ -36,21 +36,21 @@ ovk release-preflight
 | Area | Location |
 |---|---|
 | CLI | `ovk/cli.py` |
-| Kernel orchestration | `ovk/core/kernel.py`, `ovk/core/router.py` |
-| Lane evaluation | `ovk/core/multi_lane.py` |
+| Core verification routing | `ovk/core/kernel.py`, `ovk/core/router.py` |
+| Check-type evaluation | `ovk/core/multi_lane.py` |
 | Release bundles | `ovk/core/release_bundle.py` |
 | Evidence quality | `ovk/core/evidence_quality.py`, `ovk/core/evidence_invariants.py` |
 | Planning | `ovk/core/planner.py`, `ovk/core/change_detection.py` |
 | Diff parsing | `ovk/core/diff_parser.py`, `ovk/adapters/workflow/`, `benchmarks/real_diffs/` |
 | External adapters | `ovk/adapters/{cedar,tla,kani,dafny,verus,lean,cbmc,alloy}/` |
-| MVP lane adapters | `ovk/adapters/{opa,z3,infra,ci_secrets,deployment}/` |
+| Core check adapters (five check types) | `ovk/adapters/{opa,z3,infra,ci_secrets,deployment}/` |
 | MCP | `ovk/mcp_server.py`, `ovk/mcp_stdio.py` |
 | GitHub Action | `action.yml` |
 | Schemas | `schemas/` |
 | Examples | `examples/`, `examples/repair_loops/` |
 | Benchmark | `benchmarks/formal_pr_bench/`, `benchmarks/real_diffs/` |
 
-## Adding a new lane
+## Adding a new check type
 
 1. Define input schema in `schemas/`.
 2. Implement adapter under `ovk/adapters/`.
@@ -59,7 +59,7 @@ ovk release-preflight
 5. Add examples, regression fixture, and benchmark case.
 6. Update `ovk/core/release_metadata.py` and [SCHEMA_INDEX.md](SCHEMA_INDEX.md).
 7. Document in [LANES.md](LANES.md).
-8. Add to `examples/verification_manifests/full_mvp.json` if MVP-scope.
+8. Add to `examples/verification_manifests/full_mvp.json` if part of the standard five-check manifest.
 
 ## Local setup
 
