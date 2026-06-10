@@ -1,4 +1,4 @@
-from scripts.release_preflight_report import build_release_preflight_report
+from ovk.core.release_preflight_report import build_release_preflight_report
 
 
 def test_release_preflight_report_is_serializable() -> None:

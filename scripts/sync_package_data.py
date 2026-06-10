@@ -10,7 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = ROOT / "ovk" / "package_data"
-RESOURCE_DIRS = ("schemas", "templates", "adapters", "examples", "benchmarks")
+RESOURCE_DIRS = ("schemas", "templates", "adapters", "examples", "benchmarks", "scripts")
 
 
 def sync_package_data(*, clean: bool = True) -> Path:

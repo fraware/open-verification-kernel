@@ -173,17 +173,16 @@ def evidence_quality(
 
 @app.command("pilot")
 def pilot_cmd(
-    pilot_dir: Path = typer.Option(Path("examples/pilot_repos"), help="Directory of pilot manifest JSON files."),
+    pilot_dir: Optional[Path] = typer.Option(None, help="Directory of pilot manifest JSON files."),
     output: Optional[Path] = typer.Option(None, help="Optional pilot report JSON output."),
     repo: str = typer.Option("pilot/repo"),
     head_sha: str = typer.Option("pilot-head"),
 ) -> None:
     """Run the OVK pilot program manifests and emit adoption metrics."""
-    from ovk.core.pilot import run_pilot_program
-
+    from ovk.core.pilot import PILOT_DIR, run_pilot_program
     from ovk.core.schema_validation import require_schema_valid
 
-    report = run_pilot_program(pilot_dir, repo=repo, head_sha=head_sha)
+    report = run_pilot_program(pilot_dir or PILOT_DIR, repo=repo, head_sha=head_sha)
     from ovk.paths import schema_path as ovk_schema_path
 
     pilot_schema = ovk_schema_path("pilot.report.schema.json")
@@ -210,11 +209,10 @@ def bench_cmd(
     ),
 ) -> None:
     """Run FormalPR-Bench and write a multi-dimensional leaderboard artifact."""
-    from benchmarks.formal_pr_bench.score_all_lanes import run_benchmark
-
+    from ovk.core.bench import run_formal_pr_bench
     from ovk.core.schema_validation import require_schema_valid
 
-    scores, report = run_benchmark(expanded=expanded, include_extended=not no_extended)
+    scores, report = run_formal_pr_bench(expanded=expanded, include_extended=not no_extended)
     leaderboard.parent.mkdir(parents=True, exist_ok=True)
     from ovk.paths import schema_path as ovk_schema_path
 
@@ -240,7 +238,7 @@ def release_preflight(
     output: Optional[Path] = typer.Option(None, help="Optional structured preflight report JSON."),
 ) -> None:
     """Run local release preflight checks."""
-    from scripts.release_preflight_report import build_release_preflight_report
+    from ovk.core.release_preflight_report import build_release_preflight_report
 
     report = build_release_preflight_report()
     if output:

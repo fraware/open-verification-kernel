@@ -7,9 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from ovk.core.multi_lane import load_verification_manifest, run_verification_manifest
+from ovk.paths import resource_path
 
 
-PILOT_DIR = Path("examples/pilot_repos")
+PILOT_DIR = resource_path("examples", "pilot_repos")
 
 
 def run_pilot_manifest(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from functools import lru_cache
 from pathlib import Path
 
@@ -17,6 +18,20 @@ def ovk_data_root() -> Path:
     if packaged.is_dir():
         return packaged
     return repo_root
+
+
+def resource_path(*parts: str) -> Path:
+    """Return a path under the OVK data root (examples, benchmarks, scripts, etc.)."""
+    return ovk_data_root().joinpath(*parts)
+
+
+def ensure_repo_on_path() -> Path:
+    """Ensure the OVK data root is importable for ``benchmarks`` and ``scripts`` packages."""
+    root = ovk_data_root()
+    path = str(root)
+    if path not in sys.path:
+        sys.path.insert(0, path)
+    return root
 
 
 def schema_path(name: str) -> Path:

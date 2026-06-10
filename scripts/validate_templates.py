@@ -9,10 +9,11 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 from ovk.core.json_io import read_json_file
+from ovk.paths import resource_path
 
 
-SCHEMA_PATH = Path("schemas/verification.intent.schema.json")
-TEMPLATES_DIR = Path("templates")
+SCHEMA_PATH = resource_path("schemas", "verification.intent.schema.json")
+TEMPLATES_DIR = resource_path("templates")
 
 
 def validate_templates(template_dir: Path = TEMPLATES_DIR) -> list[str]:

@@ -38,7 +38,7 @@ jobs:
             --output-dir .ovk-check-test \
             --advisory
       - name: Release preflight
-        run: python scripts/release_preflight.py
+        run: ovk release-preflight
       - name: External smoke checklist
         run: python scripts/external_smoke_checklist.py
       - name: Multi-lane verify bundle
