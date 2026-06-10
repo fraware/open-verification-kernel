@@ -1,25 +1,50 @@
 {
   "schema_version": "formal_pr_bench.summary.v1",
   "generated_from": "formal_pr_bench.leaderboard.v1",
-  "cases_total": 100,
-  "cases_passed": 100,
+  "cases_total": 114,
+  "cases_passed": 114,
   "pass_rate": 1.0,
   "merge_decision_accuracy": 1.0,
   "status_accuracy": 1.0,
   "counterexample_usefulness": 1.0,
   "backend_selection_accuracy": 1.0,
   "evidence_honesty": 1.0,
-  "intent_recall": null,
+  "intent_recall": 1.0,
   "by_category": {
+    "adversarial": {
+      "cases_total": 2,
+      "cases_passed": 2,
+      "pass_rate": 1.0
+    },
+    "intent_recall": {
+      "cases_total": 3,
+      "cases_passed": 3,
+      "pass_rate": 1.0
+    },
     "lane": {
       "cases_total": 100,
       "cases_passed": 100,
       "pass_rate": 1.0
+    },
+    "multi_backend": {
+      "cases_total": 1,
+      "cases_passed": 1,
+      "pass_rate": 1.0
+    },
+    "repair_loop": {
+      "cases_total": 4,
+      "cases_passed": 4,
+      "pass_rate": 1.0
+    },
+    "routing": {
+      "cases_total": 4,
+      "cases_passed": 4,
+      "pass_rate": 1.0
     }
   },
   "timing_ms": {
-    "p50": 9.589900000264606,
-    "p95": 18.576999999822874,
-    "max": 25.002299999869138
+    "p50": 0.13598500000000513,
+    "p95": 1.9926030000050332,
+    "max": 11.14858100000049
   }
 }
