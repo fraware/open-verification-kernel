@@ -19,6 +19,8 @@ Living adoption dashboard for Open Verification Kernel.
 
 OVK is **not** complete formal verification of arbitrary code. It ships targeted, explainable checks for high-risk PR changes, with explicit unknowns and human-review paths.
 
+Latest deep audit after the engineer push: [LATEST_CODE_AUDIT.md](LATEST_CODE_AUDIT.md).
+
 ## Adoption readiness
 
 | Mode | Safe today? | Notes |
@@ -55,6 +57,7 @@ Full list: [RELEASE.md — Known limitations](RELEASE.md#known-limitations). Sum
 | Document | Purpose |
 |---|---|
 | [STATUS.md](STATUS.md) | Capabilities and commands |
+| [LATEST_CODE_AUDIT.md](LATEST_CODE_AUDIT.md) | Deep audit after the latest engineer push |
 | [INTEGRATION.md](INTEGRATION.md) | Install and GitHub Actions |
 | [RELEASE.md](RELEASE.md) | Maintainer guide and limitations |
 | [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md) | Roll out on external repos |
