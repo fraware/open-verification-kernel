@@ -8,17 +8,24 @@
     "passed": { "type": "boolean" },
     "checks": {
       "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["name", "passed"],
-        "properties": {
-          "name": { "type": "string" },
-          "passed": { "type": "boolean" },
-          "failures": { "type": "array", "items": { "type": "string" } }
-        },
-        "additionalProperties": true
-      }
+      "items": { "$ref": "#/$defs/check" }
+    },
+    "optional_checks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/check" }
     }
   },
-  "additionalProperties": true
+  "$defs": {
+    "check": {
+      "type": "object",
+      "required": ["name", "passed", "messages"],
+      "properties": {
+        "name": { "type": "string" },
+        "passed": { "type": "boolean" },
+        "messages": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
 }
