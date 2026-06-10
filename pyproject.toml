@@ -73,3 +73,6 @@ line-length = 120
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+  "native_backend(name): native backend integration probe by backend name",
+]

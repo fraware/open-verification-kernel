@@ -1,0 +1,35 @@
+{
+  "intent_id": "verus-build-integrity",
+  "version": "0.1.0",
+  "domain": "ci_cd",
+  "title": "Verus build integrity",
+  "description": "CI changes must not weaken verified-build gates for release artifacts.",
+  "property": {
+    "kind": "safety",
+    "natural_language": "Release pipelines retain verified-build requirements for protected artifacts."
+  },
+  "failure_modes": [
+    "gate_removal",
+    "unsigned_artifact_publish"
+  ],
+  "acceptable_evidence": [
+    {
+      "kind": "proof",
+      "minimum_confidence": "medium"
+    }
+  ],
+  "risk": {
+    "severity": "high",
+    "likelihood": "medium",
+    "rationale": "Weakened build gates enable supply-chain regressions."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "canonical": true
+  }
+}

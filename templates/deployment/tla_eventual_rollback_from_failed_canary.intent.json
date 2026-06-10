@@ -1,0 +1,33 @@
+{
+  "intent_id": "tla-eventual-rollback-from-failed-canary",
+  "version": "0.1.0",
+  "domain": "deployment",
+  "title": "TLA eventual rollback from failed canary",
+  "description": "Failed canary outcomes should always have a reachable rollback transition to a safe state.",
+  "scope": {
+    "files": ["**/*deploy*", "**/*rollback*", "**/*canary*"]
+  },
+  "property": {
+    "kind": "liveness",
+    "natural_language": "Any failed canary state must eventually transition to rollback or manual hold."
+  },
+  "failure_modes": ["rollback_transition_removed", "dead_end_failure_state", "retry_without_escape"],
+  "acceptable_evidence": [
+    { "kind": "model_check", "minimum_confidence": "medium" },
+    { "kind": "state_machine_check", "minimum_confidence": "high" }
+  ],
+  "risk": {
+    "severity": "high",
+    "likelihood": "low",
+    "rationale": "Without rollback liveness, failed canaries can stall releases in unsafe intermediary states."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "curated": true
+  }
+}

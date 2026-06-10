@@ -1,0 +1,33 @@
+{
+  "intent_id": "kani-no-unsafe-pointer-deref",
+  "version": "0.1.0",
+  "domain": "ci_cd",
+  "title": "Kani no unsafe pointer dereference",
+  "description": "Rust security-critical paths must avoid unsafe pointer dereference behavior under symbolic execution.",
+  "scope": {
+    "files": ["**/*.rs", "**/Cargo.toml", "**/.github/workflows/*.yml"]
+  },
+  "property": {
+    "kind": "safety",
+    "natural_language": "Unsafe Rust pointer dereferences must not be reachable in changed code paths."
+  },
+  "failure_modes": ["unsafe_pointer_deref", "unchecked_raw_pointer_cast", "failing_kani_assertion"],
+  "acceptable_evidence": [
+    { "kind": "model_check", "minimum_confidence": "high" },
+    { "kind": "counterexample_trace", "minimum_confidence": "medium" }
+  ],
+  "risk": {
+    "severity": "critical",
+    "likelihood": "medium",
+    "rationale": "Unsafe pointer bugs in CI-reviewed Rust services can become memory safety vulnerabilities."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "curated": true
+  }
+}

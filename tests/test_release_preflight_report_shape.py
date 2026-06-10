@@ -13,6 +13,7 @@ def test_release_preflight_report_is_serializable() -> None:
         "adversarial_quality_gate",
         "multi_lane_manifest",
         "external_smoke_checklist",
+        "external_validation_matrix",
         "ovk_check_latency",
         "formal_pr_bench",
         "template_validation",

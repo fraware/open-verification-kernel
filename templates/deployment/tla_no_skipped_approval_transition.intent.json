@@ -1,0 +1,33 @@
+{
+  "intent_id": "tla-no-skipped-approval-transition",
+  "version": "0.1.0",
+  "domain": "deployment",
+  "title": "TLA no skipped approval transition",
+  "description": "Deployment state machines should not admit transitions to production that bypass required approval states.",
+  "scope": {
+    "files": ["**/*deploy*", "**/*release*", "**/*state_machine*", "**/*workflow*"]
+  },
+  "property": {
+    "kind": "invariant",
+    "natural_language": "Every production transition must pass through mandatory approval states."
+  },
+  "failure_modes": ["approval_state_removed", "transition_shortcut_added", "guard_condition_weakened"],
+  "acceptable_evidence": [
+    { "kind": "state_machine_check", "minimum_confidence": "high" },
+    { "kind": "model_check", "minimum_confidence": "medium" }
+  ],
+  "risk": {
+    "severity": "critical",
+    "likelihood": "medium",
+    "rationale": "Skipped approvals create direct governance bypass in release automation."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "curated": true
+  }
+}

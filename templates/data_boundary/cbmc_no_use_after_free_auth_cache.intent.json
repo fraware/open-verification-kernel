@@ -1,0 +1,33 @@
+{
+  "intent_id": "cbmc-no-use-after-free-auth-cache",
+  "version": "0.1.0",
+  "domain": "data_boundary",
+  "title": "CBMC no use after free auth cache",
+  "description": "Authentication cache memory lifetimes must remain valid across allocation and invalidation changes.",
+  "scope": {
+    "files": ["**/*auth*.c", "**/*cache*.c", "**/*session*.c", "**/*.h"]
+  },
+  "property": {
+    "kind": "safety",
+    "natural_language": "No execution path should read or write authentication cache entries after free."
+  },
+  "failure_modes": ["use_after_free", "dangling_pointer_reuse", "lifetime_guard_removed"],
+  "acceptable_evidence": [
+    { "kind": "model_check", "minimum_confidence": "high" },
+    { "kind": "generated_regression_test", "minimum_confidence": "medium" }
+  ],
+  "risk": {
+    "severity": "high",
+    "likelihood": "low",
+    "rationale": "Use-after-free bugs in auth state handling can cause corruption or security bypass."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "curated": true
+  }
+}

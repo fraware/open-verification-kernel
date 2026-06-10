@@ -29,14 +29,22 @@ Details: [STATUS.md](STATUS.md), [RELEASE.md](RELEASE.md).
 | Ten backend adapters (wave 1 + wave 2) | delivered |
 | Pilot program (`ovk pilot`, five manifests) | delivered |
 
+## Post-v1.0 ecosystem hardening (delivered)
+
+| Area | Status |
+|---|---|
+| FormalPR-Bench shields.io badge (committed JSON on `main`) | delivered |
+| Template library expanded to 100 schema-valid intents | delivered |
+| Weekly external validation matrix workflow | delivered |
+| Native backend CI matrix (10 backends, `continue-on-error`) | delivered |
+| Router policy schema, recipes (`docs/POLICY.md`), `ovk doctor` config validation | delivered |
+
 ## Post-v1.0 priorities
 
 1. PyPI publication and semver release automation.
 2. Real-world OSS pilot repositories beyond example manifests.
-3. Repository policy preferences and runtime budgets in backend routing.
-4. External-repo Action validation at scale.
-5. Deeper Z3 obligation expressiveness and counterexample minimization.
-6. Community backend contributions and expanded template library (100+ intents).
+3. Deeper Z3 obligation expressiveness and counterexample minimization.
+4. Community backend contributions beyond the native install matrix.
 
 ## Historical phases (completed for v0.1 scope)
 

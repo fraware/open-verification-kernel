@@ -1,0 +1,33 @@
+{
+  "intent_id": "alloy-admin-path-requires-jump-host",
+  "version": "0.1.0",
+  "domain": "infrastructure",
+  "title": "Alloy admin path requires jump host",
+  "description": "Administrative infrastructure paths should route through managed bastion controls rather than direct ingress.",
+  "scope": {
+    "files": ["**/*.tf", "**/*iam*", "**/*network*"]
+  },
+  "property": {
+    "kind": "forbidden_configuration",
+    "natural_language": "Direct public ingress to admin endpoints is forbidden; jump-host mediation is required."
+  },
+  "failure_modes": ["direct_admin_ingress", "bastion_requirement_removed", "overbroad_source_cidr"],
+  "acceptable_evidence": [
+    { "kind": "policy_check", "minimum_confidence": "high" },
+    { "kind": "graph_reachability", "minimum_confidence": "medium" }
+  ],
+  "risk": {
+    "severity": "high",
+    "likelihood": "medium",
+    "rationale": "Admin endpoint exposure significantly increases privilege escalation risk."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "curated": true
+  }
+}

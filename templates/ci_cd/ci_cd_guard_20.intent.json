@@ -1,0 +1,39 @@
+{
+  "intent_id": "ci-cd-guard-20",
+  "version": "0.1.0",
+  "domain": "ci_cd",
+  "title": "Ci Cd Guard 20",
+  "description": "Generated guard for ci_cd surface 20 covering data_boundary properties.",
+  "property": {
+    "kind": "data_boundary",
+    "natural_language": "Changed ci_cd artifacts must preserve data_boundary obligations for surface 20."
+  },
+  "failure_modes": [
+    "secret_in_untrusted_context",
+    "workflow_permission_escalation"
+  ],
+  "acceptable_evidence": [
+    {
+      "kind": "policy_check",
+      "minimum_confidence": "medium"
+    },
+    {
+      "kind": "generated_regression_test",
+      "minimum_confidence": "medium"
+    }
+  ],
+  "risk": {
+    "severity": "critical",
+    "likelihood": "low",
+    "rationale": "Generated guard for ci_cd surface 20."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "generated": true
+  }
+}

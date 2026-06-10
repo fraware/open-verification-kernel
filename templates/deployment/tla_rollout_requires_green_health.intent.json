@@ -1,0 +1,33 @@
+{
+  "intent_id": "tla-rollout-requires-green-health",
+  "version": "0.1.0",
+  "domain": "deployment",
+  "title": "TLA rollout requires green health",
+  "description": "Canary and staged rollout paths should only progress when health checks remain green.",
+  "scope": {
+    "files": ["**/*deploy*", "**/*rollout*", "**/*canary*", "**/*workflow*"]
+  },
+  "property": {
+    "kind": "safety",
+    "natural_language": "Rollout progression must halt when health checks fail."
+  },
+  "failure_modes": ["health_gate_removed", "failure_branch_unreachable", "forced_progression_added"],
+  "acceptable_evidence": [
+    { "kind": "state_machine_check", "minimum_confidence": "high" },
+    { "kind": "generated_regression_test", "minimum_confidence": "medium" }
+  ],
+  "risk": {
+    "severity": "high",
+    "likelihood": "medium",
+    "rationale": "Unhealthy rollouts can magnify incidents by promoting broken versions globally."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "curated": true
+  }
+}

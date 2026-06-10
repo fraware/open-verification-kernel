@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from jsonschema import Draft202012Validator
+
 from ovk import __version__
 from ovk.core.json_io import read_json_file
 from ovk.core.templates_cli import TEMPLATES_DIR, list_templates
@@ -51,11 +53,42 @@ def _check_verification_dir(path: Path) -> DoctorCheck:
 
 def _check_templates() -> DoctorCheck:
     templates = list_templates(TEMPLATES_DIR)
+    required_templates = 100
     return DoctorCheck(
         "template_library",
-        len(templates) >= 5,
+        len(templates) >= required_templates,
         f"{len(templates)} intent templates available under {TEMPLATES_DIR}",
     )
+
+
+def _check_policy_config(path: Path) -> DoctorCheck:
+    config_path = path / "config.yml"
+    if not config_path.exists():
+        return DoctorCheck("verification_config_schema", True, "config.yml not present (optional)")
+    schema_path = Path("schemas/verification.config.schema.json")
+    if not schema_path.exists():
+        return DoctorCheck("verification_config_schema", False, "schemas/verification.config.schema.json missing")
+    try:
+        import yaml
+    except Exception as error:  # noqa: BLE001
+        return DoctorCheck("verification_config_schema", False, f"PyYAML unavailable: {error}")
+    try:
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except Exception as error:  # noqa: BLE001
+        return DoctorCheck("verification_config_schema", False, f"invalid YAML: {error}")
+    if not isinstance(config, dict):
+        return DoctorCheck("verification_config_schema", False, "config.yml must contain a YAML mapping")
+    try:
+        schema = read_json_file(schema_path)
+    except Exception as error:  # noqa: BLE001
+        return DoctorCheck("verification_config_schema", False, f"cannot read schema: {error}")
+    validator = Draft202012Validator(schema)
+    errors = sorted(validator.iter_errors(config), key=lambda item: list(item.path))
+    if errors:
+        error = errors[0]
+        at = "/".join(str(part) for part in error.path) or "$"
+        return DoctorCheck("verification_config_schema", False, f"{at}: {error.message}")
+    return DoctorCheck("verification_config_schema", True, f"{config_path} is schema-valid")
 
 
 def _check_schema_index() -> DoctorCheck:
@@ -90,13 +123,25 @@ def _check_manifest_example() -> DoctorCheck:
 
 def run_doctor(*, verification_dir: Path = Path(".verification")) -> dict[str, Any]:
     """Run OVK environment diagnostics."""
+    optional_binaries = [
+        "opa",
+        "z3",
+        "cedar",
+        "tlc",
+        "kani",
+        "dafny",
+        "verus",
+        "lean",
+        "cbmc",
+        "alloy",
+        "cosign",
+    ]
     checks = [
         DoctorCheck("ovk_version", True, __version__),
         _check_python(),
-        _check_optional_binary("opa"),
-        _check_optional_binary("z3"),
-        _check_optional_binary("cosign"),
+        *[_check_optional_binary(name) for name in optional_binaries],
         _check_verification_dir(verification_dir),
+        _check_policy_config(verification_dir),
         _check_manifest_example(),
         _check_templates(),
         _check_schema_index(),
@@ -106,7 +151,15 @@ def run_doctor(*, verification_dir: Path = Path(".verification")) -> dict[str, A
     failures = [
         check
         for check in checks
-        if not check.passed and check.name in {"python", "verification_dir", "example_manifest", "template_library", "schema_index"}
+        if not check.passed
+        and check.name in {
+            "python",
+            "verification_dir",
+            "verification_config_schema",
+            "example_manifest",
+            "template_library",
+            "schema_index",
+        }
     ]
     return {
         "passed": len(failures) == 0,

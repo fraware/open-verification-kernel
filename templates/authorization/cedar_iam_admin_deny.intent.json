@@ -1,0 +1,43 @@
+{
+  "intent_id": "cedar-iam-admin-deny",
+  "version": "0.1.0",
+  "domain": "authorization",
+  "title": "Cedar IAM admin deny",
+  "description": "IAM policy changes must not grant admin actions to unprivileged principals.",
+  "scope": {
+    "files": [
+      "**/*policy*",
+      "**/iam/**",
+      "**/*.cedar"
+    ]
+  },
+  "property": {
+    "kind": "access_control",
+    "natural_language": "Non-admin principals must not be permitted admin IAM actions after the change."
+  },
+  "failure_modes": [
+    "policy_default_allow",
+    "wildcard_principal",
+    "privilege_escalation"
+  ],
+  "acceptable_evidence": [
+    {
+      "kind": "policy_check",
+      "minimum_confidence": "high"
+    }
+  ],
+  "risk": {
+    "severity": "critical",
+    "likelihood": "medium",
+    "rationale": "IAM regressions expose cloud control planes."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "canonical": true
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "intent_id": "kani-bounded-loop-termination",
+  "version": "0.1.0",
+  "domain": "ci_cd",
+  "title": "Kani bounded loop termination",
+  "description": "Critical Rust routines should preserve bounded iteration assumptions required for model-check feasibility and safety.",
+  "scope": {
+    "files": ["**/*.rs"]
+  },
+  "property": {
+    "kind": "invariant",
+    "natural_language": "Security-relevant loops must preserve explicit bounds and terminate."
+  },
+  "failure_modes": ["unbounded_loop_introduced", "termination_guard_removed", "symbolic_timeout"],
+  "acceptable_evidence": [
+    { "kind": "model_check", "minimum_confidence": "medium" },
+    { "kind": "analysis_report", "minimum_confidence": "medium" }
+  ],
+  "risk": {
+    "severity": "high",
+    "likelihood": "low",
+    "rationale": "Unexpected non-termination in critical code can bypass or delay enforcement checks."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "curated": true
+  }
+}

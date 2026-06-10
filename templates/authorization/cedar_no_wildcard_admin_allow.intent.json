@@ -1,0 +1,33 @@
+{
+  "intent_id": "cedar-no-wildcard-admin-allow",
+  "version": "0.1.0",
+  "domain": "authorization",
+  "title": "Cedar no wildcard admin allow",
+  "description": "IAM policy changes must not introduce wildcard principals with admin-level allow effects.",
+  "scope": {
+    "files": ["**/*cedar*", "**/*policy*", "**/*iam*"]
+  },
+  "property": {
+    "kind": "access_control",
+    "natural_language": "Wildcard principals must never receive admin permissions through Cedar policy diffs."
+  },
+  "failure_modes": ["wildcard_principal_allow", "overbroad_action_set", "policy_scope_regression"],
+  "acceptable_evidence": [
+    { "kind": "policy_check", "minimum_confidence": "high" },
+    { "kind": "counterexample_trace", "minimum_confidence": "medium" }
+  ],
+  "risk": {
+    "severity": "critical",
+    "likelihood": "medium",
+    "rationale": "Wildcard admin grants can create immediate tenant-wide compromise paths."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "curated": true
+  }
+}

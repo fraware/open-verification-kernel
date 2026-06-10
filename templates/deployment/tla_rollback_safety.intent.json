@@ -1,0 +1,35 @@
+{
+  "intent_id": "tla-rollback-safety",
+  "version": "0.1.0",
+  "domain": "deployment",
+  "title": "TLA rollback safety",
+  "description": "Rollback paths must not skip safety checks or leave the system in an invalid state.",
+  "property": {
+    "kind": "safety",
+    "natural_language": "Rollback transitions preserve deployment safety invariants."
+  },
+  "failure_modes": [
+    "rollback_bypass",
+    "invalid_state_transition"
+  ],
+  "acceptable_evidence": [
+    {
+      "kind": "model_check",
+      "minimum_confidence": "medium"
+    }
+  ],
+  "risk": {
+    "severity": "high",
+    "likelihood": "low",
+    "rationale": "Unsafe rollbacks can reintroduce known failures."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "canonical": true
+  }
+}

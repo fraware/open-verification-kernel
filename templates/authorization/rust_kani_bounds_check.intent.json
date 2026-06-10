@@ -1,0 +1,47 @@
+{
+  "intent_id": "rust-kani-bounds-check",
+  "version": "0.1.0",
+  "domain": "authorization",
+  "title": "Rust Kani bounds check",
+  "description": "Unsafe Rust changes must not introduce out-of-bounds memory access on privileged paths.",
+  "scope": {
+    "files": [
+      "**/*.rs",
+      "**/Cargo.toml"
+    ]
+  },
+  "property": {
+    "kind": "safety",
+    "natural_language": "Array and pointer accesses in changed Rust code remain within declared bounds.",
+    "formal_hint": "forall i. 0 <= i < len(arr) implies safe_access(arr, i)"
+  },
+  "failure_modes": [
+    "buffer_overflow",
+    "unchecked_index",
+    "raw_pointer_deref"
+  ],
+  "acceptable_evidence": [
+    {
+      "kind": "model_check",
+      "minimum_confidence": "high"
+    },
+    {
+      "kind": "smt_counterexample",
+      "minimum_confidence": "medium"
+    }
+  ],
+  "risk": {
+    "severity": "critical",
+    "likelihood": "medium",
+    "rationale": "Memory safety regressions in auth paths are exploitable."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "canonical": true
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "intent_id": "deployment-guard-9",
+  "version": "0.1.0",
+  "domain": "deployment",
+  "title": "Deployment Guard 9",
+  "description": "Generated guard for deployment surface 9 covering invariant properties.",
+  "property": {
+    "kind": "invariant",
+    "natural_language": "Changed deployment artifacts must preserve invariant obligations for surface 9."
+  },
+  "failure_modes": [
+    "skipped_approval",
+    "invalid_state_transition",
+    "rollback_bypass"
+  ],
+  "acceptable_evidence": [
+    {
+      "kind": "model_check",
+      "minimum_confidence": "medium"
+    },
+    {
+      "kind": "trace",
+      "minimum_confidence": "medium"
+    }
+  ],
+  "risk": {
+    "severity": "high",
+    "likelihood": "medium",
+    "rationale": "Generated guard for deployment surface 9."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "generated": true
+  }
+}

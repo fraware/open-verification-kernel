@@ -1,0 +1,42 @@
+{
+  "intent_id": "tla-approval-state-machine",
+  "version": "0.1.0",
+  "domain": "deployment",
+  "title": "TLA approval state machine",
+  "description": "Deployment workflows must preserve required approval states before production promotion.",
+  "scope": {
+    "files": [
+      "**/*.tla",
+      "**/deploy/**",
+      "**/.github/workflows/**"
+    ]
+  },
+  "property": {
+    "kind": "invariant",
+    "natural_language": "Production promotion is unreachable without passing through required approval states."
+  },
+  "failure_modes": [
+    "skipped_approval",
+    "invalid_state_transition"
+  ],
+  "acceptable_evidence": [
+    {
+      "kind": "model_check",
+      "minimum_confidence": "high"
+    }
+  ],
+  "risk": {
+    "severity": "high",
+    "likelihood": "medium",
+    "rationale": "Skipped approvals enable unreviewed production changes."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "canonical": true
+  }
+}

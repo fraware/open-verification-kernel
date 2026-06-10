@@ -1,0 +1,41 @@
+{
+  "schema_version": "ovk.external_validation.scenarios.v1",
+  "scenarios": [
+    {
+      "id": "check_strict_block",
+      "kind": "action_check",
+      "description": "Strict mode blocks when secrets appear in untrusted CI context",
+      "mode": "strict",
+      "changed_files": "examples/ci_secrets/workflow_secrets_on_pr.diff",
+      "expected_recommendation": "block",
+      "expect_exit_code": 1
+    },
+    {
+      "id": "check_advisory_allow",
+      "kind": "action_ci",
+      "description": "Advisory mode allows preserved gate metadata",
+      "mode": "advisory",
+      "changed_files": "examples/no_agent_self_approval/changed_files_workflow.txt",
+      "metadata": "examples/no_agent_self_approval/metadata_missing_required_checks.json",
+      "expected_recommendation": "allow",
+      "expect_exit_code": 0
+    },
+    {
+      "id": "mvp_manifest_allow",
+      "kind": "action_manifest",
+      "description": "Full MVP manifest produces valid advisory bundle",
+      "mode": "advisory",
+      "verification_manifest": "examples/verification_manifests/full_mvp.json",
+      "expected_recommendation": "allow",
+      "expect_exit_code": 0
+    },
+    {
+      "id": "forged_bundle_rejected",
+      "kind": "quality_gate",
+      "description": "Adversarial forged bundle fails quality gate",
+      "input_bundle": "examples/evidence_quality/adversarial_allow_with_fail.json",
+      "expected_recommendation": "quality_fail",
+      "expect_exit_code": 0
+    }
+  ]
+}

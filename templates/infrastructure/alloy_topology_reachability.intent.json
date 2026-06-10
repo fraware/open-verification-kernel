@@ -1,0 +1,42 @@
+{
+  "intent_id": "alloy-topology-reachability",
+  "version": "0.1.0",
+  "domain": "infrastructure",
+  "title": "Alloy topology reachability",
+  "description": "Network topology changes must not create unintended paths from public ingress to sensitive tiers.",
+  "scope": {
+    "files": [
+      "**/*.alloy",
+      "**/network/**",
+      "**/*.tf"
+    ]
+  },
+  "property": {
+    "kind": "invariant",
+    "natural_language": "No public ingress may reach a sensitive data tier without explicit policy."
+  },
+  "failure_modes": [
+    "public_exposure",
+    "lateral_movement_path"
+  ],
+  "acceptable_evidence": [
+    {
+      "kind": "topology_model",
+      "minimum_confidence": "medium"
+    }
+  ],
+  "risk": {
+    "severity": "high",
+    "likelihood": "medium",
+    "rationale": "Topology regressions enable data exfiltration."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "canonical": true
+  }
+}

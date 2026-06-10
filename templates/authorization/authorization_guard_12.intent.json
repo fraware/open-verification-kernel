@@ -1,0 +1,41 @@
+{
+  "intent_id": "authorization-guard-12",
+  "version": "0.1.0",
+  "domain": "authorization",
+  "title": "Authorization Guard 12",
+  "description": "Generated guard for authorization surface 12 covering access_control properties.",
+  "property": {
+    "kind": "access_control",
+    "natural_language": "Changed authorization artifacts must preserve access_control obligations for surface 12."
+  },
+  "failure_modes": [
+    "middleware_skipped",
+    "route_group_unprotected",
+    "policy_default_allow",
+    "role_check_removed"
+  ],
+  "acceptable_evidence": [
+    {
+      "kind": "policy_check",
+      "minimum_confidence": "medium"
+    },
+    {
+      "kind": "smt_counterexample",
+      "minimum_confidence": "medium"
+    }
+  ],
+  "risk": {
+    "severity": "high",
+    "likelihood": "medium",
+    "rationale": "Generated guard for authorization surface 12."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "generated": true
+  }
+}

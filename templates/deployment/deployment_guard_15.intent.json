@@ -1,0 +1,40 @@
+{
+  "intent_id": "deployment-guard-15",
+  "version": "0.1.0",
+  "domain": "deployment",
+  "title": "Deployment Guard 15",
+  "description": "Generated guard for deployment surface 15 covering invariant properties.",
+  "property": {
+    "kind": "invariant",
+    "natural_language": "Changed deployment artifacts must preserve invariant obligations for surface 15."
+  },
+  "failure_modes": [
+    "skipped_approval",
+    "invalid_state_transition",
+    "rollback_bypass"
+  ],
+  "acceptable_evidence": [
+    {
+      "kind": "model_check",
+      "minimum_confidence": "medium"
+    },
+    {
+      "kind": "trace",
+      "minimum_confidence": "medium"
+    }
+  ],
+  "risk": {
+    "severity": "high",
+    "likelihood": "medium",
+    "rationale": "Generated guard for deployment surface 15."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "generated": true
+  }
+}

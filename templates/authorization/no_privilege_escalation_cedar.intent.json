@@ -1,0 +1,35 @@
+{
+  "intent_id": "no-privilege-escalation-cedar",
+  "version": "0.1.0",
+  "domain": "authorization",
+  "title": "No privilege escalation (Cedar)",
+  "description": "Authorization policy edits must not grant new privileges without explicit intent.",
+  "property": {
+    "kind": "access_control",
+    "natural_language": "Principals cannot gain permissions they did not hold before the change."
+  },
+  "failure_modes": [
+    "privilege_escalation",
+    "policy_default_allow"
+  ],
+  "acceptable_evidence": [
+    {
+      "kind": "policy_check",
+      "minimum_confidence": "high"
+    }
+  ],
+  "risk": {
+    "severity": "critical",
+    "likelihood": "medium",
+    "rationale": "Privilege escalation is a primary auth regression class."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "canonical": true
+  }
+}

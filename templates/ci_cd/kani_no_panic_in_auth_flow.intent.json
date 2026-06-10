@@ -1,0 +1,33 @@
+{
+  "intent_id": "kani-no-panic-in-auth-flow",
+  "version": "0.1.0",
+  "domain": "ci_cd",
+  "title": "Kani no panic in auth flow",
+  "description": "Authentication and authorization Rust code should remain panic-free for untrusted inputs.",
+  "scope": {
+    "files": ["**/*auth*.rs", "**/*session*.rs", "**/*token*.rs"]
+  },
+  "property": {
+    "kind": "safety",
+    "natural_language": "Untrusted authentication inputs must not trigger panic paths."
+  },
+  "failure_modes": ["panic_on_malformed_input", "unwrap_on_none", "assertion_failure"],
+  "acceptable_evidence": [
+    { "kind": "model_check", "minimum_confidence": "high" },
+    { "kind": "generated_regression_test", "minimum_confidence": "medium" }
+  ],
+  "risk": {
+    "severity": "high",
+    "likelihood": "medium",
+    "rationale": "Panic-based denial of service can disable auth workflows during deployment events."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "curated": true
+  }
+}

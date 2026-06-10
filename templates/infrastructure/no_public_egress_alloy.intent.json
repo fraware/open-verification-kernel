@@ -1,0 +1,35 @@
+{
+  "intent_id": "no-public-egress-alloy",
+  "version": "0.1.0",
+  "domain": "infrastructure",
+  "title": "No public egress (Alloy)",
+  "description": "Sensitive workloads must not gain unrestricted public egress without review.",
+  "property": {
+    "kind": "forbidden_configuration",
+    "natural_language": "Sensitive tiers do not route traffic to unrestricted public egress."
+  },
+  "failure_modes": [
+    "public_exposure",
+    "lateral_movement_path"
+  ],
+  "acceptable_evidence": [
+    {
+      "kind": "topology_model",
+      "minimum_confidence": "medium"
+    }
+  ],
+  "risk": {
+    "severity": "high",
+    "likelihood": "medium",
+    "rationale": "Public egress from sensitive tiers enables exfiltration."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "canonical": true
+  }
+}

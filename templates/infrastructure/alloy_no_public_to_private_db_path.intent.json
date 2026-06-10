@@ -1,0 +1,33 @@
+{
+  "intent_id": "alloy-no-public-to-private-db-path",
+  "version": "0.1.0",
+  "domain": "infrastructure",
+  "title": "Alloy no public to private DB path",
+  "description": "Topology-level constraints should prevent public components from reaching private database resources directly.",
+  "scope": {
+    "files": ["**/*.tf", "**/*network*", "**/*topology*"]
+  },
+  "property": {
+    "kind": "data_boundary",
+    "natural_language": "No path should exist from internet-exposed components to private databases."
+  },
+  "failure_modes": ["public_to_private_path", "security_group_bridge_added", "network_acl_regression"],
+  "acceptable_evidence": [
+    { "kind": "graph_reachability", "minimum_confidence": "high" },
+    { "kind": "model_check", "minimum_confidence": "medium" }
+  ],
+  "risk": {
+    "severity": "critical",
+    "likelihood": "medium",
+    "rationale": "Network path regressions can expose high-value data stores to internet threat actors."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "curated": true
+  }
+}

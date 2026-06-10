@@ -1,0 +1,33 @@
+{
+  "intent_id": "cbmc-no-unchecked-buffer-copy",
+  "version": "0.1.0",
+  "domain": "data_boundary",
+  "title": "CBMC no unchecked buffer copy",
+  "description": "C/C++ boundary-handling code should preserve explicit bounds checks before memory copy operations.",
+  "scope": {
+    "files": ["**/*.c", "**/*.cc", "**/*.cpp", "**/*.h"]
+  },
+  "property": {
+    "kind": "safety",
+    "natural_language": "Untrusted input must not drive out-of-bounds copy operations."
+  },
+  "failure_modes": ["buffer_overflow", "unchecked_memcpy", "missing_length_guard"],
+  "acceptable_evidence": [
+    { "kind": "model_check", "minimum_confidence": "high" },
+    { "kind": "counterexample_trace", "minimum_confidence": "medium" }
+  ],
+  "risk": {
+    "severity": "critical",
+    "likelihood": "medium",
+    "rationale": "Unchecked memory operations can become direct memory corruption vulnerabilities."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "curated": true
+  }
+}

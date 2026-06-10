@@ -177,6 +177,14 @@ def _check_ovk_check_latency() -> list[str]:
     return []
 
 
+def _check_external_validation_matrix() -> list[str]:
+    """Dry-run parse external validation matrix scenarios and workflow wiring."""
+    ensure_repo_on_path()
+    from scripts.external_smoke_checklist import validate_external_validation_matrix
+
+    return validate_external_validation_matrix()
+
+
 def build_release_preflight_report() -> PreflightReport:
     """Run release preflight checks and return a structured report."""
     ensure_repo_on_path()
@@ -197,6 +205,7 @@ def build_release_preflight_report() -> PreflightReport:
                 __import__("scripts.external_smoke_checklist", fromlist=["main"]).main(),
                 "external smoke checklist failed",
             ),
+            check_from_failures("external_validation_matrix", _check_external_validation_matrix()),
             check_from_failures("ovk_check_latency", _check_ovk_check_latency()),
             check_from_failures("formal_pr_bench", _check_formal_pr_bench()),
             check_from_failures("template_validation", _check_template_validation()),

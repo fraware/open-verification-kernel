@@ -1,0 +1,40 @@
+{
+  "intent_id": "infrastructure-guard-1",
+  "version": "0.1.0",
+  "domain": "infrastructure",
+  "title": "Infrastructure Guard 1",
+  "description": "Generated guard for infrastructure surface 1 covering data_boundary properties.",
+  "property": {
+    "kind": "data_boundary",
+    "natural_language": "Changed infrastructure artifacts must preserve data_boundary obligations for surface 1."
+  },
+  "failure_modes": [
+    "public_exposure",
+    "missing_encryption",
+    "overly_permissive_sg"
+  ],
+  "acceptable_evidence": [
+    {
+      "kind": "policy_check",
+      "minimum_confidence": "medium"
+    },
+    {
+      "kind": "topology_model",
+      "minimum_confidence": "medium"
+    }
+  ],
+  "risk": {
+    "severity": "high",
+    "likelihood": "low",
+    "rationale": "Generated guard for infrastructure surface 1."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "generated": true
+  }
+}

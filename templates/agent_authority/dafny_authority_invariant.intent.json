@@ -1,0 +1,35 @@
+{
+  "intent_id": "dafny-authority-invariant",
+  "version": "0.1.0",
+  "domain": "agent_authority",
+  "title": "Dafny authority invariant",
+  "description": "Agent authority modules must preserve non-escalation invariants across changes.",
+  "property": {
+    "kind": "invariant",
+    "natural_language": "Agent actions cannot escalate authority beyond the declared envelope."
+  },
+  "failure_modes": [
+    "privilege_escalation",
+    "self_approval"
+  ],
+  "acceptable_evidence": [
+    {
+      "kind": "proof",
+      "minimum_confidence": "high"
+    }
+  ],
+  "risk": {
+    "severity": "critical",
+    "likelihood": "medium",
+    "rationale": "Authority escalation enables autonomous harm."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "canonical": true
+  }
+}

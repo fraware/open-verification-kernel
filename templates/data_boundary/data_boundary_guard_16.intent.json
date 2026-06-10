@@ -1,0 +1,40 @@
+{
+  "intent_id": "data-boundary-guard-16",
+  "version": "0.1.0",
+  "domain": "data_boundary",
+  "title": "Data Boundary Guard 16",
+  "description": "Generated guard for data_boundary surface 16 covering safety properties.",
+  "property": {
+    "kind": "safety",
+    "natural_language": "Changed data_boundary artifacts must preserve safety obligations for surface 16."
+  },
+  "failure_modes": [
+    "cross_tenant_leak",
+    "buffer_overflow",
+    "type_escape"
+  ],
+  "acceptable_evidence": [
+    {
+      "kind": "smt_counterexample",
+      "minimum_confidence": "medium"
+    },
+    {
+      "kind": "memory_model",
+      "minimum_confidence": "medium"
+    }
+  ],
+  "risk": {
+    "severity": "high",
+    "likelihood": "low",
+    "rationale": "Generated guard for data_boundary surface 16."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "generated": true
+  }
+}

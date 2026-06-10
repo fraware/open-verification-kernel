@@ -2,6 +2,8 @@
 
 Install and run Open Verification Kernel locally or in GitHub Actions.
 
+Router policy recipes for `.verification/config.yml`: [POLICY.md](POLICY.md).
+
 ## Local installation
 
 ```bash
@@ -223,3 +225,11 @@ Optional Sigstore signing: set `OVK_SIGSTORE=1` and install cosign. Optional HMA
 2. Supply `check-metadata` or collect branch metadata.
 3. Validate artifacts before enabling strict mode.
 4. Use `verification-manifest` when all five MVP properties must be checked.
+
+## Policy configuration
+
+Use `.verification/config.yml` to set `mode`, unknown-handling behavior, routing budget, and backend allow/deny lists.
+
+- Schema: `schemas/verification.config.schema.json`
+- Recipes: [POLICY.md](POLICY.md)
+- Validation: `ovk doctor`

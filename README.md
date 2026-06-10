@@ -2,6 +2,8 @@
 
 Open Verification Kernel (OVK) is an open-source, solver-agnostic verification layer for AI-agent engineering workflows.
 
+[![FormalPR-Bench](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/fraware/open-verification-kernel/main/docs/benchmarks/leaderboard-badge.json)](docs/benchmarks/latest-leaderboard-summary.json)
+
 OVK sits between AI coding agents and existing formal methods tools. It does not replace Lean, Dafny, TLA+, Kani, Verus, Z3, OPA, Cedar, CBMC, Alloy, or other backends. It gives agents and CI systems a common way to ask what must remain true after a change, route that obligation to the right backend, and attach structured evidence to a pull request.
 
 ## Core thesis

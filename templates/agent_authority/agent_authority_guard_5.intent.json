@@ -1,0 +1,40 @@
+{
+  "intent_id": "agent-authority-guard-5",
+  "version": "0.1.0",
+  "domain": "agent_authority",
+  "title": "Agent Authority Guard 5",
+  "description": "Generated guard for agent_authority surface 5 covering runtime_monitorable properties.",
+  "property": {
+    "kind": "runtime_monitorable",
+    "natural_language": "Changed agent_authority artifacts must preserve runtime_monitorable obligations for surface 5."
+  },
+  "failure_modes": [
+    "self_approval",
+    "gate_removal",
+    "bot_bypass"
+  ],
+  "acceptable_evidence": [
+    {
+      "kind": "policy_check",
+      "minimum_confidence": "high"
+    },
+    {
+      "kind": "generated_regression_test",
+      "minimum_confidence": "medium"
+    }
+  ],
+  "risk": {
+    "severity": "critical",
+    "likelihood": "low",
+    "rationale": "Generated guard for agent_authority surface 5."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "generated": true
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "intent_id": "cedar-deny-precedence-preserved",
+  "version": "0.1.0",
+  "domain": "authorization",
+  "title": "Cedar deny precedence preserved",
+  "description": "Policy refactors must preserve deny-overrides semantics for explicit restrictions.",
+  "scope": {
+    "files": ["**/*cedar*", "**/*policy*"]
+  },
+  "property": {
+    "kind": "invariant",
+    "natural_language": "Explicit deny rules for protected resources must remain effective after policy changes."
+  },
+  "failure_modes": ["deny_clause_removed", "deny_precedence_broken", "allow_override_added"],
+  "acceptable_evidence": [
+    { "kind": "policy_check", "minimum_confidence": "high" },
+    { "kind": "generated_regression_test", "minimum_confidence": "medium" }
+  ],
+  "risk": {
+    "severity": "high",
+    "likelihood": "low",
+    "rationale": "Loss of deny precedence can silently reopen previously blocked access paths."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "curated": true
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "intent_id": "cbmc-no-integer-overflow-quota",
+  "version": "0.1.0",
+  "domain": "data_boundary",
+  "title": "CBMC no integer overflow quota",
+  "description": "Quota and rate-limit arithmetic must remain overflow-safe under attacker-controlled request volumes.",
+  "scope": {
+    "files": ["**/*quota*.c", "**/*rate*.c", "**/*limit*.c", "**/*.h"]
+  },
+  "property": {
+    "kind": "invariant",
+    "natural_language": "Quota accounting arithmetic must not overflow across valid input ranges."
+  },
+  "failure_modes": ["signed_overflow", "unsigned_wraparound", "quota_bypass_via_overflow"],
+  "acceptable_evidence": [
+    { "kind": "model_check", "minimum_confidence": "high" },
+    { "kind": "analysis_report", "minimum_confidence": "medium" }
+  ],
+  "risk": {
+    "severity": "high",
+    "likelihood": "medium",
+    "rationale": "Overflow bugs in quota logic can bypass request throttling or accounting controls."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "curated": true
+  }
+}

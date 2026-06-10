@@ -91,9 +91,42 @@ def init(path: Path = typer.Option(Path(".verification"), help="Verification dir
     config = path / "config.yml"
     if not config.exists():
         config.write_text(
+            "# OVK policy configuration schema: schemas/verification.config.schema.json\n"
             "schema_version: ovk.config.v1\n"
+            "\n"
+            "# Recipe 1: Advisory OSS default\n"
             "mode: advisory\n"
-            "default_on_unknown: require_human_review\n",
+            "default_on_unknown: require_human_review\n"
+            "budget:\n"
+            "  max_wall_time_seconds: 30\n"
+            "  max_memory_mb: 512\n"
+            "  allowed_backends: [opa, z3, cedar]\n"
+            "  denied_backends: []\n"
+            "routing:\n"
+            "  prefer_deterministic: false\n"
+            "\n"
+            "# Recipe 2: Strict production\n"
+            "# mode: strict\n"
+            "# budget:\n"
+            "#   denied_backends: [dafny, lean, verus]\n"
+            "\n"
+            "# Recipe 3: Deterministic-only CI\n"
+            "# budget:\n"
+            "#   denied_backends: [dafny, verus, lean, kani]\n"
+            "# routing:\n"
+            "#   prefer_deterministic: true\n"
+            "\n"
+            "# Recipe 4: Security-sensitive bot PRs\n"
+            "# budget:\n"
+            "#   max_wall_time_seconds: 15\n"
+            "#   max_memory_mb: 256\n"
+            "#   allowed_backends: [opa, z3, cedar]\n"
+            "\n"
+            "# Recipe 5: Full formal stack\n"
+            "# budget:\n"
+            "#   max_wall_time_seconds: 300\n"
+            "#   max_memory_mb: 2048\n"
+            "#   denied_backends: []\n",
             encoding="utf-8",
         )
     manifest_example = Path("examples/verification_manifests/full_mvp.json")

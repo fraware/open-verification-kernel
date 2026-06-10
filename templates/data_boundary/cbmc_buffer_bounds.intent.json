@@ -1,0 +1,42 @@
+{
+  "intent_id": "cbmc-buffer-bounds",
+  "version": "0.1.0",
+  "domain": "data_boundary",
+  "title": "CBMC buffer bounds",
+  "description": "Native code touching sensitive buffers must remain within allocated bounds.",
+  "scope": {
+    "files": [
+      "**/*.c",
+      "**/*.h",
+      "**/*.cpp"
+    ]
+  },
+  "property": {
+    "kind": "data_boundary",
+    "natural_language": "Buffer reads and writes stay within allocated memory for sensitive data paths."
+  },
+  "failure_modes": [
+    "buffer_overflow",
+    "use_after_free"
+  ],
+  "acceptable_evidence": [
+    {
+      "kind": "memory_model",
+      "minimum_confidence": "high"
+    }
+  ],
+  "risk": {
+    "severity": "critical",
+    "likelihood": "low",
+    "rationale": "Memory corruption can leak cross-tenant data."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "canonical": true
+  }
+}

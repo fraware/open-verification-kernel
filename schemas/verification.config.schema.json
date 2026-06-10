@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/verification.config.schema.json",
+  "title": "Verification Config",
+  "type": "object",
+  "required": ["schema_version", "mode", "default_on_unknown"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "ovk.config.v1"
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["advisory", "strict"]
+    },
+    "default_on_unknown": {
+      "type": "string",
+      "enum": ["require_human_review", "block", "allow_with_warning"]
+    },
+    "budget": {
+      "type": "object",
+      "properties": {
+        "max_wall_time_seconds": { "type": "number", "minimum": 1 },
+        "max_memory_mb": { "type": "integer", "minimum": 64 },
+        "allowed_backends": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "denied_backends": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "routing": {
+      "type": "object",
+      "properties": {
+        "prefer_deterministic": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "allowed_backends": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "denied_backends": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "max_wall_time_seconds": { "type": "number", "minimum": 1 },
+    "max_memory_mb": { "type": "integer", "minimum": 64 }
+  },
+  "additionalProperties": false
+}

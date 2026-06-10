@@ -1,0 +1,33 @@
+{
+  "intent_id": "alloy-private-service-not-public-component",
+  "version": "0.1.0",
+  "domain": "infrastructure",
+  "title": "Alloy private service not public component",
+  "description": "Service topology should preserve non-public component boundaries for private workloads.",
+  "scope": {
+    "files": ["**/*.tf", "**/*service*", "**/*topology*"]
+  },
+  "property": {
+    "kind": "invariant",
+    "natural_language": "Services marked private must not be connected to public ingress components."
+  },
+  "failure_modes": ["private_service_exposed", "public_listener_added", "component_label_drift"],
+  "acceptable_evidence": [
+    { "kind": "graph_reachability", "minimum_confidence": "high" },
+    { "kind": "policy_check", "minimum_confidence": "medium" }
+  ],
+  "risk": {
+    "severity": "high",
+    "likelihood": "medium",
+    "rationale": "Boundary regressions around private services can leak confidential internal APIs."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "curated": true
+  }
+}

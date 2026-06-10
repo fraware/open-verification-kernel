@@ -37,7 +37,7 @@ Lane details: [LANES.md](LANES.md).
 | `ovk doctor` | Environment and layout validation |
 | `ovk bench` | FormalPR-Bench + leaderboard artifact |
 | `ovk generate-test` | Counterexample → regression artifacts |
-| `ovk template list/show/apply` | Template library (50+ intents) |
+| `ovk template list/show/apply` | Template library (100+ intents) |
 | `ovk release-preflight` | Structured release readiness checks |
 | `ovk-mcp` | MCP SDK server (optional `mcp` extra) |
 

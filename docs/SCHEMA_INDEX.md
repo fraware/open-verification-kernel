@@ -17,6 +17,7 @@ JSON schemas for OVK objects. See also [ARTIFACTS.md](ARTIFACTS.md).
 | [attestation.envelope.schema.json](../schemas/attestation.envelope.schema.json) | ovk.attestation_envelope.v1 | `ovk-attestation-envelope.json`; validated by `ovk validate-outputs` |
 | [infrastructure.input.schema.json](../schemas/infrastructure.input.schema.json) | ovk.infrastructure.input.v1 | `examples/infrastructure_exposure/` |
 | [infrastructure.policy.schema.json](../schemas/infrastructure.policy.schema.json) | ovk.infrastructure.policy.v1 | policy configuration files |
+| [verification.config.schema.json](../schemas/verification.config.schema.json) | ovk.config.v1 | `.verification/config.yml` policy routing config |
 | [formal_pr_bench.leaderboard.schema.json](../schemas/formal_pr_bench.leaderboard.schema.json) | formal_pr_bench.leaderboard.v1 | `ovk bench --leaderboard` |
 | [pilot.report.schema.json](../schemas/pilot.report.schema.json) | ovk.pilot_report.v1 | `ovk pilot --output report.json` |
 

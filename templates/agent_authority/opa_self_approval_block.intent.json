@@ -1,0 +1,42 @@
+{
+  "intent_id": "opa-self-approval-block",
+  "version": "0.1.0",
+  "domain": "agent_authority",
+  "title": "OPA self-approval block",
+  "description": "Bot-authored PRs must not remove or bypass required verification gates.",
+  "scope": {
+    "files": [
+      "**/.github/**",
+      "**/CODEOWNERS"
+    ]
+  },
+  "property": {
+    "kind": "runtime_monitorable",
+    "natural_language": "Required branch protection checks remain enforced for bot actors."
+  },
+  "failure_modes": [
+    "self_approval",
+    "gate_removal",
+    "bot_bypass"
+  ],
+  "acceptable_evidence": [
+    {
+      "kind": "policy_check",
+      "minimum_confidence": "high"
+    }
+  ],
+  "risk": {
+    "severity": "critical",
+    "likelihood": "high",
+    "rationale": "Agents must not weaken their own verification gates."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "canonical": true
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "intent_id": "lean-type-safety",
+  "version": "0.1.0",
+  "domain": "data_boundary",
+  "title": "Lean type safety",
+  "description": "Proof-bearing code changes must preserve type-level data boundary invariants.",
+  "property": {
+    "kind": "invariant",
+    "natural_language": "Sensitive data types remain separated at the type level after the change."
+  },
+  "failure_modes": [
+    "type_escape",
+    "unsound_cast"
+  ],
+  "acceptable_evidence": [
+    {
+      "kind": "proof",
+      "minimum_confidence": "high"
+    }
+  ],
+  "risk": {
+    "severity": "high",
+    "likelihood": "low",
+    "rationale": "Type escapes can void formal guarantees."
+  },
+  "merge_policy": {
+    "on_pass": "allow",
+    "on_fail": "block",
+    "on_unknown": "require_human_review"
+  },
+  "provenance": {
+    "source": "ovk-template-library",
+    "canonical": true
+  }
+}

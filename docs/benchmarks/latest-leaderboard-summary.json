@@ -1,0 +1,25 @@
+{
+  "schema_version": "formal_pr_bench.summary.v1",
+  "generated_from": "formal_pr_bench.leaderboard.v1",
+  "cases_total": 100,
+  "cases_passed": 100,
+  "pass_rate": 1.0,
+  "merge_decision_accuracy": 1.0,
+  "status_accuracy": 1.0,
+  "counterexample_usefulness": 1.0,
+  "backend_selection_accuracy": 1.0,
+  "evidence_honesty": 1.0,
+  "intent_recall": null,
+  "by_category": {
+    "lane": {
+      "cases_total": 100,
+      "cases_passed": 100,
+      "pass_rate": 1.0
+    }
+  },
+  "timing_ms": {
+    "p50": 9.589900000264606,
+    "p95": 18.576999999822874,
+    "max": 25.002299999869138
+  }
+}
