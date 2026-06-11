@@ -6,6 +6,7 @@ import pytest
 from ovk.adapters.z3.executor import run_authorization_obligation_with_z3
 from ovk.adapters.z3.obligation import build_authorization_obligation
 from ovk.adapters.z3.result import normalize_z3_authorization_result, recommendation_from_z3_status
+from tests.native_ci import skip_unless_z3
 
 
 def load_fixture(name: str) -> dict:
@@ -54,7 +55,7 @@ def test_z3_executor_returns_valid_status_without_requiring_solver() -> None:
     assert raw["status"] in {"pass", "fail", "unknown"}
 
 
-@pytest.mark.skipif(__import__("importlib.util").util.find_spec("z3") is None, reason="z3-solver is not installed")
+@pytest.mark.skipif(skip_unless_z3(), reason="Z3 integration runs in tier-1 workflow")
 def test_z3_executor_finds_violation_when_solver_installed() -> None:
     obligation = build_authorization_obligation(load_fixture("input_admin_bypass.json"))
     raw = run_authorization_obligation_with_z3(obligation)

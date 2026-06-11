@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 
 import pytest
 
 from ovk.adapters.z3.route_extract import authorization_inputs_from_diff
 from ovk.adapters.z3.validated_path import evaluate_validated_authorization_path
+from tests.native_ci import skip_unless_z3
 
 
 DIFF_ROOT = Path("benchmarks/real_diffs")
@@ -26,7 +26,7 @@ def _provenance_backend(evidence) -> str | None:
     return None
 
 
-@pytest.mark.skipif(importlib.util.find_spec("z3") is None, reason="z3-solver is not installed")
+@pytest.mark.skipif(skip_unless_z3(), reason="Z3 integration runs in tier-1 workflow")
 @pytest.mark.parametrize(("diff_name", "expected_status"), AUTH_CASES)
 def test_z3_native_path_on_real_diff_auth_cases(diff_name: str, expected_status: str) -> None:
     diff_text = (DIFF_ROOT / diff_name).read_text(encoding="utf-8")

@@ -1,9 +1,9 @@
-import importlib.util
 from pathlib import Path
 
 import pytest
 
 from ovk.adapters.z3.validated_path import evaluate_validated_authorization_path
+from tests.native_ci import skip_unless_z3
 
 
 def _provenance_backend(evidence) -> str | None:
@@ -13,7 +13,7 @@ def _provenance_backend(evidence) -> str | None:
     return None
 
 
-@pytest.mark.skipif(importlib.util.find_spec("z3") is None, reason="z3-solver is not installed")
+@pytest.mark.skipif(skip_unless_z3(), reason="Z3 integration runs in tier-1 workflow")
 def test_z3_native_path_blocks_admin_bypass_when_z3_installed() -> None:
     payload = Path("examples/auth_regression/input_admin_bypass.json").read_text(encoding="utf-8")
     import json
@@ -25,7 +25,7 @@ def test_z3_native_path_blocks_admin_bypass_when_z3_installed() -> None:
     assert _provenance_backend(evidence) == "z3"
 
 
-@pytest.mark.skipif(importlib.util.find_spec("z3") is None, reason="z3-solver is not installed")
+@pytest.mark.skipif(skip_unless_z3(), reason="Z3 integration runs in tier-1 workflow")
 def test_z3_native_path_allows_protected_admin_route_when_z3_installed() -> None:
     payload = Path("examples/auth_regression/input_admin_protected.json").read_text(encoding="utf-8")
     import json
