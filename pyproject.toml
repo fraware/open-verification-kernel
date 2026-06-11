@@ -33,7 +33,7 @@ Repository = "https://github.com/fraware/open-verification-kernel"
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8.0.0",
+  "pytest>=8.3.0,<9",
   "ruff>=0.5.0"
 ]
 solvers = [

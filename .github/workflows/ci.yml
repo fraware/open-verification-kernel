@@ -22,7 +22,14 @@ jobs:
       - name: Lint
         run: ruff check ovk tests benchmarks/formal_pr_bench
       - name: Test
-        run: pytest
+        run: |
+          pytest -q --tb=short --junitxml=pytest-results.xml
+      - name: Upload pytest results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results
+          path: pytest-results.xml
       - name: Validate intent templates
         run: python scripts/validate_templates.py
       - name: Validate adapter capabilities
