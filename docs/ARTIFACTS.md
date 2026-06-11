@@ -40,9 +40,15 @@ ovk validate-outputs ovk-bundle
 
 Set `OVK_SIGNING_KEY` for HMAC-SHA256 envelope signing.
 
+## Attestation statement
+
+Schema: in-toto Statement shell with OVK verification predicate — see `schemas/attestation.statement.schema.json`.
+
+Unsigned attestation produced by `bundle_to_statement()`. Validated at write time and by `ovk validate-outputs`.
+
 ## Artifact manifest
 
-Schema: `ovk.artifact_manifest.v1`
+Schema: `ovk.artifact_manifest.v1` — see `schemas/artifact.manifest.schema.json`.
 
 ```json
 {
@@ -123,6 +129,6 @@ Use `--root` for portable relative paths in the manifest.
 
 ## Validation
 
-`ovk validate-outputs <directory>` schema-checks evidence, quality, provenance, and attestation envelope files. Write-time Pydantic validation applies when runners emit evidence bundles.
+`ovk validate-outputs <directory>` schema-checks evidence, attestation statement, artifact manifest, quality, provenance, and attestation envelope files. Write-time Pydantic validation applies when runners emit evidence bundles. `write_release_bundle()` validates the release layout schema before writing artifacts. Release layout schema coverage and adapter capability manifests are required `ovk release-preflight` checks.
 
 Schema index: [SCHEMA_INDEX.md](SCHEMA_INDEX.md).

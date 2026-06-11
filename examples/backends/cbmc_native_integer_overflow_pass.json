@@ -1,0 +1,6 @@
+{
+  "intent_id": "cbmc-no-integer-overflow-quota",
+  "harness_path": "examples/backends/cbmc_harness/integer_overflow_quota_pass.c",
+  "entry_function": "harness",
+  "unwind": 32
+}

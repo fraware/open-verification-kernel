@@ -16,6 +16,13 @@ JSON schemas for OVK objects. See also [ARTIFACTS.md](ARTIFACTS.md).
 | [verification.manifest.schema.json](../schemas/verification.manifest.schema.json) | ovk.verification_manifest.v1 | `examples/verification_manifests/full_mvp.json` (five-check manifest) |
 | [provenance.schema.json](../schemas/provenance.schema.json) | ovk.provenance.v1 | `ovk-provenance.json` in release bundles |
 | [attestation.envelope.schema.json](../schemas/attestation.envelope.schema.json) | ovk.attestation_envelope.v1 | `ovk-attestation-envelope.json`; validated by `ovk validate-outputs` |
+| [attestation.statement.schema.json](../schemas/attestation.statement.schema.json) | in-toto Statement + OVK predicate | `ovk-attestation.json`; validated by `ovk validate-outputs` |
+| [artifact.manifest.schema.json](../schemas/artifact.manifest.schema.json) | ovk.artifact_manifest.v1 | `ovk-artifact-manifest.json`; validated by `ovk validate-outputs` |
+| [verification.intent.schema.json](../schemas/verification.intent.schema.json) | n/a | `templates/**/*.intent.json` |
+| [verification.capability.schema.json](../schemas/verification.capability.schema.json) | n/a | `adapters/*/capability.json` |
+| [verification.obligation.schema.json](../schemas/verification.obligation.schema.json) | n/a | obligation payloads |
+| [verification.result.schema.json](../schemas/verification.result.schema.json) | n/a | backend result payloads |
+| [self_protection.input.schema.json](../schemas/self_protection.input.schema.json) | n/a | `examples/no_agent_self_approval/` metadata and canonical inputs |
 | [infrastructure.input.schema.json](../schemas/infrastructure.input.schema.json) | ovk.infrastructure.input.v1 | `examples/infrastructure_exposure/` |
 | [infrastructure.policy.schema.json](../schemas/infrastructure.policy.schema.json) | ovk.infrastructure.policy.v1 | policy configuration files |
 | [verification.config.schema.json](../schemas/verification.config.schema.json) | ovk.config.v1 | `.verification/config.yml` policy routing config |
@@ -23,5 +30,7 @@ JSON schemas for OVK objects. See also [ARTIFACTS.md](ARTIFACTS.md).
 | [pilot.report.schema.json](../schemas/pilot.report.schema.json) | ovk.pilot_report.v1 | `ovk pilot --output report.json` |
 | [pilot.metrics.schema.json](../schemas/pilot.metrics.schema.json) | ovk.pilot_metrics.v1 | `scripts/collect_pilot_metrics.py --output pilot-metrics.json` |
 | [adoption.summary.schema.json](../schemas/adoption.summary.schema.json) | ovk.adoption_summary.v1 | `docs/benchmarks/adoption-summary.json` |
+| [external.pilot.schema.json](../schemas/external.pilot.schema.json) | n/a | `docs/benchmarks/external-pilots-registry.json` items |
+| [external.pilots.registry.schema.json](../schemas/external.pilots.registry.schema.json) | ovk.external_pilots_registry.v1 | `docs/benchmarks/external-pilots-registry.json` |
 
-Generated evidence bundles are validated at write time using the canonical Pydantic `EvidenceBundle` model. Release bundles are additionally checked with `ovk validate-outputs`.
+Generated evidence bundles are validated at write time using the canonical Pydantic `EvidenceBundle` model and cross-checked against [verification.bundle.schema.json](../schemas/verification.bundle.schema.json) in CI. Release bundles are additionally checked with `ovk validate-outputs`. Adapter `capability.json` files are validated in CI and `ovk release-preflight` via `scripts/validate_capabilities.py`.

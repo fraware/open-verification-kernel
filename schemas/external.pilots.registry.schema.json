@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/external.pilots.registry.schema.json",
+  "title": "External Pilots Registry",
+  "type": "object",
+  "required": ["schema_version", "updated_at", "external_pilots"],
+  "properties": {
+    "schema_version": { "const": "ovk.external_pilots_registry.v1" },
+    "updated_at": { "type": "string", "minLength": 1 },
+    "external_pilots": {
+      "type": "array",
+      "items": { "$ref": "external.pilot.schema.json" }
+    }
+  },
+  "additionalProperties": false
+}

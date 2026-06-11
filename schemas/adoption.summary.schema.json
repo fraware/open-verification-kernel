@@ -56,7 +56,7 @@
     },
     "external_pilots": {
       "type": "array",
-      "items": { "type": "object" }
+      "items": { "$ref": "external.pilot.schema.json" }
     }
   },
   "additionalProperties": false

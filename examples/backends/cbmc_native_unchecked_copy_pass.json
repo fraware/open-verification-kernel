@@ -1,0 +1,6 @@
+{
+  "intent_id": "cbmc-no-unchecked-buffer-copy",
+  "harness_path": "examples/backends/cbmc_harness/unchecked_buffer_copy_pass.c",
+  "entry_function": "harness",
+  "unwind": 16
+}

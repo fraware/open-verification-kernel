@@ -290,6 +290,42 @@
       "expected_counterexample_class": "cbmc_assertion_failed"
     },
     {
+      "case_id": "cbmc_native_buffer_bounds_pass",
+      "input_fixture": "examples/backends/cbmc_native_buffer_bounds_pass.json",
+      "expected_intent": "cbmc-buffer-bounds",
+      "expected_backend_class": "model_checker",
+      "expected_status": "pass",
+      "expected_merge_recommendation": "allow",
+      "expected_counterexample_class": null
+    },
+    {
+      "case_id": "cbmc_native_integer_overflow_pass",
+      "input_fixture": "examples/backends/cbmc_native_integer_overflow_pass.json",
+      "expected_intent": "cbmc-no-integer-overflow-quota",
+      "expected_backend_class": "model_checker",
+      "expected_status": "pass",
+      "expected_merge_recommendation": "allow",
+      "expected_counterexample_class": null
+    },
+    {
+      "case_id": "cbmc_native_unchecked_copy_pass",
+      "input_fixture": "examples/backends/cbmc_native_unchecked_copy_pass.json",
+      "expected_intent": "cbmc-no-unchecked-buffer-copy",
+      "expected_backend_class": "model_checker",
+      "expected_status": "pass",
+      "expected_merge_recommendation": "allow",
+      "expected_counterexample_class": null
+    },
+    {
+      "case_id": "cbmc_native_uaf_pass",
+      "input_fixture": "examples/backends/cbmc_native_uaf_pass.json",
+      "expected_intent": "cbmc-no-use-after-free-auth-cache",
+      "expected_backend_class": "model_checker",
+      "expected_status": "pass",
+      "expected_merge_recommendation": "allow",
+      "expected_counterexample_class": null
+    },
+    {
       "case_id": "alloy_pass",
       "input_fixture": "examples/backends/alloy_pass.json",
       "expected_intent": "alloy-model-check",

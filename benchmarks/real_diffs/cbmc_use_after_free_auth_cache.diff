@@ -1,0 +1,17 @@
+diff --git a/src/auth/cache.c b/src/auth/cache.c
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/src/auth/cache.c
+@@ -0,0 +1,12 @@
++#include <stdlib.h>
++
++typedef struct {
++    int *entry;
++} auth_cache_t;
++
++void auth_cache_store(auth_cache_t *cache) {
++    cache->entry = (int *)malloc(sizeof(int));
++    free(cache->entry);
++    *cache->entry = 1;
++}

@@ -66,6 +66,10 @@ BACKEND_INTENT_EVALUATORS: dict[str, BackendEvaluator] = {
     "verus-harness-check": _verus,
     "lean-proof-check": _lean,
     "cbmc-harness-check": _cbmc,
+    "cbmc-buffer-bounds": _cbmc,
+    "cbmc-no-integer-overflow-quota": _cbmc,
+    "cbmc-no-unchecked-buffer-copy": _cbmc,
+    "cbmc-no-use-after-free-auth-cache": _cbmc,
     "alloy-model-check": _alloy,
 }
 

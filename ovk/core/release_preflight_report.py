@@ -9,8 +9,11 @@ from ovk.core.bench import run_formal_pr_bench
 from ovk.core.evidence_quality import build_evidence_quality_report
 from ovk.core.json_io import read_json_file, write_json_file
 from ovk.core.models import EvidenceBundle
+from ovk.core.output_validation import missing_release_layout_schema_coverage
 from ovk.core.preflight import PreflightReport, check_from_exit_code, check_from_failures
-from ovk.paths import ensure_repo_on_path, resource_path
+from ovk.core.release_bundle import release_bundle_layout
+from ovk.core.schema_validation import require_schema_valid
+from ovk.paths import ensure_repo_on_path, resource_path, schema_path
 
 
 def _check_multi_lane_manifest() -> list[str]:
@@ -227,6 +230,19 @@ def _check_pilot_metrics_dry_run() -> list[str]:
     return validate_pilot_metrics_dry_run()
 
 
+def _check_release_layout_schema_coverage() -> list[str]:
+    """Ensure every JSON artifact in the release layout has schema validation."""
+    return missing_release_layout_schema_coverage(release_bundle_layout())
+
+
+def _check_adapter_capabilities() -> list[str]:
+    """Validate adapter capability manifests against the JSON schema."""
+    ensure_repo_on_path()
+    from scripts.validate_capabilities import validate_capabilities
+
+    return validate_capabilities()
+
+
 def build_release_preflight_report() -> PreflightReport:
     """Run release preflight checks and return a structured report."""
     ensure_repo_on_path()
@@ -252,6 +268,8 @@ def build_release_preflight_report() -> PreflightReport:
             check_from_failures("formal_pr_bench", _check_formal_pr_bench()),
             check_from_failures("template_validation", _check_template_validation()),
             check_from_failures("pilot_program", _check_pilot_program()),
+            check_from_failures("release_layout_schema_coverage", _check_release_layout_schema_coverage()),
+            check_from_failures("adapter_capabilities", _check_adapter_capabilities()),
         ),
         optional_checks=(
             check_from_failures("pilot_metrics_dry_run", _check_pilot_metrics_dry_run()),
@@ -269,7 +287,15 @@ def main() -> int:
     args = parse_args()
     report = build_release_preflight_report()
     if args.output is not None:
-        write_json_file(args.output, report.to_dict())
+        payload = report.to_dict()
+        write_json_file(args.output, payload)
+        preflight_schema = schema_path("preflight.report.schema.json")
+        if preflight_schema.exists():
+            require_schema_valid(
+                payload,
+                read_json_file(preflight_schema),
+                context="preflight report",
+            )
     for failure in report.failures:
         print(failure)
     if not report.passed:

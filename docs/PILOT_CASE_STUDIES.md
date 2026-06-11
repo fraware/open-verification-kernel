@@ -116,11 +116,13 @@ Manifest template: [templates/pilot_manifest_ci_secrets.template.json](templates
 
 ### Active and recruiting
 
+Source of truth: [external-pilots-registry.json](benchmarks/external-pilots-registry.json) (merged into [adoption-summary.json](benchmarks/adoption-summary.json) by `scripts/render_pilot_metrics.py`).
+
 | Repository | Status | Check type | Advisory period | False positive rate | Strict enabled |
 |-------|--------|------|-----------------|---------------------|----------------|
-| _Pending community repo_ | recruiting | ci_secrets | — | — | no |
+| TBD — recruiting first OSS adopter (see registry) | recruiting | ci_secrets | — | — | no |
 
-When an external repo completes advisory rollout, add a row with measured metrics. Target: under 5% false positives before enabling strict mode on protected branches.
+When an external repo completes advisory rollout, maintainer ingests artifacts, updates the registry, re-renders the adoption summary, and replaces the recruiting row with measured metrics. Target: under 5% false positives before enabling strict mode on protected branches.
 
 ### Reporting template
 

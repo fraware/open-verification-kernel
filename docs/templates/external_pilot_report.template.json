@@ -1,0 +1,18 @@
+{
+  "schema_version": "ovk.external_pilot_report.v1",
+  "repository": "org/example-repo",
+  "repository_url": "https://github.com/org/example-repo",
+  "check_types": ["ci_secrets"],
+  "advisory_start": "2026-01-01",
+  "advisory_end": "2026-01-15",
+  "prs_evaluated": 0,
+  "prs_blocked": 0,
+  "false_positives": 0,
+  "false_positive_rate": 0.0,
+  "median_check_latency_ms": null,
+  "strict_enabled": false,
+  "ovk_version_pin": "1.2.0",
+  "workflow_path": ".github/workflows/ovk-pilot.yml",
+  "evidence_url": null,
+  "notes": "Self-reported metrics from the external pilot maintainer. Ingest with scripts/ingest_external_pilot_metrics.py."
+}

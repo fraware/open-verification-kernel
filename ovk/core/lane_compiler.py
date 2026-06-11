@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from ovk.adapters.cbmc.diff_extract import cbmc_inputs_from_diff
 from ovk.adapters.deployment.diff_extract import deployment_inputs_from_diff
 from ovk.adapters.workflow.diff_extract import workflow_inputs_from_diff
 from ovk.adapters.z3.route_extract import authorization_inputs_from_diff
@@ -21,6 +22,11 @@ INTENT_TO_LANE = {
     "no-public-sensitive-resource": "infrastructure",
     "no-secrets-in-untrusted-context": "ci_secrets",
     "no-skipped-approval-state": "deployment",
+    "cbmc-harness-check": "backend",
+    "cbmc-buffer-bounds": "backend",
+    "cbmc-no-integer-overflow-quota": "backend",
+    "cbmc-no-unchecked-buffer-copy": "backend",
+    "cbmc-no-use-after-free-auth-cache": "backend",
 }
 
 
@@ -71,6 +77,21 @@ def compile_lane_inputs_from_plan(
         if "deployment" in lanes_needed:
             for index, data in enumerate(deployment_inputs_from_diff(diff_text)):
                 jobs.append({"lane": "deployment", "data": data, "input_format": "infra", "job_id": f"deployment_{index}"})
+        if "backend" in lanes_needed:
+            candidate_intents = set(plan.get("candidate_intents", []))
+            for index, data in enumerate(cbmc_inputs_from_diff(diff_text)):
+                intent_id = str(data.get("intent_id", ""))
+                if intent_id not in candidate_intents:
+                    continue
+                jobs.append(
+                    {
+                        "lane": "backend",
+                        "data": data,
+                        "input_format": "backend",
+                        "job_id": f"cbmc_{index}",
+                        "intent_id": intent_id,
+                    }
+                )
 
     suggested = plan.get("suggested_lane_inputs", {})
     if isinstance(suggested.get("ci_secrets"), list):

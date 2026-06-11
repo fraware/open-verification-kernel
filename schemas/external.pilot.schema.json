@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/external.pilot.schema.json",
+  "title": "External Pilot",
+  "type": "object",
+  "required": [
+    "repository",
+    "status",
+    "check_types",
+    "strict_enabled",
+    "ovk_version_pin"
+  ],
+  "properties": {
+    "repository": { "type": "string", "minLength": 1 },
+    "status": {
+      "type": "string",
+      "enum": ["recruiting", "advisory", "strict", "completed"]
+    },
+    "check_types": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "advisory_start": { "type": ["string", "null"], "format": "date" },
+    "advisory_end": { "type": ["string", "null"], "format": "date" },
+    "prs_evaluated": { "type": ["integer", "null"], "minimum": 0 },
+    "prs_blocked": { "type": ["integer", "null"], "minimum": 0 },
+    "false_positives": { "type": ["integer", "null"], "minimum": 0 },
+    "false_positive_rate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+    "median_check_latency_ms": { "type": ["number", "null"], "minimum": 0 },
+    "strict_enabled": { "type": "boolean" },
+    "ovk_version_pin": { "type": "string", "minLength": 1 },
+    "workflow_path": { "type": "string" },
+    "evidence_url": { "type": "string" },
+    "notes": { "type": "string" }
+  },
+  "additionalProperties": false
+}

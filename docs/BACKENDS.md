@@ -14,7 +14,7 @@ Workflow: [`.github/workflows/native-backends-tier1.yml`](../.github/workflows/n
 |---------|---------|------------------|
 | `opa` | OPA `v0.67.0` static release | Yes |
 | `z3` | `z3-solver` Python package `4.13.4.0` | Yes |
-| `cbmc` | CBMC Debian `6.4.1` | Binary probe + contract check today; full harness execution planned |
+| `cbmc` | CBMC Debian `6.4.1` | Yes — native harness execution for all four data-boundary templates |
 | `cedar` | `cedar-policy-cli` `4.8.2` | Yes |
 
 Installer: [`scripts/ci/install_backend.sh`](../scripts/ci/install_backend.sh)
@@ -41,7 +41,7 @@ These use built-in evaluators when binaries are missing. Verification still runs
 | `dafny` | `dafny` | Proof obligations | `examples/backends/dafny_*.json` |
 | `verus` | `verus` | Verified Rust | `examples/backends/verus_*.json` |
 | `lean` | `lean` | Theorem proving | `examples/backends/lean_*.json` |
-| `cbmc` | `cbmc` | Bounded C verification | `examples/backends/cbmc_*.json` |
+| `cbmc` | `cbmc` | Bounded C verification (native harness) | `examples/backends/cbmc_*.json`, `examples/backends/cbmc_harness/*.c` |
 | `alloy` | `alloy` | Relational models | `examples/backends/alloy_*.json` |
 
 ## Built-in fallback behavior

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/artifact.manifest.schema.json",
+  "title": "OVK Artifact Manifest",
+  "type": "object",
+  "required": ["schema_version", "artifacts"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "ovk.artifact_manifest.v1" },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "kind", "sha256", "size_bytes"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "minLength": 64, "maxLength": 64 },
+          "size_bytes": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

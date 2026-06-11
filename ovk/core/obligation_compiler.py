@@ -48,7 +48,10 @@ class ObligationCompilerRegistry:
         obligations: list[dict[str, Any]] = []
         for job in jobs:
             lane = str(job["lane"])
-            intent_id = next((intent for intent, mapped in self._intent_to_lane.items() if mapped == lane), lane)
+            intent_id = str(job.get("intent_id") or next(
+                (intent for intent, mapped in self._intent_to_lane.items() if mapped == lane),
+                lane,
+            ))
             obligations.append(
                 {
                     "intent_id": intent_id,

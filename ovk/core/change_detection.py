@@ -51,6 +51,30 @@ SURFACE_RULES = [
         "intent": "no-skipped-approval-state",
         "reason": "change touches deployment or release state configuration",
     },
+    {
+        "domain": "data_boundary",
+        "patterns": ["*quota*.c", "*rate*.c", "*limit*.c"],
+        "intent": "cbmc-no-integer-overflow-quota",
+        "reason": "change touches quota or rate-limit C code",
+    },
+    {
+        "domain": "data_boundary",
+        "patterns": ["*auth*.c", "*cache*.c", "*session*.c"],
+        "intent": "cbmc-no-use-after-free-auth-cache",
+        "reason": "change touches authentication cache lifetime C code",
+    },
+    {
+        "domain": "data_boundary",
+        "patterns": ["*.c", "*.h", "*.cpp", "*.cc"],
+        "intent": "cbmc-buffer-bounds",
+        "reason": "change touches native buffer-handling C/C++ code",
+    },
+    {
+        "domain": "data_boundary",
+        "patterns": ["*.c", "*.cc", "*.cpp"],
+        "intent": "cbmc-no-unchecked-buffer-copy",
+        "reason": "change touches native memory-copy C/C++ code",
+    },
 ]
 
 

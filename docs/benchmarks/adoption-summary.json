@@ -1,7 +1,7 @@
 {
   "schema_version": "ovk.adoption_summary.v1",
   "ovk_version": "1.2.0",
-  "updated_at": "2026-06-10T21:55:08Z",
+  "updated_at": "2026-06-10T23:38:24Z",
   "formal_pr_bench": {
     "cases_total": 130,
     "cases_passed": 130,
@@ -45,23 +45,42 @@
       }
     },
     "timing_ms": {
-      "p50": 0.143287000000214,
-      "p95": 13.238509999993653,
-      "max": 24.929643999996642
+      "p50": 0.12271200000668614,
+      "p95": 12.90817699999991,
+      "max": 25.407987999997772
     }
   },
   "real_diff_recall": 1.0,
   "pilot_dogfood": {
     "source": "local",
-    "last_run": "2026-06-10T21:55:08Z",
+    "last_run": "2026-06-10T23:38:24Z",
     "manifests_passed": 5,
     "manifests_total": 5,
-    "median_elapsed_ms": 13.955099999293452,
+    "median_elapsed_ms": 113.28040000012152,
     "false_positive_rate": 0.0,
     "external_manifest": "examples/pilot_repos/external_oss_ci_secrets.json",
     "weekly_schedule": "0 7 * * 1",
     "workflow": ".github/workflows/pilot-dogfood.yml",
     "ovk_version_pin": "1.2.0"
   },
-  "external_pilots": []
+  "external_pilots": [
+    {
+      "repository": "TBD \u2014 recruiting first OSS adopter",
+      "status": "recruiting",
+      "check_types": [
+        "ci_secrets"
+      ],
+      "advisory_start": null,
+      "advisory_end": null,
+      "prs_evaluated": null,
+      "prs_blocked": null,
+      "false_positives": null,
+      "false_positive_rate": null,
+      "median_check_latency_ms": null,
+      "strict_enabled": false,
+      "ovk_version_pin": "1.2.0",
+      "workflow_path": ".github/workflows/ovk-pilot.yml",
+      "notes": "Placeholder row until the first external OSS repo completes advisory rollout. See docs/EXTERNAL_PILOT_PLAYBOOK.md and docs/templates/pilot_manifest_ci_secrets.template.json."
+    }
+  ]
 }

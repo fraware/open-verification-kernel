@@ -55,6 +55,10 @@ def evaluate_lane_case(case: dict) -> tuple[str, str, str | None]:
         "verus-harness-check",
         "lean-proof-check",
         "cbmc-harness-check",
+        "cbmc-buffer-bounds",
+        "cbmc-no-integer-overflow-quota",
+        "cbmc-no-unchecked-buffer-copy",
+        "cbmc-no-use-after-free-auth-cache",
         "alloy-model-check",
     }:
         from ovk.core.backend_fixture import evaluate_backend_fixture

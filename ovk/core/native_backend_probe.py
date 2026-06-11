@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ovk.adapters.cbmc.deterministic import evaluate_cbmc_input
+from ovk.adapters.cbmc.evidence import evaluate_cbmc_harness
 from ovk.adapters.cedar.deterministic import evaluate_cedar_input
 from ovk.adapters.cedar.optional_runner import probe_cedar_binary
 from ovk.adapters.opa.optional_runner import run_opa_policy
@@ -44,7 +46,7 @@ class NativeBackendSummary:
     fixture_matches_oracle: bool
 
 
-TIER1_NATIVE_EXECUTION_BACKENDS = frozenset({"opa", "z3", "cedar"})
+TIER1_NATIVE_EXECUTION_BACKENDS = frozenset({"opa", "z3", "cbmc", "cedar"})
 TIER1_REQUIRED_BACKENDS = frozenset({"opa", "z3", "cbmc", "cedar"})
 
 
@@ -118,6 +120,27 @@ def _probe_opa(fixture_path: str) -> NativeBackendProbeResult:
     )
 
 
+def _probe_cbmc(fixture_path: str) -> NativeBackendProbeResult:
+    payload = _read_fixture(fixture_path)
+    oracle_status, _ = evaluate_cbmc_input(payload)
+    evidence = evaluate_cbmc_harness(payload, repo="probe/repo", head_sha="probe-sha")
+    runtime_status = evidence.backend_claims[0].status.value
+    binary_present = shutil.which("cbmc") is not None
+    used_native = any(
+        artifact.get("kind") == "backend_provenance" and artifact.get("used_native_binary")
+        for artifact in evidence.generated_artifacts
+    )
+    return NativeBackendProbeResult(
+        backend="cbmc",
+        fixture_path=fixture_path,
+        runtime_status=runtime_status,
+        oracle_status=oracle_status,
+        binary_name="cbmc",
+        binary_present=binary_present,
+        used_native_binary=used_native,
+    )
+
+
 def _probe_cedar(fixture_path: str) -> NativeBackendProbeResult:
     payload = _read_fixture(fixture_path)
     oracle_status, _ = evaluate_cedar_input(payload)
@@ -168,6 +191,8 @@ def probe_native_backend(backend: str) -> list[NativeBackendProbeResult]:
         return [_probe_opa(path) for path in fixture_paths]
     if backend == "cedar":
         return [_probe_cedar(path) for path in fixture_paths]
+    if backend == "cbmc":
+        return [_probe_cbmc(path) for path in fixture_paths]
     if backend == "z3":
         return [_probe_z3(path) for path in fixture_paths]
     return [_probe_external_adapter(backend, path) for path in fixture_paths]

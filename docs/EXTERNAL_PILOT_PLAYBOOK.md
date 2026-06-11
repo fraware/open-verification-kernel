@@ -66,7 +66,25 @@ jobs:
 | Time to first green after repair | under 5 minutes |
 | Block rate on known-bad fixtures | 100% |
 
+Download the workflow artifact (`ovk-pilot-artifacts`) and ingest metrics into the OVK registry:
+
+```bash
+python scripts/ingest_external_pilot_metrics.py --repo org/repo --artifacts-dir ./artifact
+python scripts/render_pilot_metrics.py --registry docs/benchmarks/external-pilots-registry.json
+```
+
+Optional self-report JSON: copy [external_pilot_report.template.json](templates/external_pilot_report.template.json), fill measured values, and pass `--report external_pilot_report.json` to the ingest script.
+
 Publish results in [PILOT_CASE_STUDIES.md](PILOT_CASE_STUDIES.md) under **External pilots**.
+
+Maintainers ingest downloaded workflow artifacts and refresh the public summary:
+
+```bash
+python scripts/ingest_external_pilot_metrics.py --repo org/repo --artifacts-dir ./artifact
+python scripts/render_pilot_metrics.py --registry docs/benchmarks/external-pilots-registry.json
+```
+
+Optional self-report JSON: copy [external_pilot_report.template.json](templates/external_pilot_report.template.json), fill metrics, and pass `--report external_pilot_report.json` to the ingest script. Registry rows live in [external-pilots-registry.json](benchmarks/external-pilots-registry.json).
 
 ## Step 3 — Strict on protected branches
 
@@ -110,6 +128,9 @@ Weekly in-repo pilot workflow: `.github/workflows/pilot-dogfood.yml` with `scrip
 - Realistic PR diffs: `benchmarks/real_diffs/`
 - Example workflows: `examples/github_workflows/`
 - Metrics: `scripts/collect_pilot_metrics.py`, `docs/benchmarks/adoption-summary.json`
+- External pilot registry: `docs/benchmarks/external-pilots-registry.json`
+- Self-report template: `docs/templates/external_pilot_report.template.json`
+- Ingest script: `scripts/ingest_external_pilot_metrics.py`
 
 ## What to report
 

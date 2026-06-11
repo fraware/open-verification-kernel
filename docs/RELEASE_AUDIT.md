@@ -8,7 +8,7 @@ Answers to the external engineering review of OVK v1.2.0 readiness.
 |---|---|
 | **376 passed, 12 skipped** | Local `pytest` after audit fixes (includes `tests/test_parallel_execution_order.py`). Re-run: `pytest -q` |
 | **130/130 FormalPR-Bench** | `ovk bench --expanded` on the same commit; artifacts in `docs/benchmarks/latest-leaderboard-summary.json` |
-| **12 required preflight checks** | `ovk release-preflight` on the same commit |
+| **14 required preflight checks** | `ovk release-preflight` on the same commit |
 | **CI workflow green** | Verify on GitHub: [Actions → CI workflow](https://github.com/fraware/open-verification-kernel/actions/workflows/ci.yml) for the commit under test |
 
 Badge-only commits tagged `[skip ci]` intentionally skip workflows. They do not invalidate prior green runs on the preceding feature commit. Always trace health claims to the last **non–skip-ci** commit that ran `ci.yml`.
@@ -26,6 +26,8 @@ Yes. The badge updater commits leaderboard JSON only and uses `[skip ci]` to avo
 ### 3. Is `Development Status :: 5 - Production/Stable` intentional?
 
 The package classifier is **Beta** (`Development Status :: 4`) until external pilot metrics are published. v1.2.0 is a **release candidate**: feature-complete for the five check types, pending proven CI runs on HEAD and external adoption evidence.
+
+**Production/Stable gate (external pilot):** at least one row in [external-pilots-registry.json](benchmarks/external-pilots-registry.json) with `status: completed`, advisory window `advisory_end - advisory_start >= 14` days, and `false_positive_rate < 0.05` before strict mode. Re-render [adoption-summary.json](benchmarks/adoption-summary.json) after ingest; flip the classifier only when the gate is met.
 
 ### 4. What do required native backend checks mean?
 
@@ -46,12 +48,34 @@ Yes. Parallel obligation execution must preserve submission order. Fixed in `ovk
 
 Strict mode is **safe to enable on a repository after advisory calibration** on that repo's diffs (target: under 5% false positives). It is not a blanket “enable everywhere immediately” switch. See [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md).
 
+## Production / Stable gate
+
+**Production/Stable** (`Development Status :: 5`) requires an `external_pilots` registry entry with:
+
+- `status: completed`
+- `advisory_end - advisory_start >= 14 days`
+- `false_positive_rate < 0.05` before strict mode on protected branches
+
+Until that gate is met, the package stays **Beta / RC** (`Development Status :: 4`).
+
 ## Remaining gaps (acknowledged)
 
-- Externally validated GitHub Action usage metrics from community repos
-- Full CBMC harness execution (contract check today)
+- First external OSS adopter completing a 14+ day advisory window (registry + ingest pipeline shipped; recruiting placeholder in `docs/benchmarks/external-pilots-registry.json`)
+- Full CBMC harness execution for all four data-boundary templates (contract check today)
 - Complete CLI/script parity audit
-- Deeper schema coverage for every emitted artifact type
+
+## Schema coverage (v1.2.0 RC)
+
+Consumer-facing release artifacts are schema-validated at write time and by `ovk validate-outputs`:
+
+- `ovk-evidence.json` (Pydantic + `verification.bundle.schema.json`)
+- `ovk-attestation.json` (`attestation.statement.schema.json`)
+- `ovk-artifact-manifest.json` (`artifact.manifest.schema.json`)
+- `ovk-evidence-quality.json` (`evidence.quality.schema.json` with invariant issue `$ref`)
+- `ovk-provenance.json`, `ovk-attestation-envelope.json`
+- `ovk release-preflight --output` (`preflight.report.schema.json`)
+
+Lane inputs validated at `evaluate_lane()` entry: `ci_secrets`, `deployment`, `self_protection`. Infrastructure policy files validated in `load_policy()`. Release layout schema coverage and adapter capability manifests are required preflight checks.
 
 ## Fixes applied from this audit
 

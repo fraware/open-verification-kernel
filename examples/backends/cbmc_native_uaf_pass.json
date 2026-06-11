@@ -1,0 +1,6 @@
+{
+  "intent_id": "cbmc-no-use-after-free-auth-cache",
+  "harness_path": "examples/backends/cbmc_harness/use_after_free_auth_cache_pass.c",
+  "entry_function": "harness",
+  "unwind": 8
+}

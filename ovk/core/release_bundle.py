@@ -10,7 +10,7 @@ from ovk.core.attestation_binding import verify_bundle_statement_binding, verify
 from ovk.core.attestation_envelope import build_attestation_envelope
 from ovk.core.attestation_signing import verify_envelope_signature
 from ovk.core.json_io import read_json_file, write_json_file
-from ovk.core.output_validation import validate_output_directory
+from ovk.core.output_validation import validate_generated_file, validate_generated_json, validate_output_directory
 from ovk.core.provenance import build_provenance_statement
 from ovk.core.models import EvidenceBundle
 from ovk.core.release_layout import ReleaseArtifact, missing_required_artifacts
@@ -67,6 +67,12 @@ def write_release_bundle(
     paths: ReleaseBundlePaths,
 ) -> dict[str, Path]:
     """Write a complete release bundle and return written artifact paths."""
+    layout = release_bundle_layout()
+    layout_report = validate_generated_json(layout, "release_layout")
+    if not layout_report.valid:
+        issues = "; ".join(issue.message for issue in layout_report.issues)
+        raise ValueError(f"release layout failed schema validation: {issues}")
+
     paths.root.mkdir(parents=True, exist_ok=True)
     standard = paths.resolved()
     write_standard_run_outputs(

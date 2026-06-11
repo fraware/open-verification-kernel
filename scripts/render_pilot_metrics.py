@@ -15,9 +15,11 @@ from ovk.paths import schema_path
 
 ROOT = Path(__file__).resolve().parents[1]
 ADOPTION_SUMMARY_PATH = ROOT / "docs" / "benchmarks" / "adoption-summary.json"
+EXTERNAL_PILOTS_REGISTRY_PATH = ROOT / "docs" / "benchmarks" / "external-pilots-registry.json"
 LEADERBOARD_SUMMARY_PATH = ROOT / "docs" / "benchmarks" / "latest-leaderboard-summary.json"
 LEADERBOARD_PATH = ROOT / ".verification" / "formal-pr-bench-leaderboard.json"
 ADOPTION_SCHEMA = schema_path("adoption.summary.schema.json")
+EXTERNAL_PILOTS_REGISTRY_SCHEMA = schema_path("external.pilots.registry.schema.json")
 PILOT_DOGFOOD_WORKFLOW = ".github/workflows/pilot-dogfood.yml"
 
 
@@ -60,10 +62,51 @@ def _real_diff_recall(metrics: dict[str, Any]) -> float | None:
     return bench.get("real_diff_recall")
 
 
-def render_adoption_summary(metrics: dict[str, Any]) -> dict[str, Any]:
+def load_external_pilots_registry(registry_path: Path) -> list[dict[str, Any]]:
+    """Load and validate external pilot rows from the registry file."""
+    if not registry_path.is_file():
+        return []
+    payload = read_json_file(registry_path)
+    if EXTERNAL_PILOTS_REGISTRY_SCHEMA.is_file():
+        require_schema_valid(
+            payload,
+            read_json_file(EXTERNAL_PILOTS_REGISTRY_SCHEMA),
+            context="external pilots registry",
+        )
+    pilots = payload.get("external_pilots", [])
+    return [dict(item) for item in pilots]
+
+
+def merge_external_pilots(
+    registry_pilots: list[dict[str, Any]],
+    existing_pilots: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Merge registry rows with any existing adoption-summary rows by repository key."""
+    merged: dict[str, dict[str, Any]] = {}
+    for item in existing_pilots or []:
+        key = str(item.get("repository", ""))
+        if key:
+            merged[key] = dict(item)
+    for item in registry_pilots:
+        key = str(item.get("repository", ""))
+        if key:
+            merged[key] = dict(item)
+    return list(merged.values())
+
+
+def render_adoption_summary(
+    metrics: dict[str, Any],
+    *,
+    registry_path: Path | None = None,
+    existing_summary: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Build the public adoption summary document from pilot metrics."""
     adoption = metrics.get("adoption", {})
     pilot_dogfood = adoption.get("pilot_dogfood", {})
+    registry = load_external_pilots_registry(registry_path or EXTERNAL_PILOTS_REGISTRY_PATH)
+    existing_pilots = None
+    if existing_summary is not None:
+        existing_pilots = existing_summary.get("external_pilots")
     return {
         "schema_version": "ovk.adoption_summary.v1",
         "ovk_version": metrics.get("ovk_version", OVK_VERSION),
@@ -82,7 +125,7 @@ def render_adoption_summary(metrics: dict[str, Any]) -> dict[str, Any]:
             "workflow": PILOT_DOGFOOD_WORKFLOW,
             "ovk_version_pin": metrics.get("ovk_version", OVK_VERSION),
         },
-        "external_pilots": [],
+        "external_pilots": merge_external_pilots(registry, existing_pilots),
     }
 
 
@@ -95,6 +138,12 @@ def validate_summary(summary: dict[str, Any]) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Render adoption-summary.json from pilot metrics")
     parser.add_argument("--metrics", type=Path, help="Pilot metrics JSON report from collect_pilot_metrics.py")
+    parser.add_argument(
+        "--registry",
+        type=Path,
+        default=EXTERNAL_PILOTS_REGISTRY_PATH,
+        help="External pilots registry JSON (default: docs/benchmarks/external-pilots-registry.json)",
+    )
     parser.add_argument("--output", type=Path, default=ADOPTION_SUMMARY_PATH, help="Output path for adoption-summary.json")
     parser.add_argument("--dry-run", action="store_true", help="Print summary without writing files")
     return parser.parse_args()
@@ -111,7 +160,8 @@ def main() -> int:
         from scripts.collect_pilot_metrics import collect_pilot_metrics
 
         metrics = collect_pilot_metrics(source="local")
-    summary = render_adoption_summary(metrics)
+    existing_summary = read_json_file(args.output) if args.output.is_file() else None
+    summary = render_adoption_summary(metrics, registry_path=args.registry, existing_summary=existing_summary)
     validate_summary(summary)
     if args.dry_run:
         print(json.dumps(summary, indent=2))

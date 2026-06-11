@@ -3,6 +3,8 @@ from pathlib import Path
 
 from ovk.adapters.cedar.adapter import ADAPTER as CEDAR_ADAPTER
 from ovk.adapters.cedar.diff_extract import cedar_inputs_from_diff
+from ovk.adapters.cbmc.adapter import ADAPTER as CBMC_ADAPTER
+from ovk.adapters.cbmc.diff_extract import cbmc_inputs_from_diff
 from ovk.adapters.kani.adapter import ADAPTER as KANI_ADAPTER
 from ovk.adapters.kani.diff_extract import kani_inputs_from_diff
 from ovk.adapters.tla.adapter import ADAPTER as TLA_ADAPTER
@@ -70,6 +72,14 @@ def test_kani_diff_extracts_unsafe_rust_input() -> None:
     inputs = kani_inputs_from_diff(diff_text)
     assert inputs
     evidence = KANI_ADAPTER.evaluate_evidence(inputs[0], repo="r", head_sha="sha")
+    assert evidence.backend_claims[0].status.value == "fail"
+
+
+def test_cbmc_diff_extracts_use_after_free_input() -> None:
+    diff_text = Path("benchmarks/real_diffs/cbmc_use_after_free_auth_cache.diff").read_text(encoding="utf-8")
+    inputs = cbmc_inputs_from_diff(diff_text)
+    assert inputs
+    evidence = CBMC_ADAPTER.evaluate_evidence(inputs[0], repo="r", head_sha="sha")
     assert evidence.backend_claims[0].status.value == "fail"
 
 

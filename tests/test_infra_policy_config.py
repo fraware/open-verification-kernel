@@ -45,3 +45,10 @@ def test_load_policy_reads_json_file(tmp_path: Path) -> None:
         public_exposure=True,
     )
     assert policy.blocks_public_exposure(resource)
+
+
+def test_load_policy_rejects_invalid_schema(tmp_path: Path) -> None:
+    path = tmp_path / "policy.json"
+    path.write_text(json.dumps({"blocked_public_sensitivities": ["secret"]}), encoding="utf-8")
+    with pytest.raises(ValueError, match="infrastructure policy failed schema validation"):
+        load_policy(path)

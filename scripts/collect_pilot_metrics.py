@@ -86,6 +86,17 @@ def _evidence_recommendation(evidence_path: Path | None) -> str | None:
     return str(recommendation) if recommendation is not None else None
 
 
+def _discover_bundle_dir(artifacts_dir: Path, *names: str) -> Path | None:
+    for name in names:
+        bundle_dir = artifacts_dir / name
+        if bundle_dir.is_dir():
+            return bundle_dir
+        matches = [path for path in artifacts_dir.rglob(name) if path.is_dir()]
+        if matches:
+            return matches[0]
+    return None
+
+
 def discover_artifacts_dir(artifacts_dir: Path) -> tuple[Path | None, Path | None, Path | None]:
     """Locate pilot report, evidence, and bundle paths inside workflow artifacts."""
     pilot_report = artifacts_dir / "pilot-report.json"
@@ -98,12 +109,12 @@ def discover_artifacts_dir(artifacts_dir: Path) -> tuple[Path | None, Path | Non
         matches = sorted(artifacts_dir.rglob("ovk-evidence.json"))
         evidence = matches[0] if matches else None
 
-    bundle_dir = artifacts_dir / "pilot-dogfood-bundle"
-    if not bundle_dir.exists():
-        matches = [path for path in artifacts_dir.rglob("pilot-dogfood-bundle") if path.is_dir()]
-        if not matches:
-            matches = [path for path in artifacts_dir.rglob("pilot-dogfood-bundle") if path.is_dir()]
-        bundle_dir = matches[0] if matches else None
+    bundle_dir = _discover_bundle_dir(
+        artifacts_dir,
+        "pilot-dogfood-bundle",
+        "ovk-pilot-bundle",
+        "ovk-pilot-artifacts",
+    )
     if bundle_dir is None:
         alt = artifacts_dir / ".verification" / "pilot-dogfood-bundle"
         bundle_dir = alt if alt.is_dir() else None

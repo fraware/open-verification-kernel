@@ -51,6 +51,10 @@ def write_standard_run_outputs(
         if not evidence_report.valid:
             issues = "; ".join(issue.message for issue in evidence_report.issues)
             raise ValueError(f"evidence bundle failed schema validation: {issues}")
+        attestation_report = validate_generated_file(paths.attestation, "attestation")
+        if not attestation_report.valid:
+            issues = "; ".join(issue.message for issue in attestation_report.issues)
+            raise ValueError(f"attestation statement failed schema validation: {issues}")
         if paths.quality_report is not None and paths.quality_report.exists():
             quality_report = validate_generated_file(paths.quality_report, "quality_report")
             if not quality_report.valid:
@@ -79,3 +83,12 @@ def write_standard_run_outputs(
         envelope_path = paths.envelope or paths.manifest.parent / "ovk-attestation-envelope.json"
         envelope = build_attestation_envelope(statement=attestation, manifest_path=paths.manifest)
         write_json_file(envelope_path, envelope)
+        if validate_outputs:
+            manifest_report = validate_generated_file(paths.manifest, "artifact_manifest")
+            if not manifest_report.valid:
+                issues = "; ".join(issue.message for issue in manifest_report.issues)
+                raise ValueError(f"artifact manifest failed schema validation: {issues}")
+            envelope_report = validate_generated_file(envelope_path, "attestation_envelope")
+            if not envelope_report.valid:
+                issues = "; ".join(issue.message for issue in envelope_report.issues)
+                raise ValueError(f"attestation envelope failed schema validation: {issues}")

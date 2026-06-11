@@ -23,6 +23,28 @@ from ovk.core.self_protection_input import SelfProtectionMetadata, build_self_pr
 from ovk.paths import schema_path
 
 
+LANE_INPUT_SCHEMAS: dict[str, str] = {
+    "ci_secrets": "ci_secrets.input.schema.json",
+    "deployment": "deployment_state.input.schema.json",
+    "self_protection": "self_protection.input.schema.json",
+}
+
+
+def _validate_lane_input(data: dict[str, Any], schema_name: str, *, lane: str) -> None:
+    """Validate lane input against a registered JSON schema."""
+    path = schema_path(schema_name)
+    if not path.exists():
+        return
+    schema = read_json_file(path)
+    report = validate_against_schema(data, schema)
+    if not report.valid:
+        issues = "; ".join(
+            f"{'/'.join(str(part) for part in issue.path) or '$'}: {issue.message}"
+            for issue in report.issues
+        )
+        raise ValueError(f"{lane} input failed schema validation: {issues}")
+
+
 LANE_ALIASES = {
     "self_protection": "self_protection",
     "agent-cannot-disable-own-ci-gate": "self_protection",
@@ -63,20 +85,23 @@ def evaluate_lane(
         return evaluate_backend_fixture(data, repo=repo, head_sha=head_sha, base_sha=base_sha)
     if canonical == "self_protection":
         if "actor" in data and "before" in data:
-            return evaluate_self_protection(data, repo=repo, head_sha=head_sha, base_sha=base_sha)
-        structured = build_self_protection_input(
-            SelfProtectionMetadata(
-                actor_type=str(data.get("actor_type", data.get("author_type", "ai_agent"))),
-                agent_id=str(data.get("agent_id", data.get("agent", "unknown"))),
-                task=str(data.get("task", "unknown")),
-                changed_files=[str(path) for path in data.get("changed_files", [])],
-                before_required_checks=data.get("before_required_checks"),
-                after_required_checks=data.get("after_required_checks"),
-                before_workflow_permissions=data.get("before_workflow_permissions"),
-                after_workflow_permissions=data.get("after_workflow_permissions"),
-                ovk_gate_name=str(data.get("ovk_gate_name", "ovk-verify")),
+            structured = data
+        else:
+            _validate_lane_input(data, LANE_INPUT_SCHEMAS["self_protection"], lane=canonical)
+            structured = build_self_protection_input(
+                SelfProtectionMetadata(
+                    actor_type=str(data.get("actor_type", data.get("author_type", "ai_agent"))),
+                    agent_id=str(data.get("agent_id", data.get("agent", "unknown"))),
+                    task=str(data.get("task", "unknown")),
+                    changed_files=[str(path) for path in data.get("changed_files", [])],
+                    before_required_checks=data.get("before_required_checks"),
+                    after_required_checks=data.get("after_required_checks"),
+                    before_workflow_permissions=data.get("before_workflow_permissions"),
+                    after_workflow_permissions=data.get("after_workflow_permissions"),
+                    ovk_gate_name=str(data.get("ovk_gate_name", "ovk-verify")),
+                )
             )
-        )
+        _validate_lane_input(structured, LANE_INPUT_SCHEMAS["self_protection"], lane=canonical)
         return evaluate_self_protection(structured, repo=repo, head_sha=head_sha, base_sha=base_sha)
     if canonical == "authorization":
         return evaluate_validated_authorization_path(data, repo=repo, head_sha=head_sha, base_sha=base_sha)
@@ -90,8 +115,10 @@ def evaluate_lane(
             policy=load_policy(policy_path),
         )
     if canonical == "ci_secrets":
+        _validate_lane_input(data, LANE_INPUT_SCHEMAS["ci_secrets"], lane=canonical)
         return evaluate_ci_secrets_exposure(data, repo=repo, head_sha=head_sha, base_sha=base_sha)
     if canonical == "deployment":
+        _validate_lane_input(data, LANE_INPUT_SCHEMAS["deployment"], lane=canonical)
         return evaluate_approval_state_machine(data, repo=repo, head_sha=head_sha, base_sha=base_sha)
     raise ValueError(f"unsupported lane: {lane}")
 

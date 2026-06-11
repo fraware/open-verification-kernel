@@ -43,3 +43,20 @@ def test_collect_from_artifacts_dir(tmp_path: Path) -> None:
     parsed = collect_from_artifacts_dir(tmp_path, source="pilot_dogfood", ovk_version="1.2.0")
     validate_metrics(parsed)
     assert parsed["bundle_artifacts"]
+
+
+def test_discover_artifacts_dir_finds_ovk_pilot_bundle(tmp_path: Path) -> None:
+    from scripts.collect_pilot_metrics import discover_artifacts_dir
+
+    bundle_dir = tmp_path / "ovk-pilot-artifacts" / "ovk-pilot-bundle"
+    bundle_dir.mkdir(parents=True)
+    (bundle_dir / "ovk-evidence.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "ovk-evidence.json").write_text(
+        json.dumps({"decision": {"merge_recommendation": "allow"}}),
+        encoding="utf-8",
+    )
+
+    _report, evidence, discovered_bundle = discover_artifacts_dir(tmp_path)
+    assert evidence is not None
+    assert discovered_bundle is not None
+    assert discovered_bundle.name == "ovk-pilot-bundle"

@@ -1,0 +1,6 @@
+{
+  "intent_id": "cbmc-buffer-bounds",
+  "harness_path": "examples/backends/cbmc_harness/buffer_bounds_pass.c",
+  "entry_function": "harness",
+  "unwind": 16
+}

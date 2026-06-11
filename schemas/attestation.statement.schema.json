@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/attestation.statement.schema.json",
+  "title": "OVK Attestation Statement",
+  "type": "object",
+  "required": ["_type", "subject", "predicateType", "predicate"],
+  "properties": {
+    "_type": { "type": "string", "const": "https://in-toto.io/Statement/v1" },
+    "subject": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "digest"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "digest": {
+            "type": "object",
+            "required": ["gitCommit"],
+            "properties": {
+              "gitCommit": { "type": "string", "minLength": 1 }
+            },
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "predicateType": {
+      "type": "string",
+      "const": "https://openverification.dev/predicate/verification/v1"
+    },
+    "predicate": {
+      "type": "object",
+      "required": ["builder", "verification"],
+      "properties": {
+        "builder": {
+          "type": "object",
+          "required": ["id", "version", "runtime"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "version": { "type": "string", "minLength": 1 },
+            "runtime": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": true
+        },
+        "verification": {
+          "type": "object",
+          "required": ["bundle_id", "bundle_digest", "schema_version", "evidence", "decision"],
+          "properties": {
+            "bundle_id": { "type": "string", "minLength": 1 },
+            "bundle_digest": { "type": "string", "minLength": 64, "maxLength": 64 },
+            "schema_version": { "type": "string", "minLength": 1 },
+            "evidence": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["intent_id", "title", "claims", "counterexamples", "decision"],
+                "properties": {
+                  "intent_id": { "type": "string" },
+                  "title": { "type": "string" },
+                  "claims": { "type": "array" },
+                  "counterexamples": { "type": "array" },
+                  "decision": { "type": "object" }
+                },
+                "additionalProperties": true
+              }
+            },
+            "decision": { "type": "object" },
+            "open_obligations": { "type": "array" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

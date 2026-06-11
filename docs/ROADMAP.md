@@ -15,7 +15,7 @@ Current release: **v1.2.0**. What OVK can do today: [STATUS.md](STATUS.md). Adop
 1. **External repository pilots** — publish measured outcomes from real open-source adopters in [PILOT_CASE_STUDIES.md](PILOT_CASE_STUDIES.md).
 2. **Richer authorization checks** — more expressive Z3 obligations and smaller, clearer counterexamples.
 3. **Community backends** — adapters and install docs beyond the current native checker matrix.
-4. **Full CBMC execution** — today CBMC uses a contract check plus a built-in fallback; native harness execution is planned.
+4. **CBMC diff depth** — richer extraction from real C PR hunks and repair-loop fixtures for CBMC counterexamples.
 
 ## Not planned as product promises
 

@@ -1,0 +1,15 @@
+diff --git a/src/quota/rate_limit.c b/src/quota/rate_limit.c
+new file mode 100644
+index 0000000..2222222
+--- /dev/null
++++ b/src/quota/rate_limit.c
+@@ -0,0 +1,10 @@
++#include <stdint.h>
++
++unsigned int apply_quota(unsigned int used, unsigned int delta) {
++    unsigned int next = used + delta;
++    if (next < used) {
++        return used;
++    }
++    return next;
++}

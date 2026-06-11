@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/self_protection.input.schema.json",
+  "title": "OVK Self-Protection Input",
+  "oneOf": [
+    {
+      "title": "Canonical adapter input",
+      "type": "object",
+      "required": ["actor", "task", "changed_files", "before", "after"],
+      "properties": {
+        "actor": {
+          "type": "object",
+          "required": ["type", "id"],
+          "properties": {
+            "type": { "type": "string", "minLength": 1 },
+            "id": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": true
+        },
+        "task": { "type": "string" },
+        "ovk_gate_name": { "type": "string" },
+        "changed_files": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "before": {
+          "type": "object",
+          "properties": {
+            "required_checks": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "workflow_permissions": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            }
+          },
+          "additionalProperties": true
+        },
+        "after": {
+          "type": "object",
+          "properties": {
+            "required_checks": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "workflow_permissions": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    {
+      "title": "Metadata gate input",
+      "type": "object",
+      "not": {
+        "anyOf": [
+          { "required": ["actor"] },
+          { "required": ["before"] },
+          { "required": ["after"] }
+        ]
+      },
+      "properties": {
+        "actor_type": { "type": "string" },
+        "author_type": { "type": "string" },
+        "agent_id": { "type": "string" },
+        "agent": { "type": "string" },
+        "task": { "type": "string" },
+        "ovk_gate_name": { "type": "string" },
+        "changed_files": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "before_required_checks": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "after_required_checks": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "before_workflow_permissions": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "after_workflow_permissions": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "additionalProperties": true
+    }
+  ]
+}

@@ -24,6 +24,8 @@ jobs:
         run: pytest
       - name: Validate intent templates
         run: python scripts/validate_templates.py
+      - name: Validate adapter capabilities
+        run: python scripts/validate_capabilities.py
       - name: Score all benchmark cases
         run: python benchmarks/formal_pr_bench/score_all_lanes.py
       - name: Score expanded benchmark and publish leaderboard

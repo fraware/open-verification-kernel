@@ -22,12 +22,51 @@ ARTIFACT_SCHEMAS: dict[str, Path] = {
     "release_layout": SCHEMA_ROOT / "release.layout.schema.json",
     "provenance": SCHEMA_ROOT / "provenance.schema.json",
     "attestation_envelope": SCHEMA_ROOT / "attestation.envelope.schema.json",
+    "artifact_manifest": SCHEMA_ROOT / "artifact.manifest.schema.json",
+    "attestation": SCHEMA_ROOT / "attestation.statement.schema.json",
+}
+
+RELEASE_LAYOUT_VALIDATION_KINDS: dict[str, str | None] = {
+    "evidence": "evidence",
+    "markdown": None,
+    "attestation": "attestation",
+    "artifact_manifest": "artifact_manifest",
+    "evidence_quality": "quality_report",
+    "provenance": "provenance",
+    "attestation_envelope": "attestation_envelope",
 }
 
 
 def schema_for_kind(kind: str) -> Path | None:
     """Return the schema path for a generated artifact kind, if known."""
     return ARTIFACT_SCHEMAS.get(kind)
+
+
+def validation_kind_for_release_artifact(kind: str) -> str | None:
+    """Map a release layout artifact kind to a validation kind key."""
+    if kind in RELEASE_LAYOUT_VALIDATION_KINDS:
+        return RELEASE_LAYOUT_VALIDATION_KINDS[kind]
+    return kind if kind in ARTIFACT_SCHEMAS or kind == "evidence" else None
+
+
+def missing_release_layout_schema_coverage(layout: dict[str, Any]) -> list[str]:
+    """Return failures when a release layout artifact lacks schema validation."""
+    failures: list[str] = []
+    for artifact in layout.get("artifacts", []):
+        if not isinstance(artifact, dict):
+            continue
+        kind = str(artifact.get("kind", ""))
+        validation_kind = validation_kind_for_release_artifact(kind)
+        if validation_kind is None:
+            continue
+        if validation_kind == "evidence":
+            continue
+        schema_path = schema_for_kind(validation_kind)
+        if schema_path is None:
+            failures.append(f"release layout kind {kind!r} has no registered schema")
+        elif not schema_path.exists():
+            failures.append(f"release layout kind {kind!r} schema file missing: {schema_path.name}")
+    return failures
 
 
 def _issues_from_pydantic(error: ValidationError) -> list[ValidationIssue]:
@@ -67,6 +106,13 @@ def validate_generated_file(path: Path, kind: str) -> ValidationReport:
     return validate_file(path, schema_path)
 
 
+def _format_file_validation_failures(path: Path, report: ValidationReport) -> list[str]:
+    return [
+        f"{path.name} validation at {issue.path}: {issue.message}"
+        for issue in report.issues
+    ]
+
+
 def validate_output_directory(root: Path) -> list[str]:
     """Validate known JSON artifacts under a release bundle directory."""
     failures: list[str] = []
@@ -74,6 +120,8 @@ def validate_output_directory(root: Path) -> list[str]:
         (root / "ovk-evidence.json", "evidence"),
         (root / "ovk-evidence-quality.json", "quality_report"),
         (root / "ovk-provenance.json", "provenance"),
+        (root / "ovk-attestation.json", "attestation"),
+        (root / "ovk-artifact-manifest.json", "artifact_manifest"),
         (root / "ovk-attestation-envelope.json", "attestation_envelope"),
     ]
     for path, kind in checks:
@@ -81,8 +129,7 @@ def validate_output_directory(root: Path) -> list[str]:
             continue
         report = validate_generated_file(path, kind)
         if not report.valid:
-            for issue in report.issues:
-                failures.append(f"{path.name} validation at {issue.path}: {issue.message}")
+            failures.extend(_format_file_validation_failures(path, report))
     return failures
 
 

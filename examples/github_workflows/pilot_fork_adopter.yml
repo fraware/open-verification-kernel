@@ -1,7 +1,7 @@
 name: OVK Pilot (Fork Adopter)
 
 # Copy to .github/workflows/ovk-pilot.yml in your repository.
-# Phase 0: zero-risk advisory manifest verify (no use-check; manifest path wins).
+# Phase 0: advisory check + manifest verify; upload metrics for maintainer ingest.
 # See docs/EXTERNAL_PILOT_PLAYBOOK.md for advisory → strict rollout.
 
 on:
@@ -20,6 +20,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build PR diff for OVK
+        run: |
+          git fetch origin "${{ github.base_ref }}"
+          git diff "origin/${{ github.base_ref }}...HEAD" > ovk-pr.diff
+      - name: OVK advisory check
+        uses: fraware/open-verification-kernel@v1.2.0
+        with:
+          mode: advisory
+          use-check: "true"
+          changed-files: ovk-pr.diff
+          post-comment: "false"
       - name: OVK advisory verify (ci_secrets lane manifest)
         uses: fraware/open-verification-kernel@v1.2.0
         with:
@@ -27,3 +40,13 @@ jobs:
           verification-manifest: .verification/ci_secrets_pilot.json
           bundle-output-dir: ovk-pilot-bundle
           post-comment: "true"
+      - name: Upload pilot metrics artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ovk-pilot-artifacts
+          path: |
+            ovk-evidence.json
+            ovk-pilot-bundle/**
+            external_pilot_report.json
+          retention-days: 30
+          if-no-files-found: ignore

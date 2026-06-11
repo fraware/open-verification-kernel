@@ -27,6 +27,11 @@ FAILURE_MODE_TO_LANE: dict[str, str] = {
     "required_approval_state_skipped": "deployment",
     "skipped_required_approval_state": "deployment",
     "opa_policy_violation": "self_protection",
+    "cbmc_assertion_failed": "backend",
+    "buffer_overflow": "backend",
+    "unchecked_memcpy": "backend",
+    "use_after_free": "backend",
+    "signed_overflow": "backend",
 }
 
 FIX_CLASSES: dict[str, str] = {
@@ -43,6 +48,11 @@ FIX_CLASSES: dict[str, str] = {
     "authorization_abstraction_invalid": "fix_authorization_input",
     "infrastructure_abstraction_invalid": "fix_infrastructure_input",
     "opa_policy_violation": "fix_policy_violation",
+    "cbmc_assertion_failed": "review_cbmc_counterexample",
+    "buffer_overflow": "add_buffer_bounds_check",
+    "unchecked_memcpy": "add_copy_length_guard",
+    "use_after_free": "fix_memory_lifetime",
+    "signed_overflow": "harden_quota_arithmetic",
 }
 
 REPAIR_SUGGESTIONS: dict[str, str] = {
@@ -59,6 +69,11 @@ REPAIR_SUGGESTIONS: dict[str, str] = {
     "authorization_abstraction_invalid": "Repair the authorization abstraction input.",
     "infrastructure_abstraction_invalid": "Repair the infrastructure abstraction input.",
     "opa_policy_violation": "Resolve the policy violation reported by OPA.",
+    "cbmc_assertion_failed": "Review the CBMC counterexample trace and repair the reported C property violation.",
+    "buffer_overflow": "Add or restore bounds checks on sensitive buffer accesses.",
+    "unchecked_memcpy": "Guard memory copy length before copying untrusted input.",
+    "use_after_free": "Ensure authentication cache entries are not accessed after free.",
+    "signed_overflow": "Use overflow-safe arithmetic for quota and rate-limit counters.",
 }
 
 LANE_RENDERERS: dict[str, Callable[[list[dict[str, Any]]], str]] = {

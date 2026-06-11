@@ -1,0 +1,22 @@
+{
+  "schema_version": "ovk.external_pilots_registry.v1",
+  "updated_at": "2026-06-10T00:00:00Z",
+  "external_pilots": [
+    {
+      "repository": "TBD — recruiting first OSS adopter",
+      "status": "recruiting",
+      "check_types": ["ci_secrets"],
+      "advisory_start": null,
+      "advisory_end": null,
+      "prs_evaluated": null,
+      "prs_blocked": null,
+      "false_positives": null,
+      "false_positive_rate": null,
+      "median_check_latency_ms": null,
+      "strict_enabled": false,
+      "ovk_version_pin": "1.2.0",
+      "workflow_path": ".github/workflows/ovk-pilot.yml",
+      "notes": "Placeholder row until the first external OSS repo completes advisory rollout. See docs/EXTERNAL_PILOT_PLAYBOOK.md and docs/templates/pilot_manifest_ci_secrets.template.json."
+    }
+  ]
+}
