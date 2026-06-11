@@ -1,5 +1,4 @@
 import json
-import shutil
 from pathlib import Path
 
 import pytest
@@ -8,6 +7,7 @@ from ovk.adapters.cbmc.diff_extract import cbmc_inputs_from_diff
 from ovk.adapters.cbmc.evidence import evaluate_cbmc_harness
 from ovk.adapters.cbmc.harness_compiler import compile_cbmc_harness
 from ovk.core.kernel import execute_kernel
+from tests.native_ci import skip_unless_native_backend
 
 
 def test_cbmc_diff_extracts_auth_cache_input() -> None:
@@ -32,7 +32,7 @@ def test_harness_compiler_resolves_all_templates() -> None:
         assert Path(str(compiled["harness_path"])).is_file()
 
 
-@pytest.mark.skipif(shutil.which("cbmc") is None, reason="CBMC binary is not installed")
+@pytest.mark.skipif(skip_unless_native_backend("cbmc"), reason="CBMC integration runs in tier-1 workflow")
 def test_cbmc_harness_pass_fixture_uses_native_path_when_installed() -> None:
     data = json.loads(Path("examples/backends/cbmc_pass.json").read_text(encoding="utf-8"))
     evidence = evaluate_cbmc_harness(data, repo="test/repo", head_sha="abc12345")
@@ -41,7 +41,7 @@ def test_cbmc_harness_pass_fixture_uses_native_path_when_installed() -> None:
     assert any(item.get("kind") == "backend_provenance" for item in evidence.generated_artifacts)
 
 
-@pytest.mark.skipif(shutil.which("cbmc") is None, reason="CBMC binary is not installed")
+@pytest.mark.skipif(skip_unless_native_backend("cbmc"), reason="CBMC integration runs in tier-1 workflow")
 def test_cbmc_harness_fail_fixture_uses_native_path_when_installed() -> None:
     data = json.loads(Path("examples/backends/cbmc_fail.json").read_text(encoding="utf-8"))
     evidence = evaluate_cbmc_harness(data, repo="test/repo", head_sha="abc12345")
