@@ -10,7 +10,7 @@ from ovk.core.attestation_binding import verify_bundle_statement_binding, verify
 from ovk.core.attestation_envelope import build_attestation_envelope
 from ovk.core.attestation_signing import verify_envelope_signature
 from ovk.core.json_io import read_json_file, write_json_file
-from ovk.core.output_validation import validate_generated_file, validate_generated_json, validate_output_directory
+from ovk.core.output_validation import validate_generated_json, validate_output_directory
 from ovk.core.provenance import build_provenance_statement
 from ovk.core.models import EvidenceBundle
 from ovk.core.release_layout import ReleaseArtifact, missing_required_artifacts

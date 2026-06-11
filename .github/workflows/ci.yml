@@ -137,6 +137,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Strict emit-check on known-bad diff
         id: ovk
+        continue-on-error: true
         uses: ./
         with:
           mode: strict

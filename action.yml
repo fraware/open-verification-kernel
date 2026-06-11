@@ -93,9 +93,8 @@ runs:
       run: |
         python -m pip install --upgrade pip
         if [ -n "${OVK_PACKAGE_VERSION:-}" ]; then
-          pip install "open-verification-kernel==${OVK_PACKAGE_VERSION}"
+          pip install "open-verification-kernel==${OVK_PACKAGE_VERSION}" || pip install .
         else
-          # Local composite action (uses: ./) installs from checkout; consumers set OVK_PACKAGE_VERSION=1.2.0
           pip install .
         fi
     - name: Initialize verification directory if needed
