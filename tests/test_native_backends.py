@@ -1,6 +1,13 @@
+import os
+
 import pytest
 
 from ovk.core.native_backend_probe import TIER1_NATIVE_EXECUTION_BACKENDS, probe_native_backend
+
+requires_native_ci = pytest.mark.skipif(
+    not os.environ.get("OVK_NATIVE_BACKEND"),
+    reason="native backend probes run in tier-1 workflow with explicit backend install",
+)
 
 
 def _assert_backend(backend: str) -> None:
@@ -18,51 +25,61 @@ def _assert_backend(backend: str) -> None:
             )
 
 
+@requires_native_ci
 @pytest.mark.native_backend(name="opa")
 def test_native_backend_opa() -> None:
     _assert_backend("opa")
 
 
+@requires_native_ci
 @pytest.mark.native_backend(name="z3")
 def test_native_backend_z3() -> None:
     _assert_backend("z3")
 
 
+@requires_native_ci
 @pytest.mark.native_backend(name="cedar")
 def test_native_backend_cedar() -> None:
     _assert_backend("cedar")
 
 
+@requires_native_ci
 @pytest.mark.native_backend(name="tla+")
 def test_native_backend_tla() -> None:
     _assert_backend("tla+")
 
 
+@requires_native_ci
 @pytest.mark.native_backend(name="kani")
 def test_native_backend_kani() -> None:
     _assert_backend("kani")
 
 
+@requires_native_ci
 @pytest.mark.native_backend(name="dafny")
 def test_native_backend_dafny() -> None:
     _assert_backend("dafny")
 
 
+@requires_native_ci
 @pytest.mark.native_backend(name="verus")
 def test_native_backend_verus() -> None:
     _assert_backend("verus")
 
 
+@requires_native_ci
 @pytest.mark.native_backend(name="lean")
 def test_native_backend_lean() -> None:
     _assert_backend("lean")
 
 
+@requires_native_ci
 @pytest.mark.native_backend(name="cbmc")
 def test_native_backend_cbmc() -> None:
     _assert_backend("cbmc")
 
 
+@requires_native_ci
 @pytest.mark.native_backend(name="alloy")
 def test_native_backend_alloy() -> None:
     _assert_backend("alloy")

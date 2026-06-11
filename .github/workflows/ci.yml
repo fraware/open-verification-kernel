@@ -18,18 +18,26 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python scripts/sync_package_data.py
-          pip install -e '.[dev]'
+          pip install --no-cache-dir -e '.[dev]'
       - name: Lint
         run: ruff check ovk tests benchmarks/formal_pr_bench
       - name: Test
         run: |
-          pytest -q --tb=short --junitxml=pytest-results.xml
+          set -o pipefail
+          if ! pytest -q --tb=short --junitxml=pytest-results.xml | tee pytest-output.txt; then
+            echo "::group::Failing tests (verbose)"
+            pytest --lf -vv --tb=long
+            echo "::endgroup::"
+            exit 1
+          fi
       - name: Upload pytest results on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: pytest-results
-          path: pytest-results.xml
+          path: |
+            pytest-results.xml
+            pytest-output.txt
       - name: Validate intent templates
         run: python scripts/validate_templates.py
       - name: Validate adapter capabilities
