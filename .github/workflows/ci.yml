@@ -162,6 +162,27 @@ jobs:
           test "${{ steps.ovk.outputs.recommendation }}" = "block"
           test "${{ steps.ovk.outputs.exit_code }}" = "1"
 
+  action_default_diff_dogfood:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Exercise automatic diff collection
+        uses: ./
+        with:
+          mode: advisory
+          use-check: "true"
+          emit-check: "false"
+          post-comment: "false"
+      - name: Assert default Action outputs exist
+        run: |
+          test -f ovk-evidence.json
+          test -f ovk-evidence-quality.json
+          ovk validate-outputs .
+
   package:
     runs-on: ubuntu-latest
     steps:
@@ -175,3 +196,36 @@ jobs:
           python scripts/sync_package_data.py
           python -m build
           twine check dist/*
+      - name: Smoke-test installed wheel outside checkout
+        run: |
+          WHEEL="$(realpath "$(ls dist/*.whl | head -n 1)")"
+          python -m venv /tmp/ovk-wheel-venv
+          /tmp/ovk-wheel-venv/bin/python -m pip install --upgrade pip
+          /tmp/ovk-wheel-venv/bin/python -m pip install "$WHEEL"
+          rm -rf /tmp/ovk-wheel-consumer
+          mkdir -p /tmp/ovk-wheel-consumer
+          cd /tmp/ovk-wheel-consumer
+          /tmp/ovk-wheel-venv/bin/ovk init
+          /tmp/ovk-wheel-venv/bin/ovk doctor
+          /tmp/ovk-wheel-venv/bin/python - <<'PY'
+          from ovk import mcp_server
+          from ovk.core.capabilities import CapabilityRegistry
+          from ovk.core.kernel import execute_kernel
+          from ovk.core.templates_cli import list_templates
+          from ovk.paths import resource_path, schema_path
+
+          assert len(list_templates()) >= 100
+          assert schema_path("verification.bundle.schema.json").is_file()
+          capabilities = CapabilityRegistry.from_directory(resource_path("adapters")).all()
+          assert len(capabilities) >= 10
+          assert len(mcp_server.list_capabilities()["capabilities"]) == len(capabilities)
+          result = execute_kernel(
+              changed_files=[".github/workflows/release.yml"],
+              metadata={"actor_type": "ai_agent", "changed_files": [".github/workflows/release.yml"]},
+              repo="wheel/consumer",
+              head_sha="wheel-smoke",
+              use_cache=False,
+          )
+          assert result.routing
+          assert result.bundle.subject["repo"] == "wheel/consumer"
+          PY
