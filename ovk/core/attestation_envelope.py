@@ -7,7 +7,7 @@ from typing import Any
 
 from ovk.core.artifact_manifest import sha256_file
 from ovk.core.attestation_signing import sign_envelope
-from ovk.core.sigstore_signing import should_sign_with_cosign, sign_envelope_with_cosign
+from ovk.core.sigstore_signing import sigstore_signing_enabled, sign_envelope_with_cosign
 
 
 ENVELOPE_SCHEMA_VERSION = "ovk.attestation_envelope.v1"
@@ -30,10 +30,11 @@ def build_attestation_envelope(
             "sha256": sha256_file(manifest_path),
         },
     }
-    if sign:
-        signed = sign_envelope(envelope)
-        if should_sign_with_cosign():
-            sigstore_bundle = manifest_path.with_suffix(".cosign.bundle.json")
-            return sign_envelope_with_cosign(signed, bundle_path=sigstore_bundle)
-        return signed
-    return envelope
+    if not sign:
+        return envelope
+
+    signed = sign_envelope(envelope)
+    if sigstore_signing_enabled():
+        sigstore_bundle = manifest_path.with_suffix(".cosign.bundle.json")
+        return sign_envelope_with_cosign(signed, bundle_path=sigstore_bundle)
+    return signed
