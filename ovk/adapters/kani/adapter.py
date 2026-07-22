@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from ovk.adapters.external.base_adapter import BaseExternalAdapter
 from ovk.adapters.kani.deterministic import evaluate_kani_input
+from ovk.paths import resource_path
 
 
 class KaniAdapter(BaseExternalAdapter):
@@ -17,7 +17,7 @@ class KaniAdapter(BaseExternalAdapter):
     input_language = "rust"
 
     def __init__(self) -> None:
-        manifest_path = Path("adapters/kani/capability.json")
+        manifest_path = resource_path("adapters", "kani", "capability.json")
         self.capability_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
     def _deterministic_evaluator(self):
