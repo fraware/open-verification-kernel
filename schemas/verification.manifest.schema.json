@@ -6,6 +6,8 @@
   "required": ["lanes"],
   "properties": {
     "schema_version": { "type": "string", "const": "ovk.verification_manifest.v1" },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
     "repo": { "type": "string", "minLength": 1 },
     "head_sha": { "type": "string", "minLength": 1 },
     "base_sha": { "type": "string", "minLength": 1 },
