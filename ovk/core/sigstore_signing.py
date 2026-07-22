@@ -34,9 +34,15 @@ def sign_envelope_with_cosign(
     *,
     bundle_path: str | Path,
 ) -> dict[str, Any]:
-    """Attach a cosign sign-blob bundle when signing is enabled."""
-    if not should_sign_with_cosign():
+    """Attach a cosign sign-blob bundle when signing is explicitly enabled.
+
+    Explicit signing requests fail closed. Returning an unsigned envelope after
+    a signing error would misrepresent the release artifact's trust state.
+    """
+    if not sigstore_signing_enabled():
         return envelope
+    if not cosign_available():
+        raise RuntimeError("OVK Sigstore signing is enabled but cosign is not available")
 
     bundle_file = Path(bundle_path)
     bundle_file.parent.mkdir(parents=True, exist_ok=True)
@@ -51,10 +57,17 @@ def sign_envelope_with_cosign(
         identity = os.environ.get(COSIGN_IDENTITY_ENV)
         if identity:
             command.extend(["--certificate-identity", identity])
-        subprocess.run(command, capture_output=True, text=True, check=True, timeout=60)
-        bundle_data = json.loads(bundle_file.read_text(encoding="utf-8"))
-    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
-        return envelope
+        completed = subprocess.run(command, capture_output=True, text=True, check=False, timeout=60)
+        if completed.returncode != 0:
+            raise RuntimeError(completed.stderr.strip() or "cosign sign-blob failed")
+        try:
+            bundle_data = json.loads(bundle_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise RuntimeError(f"cosign did not produce a readable bundle: {error}") from error
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("cosign sign-blob timed out") from error
+    except OSError as error:
+        raise RuntimeError(f"cosign sign-blob could not execute: {error}") from error
     finally:
         payload_path.unlink(missing_ok=True)
 
@@ -91,6 +104,7 @@ def verify_cosign_bundle(payload: bytes | str, bundle: dict[str, Any]) -> bool:
             capture_output=True,
             text=True,
             timeout=60,
+            check=False,
         )
         return result.returncode == 0
     except (OSError, subprocess.SubprocessError):
