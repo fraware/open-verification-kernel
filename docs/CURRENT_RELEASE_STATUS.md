@@ -2,65 +2,75 @@
 
 Living adoption dashboard for Open Verification Kernel.
 
-**Last updated:** 2026-06-10
+**Last updated:** 2026-07-22
 
-**Release judgment:** v1.2.0 **release candidate** — core loop is implemented; confirm CI on the current SHA and external pilot metrics before calling production-stable. Audit responses: [RELEASE_AUDIT.md](RELEASE_AUDIT.md).
+**Release judgment:** v1.2.0 **release candidate**. The bounded evidence pipeline is substantial, but the complete solver-agnostic kernel vision is still partial because backend routing does not yet control execution. A fresh green CI run and independent tagged-consumer validation are required before calling the release production-stable.
+
+Authoritative audit: [VISION_AUDIT_2026-07-22.md](VISION_AUDIT_2026-07-22.md).
 
 ## At a glance
 
 | Signal | Current state |
 |---|---|
-| **Released version** | v1.2.0 RC (Action pin `@v1.2.0`; PyPI pending maintainer tag — [RELEASE.md](RELEASE.md)) |
-| **FormalPR-Bench** | 130/130 pass ([latest summary](benchmarks/latest-leaderboard-summary.json)) |
-| **Realistic PR diff score** | 100% ([adoption-summary](benchmarks/adoption-summary.json)) |
-| **Check types** | 5 (self-protection, authorization, infrastructure, CI secrets, deployment) |
-| **Release readiness** | 12 required checks + 1 optional (`ovk release-preflight`) |
-| **Unit tests** | 376 passed, 12 skipped — provenance: [RELEASE_AUDIT.md](RELEASE_AUDIT.md) |
-| **CI** | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) — verify green run on current SHA (badge `[skip ci]` commits do not run CI) |
-| **External validation** | Weekly — [EXTERNAL_VALIDATION.md](EXTERNAL_VALIDATION.md) |
+| **Package version** | `1.2.0` release candidate; PyPI and immutable release-tag state must be confirmed by maintainers |
+| **FormalPR-Bench** | Repository snapshot reports 130/130 curated regression cases; this is internal conformance, not an external accuracy estimate |
+| **Check types** | Five bounded production lanes: self-protection, authorization, infrastructure, CI secrets, deployment |
+| **Backend execution** | OPA and Z3 native paths; CBMC bounded explicit/template harness path; Cedar version probe plus deterministic evaluator; six deterministic contract adapters |
+| **Routing** | Candidate routing is computed and recorded; selected backends do not yet control lane execution |
+| **Unit and workflow tests** | Not independently observed for the current audited source commit; latest observed HEAD is a `[skip ci]` badge commit |
+| **Package portability** | Wheel-outside-checkout smoke has been added to CI and must pass on the current source SHA |
+| **GitHub Action** | Automatic PR-diff collection and quoted arguments are implemented; independent tagged consumer repository remains pending |
+| **External validation** | Current workflow is in-repository dogfooding; external pilot registry contains no completed independent pilot evidence yet |
 
-OVK is **not** complete formal verification of arbitrary code. It ships targeted, explainable checks for high-risk PR changes, with explicit unknowns and human-review paths.
-
-Latest deep audit after the engineer push: [LATEST_CODE_AUDIT.md](LATEST_CODE_AUDIT.md).
+OVK is not complete formal verification of arbitrary code. It provides explainable, conservative checks for a bounded set of high-risk changes and emits explicit unknown and human-review outcomes.
 
 ## Adoption readiness
 
-| Mode | Safe today? | Notes |
+| Mode | Current recommendation | Conditions |
 |---|---|---|
-| **Advisory** | Yes | Default Action setting — reports findings without failing the job. Start here. |
-| **Strict** | Yes, after calibration | Enable only after advisory runs on **your** repo's diffs (under 5% false positives). Needs `checks: write` when publishing GitHub check runs. See [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md). |
+| **Local/demo** | Appropriate after current CI is green | Use shipped examples and inspect assumptions and limits |
+| **Advisory Action** | Appropriate for pilots after current CI is green | Collect adjudicated false positives, unknowns, and missed detections |
+| **Strict required check** | Repository-specific only | Calibrate on real diffs; use trusted abstraction sources and protected policy metadata |
+| **Production-stable general enforcement** | Not yet | Requires enforced backend routing, source-grounded compilers, independent pilots, and attributable release CI |
 
-**Suggested rollout:** advisory only → advisory with check run / PR comment → strict with required check on protected branches.
+Suggested rollout: local validation → advisory artifacts → advisory check run/comment → calibrated strict lane → protected required check.
 
-Machine-readable metrics: [benchmarks/adoption-summary.json](benchmarks/adoption-summary.json).
+## Current high-priority gaps
 
-## Known gaps
+1. Backend routing is advisory metadata and does not control compilation or execution.
+2. The 100-template catalog does not equal 100 executable, end-to-end properties.
+3. Authorization, infrastructure, CI workflow, and deployment diff extraction remain heuristic.
+4. Cedar and six other external adapters do not perform native proof/policy execution.
+5. FormalPR-Bench is an internal curated regression corpus without an independent holdout.
+6. No completed independent repository currently proves the tagged Action and wheel integration.
+7. Current-commit CI evidence is not attached to the latest observed `[skip ci]` HEAD.
+8. Auto-collected branch protection cannot reconstruct removed required checks without trusted before/after data.
 
-Full list: [RELEASE.md — Known limitations](RELEASE.md#known-limitations). Summary:
+Full analysis and acceptance criteria: [VISION_AUDIT_2026-07-22.md](VISION_AUDIT_2026-07-22.md).
 
-- Conservative parsing of infrastructure and auth diffs
-- Optional native checkers (TLA+, Kani, Dafny, Verus, Lean, Alloy) are informational in CI
-- External open-source pilot metrics pending until community repos finish advisory rollout
-- Auto-collected branch-protection metadata cannot detect removed required checks without explicit before/after JSON
+## Maintainer release gates
 
-## Maintainer actions
+Before tagging or publishing v1.2.0:
 
-- Publish v1.2.0 to PyPI and tag the GitHub release ([RELEASE.md](RELEASE.md))
-- Recruit external pilots; record outcomes in [PILOT_CASE_STUDIES.md](PILOT_CASE_STUDIES.md)
-- Refresh adoption metrics: `python scripts/render_pilot_metrics.py`
+- [ ] run all CI and native Tier 1 jobs on a non-`[skip ci]` source commit;
+- [ ] confirm wheel smoke from a directory outside the checkout;
+- [ ] confirm automatic-diff composite Action dogfood;
+- [ ] confirm package version matches the release tag;
+- [ ] run full expanded FormalPR-Bench and release preflight;
+- [ ] validate a complete release bundle, including evidence-quality semantics;
+- [ ] exercise HMAC signing and identity-bound Sigstore signing according to release policy;
+- [ ] run the immutable Action or release wheel in an independent consumer repository;
+- [ ] update status with exact source SHA and workflow links;
+- [ ] decide whether the package classifier should remain `Production/Stable` before independent pilots and routing enforcement.
 
-## Recent releases
-
-- **v1.2.0:** Quality checks on all five check types, Action outputs, example workflows, branch-protection guide — [RELEASE_NOTES_v1.2.0.md](RELEASE_NOTES_v1.2.0.md)
-- **v1.1.0:** Realistic diff benchmark, native checker CI, external rollout guide — [RELEASE_NOTES_v1.1.0.md](RELEASE_NOTES_v1.1.0.md)
-
-## Related docs
+## Related documents
 
 | Document | Purpose |
 |---|---|
-| [STATUS.md](STATUS.md) | Capabilities and commands |
-| [LATEST_CODE_AUDIT.md](LATEST_CODE_AUDIT.md) | Deep audit after the latest engineer push |
-| [INTEGRATION.md](INTEGRATION.md) | Install and GitHub Actions |
-| [RELEASE.md](RELEASE.md) | Maintainer guide and limitations |
-| [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md) | Roll out on external repos |
-| [BENCHMARK.md](BENCHMARK.md) | FormalPR-Bench |
+| [VISION_AUDIT_2026-07-22.md](VISION_AUDIT_2026-07-22.md) | Current deep code, artifact, vision, and engineering audit |
+| [STATUS.md](STATUS.md) | Command and lane inventory |
+| [BACKENDS.md](BACKENDS.md) | Exact backend execution maturity and guarantee classes |
+| [INTEGRATION.md](INTEGRATION.md) | Installation and GitHub Action setup |
+| [RELEASE.md](RELEASE.md) | Maintainer release procedure |
+| [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md) | Independent advisory pilot process |
+| [BENCHMARK.md](BENCHMARK.md) | Internal benchmark format and execution |
