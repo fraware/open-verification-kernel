@@ -18,6 +18,19 @@ def content_digest(value: object) -> str:
     return sha256(_stable_json(value).encode("utf-8")).hexdigest()
 
 
+def _validate_bundle_inputs(evidence: list[VerificationEvidence]) -> None:
+    subject = evidence[0].subject
+    for index, item in enumerate(evidence[1:], start=1):
+        if item.subject != subject:
+            raise ValueError(
+                f"evidence subject mismatch at index {index}: expected {subject}, got {item.subject}"
+            )
+    evidence_ids = [item.evidence_id for item in evidence]
+    duplicate_ids = sorted({item for item in evidence_ids if evidence_ids.count(item) > 1})
+    if duplicate_ids:
+        raise ValueError(f"evidence bundle contains duplicate evidence_id values: {', '.join(duplicate_ids)}")
+
+
 def make_bundle(
     evidence: list[VerificationEvidence],
     *,
@@ -27,6 +40,7 @@ def make_bundle(
     """Create a conservative content-addressed bundle from evidence objects."""
     if not evidence:
         raise ValueError("cannot create an evidence bundle without evidence")
+    _validate_bundle_inputs(evidence)
 
     subject = evidence[0].subject
     evidence_payload = [item.model_dump(mode="json") for item in evidence]
