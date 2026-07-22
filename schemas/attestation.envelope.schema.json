@@ -28,12 +28,21 @@
     },
     "sigstore": {
       "type": "object",
-      "required": ["provider", "bundle_path", "bundle", "status"],
+      "required": [
+        "provider",
+        "bundle_path",
+        "bundle",
+        "status",
+        "certificate_identity",
+        "certificate_oidc_issuer"
+      ],
       "properties": {
         "provider": { "type": "string", "const": "cosign" },
         "bundle_path": { "type": "string", "minLength": 1 },
         "bundle": { "type": "object" },
-        "status": { "type": "string", "const": "signed" }
+        "status": { "type": "string", "const": "signed" },
+        "certificate_identity": { "type": "string", "minLength": 1 },
+        "certificate_oidc_issuer": { "type": "string", "minLength": 1 }
       },
       "additionalProperties": false
     }
