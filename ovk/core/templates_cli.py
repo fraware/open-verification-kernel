@@ -6,8 +6,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ovk.paths import resource_path
 
-TEMPLATES_DIR = Path("templates")
+
+TEMPLATES_DIR = resource_path("templates")
 
 
 def list_templates(template_dir: Path = TEMPLATES_DIR) -> list[dict[str, str]]:
