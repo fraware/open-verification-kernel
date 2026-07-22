@@ -10,15 +10,15 @@ inputs:
     required: false
     default: advisory
   metadata:
-    description: Optional self-protection metadata JSON
+    description: Optional path to self-protection metadata JSON in the consumer repository
     required: false
-    default: examples/no_agent_self_approval/metadata_missing_required_checks.json
+    default: ""
   changed-files:
-    description: Changed files as JSON, newline text, or diff
+    description: Optional path to changed-files JSON, newline text, or a unified diff; PR diff is collected automatically when empty
     required: false
-    default: examples/no_agent_self_approval/changed_files_workflow.txt
+    default: ""
   check-metadata:
-    description: Optional required-check metadata JSON
+    description: Optional path to required-check metadata JSON
     required: false
     default: ""
   backend-strategy:
@@ -110,6 +110,39 @@ runs:
         python "${{ github.action_path }}/scripts/collect_branch_metadata.py" \
           --event "${{ github.event_path }}" \
           --output ovk-branch-metadata.json || true
+    - name: Prepare change input
+      if: ${{ inputs.verification-manifest == '' }}
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        OVK_CHANGED_FILES: ${{ inputs.changed-files }}
+        OVK_EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        OVK_EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        OVK_GITHUB_SHA: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+        if [ -n "$OVK_CHANGED_FILES" ]; then
+          if [ ! -f "$OVK_CHANGED_FILES" ]; then
+            echo "OVK changed-files input does not exist: $OVK_CHANGED_FILES" >&2
+            exit 1
+          fi
+          printf '%s\n' "$OVK_CHANGED_FILES" > .ovk-effective-input-path
+          exit 0
+        fi
+
+        HEAD_SHA="${OVK_EVENT_HEAD_SHA:-$OVK_GITHUB_SHA}"
+        BASE_SHA="${OVK_EVENT_BASE_SHA:-}"
+        if [ -n "$BASE_SHA" ]; then
+          git fetch --no-tags --depth=1 origin "$BASE_SHA" || true
+        fi
+        if [ -n "$BASE_SHA" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+          git diff --no-ext-diff --binary "$BASE_SHA" "$HEAD_SHA" > .ovk-pr.diff
+        elif git rev-parse HEAD^ >/dev/null 2>&1; then
+          git diff --no-ext-diff --binary HEAD^ HEAD > .ovk-pr.diff
+        else
+          git show --format= --no-ext-diff --binary HEAD > .ovk-pr.diff
+        fi
+        printf '%s\n' ".ovk-pr.diff" > .ovk-effective-input-path
     - name: Run OVK multi-lane verification
       id: verify
       if: ${{ inputs.verification-manifest != '' }}
@@ -122,17 +155,17 @@ runs:
         OVK_REPO: ${{ github.repository }}
         OVK_HEAD_SHA: ${{ github.sha }}
       run: |
-        ADVISORY_FLAG=""
+        args=(
+          --manifest "$OVK_VERIFICATION_MANIFEST"
+          --output-dir "$OVK_BUNDLE_OUTPUT_DIR"
+          --repo "$OVK_REPO"
+          --head-sha "$OVK_HEAD_SHA"
+        )
         if [ "$OVK_MODE" = "advisory" ]; then
-          ADVISORY_FLAG="--advisory"
+          args+=(--advisory)
         fi
         set +e
-        ovk verify \
-          --manifest "$OVK_VERIFICATION_MANIFEST" \
-          --output-dir "$OVK_BUNDLE_OUTPUT_DIR" \
-          --repo "$OVK_REPO" \
-          --head-sha "$OVK_HEAD_SHA" \
-          $ADVISORY_FLAG
+        ovk verify "${args[@]}"
         ACTION_RC=$?
         ovk evidence-quality "$OVK_BUNDLE_OUTPUT_DIR/ovk-evidence.json" \
           --output "$OVK_BUNDLE_OUTPUT_DIR/ovk-evidence-quality.json"
@@ -149,36 +182,31 @@ runs:
       working-directory: ${{ github.workspace }}
       env:
         OVK_MODE: ${{ inputs.mode }}
-        OVK_CHANGED_FILES: ${{ inputs.changed-files }}
         OVK_CHECK_METADATA: ${{ inputs.check-metadata }}
         OVK_GITHUB_EVENT: ${{ github.event_path }}
         OVK_REPO: ${{ github.repository }}
         OVK_HEAD_SHA: ${{ github.sha }}
       run: |
-        EXTRA_CHECK_METADATA=""
+        OVK_DIFF_PATH="$(cat .ovk-effective-input-path)"
+        args=(
+          --diff "$OVK_DIFF_PATH"
+          --github-event "$OVK_GITHUB_EVENT"
+          --repo "$OVK_REPO"
+          --head-sha "$OVK_HEAD_SHA"
+          --output-dir .
+        )
         if [ -n "$OVK_CHECK_METADATA" ]; then
-          EXTRA_CHECK_METADATA="--check-metadata $OVK_CHECK_METADATA"
+          args+=(--check-metadata "$OVK_CHECK_METADATA")
         elif [ -f ovk-branch-metadata.json ]; then
-          EXTRA_CHECK_METADATA="--check-metadata ovk-branch-metadata.json"
+          args+=(--check-metadata ovk-branch-metadata.json)
         fi
-        ADVISORY_FLAG=""
         if [ "$OVK_MODE" = "advisory" ]; then
-          ADVISORY_FLAG="--advisory"
-        fi
-        STRICT_FLAG=""
-        if [ "$OVK_MODE" = "strict" ]; then
-          STRICT_FLAG="--strict"
+          args+=(--advisory)
+        elif [ "$OVK_MODE" = "strict" ]; then
+          args+=(--strict)
         fi
         set +e
-        ovk check \
-          --diff "$OVK_CHANGED_FILES" \
-          --github-event "$OVK_GITHUB_EVENT" \
-          $EXTRA_CHECK_METADATA \
-          --repo "$OVK_REPO" \
-          --head-sha "$OVK_HEAD_SHA" \
-          --output-dir . \
-          $ADVISORY_FLAG \
-          $STRICT_FLAG
+        ovk check "${args[@]}"
         ACTION_RC=$?
         ovk evidence-quality ovk-evidence.json --output ovk-evidence-quality.json
         QUALITY_RC=$?
@@ -194,13 +222,15 @@ runs:
       working-directory: ${{ github.workspace }}
       env:
         GITHUB_TOKEN: ${{ github.token }}
+        OVK_REPO: ${{ github.repository }}
+        OVK_HEAD_SHA: ${{ github.sha }}
       run: |
         set +e
         python "${{ github.action_path }}/scripts/emit_github_check.py" \
           --evidence ovk-evidence.json \
           --markdown ovk-pr-comment.md \
-          --repo "${{ github.repository }}" \
-          --head-sha "${{ github.sha }}"
+          --repo "$OVK_REPO" \
+          --head-sha "$OVK_HEAD_SHA"
         EMIT_RC=$?
         set -e
         if [ "$EMIT_RC" -eq 0 ]; then
@@ -244,7 +274,6 @@ runs:
         OVK_CHECK_METADATA: ${{ inputs.check-metadata }}
         OVK_GITHUB_EVENT: ${{ github.event_path }}
         OVK_METADATA: ${{ inputs.metadata }}
-        OVK_CHANGED_FILES: ${{ inputs.changed-files }}
         OVK_BACKEND_STRATEGY: ${{ inputs.backend-strategy }}
         OVK_EVIDENCE_OUTPUT: ${{ inputs.evidence-output }}
         OVK_MARKDOWN_OUTPUT: ${{ inputs.markdown-output }}
@@ -254,31 +283,32 @@ runs:
         OVK_REPO: ${{ github.repository }}
         OVK_HEAD_SHA: ${{ github.sha }}
       run: |
-        EXTRA_CHECK_METADATA=""
-        if [ -n "$OVK_CHECK_METADATA" ]; then
-          EXTRA_CHECK_METADATA="--check-metadata $OVK_CHECK_METADATA"
-        elif [ -f ovk-branch-metadata.json ]; then
-          EXTRA_CHECK_METADATA="--check-metadata ovk-branch-metadata.json"
+        OVK_DIFF_PATH="$(cat .ovk-effective-input-path)"
+        args=(
+          --github-event "$OVK_GITHUB_EVENT"
+          --changed-files "$OVK_DIFF_PATH"
+          --backend-strategy "$OVK_BACKEND_STRATEGY"
+          --evidence-output "$OVK_EVIDENCE_OUTPUT"
+          --markdown-output "$OVK_MARKDOWN_OUTPUT"
+          --attestation-output "$OVK_ATTESTATION_OUTPUT"
+          --manifest-output "$OVK_MANIFEST_OUTPUT"
+          --quality-output "$OVK_QUALITY_OUTPUT"
+          --repo "$OVK_REPO"
+          --head-sha "$OVK_HEAD_SHA"
+        )
+        if [ -n "$OVK_METADATA" ]; then
+          args+=(--metadata "$OVK_METADATA")
         fi
-        ADVISORY_FLAG=""
+        if [ -n "$OVK_CHECK_METADATA" ]; then
+          args+=(--check-metadata "$OVK_CHECK_METADATA")
+        elif [ -f ovk-branch-metadata.json ]; then
+          args+=(--check-metadata ovk-branch-metadata.json)
+        fi
         if [ "$OVK_MODE" = "advisory" ]; then
-          ADVISORY_FLAG="--advisory"
+          args+=(--advisory)
         fi
         set +e
-        ovk ci \
-          --github-event "$OVK_GITHUB_EVENT" \
-          --metadata "$OVK_METADATA" \
-          --changed-files "$OVK_CHANGED_FILES" \
-          $EXTRA_CHECK_METADATA \
-          --backend-strategy "$OVK_BACKEND_STRATEGY" \
-          --evidence-output "$OVK_EVIDENCE_OUTPUT" \
-          --markdown-output "$OVK_MARKDOWN_OUTPUT" \
-          --attestation-output "$OVK_ATTESTATION_OUTPUT" \
-          --manifest-output "$OVK_MANIFEST_OUTPUT" \
-          --quality-output "$OVK_QUALITY_OUTPUT" \
-          --repo "$OVK_REPO" \
-          --head-sha "$OVK_HEAD_SHA" \
-          $ADVISORY_FLAG
+        ovk ci "${args[@]}"
         ACTION_RC=$?
         set -e
         echo "$ACTION_RC" > .ovk-action-exit-code
@@ -290,28 +320,40 @@ runs:
         GITHUB_TOKEN: ${{ github.token }}
         OVK_MARKDOWN_OUTPUT: ${{ inputs.markdown-output }}
         OVK_GITHUB_EVENT: ${{ github.event_path }}
-      run: python "${{ github.action_path }}/scripts/post_pr_comment.py" --markdown "$OVK_MARKDOWN_OUTPUT" --event "$OVK_GITHUB_EVENT"
+        OVK_VERIFICATION_MANIFEST: ${{ inputs.verification-manifest }}
+        OVK_BUNDLE_OUTPUT_DIR: ${{ inputs.bundle-output-dir }}
+      run: |
+        MARKDOWN="$OVK_MARKDOWN_OUTPUT"
+        if [ -n "$OVK_VERIFICATION_MANIFEST" ]; then
+          MARKDOWN="$OVK_BUNDLE_OUTPUT_DIR/ovk-pr-comment.md"
+        fi
+        python "${{ github.action_path }}/scripts/post_pr_comment.py" \
+          --markdown "$MARKDOWN" \
+          --event "$OVK_GITHUB_EVENT"
     - name: Set action outputs
       id: set-outputs
       if: always()
       shell: bash
       working-directory: ${{ github.workspace }}
+      env:
+        OVK_VERIFICATION_MANIFEST: ${{ inputs.verification-manifest }}
+        OVK_BUNDLE_OUTPUT_DIR: ${{ inputs.bundle-output-dir }}
+        OVK_EVIDENCE_OUTPUT: ${{ inputs.evidence-output }}
       run: |
         python - <<'PY'
         import json
         import os
         from pathlib import Path
 
-        evidence_candidates = [
-            Path("ovk-evidence.json"),
-            Path("${{ inputs.evidence-output }}"),
-            Path("${{ inputs.bundle-output-dir }}") / "ovk-evidence.json",
-        ]
-        evidence_path = next((path for path in evidence_candidates if path.exists()), None)
+        if os.environ.get("OVK_VERIFICATION_MANIFEST"):
+            evidence_path = Path(os.environ["OVK_BUNDLE_OUTPUT_DIR"]) / "ovk-evidence.json"
+        else:
+            configured = Path(os.environ.get("OVK_EVIDENCE_OUTPUT", "ovk-evidence.json"))
+            evidence_path = configured if configured.exists() else Path("ovk-evidence.json")
 
         recommendation = ""
-        exit_code = "0"
-        if evidence_path is not None:
+        exit_code = "2"
+        if evidence_path.exists():
             bundle = json.loads(evidence_path.read_text(encoding="utf-8"))
             recommendation = str(bundle.get("decision", {}).get("merge_recommendation", ""))
             exit_codes = {
@@ -323,10 +365,7 @@ runs:
             }
             exit_code = str(exit_codes.get(recommendation, 2))
 
-        check_emitted = "false"
-        if Path(".ovk-check-emitted").exists():
-            check_emitted = "true"
-
+        check_emitted = "true" if Path(".ovk-check-emitted").exists() else "false"
         github_output = os.environ["GITHUB_OUTPUT"]
         with open(github_output, "a", encoding="utf-8") as handle:
             handle.write(f"recommendation={recommendation}\n")
@@ -350,6 +389,7 @@ runs:
         if [ -f .ovk-action-exit-code ]; then
           exit "$(cat .ovk-action-exit-code)"
         fi
+        exit 2
     - name: Upload OVK artifacts
       if: always()
       uses: actions/upload-artifact@v4
@@ -363,6 +403,7 @@ runs:
           ovk-evidence-quality.json
           ovk-provenance.json
           ovk-attestation-envelope.json
-          ovk-release-bundle/**
+          ${{ inputs.bundle-output-dir }}/**
           ovk-branch-metadata.json
+          .ovk-pr.diff
           .ovk-check-emitted
