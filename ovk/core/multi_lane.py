@@ -14,11 +14,11 @@ from ovk.adapters.infra.policy_config import load_policy
 from ovk.adapters.opa import evaluate_self_protection
 from ovk.adapters.z3.validated_path import evaluate_validated_authorization_path
 from ovk.core.backend_fixture import evaluate_backend_fixture
-from ovk.core.bundle import make_bundle
+from ovk.core.bundle import content_digest, make_bundle
 from ovk.core.json_io import read_json_file
-from ovk.core.schema_validation import validate_against_schema
 from ovk.core.models import EvidenceBundle, VerificationEvidence
 from ovk.core.planner import plan_from_changed_files, plan_from_diff_text
+from ovk.core.schema_validation import validate_against_schema
 from ovk.core.self_protection_input import SelfProtectionMetadata, build_self_protection_input
 from ovk.paths import schema_path
 
@@ -34,7 +34,7 @@ def _validate_lane_input(data: dict[str, Any], schema_name: str, *, lane: str) -
     """Validate lane input against a registered JSON schema."""
     path = schema_path(schema_name)
     if not path.exists():
-        return
+        raise ValueError(f"{lane} input schema is missing: {path}")
     schema = read_json_file(path)
     report = validate_against_schema(data, schema)
     if not report.valid:
@@ -131,24 +131,50 @@ def load_verification_manifest(path: Path, *, validate: bool = True) -> dict[str
     manifest = read_json_file(path)
     if not isinstance(manifest.get("lanes"), list):
         raise ValueError("verification manifest must include a lanes array")
-    if validate and MANIFEST_SCHEMA_PATH.exists():
+    if validate:
+        if not MANIFEST_SCHEMA_PATH.exists():
+            raise ValueError(f"verification manifest schema is missing: {MANIFEST_SCHEMA_PATH}")
         schema = read_json_file(MANIFEST_SCHEMA_PATH)
         report = validate_against_schema(manifest, schema)
         if not report.valid:
-            issues = "; ".join(issue.message for issue in report.issues)
+            issues = "; ".join(
+                f"{'/'.join(str(part) for part in issue.path) or '$'}: {issue.message}"
+                for issue in report.issues
+            )
             raise ValueError(f"verification manifest failed schema validation: {issues}")
     return manifest
 
 
+def _resolve_manifest_file(root: Path, value: str, *, field: str) -> Path:
+    candidate = Path(value)
+    if candidate.is_absolute():
+        raise ValueError(f"verification manifest {field} path must be relative: {value}")
+    root_resolved = root.resolve()
+    resolved = (root_resolved / candidate).resolve()
+    try:
+        resolved.relative_to(root_resolved)
+    except ValueError as error:
+        raise ValueError(f"verification manifest {field} path escapes manifest root: {value}") from error
+    if not resolved.is_file():
+        raise ValueError(f"verification manifest {field} file does not exist: {value}")
+    return resolved
+
+
 def manifest_material_paths(manifest: dict[str, Any], root: Path) -> list[Path]:
-    """Return manifest input paths that exist on disk."""
+    """Return validated manifest input and policy material paths."""
     materials: list[Path] = []
+    seen: set[Path] = set()
     for entry in manifest.get("lanes", []):
-        if not isinstance(entry, dict) or not entry.get("input"):
+        if not isinstance(entry, dict):
             continue
-        path = (root / str(entry["input"])).resolve()
-        if path.exists():
-            materials.append(path)
+        for field in ("input", "policy"):
+            value = entry.get(field)
+            if not value:
+                continue
+            path = _resolve_manifest_file(root, str(value), field=field)
+            if path not in seen:
+                materials.append(path)
+                seen.add(path)
     return materials
 
 
@@ -161,18 +187,33 @@ def _evaluate_manifest_entry(
     base_sha: str | None,
 ) -> VerificationEvidence | None:
     lane = str(entry.get("lane", ""))
-    input_path = entry.get("input")
-    if not lane or not input_path:
+    input_value = entry.get("input")
+    if not lane or not input_value:
         return None
-    data = read_json_file(manifest_root / str(input_path))
-    return evaluate_lane(
+    input_path = _resolve_manifest_file(manifest_root, str(input_value), field="input")
+    policy_path = (
+        _resolve_manifest_file(manifest_root, str(entry["policy"]), field="policy")
+        if entry.get("policy")
+        else None
+    )
+    data = read_json_file(input_path)
+    evidence = evaluate_lane(
         lane,
         data,
         repo=repo,
         head_sha=head_sha,
         base_sha=base_sha,
         input_format=str(entry.get("input_format", "infra")),
-        policy_path=(manifest_root / entry["policy"]) if entry.get("policy") else None,
+        policy_path=policy_path,
+    )
+    identity = {
+        "lane": lane,
+        "input": str(input_value),
+        "input_format": str(entry.get("input_format", "infra")),
+        "policy": entry.get("policy"),
+    }
+    return evidence.model_copy(
+        update={"evidence_id": f"{evidence.evidence_id}-{content_digest(identity)[:12]}"}
     )
 
 
@@ -186,7 +227,7 @@ def run_verification_manifest(
     parallel: bool = True,
 ) -> EvidenceBundle:
     """Run all lanes in a verification manifest and return a combined bundle."""
-    manifest_root = root or Path(".")
+    manifest_root = (root or Path(".")).resolve()
     entries = [entry for entry in manifest["lanes"] if isinstance(entry, dict)]
     evidence_items: list[VerificationEvidence] = []
 
