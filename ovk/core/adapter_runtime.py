@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import importlib.metadata
+import importlib.util
+import shutil
 from concurrent.futures import ThreadPoolExecutor
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
+from ovk.core.bundle import content_digest
 from ovk.core.models import VerificationEvidence
 from ovk.core.multi_lane import evaluate_lane
 from ovk.core.result_cache import cache_key, get_cached_evidence, store_cached_evidence
@@ -18,6 +23,60 @@ LANE_TO_INTENT = {
     "deployment": "no-skipped-approval-state",
 }
 
+_BACKEND_BINARIES = {
+    "alloy": "alloy",
+    "cbmc": "cbmc",
+    "cedar": "cedar",
+    "dafny": "dafny",
+    "kani": "kani",
+    "lean": "lean",
+    "tla": "tlc",
+    "verus": "verus",
+}
+
+
+def _policy_digest(policy_path: Path | None) -> str | None:
+    if policy_path is None or not policy_path.is_file():
+        return None
+    return sha256(policy_path.read_bytes()).hexdigest()
+
+
+def _execution_fingerprint(lane: str, data: dict[str, Any]) -> dict[str, Any] | None:
+    """Return environment facts that can change a lane result."""
+    if lane == "authorization":
+        spec = importlib.util.find_spec("z3")
+        version: str | None = None
+        if spec is not None:
+            try:
+                version = importlib.metadata.version("z3-solver")
+            except importlib.metadata.PackageNotFoundError:
+                version = None
+        return {
+            "backend": "z3",
+            "available": spec is not None,
+            "module_origin": getattr(spec, "origin", None) if spec is not None else None,
+            "version": version,
+        }
+    if lane == "backend":
+        intent_id = str(data.get("intent_id", ""))
+        backend_prefix = intent_id.split("-", 1)[0]
+        binary_name = _BACKEND_BINARIES.get(backend_prefix)
+        binary_path = shutil.which(binary_name) if binary_name else None
+        fingerprint: dict[str, Any] = {
+            "backend": backend_prefix or "unknown",
+            "binary": binary_name,
+            "binary_path": binary_path,
+        }
+        if binary_path:
+            try:
+                stat = Path(binary_path).stat()
+                fingerprint["binary_size"] = stat.st_size
+                fingerprint["binary_mtime_ns"] = stat.st_mtime_ns
+            except OSError:
+                pass
+        return fingerprint
+    return None
+
 
 def _attach_execution_metadata(
     evidence: VerificationEvidence,
@@ -28,7 +87,13 @@ def _attach_execution_metadata(
 ) -> VerificationEvidence:
     """Record routing decisions and input digest on evidence artifacts."""
     artifacts = list(evidence.generated_artifacts)
-    artifacts.append({"kind": "input_digest", "digest": cache_key(lane, data), "lane": lane})
+    artifacts.append(
+        {
+            "kind": "input_digest",
+            "digest": content_digest({"lane": lane, "input": data}),
+            "lane": lane,
+        }
+    )
     if routing is not None:
         artifacts.append(
             {
@@ -36,6 +101,8 @@ def _attach_execution_metadata(
                 "intent_id": routing.get("intent_id"),
                 "selected": routing.get("selected", []),
                 "rejected": routing.get("rejected", []),
+                "routing_enforced": False,
+                "executed_backends": [claim.backend for claim in evidence.backend_claims],
             }
         )
     return evidence.model_copy(update={"generated_artifacts": artifacts})
@@ -54,7 +121,17 @@ def _evaluate_obligation(
     lane = str(obligation["lane"])
     data = obligation["input"]
     intent_id = str(obligation.get("intent_id") or LANE_TO_INTENT.get(lane, lane))
-    key = cache_key(lane, data)
+    policy_path = Path(obligation["policy_path"]) if obligation.get("policy_path") else None
+    subject: dict[str, Any] = {"repo": repo, "head_sha": head_sha}
+    if base_sha is not None:
+        subject["base_sha"] = base_sha
+    key = cache_key(
+        lane,
+        data,
+        policy_digest=_policy_digest(policy_path),
+        subject=subject,
+        execution_fingerprint=_execution_fingerprint(lane, data),
+    )
     if use_cache and cache_dir is not None:
         cached = get_cached_evidence(cache_dir, key)
         if cached is not None:
@@ -73,7 +150,7 @@ def _evaluate_obligation(
         head_sha=head_sha,
         base_sha=base_sha,
         input_format=str(obligation.get("input_format", "infra")),
-        policy_path=Path(obligation["policy_path"]) if obligation.get("policy_path") else None,
+        policy_path=policy_path,
     )
     if use_cache and cache_dir is not None:
         store_cached_evidence(cache_dir, key, evidence.model_dump(mode="json"))
@@ -96,7 +173,7 @@ def execute_obligations(
     use_cache: bool = True,
     parallel: bool = True,
 ) -> list[VerificationEvidence]:
-    """Evaluate obligations in parallel when configured."""
+    """Evaluate obligations in parallel while preserving submission order."""
     if not obligations:
         return []
     if parallel and len(obligations) > 1:
