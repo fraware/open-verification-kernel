@@ -23,6 +23,7 @@ from ovk.core.surface_routing import surface_backend_bonuses
 from ovk.core.result_cache import DEFAULT_CACHE_DIR
 from ovk.core.risk_ranker import rank_intents
 from ovk.core.router import VerificationBudget, route_intent
+from ovk.paths import resource_path
 
 
 @dataclass(frozen=True)
@@ -91,8 +92,8 @@ def execute_kernel(
     cache_dir: Path | None = DEFAULT_CACHE_DIR,
     use_cache: bool = True,
     parallel: bool = True,
-    template_dir: Path = Path("templates"),
-    adapter_dir: Path = Path("adapters"),
+    template_dir: Path | None = None,
+    adapter_dir: Path | None = None,
 ) -> KernelResult:
     """Run the full OVK kernel pipeline for a repository change."""
     started = time.perf_counter()
@@ -111,8 +112,8 @@ def execute_kernel(
         plan,
         context=ctx,
         budget=budget,
-        template_dir=template_dir,
-        adapter_dir=adapter_dir,
+        template_dir=template_dir or resource_path("templates"),
+        adapter_dir=adapter_dir or resource_path("adapters"),
     )
 
     compiler = ObligationCompilerRegistry.default()
