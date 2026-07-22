@@ -132,11 +132,17 @@ runs:
 
         HEAD_SHA="${OVK_EVENT_HEAD_SHA:-$OVK_GITHUB_SHA}"
         BASE_SHA="${OVK_EVENT_BASE_SHA:-}"
-        if [ -n "$BASE_SHA" ]; then
+        if [ -n "$BASE_SHA" ] && ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
           git fetch --no-tags --depth=1 origin "$BASE_SHA" || true
         fi
-        if [ -n "$BASE_SHA" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+        if [ -n "$HEAD_SHA" ] && ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+          git fetch --no-tags --depth=1 origin "$HEAD_SHA" || true
+        fi
+        if [ -n "$BASE_SHA" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null \
+          && [ -n "$HEAD_SHA" ] && git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
           git diff --no-ext-diff --binary "$BASE_SHA" "$HEAD_SHA" > .ovk-pr.diff
+        elif [ -n "$BASE_SHA" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+          git diff --no-ext-diff --binary "$BASE_SHA" HEAD > .ovk-pr.diff
         elif git rev-parse HEAD^ >/dev/null 2>&1; then
           git diff --no-ext-diff --binary HEAD^ HEAD > .ovk-pr.diff
         else
@@ -394,7 +400,7 @@ runs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: ovk-evidence-artifacts
+        name: ovk-evidence-artifacts-${{ github.job }}
         path: |
           ovk-evidence.json
           ovk-pr-comment.md
