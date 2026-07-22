@@ -1,59 +1,62 @@
-# Native Backend Guide
+# Backend Execution Guide
 
-OVK connects to ten formal-methods tools. Every backend has a **built-in fallback** that runs without installing native binaries, so local development and CI stay portable.
+OVK exposes a common evidence contract across ten formal-methods backends. Their execution depth is not uniform. This document is the authoritative statement of what each backend actually executes in v1.2.0 RC.
 
-When a native binary is installed, OVK can use it and records that fact in evidence. CI verifies that native results match the built-in fallback and that evidence does not falsely claim native execution.
+## Execution maturity
 
-**Important:** a required-in-CI job proves the native install path works and stays consistent with the built-in evaluator. It does not mean every consumer run uses a native binary. Evidence must state which path ran.
+| Backend | Current execution | Native result can determine evidence? | Current limit |
+|---|---|---:|---|
+| `opa` | Native `opa eval` path plus deterministic self-protection evaluator | Yes, when the OPA strategy is selected | Generic kernel router selections do not yet control lane execution |
+| `z3` | Native Python Z3 SMT query plus deterministic authorization evaluator | Yes, when Z3 is installed | The query checks a normalized authorization abstraction, not arbitrary application code |
+| `cbmc` | Native bounded checking of an explicit or OVK template harness | Yes | Template/generated harnesses model a risk pattern and do not prove that changed project source was compiled into the model |
+| `cedar` | Deterministic Cedar-shaped input evaluator; Cedar CLI version probe | No | Native Cedar policy evaluation is not implemented |
+| `tla+` | Deterministic state-machine contract evaluator | No | TLC execution is not implemented |
+| `kani` | Deterministic Rust-harness contract evaluator | No | Native Kani execution is not implemented |
+| `dafny` | Deterministic proof-obligation contract evaluator | No | Native Dafny verification is not implemented |
+| `verus` | Deterministic verified-Rust contract evaluator | No | Native Verus verification is not implemented |
+| `lean` | Deterministic theorem-obligation contract evaluator | No | Native Lean checking is not implemented |
+| `alloy` | Deterministic relational-model contract evaluator | No | Native Alloy analysis is not implemented |
 
-## Required in CI (OPA, Z3, CBMC, Cedar)
+A binary-presence or version probe is never labeled as native verification. Evidence artifacts record `used_native_binary`, the guarantee type, assumptions, and limits.
 
-Workflow: [`.github/workflows/native-backends-tier1.yml`](../.github/workflows/native-backends-tier1.yml) (required native backends; filename is historical)
+## CI tiers
 
-| Backend | Install | Native execution |
-|---------|---------|------------------|
-| `opa` | OPA `v0.67.0` static release | Yes |
-| `z3` | `z3-solver` Python package `4.13.4.0` | Yes |
-| `cbmc` | CBMC Debian `6.4.1` | Yes — native harness execution for all four data-boundary templates |
-| `cedar` | `cedar-policy-cli` `4.8.2` | Yes |
+### Native execution required
 
-Installer: [`scripts/ci/install_backend.sh`](../scripts/ci/install_backend.sh)
+The Tier 1 workflow requires real execution for:
 
-Tests: `tests/test_native_backends.py` and per-backend integration tests.
+- OPA policy evaluation;
+- Z3 SMT evaluation;
+- CBMC bounded harness evaluation.
 
-## Optional in CI (informational)
+Workflow: [`.github/workflows/native-backends-tier1.yml`](../.github/workflows/native-backends-tier1.yml).
 
-Workflow: [`.github/workflows/native-backends.yml`](../.github/workflows/native-backends.yml) (does not block merges)
+### Toolchain probe required
 
-Backends: `tla+`, `kani`, `dafny`, `verus`, `lean`, `alloy`
+Cedar remains in the Tier 1 installation matrix because the CLI/toolchain is installed and version-probed. Its decision remains deterministic and its evidence reports `used_native_binary: false` until policy execution is implemented.
 
-These use built-in evaluators when binaries are missing. Verification still runs; evidence reports whether a native binary was used.
+### Informational adapters
 
-## All backends
+TLA+, Kani, Dafny, Verus, Lean, and Alloy remain non-blocking integration surfaces. Their deterministic contract evaluators are useful for schema, routing, and evidence interoperability tests, but they are not native proof execution.
 
-| Backend | Binary | Guarantee type | Example fixtures |
-|---------|--------|----------------|------------------|
-| `opa` | `opa` | Policy evaluation | `examples/no_agent_self_approval` |
-| `z3` | `z3-solver` | SMT reachability | `examples/auth_regression` |
-| `cedar` | `cedar` | Policy evaluation | `examples/backends/cedar_*.json` |
-| `tla+` | `tlc` | State machine | `examples/backends/tla_*.json` |
-| `kani` | `kani` | Rust model checking | `examples/backends/kani_*.json` |
-| `dafny` | `dafny` | Proof obligations | `examples/backends/dafny_*.json` |
-| `verus` | `verus` | Verified Rust | `examples/backends/verus_*.json` |
-| `lean` | `lean` | Theorem proving | `examples/backends/lean_*.json` |
-| `cbmc` | `cbmc` | Bounded C verification (native harness) | `examples/backends/cbmc_*.json`, `examples/backends/cbmc_harness/*.c` |
-| `alloy` | `alloy` | Relational models | `examples/backends/alloy_*.json` |
+## Fallback rules
 
-## Built-in fallback behavior
+- Missing OPA or Z3 cannot fabricate a native pass; the selected path returns a deterministic result or an explicit unknown.
+- A CBMC timeout or execution error returns `unknown` or `error` and requires human review. It never falls back to a deterministic pass after native execution was attempted.
+- Deterministic external-adapter results use guarantee type `deterministic_fallback`.
+- Synthetic CBMC harnesses use guarantee type `template_harness_model_check` and state that changed project source was not compiled into the checked model.
+- Only an explicitly supplied CBMC harness can use guarantee type `bounded_model_checking`.
 
-- External adapters (`cedar`, `tla+`, `kani`, `dafny`, `verus`, `lean`, `cbmc`, `alloy`) always have a built-in evaluator path.
-- OPA and Z3 check types also preserve deterministic behavior when native tools are absent.
-- Required-in-CI backends must report `used_native_binary=True` only when the native tool actually ran.
-- Optional backends must not claim native execution when only the built-in path ran.
+## Capability manifests and routing
 
-## CI entry points
+Capability manifests live under `adapters/*/capability.json` and are packaged with the wheel. They support intent/backend ranking and MCP capability discovery.
+
+In v1.2.0 RC, router output is advisory metadata. Core lane obligations still execute their lane evaluator, and the selected generic backend does not yet control compilation or execution. Evidence records `routing_enforced: false` until the backend-selection control plane is implemented.
+
+## Entry points
 
 - Installer: `scripts/ci/install_backend.sh`
-- Required checkers: `.github/workflows/native-backends-tier1.yml`
-- Optional checkers: `.github/workflows/native-backends.yml`
-- Tests: `tests/test_native_backends.py`
+- Required/probed matrix: `.github/workflows/native-backends-tier1.yml`
+- Informational matrix: `.github/workflows/native-backends.yml`
+- Probe aggregation: `ovk/core/native_backend_probe.py`
+- Integration tests: `tests/test_native_backends.py` and backend-specific test files
