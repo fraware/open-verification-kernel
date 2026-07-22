@@ -7,11 +7,12 @@ import sys
 from typing import Any, Callable
 
 from ovk import mcp_server
+from ovk.core.release_metadata import OVK_VERSION
 
 
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "open-verification-kernel"
-SERVER_VERSION = "0.1.0"
+SERVER_VERSION = OVK_VERSION
 
 
 TOOL_HANDLERS: dict[str, Callable[..., dict[str, Any]]] = {
@@ -36,6 +37,8 @@ TOOL_HANDLERS: dict[str, Callable[..., dict[str, Any]]] = {
             repo=args.get("repo", "unknown/repo"),
             head_sha=args.get("head_sha", "unknown"),
             base_sha=args.get("base_sha"),
+            input_format=args.get("input_format", "infra"),
+            policy_path=args.get("policy_path"),
         )
     },
     "ovk.create_evidence_bundle": lambda args: {
