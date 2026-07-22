@@ -16,17 +16,20 @@ from ovk.core.change_detection import detect_change_surfaces, infer_candidate_in
 from ovk.core.diff_parser import extract_changed_paths, is_unified_diff
 from ovk.core.intent_registry import IntentRegistry
 from ovk.core.router import route_intent
+from ovk.paths import resource_path
 
 
 def plan_from_changed_files(
     changed_files: list[str],
     *,
-    template_dir: Path = Path("templates"),
-    adapter_dir: Path = Path("adapters"),
+    template_dir: Path | None = None,
+    adapter_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Create a verification plan from changed file paths."""
-    intent_registry = IntentRegistry.from_directory(template_dir)
-    capability_registry = CapabilityRegistry.from_directory(adapter_dir)
+    resolved_templates = template_dir or resource_path("templates")
+    resolved_adapters = adapter_dir or resource_path("adapters")
+    intent_registry = IntentRegistry.from_directory(resolved_templates)
+    capability_registry = CapabilityRegistry.from_directory(resolved_adapters)
     candidate_ids = infer_candidate_intents(changed_files)
 
     intent_plans: list[dict[str, Any]] = []
@@ -56,8 +59,8 @@ def plan_from_changed_files(
 def plan_from_diff_text(
     diff_text: str,
     *,
-    template_dir: Path = Path("templates"),
-    adapter_dir: Path = Path("adapters"),
+    template_dir: Path | None = None,
+    adapter_dir: Path | None = None,
     trust_context: str = "untrusted_fork_pr",
 ) -> dict[str, Any]:
     """Create a verification plan from unified diff text.
