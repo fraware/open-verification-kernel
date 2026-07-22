@@ -70,6 +70,7 @@ def run_cbmc_harness(
         return {
             "status": "unknown",
             "reason": "cbmc binary not found",
+            "native_attempted": False,
             "used_native_binary": False,
             "counterexamples": [],
         }
@@ -78,6 +79,7 @@ def run_cbmc_harness(
         return {
             "status": "error",
             "reason": f"harness file not found: {harness_path}",
+            "native_attempted": False,
             "used_native_binary": False,
             "counterexamples": [],
         }
@@ -106,7 +108,16 @@ def run_cbmc_harness(
         return {
             "status": "unknown",
             "reason": "cbmc execution timed out",
-            "used_native_binary": False,
+            "native_attempted": True,
+            "used_native_binary": True,
+            "counterexamples": [],
+        }
+    except OSError as error:
+        return {
+            "status": "error",
+            "reason": f"cbmc execution failed: {error}",
+            "native_attempted": True,
+            "used_native_binary": True,
             "counterexamples": [],
         }
 
@@ -118,6 +129,7 @@ def run_cbmc_harness(
         return {
             "status": "error",
             "reason": completed.stderr.strip() or "cbmc execution failed",
+            "native_attempted": True,
             "used_native_binary": True,
             "tool_version": tool_version,
             "counterexamples": [],
@@ -128,6 +140,7 @@ def run_cbmc_harness(
         return {
             "status": "pass",
             "reason": "CBMC verification successful within bounds.",
+            "native_attempted": True,
             "used_native_binary": True,
             "tool_version": tool_version,
             "counterexamples": [],
@@ -138,6 +151,7 @@ def run_cbmc_harness(
         return {
             "status": "fail",
             "reason": "CBMC reported a reachable violation.",
+            "native_attempted": True,
             "used_native_binary": True,
             "tool_version": tool_version,
             "counterexamples": _parse_cbmc_counterexamples(combined, failure_mode=failure_mode),
@@ -147,6 +161,7 @@ def run_cbmc_harness(
     return {
         "status": "unknown",
         "reason": "cbmc output did not report verification status",
+        "native_attempted": True,
         "used_native_binary": True,
         "tool_version": tool_version,
         "counterexamples": [],
