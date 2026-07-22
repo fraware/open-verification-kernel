@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
 from ovk.adapters.cedar.deterministic import evaluate_cedar_input
@@ -11,6 +10,7 @@ from ovk.adapters.cedar.optional_runner import probe_cedar_binary
 from ovk.adapters.contract import ProofObligation, RawBackendResult
 from ovk.adapters.external.base_adapter import BaseExternalAdapter
 from ovk.core.models import BackendClaim, VerificationEvidence, VerificationStatus
+from ovk.paths import resource_path
 
 
 class CedarAdapter(BaseExternalAdapter):
@@ -21,7 +21,7 @@ class CedarAdapter(BaseExternalAdapter):
     input_language = "cedar"
 
     def __init__(self) -> None:
-        manifest_path = Path("adapters/cedar/capability.json")
+        manifest_path = resource_path("adapters", "cedar", "capability.json")
         self.capability_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
     def _deterministic_evaluator(self):
@@ -30,13 +30,12 @@ class CedarAdapter(BaseExternalAdapter):
     def run(self, obligation: ProofObligation) -> RawBackendResult:
         evaluator = self._deterministic_evaluator()
         status, counterexamples = evaluator(obligation.input)
-        probe = probe_cedar_binary()
-        used_native = bool(probe.get("used_native_binary"))
+        probe_cedar_binary()
         return RawBackendResult(
             backend=self.backend_name,
             status=status,
             counterexamples=counterexamples,
-            used_native_binary=used_native,
+            used_native_binary=False,
         )
 
     def evaluate_evidence(
@@ -47,24 +46,21 @@ class CedarAdapter(BaseExternalAdapter):
         head_sha: str,
         base_sha: str | None = None,
     ) -> VerificationEvidence:
-        """Produce OVK evidence with honest native/deterministic labeling."""
+        """Produce deterministic evidence and separately report Cedar toolchain presence."""
         evaluator = self._deterministic_evaluator()
         status_raw, counterexamples = evaluator(data)
         status = VerificationStatus(status_raw)
         probe = probe_cedar_binary()
-        used_native = bool(probe.get("used_native_binary"))
+        binary_present = bool(probe.get("binary_present"))
 
-        assumptions = [f"{self.backend_name} adapter contract evaluation."]
-        if used_native:
-            assumptions.append(f"{self.binary_name} native binary present; contract probe passed.")
-            assumptions.append(
-                "Oracle result cross-checked against installed Cedar toolchain; "
-                "full policy-file validation applies when Cedar inputs are supplied."
-            )
+        assumptions = [
+            f"{self.backend_name} adapter contract evaluation.",
+            "The decision is produced by the deterministic Cedar-shaped input oracle.",
+        ]
+        if binary_present:
+            assumptions.append("The Cedar CLI version probe passed; no policy evaluation was executed by the native tool.")
         else:
-            assumptions.append(f"{self.backend_name} adapter uses deterministic fallback when binary is absent.")
-            assumptions.append(f"{self.binary_name} deterministic oracle result used.")
-            assumptions.append(f"{self.binary_name} binary unavailable.")
+            assumptions.append("The Cedar CLI was unavailable; native policy evaluation was not attempted.")
 
         merge_by_status = {
             VerificationStatus.PASS: "allow",
@@ -79,17 +75,18 @@ class CedarAdapter(BaseExternalAdapter):
         if base_sha is not None:
             subject["base_sha"] = base_sha
 
-        generated_artifacts: list[dict[str, Any]] = []
-        if used_native:
-            generated_artifacts.append(
-                {
-                    "kind": "backend_provenance",
-                    "backend": self.backend_name,
-                    "used_native_binary": True,
-                    "raw_status": status_raw,
-                    "version": probe.get("version"),
-                }
-            )
+        generated_artifacts = [
+            {
+                "kind": "backend_provenance",
+                "backend": self.backend_name,
+                "binary_present": binary_present,
+                "used_native_binary": False,
+                "probe_type": probe.get("probe_type", "availability"),
+                "probe_status": probe.get("status"),
+                "probe_reason": probe.get("reason"),
+                "version": probe.get("version"),
+            }
+        ]
 
         return VerificationEvidence(
             evidence_id=f"{self.backend_name}-{head_sha[:8]}",
@@ -105,13 +102,17 @@ class CedarAdapter(BaseExternalAdapter):
                     guarantee_type="deterministic_fallback",
                     status=status,
                     assumptions=assumptions,
-                    limits=list(self.capability_manifest.get("limits", [])),
+                    limits=list(self.capability_manifest.get("limits", []))
+                    + ["Native Cedar policy evaluation is not implemented by this adapter."],
                     adapter_version=self.adapter_version,
                 )
             ],
             counterexamples=counterexamples,
             generated_artifacts=generated_artifacts,
-            decision={"merge_recommendation": recommendation},
+            decision={
+                "merge_recommendation": recommendation,
+                "human_review_required": recommendation in {"require_human_review", "require_stronger_check"},
+            },
         )
 
 
