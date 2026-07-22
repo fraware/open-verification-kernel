@@ -83,14 +83,26 @@ def _attach_execution_metadata(
     *,
     lane: str,
     data: dict[str, Any],
+    intent_id: str,
+    job_id: str | None,
+    input_format: str,
     routing: dict[str, Any] | None,
 ) -> VerificationEvidence:
-    """Record routing decisions and input digest on evidence artifacts."""
+    """Record routing, input digest, and an obligation-scoped evidence identity."""
+    identity = {
+        "intent_id": intent_id,
+        "lane": lane,
+        "input": data,
+        "input_format": input_format,
+        "job_id": job_id,
+    }
+    input_digest = content_digest({"lane": lane, "input": data})
+    evidence_suffix = content_digest(identity)[:12]
     artifacts = list(evidence.generated_artifacts)
     artifacts.append(
         {
             "kind": "input_digest",
-            "digest": content_digest({"lane": lane, "input": data}),
+            "digest": input_digest,
             "lane": lane,
         }
     )
@@ -105,7 +117,12 @@ def _attach_execution_metadata(
                 "executed_backends": [claim.backend for claim in evidence.backend_claims],
             }
         )
-    return evidence.model_copy(update={"generated_artifacts": artifacts})
+    return evidence.model_copy(
+        update={
+            "evidence_id": f"{evidence.evidence_id}-{evidence_suffix}",
+            "generated_artifacts": artifacts,
+        }
+    )
 
 
 def _evaluate_obligation(
@@ -121,6 +138,8 @@ def _evaluate_obligation(
     lane = str(obligation["lane"])
     data = obligation["input"]
     intent_id = str(obligation.get("intent_id") or LANE_TO_INTENT.get(lane, lane))
+    job_id = str(obligation["job_id"]) if obligation.get("job_id") is not None else None
+    input_format = str(obligation.get("input_format", "infra"))
     policy_path = Path(obligation["policy_path"]) if obligation.get("policy_path") else None
     subject: dict[str, Any] = {"repo": repo, "head_sha": head_sha}
     if base_sha is not None:
@@ -140,6 +159,9 @@ def _evaluate_obligation(
                 evidence,
                 lane=lane,
                 data=data,
+                intent_id=intent_id,
+                job_id=job_id,
+                input_format=input_format,
                 routing=routing_by_intent.get(intent_id),
             )
 
@@ -149,7 +171,7 @@ def _evaluate_obligation(
         repo=repo,
         head_sha=head_sha,
         base_sha=base_sha,
-        input_format=str(obligation.get("input_format", "infra")),
+        input_format=input_format,
         policy_path=policy_path,
     )
     if use_cache and cache_dir is not None:
@@ -158,6 +180,9 @@ def _evaluate_obligation(
         evidence,
         lane=lane,
         data=data,
+        intent_id=intent_id,
+        job_id=job_id,
+        input_format=input_format,
         routing=routing_by_intent.get(intent_id),
     )
 
