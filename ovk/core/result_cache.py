@@ -8,17 +8,38 @@ from pathlib import Path
 from typing import Any
 
 from ovk.core.bundle import content_digest
+from ovk.core.release_metadata import OVK_VERSION
 
 
 DEFAULT_CACHE_DIR = Path(".verification/cache")
 DEFAULT_TTL_SECONDS = 86400
 
 
-def cache_key(lane: str, data: dict[str, Any], *, policy_digest: str | None = None) -> str:
-    """Build a stable cache key for a lane input."""
-    payload = {"lane": lane, "input": data}
+def cache_key(
+    lane: str,
+    data: dict[str, Any],
+    *,
+    policy_digest: str | None = None,
+    subject: dict[str, Any] | None = None,
+    execution_fingerprint: dict[str, Any] | None = None,
+) -> str:
+    """Build a stable cache key for a lane input and its execution context.
+
+    Evidence is subject-bound, so repository and commit identity must participate
+    in result-cache keys. The OVK version and optional execution fingerprint
+    prevent reuse across incompatible adapter/runtime revisions.
+    """
+    payload: dict[str, Any] = {
+        "ovk_version": OVK_VERSION,
+        "lane": lane,
+        "input": data,
+    }
     if policy_digest:
         payload["policy"] = policy_digest
+    if subject:
+        payload["subject"] = subject
+    if execution_fingerprint:
+        payload["execution"] = execution_fingerprint
     return content_digest(payload)
 
 
