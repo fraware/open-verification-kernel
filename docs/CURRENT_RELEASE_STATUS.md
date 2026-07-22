@@ -61,7 +61,7 @@ Before tagging or publishing v1.2.0:
 - [ ] exercise HMAC signing and identity-bound Sigstore signing according to release policy;
 - [ ] run the immutable Action or release wheel in an independent consumer repository;
 - [ ] update status with exact source SHA and workflow links;
-- [ ] decide whether the package classifier should remain `Production/Stable` before independent pilots and routing enforcement.
+- [ ] keep the package classifier at Beta until independent pilots and backend-routing enforcement meet the production gate.
 
 ## Related documents
 
