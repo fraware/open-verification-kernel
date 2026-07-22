@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from ovk.adapters.alloy.deterministic import evaluate_alloy_input
 from ovk.adapters.external.base_adapter import BaseExternalAdapter
+from ovk.paths import resource_path
 
 
 class AlloyAdapter(BaseExternalAdapter):
@@ -15,7 +15,7 @@ class AlloyAdapter(BaseExternalAdapter):
     input_language = "alloy"
 
     def __init__(self) -> None:
-        manifest_path = Path("adapters/alloy/capability.json")
+        manifest_path = resource_path("adapters", "alloy", "capability.json")
         self.capability_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
     def _deterministic_evaluator(self):
