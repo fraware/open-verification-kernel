@@ -179,7 +179,14 @@ def verify_release_bundle(root: Path, layout: dict[str, Any] | None = None) -> l
             unsigned_sigstore = {key: value for key, value in envelope.items() if key != "sigstore"}
             payload = json.dumps(unsigned_sigstore, sort_keys=True, separators=(",", ":"))
             bundle_data = sigstore.get("bundle")
-            if not isinstance(bundle_data, dict) or not verify_cosign_bundle(payload, bundle_data):
+            identity = str(sigstore.get("certificate_identity", ""))
+            issuer = str(sigstore.get("certificate_oidc_issuer", ""))
+            if not isinstance(bundle_data, dict) or not verify_cosign_bundle(
+                payload,
+                bundle_data,
+                certificate_identity=identity,
+                certificate_oidc_issuer=issuer,
+            ):
                 failures.append("attestation envelope Sigstore bundle verification failed")
         if evidence_path.exists():
             bundle = EvidenceBundle.model_validate(read_json_file(evidence_path))
