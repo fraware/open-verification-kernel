@@ -13,6 +13,7 @@ from typing import Any
 
 SIGSTORE_SIGNING_ENV = "OVK_SIGSTORE_SIGNING"
 COSIGN_IDENTITY_ENV = "OVK_COSIGN_IDENTITY"
+COSIGN_ISSUER_ENV = "OVK_COSIGN_ISSUER"
 
 
 def cosign_available() -> bool:
@@ -25,8 +26,23 @@ def sigstore_signing_enabled() -> bool:
 
 
 def should_sign_with_cosign() -> bool:
-    """Sign with cosign only when enabled and the binary is available."""
-    return sigstore_signing_enabled() and cosign_available()
+    """Return whether all configured keyless-signing prerequisites exist."""
+    return (
+        sigstore_signing_enabled()
+        and cosign_available()
+        and bool(os.environ.get(COSIGN_IDENTITY_ENV))
+        and bool(os.environ.get(COSIGN_ISSUER_ENV))
+    )
+
+
+def _configured_trust_identity() -> tuple[str, str]:
+    identity = os.environ.get(COSIGN_IDENTITY_ENV, "").strip()
+    issuer = os.environ.get(COSIGN_ISSUER_ENV, "").strip()
+    if not identity or not issuer:
+        raise RuntimeError(
+            "OVK Sigstore signing requires OVK_COSIGN_IDENTITY and OVK_COSIGN_ISSUER"
+        )
+    return identity, issuer
 
 
 def sign_envelope_with_cosign(
@@ -34,15 +50,12 @@ def sign_envelope_with_cosign(
     *,
     bundle_path: str | Path,
 ) -> dict[str, Any]:
-    """Attach a cosign sign-blob bundle when signing is explicitly enabled.
-
-    Explicit signing requests fail closed. Returning an unsigned envelope after
-    a signing error would misrepresent the release artifact's trust state.
-    """
+    """Attach a keyless cosign sign-blob bundle when signing is enabled."""
     if not sigstore_signing_enabled():
         return envelope
     if not cosign_available():
         raise RuntimeError("OVK Sigstore signing is enabled but cosign is not available")
+    identity, issuer = _configured_trust_identity()
 
     bundle_file = Path(bundle_path)
     bundle_file.parent.mkdir(parents=True, exist_ok=True)
@@ -53,11 +66,13 @@ def sign_envelope_with_cosign(
         payload_path = Path(handle.name)
 
     try:
-        command = ["cosign", "sign-blob", "--yes", "--bundle", str(bundle_file), str(payload_path)]
-        identity = os.environ.get(COSIGN_IDENTITY_ENV)
-        if identity:
-            command.extend(["--certificate-identity", identity])
-        completed = subprocess.run(command, capture_output=True, text=True, check=False, timeout=60)
+        completed = subprocess.run(
+            ["cosign", "sign-blob", "--yes", "--bundle", str(bundle_file), str(payload_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
         if completed.returncode != 0:
             raise RuntimeError(completed.stderr.strip() or "cosign sign-blob failed")
         try:
@@ -78,18 +93,23 @@ def sign_envelope_with_cosign(
             "bundle_path": str(bundle_file),
             "bundle": bundle_data,
             "status": "signed",
+            "certificate_identity": identity,
+            "certificate_oidc_issuer": issuer,
         },
     }
 
 
-def verify_cosign_bundle(payload: bytes | str, bundle: dict[str, Any]) -> bool:
-    """Verify a payload against a cosign sign-blob bundle when cosign is available."""
-    if not cosign_available():
+def verify_cosign_bundle(
+    payload: bytes | str,
+    bundle: dict[str, Any],
+    *,
+    certificate_identity: str,
+    certificate_oidc_issuer: str,
+) -> bool:
+    """Verify a payload and bind it to an expected keyless signing identity."""
+    if not cosign_available() or not certificate_identity or not certificate_oidc_issuer:
         return False
-    if isinstance(payload, str):
-        payload_bytes = payload.encode("utf-8")
-    else:
-        payload_bytes = payload
+    payload_bytes = payload.encode("utf-8") if isinstance(payload, str) else payload
 
     with tempfile.NamedTemporaryFile("wb", delete=False) as payload_file:
         payload_file.write(payload_bytes)
@@ -100,7 +120,17 @@ def verify_cosign_bundle(payload: bytes | str, bundle: dict[str, Any]) -> bool:
 
     try:
         result = subprocess.run(
-            ["cosign", "verify-blob", "--bundle", str(bundle_path), str(payload_path)],
+            [
+                "cosign",
+                "verify-blob",
+                "--bundle",
+                str(bundle_path),
+                "--certificate-identity",
+                certificate_identity,
+                "--certificate-oidc-issuer",
+                certificate_oidc_issuer,
+                str(payload_path),
+            ],
             capture_output=True,
             text=True,
             timeout=60,
