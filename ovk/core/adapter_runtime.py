@@ -78,6 +78,24 @@ def _execution_fingerprint(lane: str, data: dict[str, Any]) -> dict[str, Any] | 
     return None
 
 
+def _cache_execution_context(
+    lane: str,
+    data: dict[str, Any],
+    *,
+    intent_id: str,
+    input_format: str,
+) -> dict[str, Any]:
+    """Return semantic and environment facts that affect evaluation."""
+    context: dict[str, Any] = {
+        "intent_id": intent_id,
+        "input_format": input_format,
+    }
+    environment = _execution_fingerprint(lane, data)
+    if environment is not None:
+        context["environment"] = environment
+    return context
+
+
 def _attach_execution_metadata(
     evidence: VerificationEvidence,
     *,
@@ -149,7 +167,12 @@ def _evaluate_obligation(
         data,
         policy_digest=_policy_digest(policy_path),
         subject=subject,
-        execution_fingerprint=_execution_fingerprint(lane, data),
+        execution_fingerprint=_cache_execution_context(
+            lane,
+            data,
+            intent_id=intent_id,
+            input_format=input_format,
+        ),
     )
     if use_cache and cache_dir is not None:
         cached = get_cached_evidence(cache_dir, key)
