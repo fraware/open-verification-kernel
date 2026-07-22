@@ -181,7 +181,7 @@ jobs:
         run: |
           test -f ovk-evidence.json
           test -f ovk-evidence-quality.json
-          ovk validate-outputs .
+          ovk evidence-quality ovk-evidence.json
 
   package:
     runs-on: ubuntu-latest
