@@ -15,6 +15,7 @@ from jsonschema import Draft202012Validator
 from ovk import __version__
 from ovk.core.json_io import read_json_file
 from ovk.core.templates_cli import TEMPLATES_DIR, list_templates
+from ovk.paths import resource_path, schema_path
 
 
 @dataclass(frozen=True)
@@ -65,9 +66,9 @@ def _check_policy_config(path: Path) -> DoctorCheck:
     config_path = path / "config.yml"
     if not config_path.exists():
         return DoctorCheck("verification_config_schema", True, "config.yml not present (optional)")
-    schema_path = Path("schemas/verification.config.schema.json")
-    if not schema_path.exists():
-        return DoctorCheck("verification_config_schema", False, "schemas/verification.config.schema.json missing")
+    policy_schema_path = schema_path("verification.config.schema.json")
+    if not policy_schema_path.exists():
+        return DoctorCheck("verification_config_schema", False, "verification.config.schema.json missing")
     try:
         import yaml
     except Exception as error:  # noqa: BLE001
@@ -79,7 +80,7 @@ def _check_policy_config(path: Path) -> DoctorCheck:
     if not isinstance(config, dict):
         return DoctorCheck("verification_config_schema", False, "config.yml must contain a YAML mapping")
     try:
-        schema = read_json_file(schema_path)
+        schema = read_json_file(policy_schema_path)
     except Exception as error:  # noqa: BLE001
         return DoctorCheck("verification_config_schema", False, f"cannot read schema: {error}")
     validator = Draft202012Validator(schema)
@@ -91,11 +92,16 @@ def _check_policy_config(path: Path) -> DoctorCheck:
     return DoctorCheck("verification_config_schema", True, f"{config_path} is schema-valid")
 
 
-def _check_schema_index() -> DoctorCheck:
-    schema_index = Path("docs/SCHEMA_INDEX.md")
-    if not schema_index.exists():
-        return DoctorCheck("schema_index", False, "docs/SCHEMA_INDEX.md missing")
-    return DoctorCheck("schema_index", True, "schema index present")
+def _check_schema_resources() -> DoctorCheck:
+    required = [
+        "verification.bundle.schema.json",
+        "verification.evidence.schema.json",
+        "verification.config.schema.json",
+    ]
+    missing = [name for name in required if not schema_path(name).is_file()]
+    if missing:
+        return DoctorCheck("schema_resources", False, f"packaged schemas missing: {', '.join(missing)}")
+    return DoctorCheck("schema_resources", True, "core packaged schemas are present")
 
 
 def _check_github_token() -> DoctorCheck:
@@ -110,7 +116,7 @@ def _check_github_token() -> DoctorCheck:
 
 
 def _check_manifest_example() -> DoctorCheck:
-    manifest = Path("examples/verification_manifests/full_mvp.json")
+    manifest = resource_path("examples", "verification_manifests", "full_mvp.json")
     if not manifest.exists():
         return DoctorCheck("example_manifest", False, "full_mvp manifest example missing")
     try:
@@ -144,23 +150,19 @@ def run_doctor(*, verification_dir: Path = Path(".verification")) -> dict[str, A
         _check_policy_config(verification_dir),
         _check_manifest_example(),
         _check_templates(),
-        _check_schema_index(),
+        _check_schema_resources(),
         _check_github_token(),
         DoctorCheck("platform", True, platform.platform()),
     ]
-    failures = [
-        check
-        for check in checks
-        if not check.passed
-        and check.name in {
-            "python",
-            "verification_dir",
-            "verification_config_schema",
-            "example_manifest",
-            "template_library",
-            "schema_index",
-        }
-    ]
+    required_names = {
+        "python",
+        "verification_dir",
+        "verification_config_schema",
+        "example_manifest",
+        "template_library",
+        "schema_resources",
+    }
+    failures = [check for check in checks if not check.passed and check.name in required_names]
     return {
         "passed": len(failures) == 0,
         "checks": [{"name": c.name, "passed": c.passed, "message": c.message} for c in checks],
