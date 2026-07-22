@@ -6,6 +6,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from ovk.paths import resource_path
+
 CBMC_TEMPLATE_IDS = frozenset(
     {
         "cbmc-harness-check",
@@ -24,7 +26,7 @@ _TEMPLATE_TO_FIXTURE_STEM = {
     "cbmc-no-use-after-free-auth-cache": "use_after_free_auth_cache",
 }
 
-_HARNESS_ROOT = Path("examples/backends/cbmc_harness")
+_HARNESS_ROOT = resource_path("examples", "backends", "cbmc_harness")
 
 
 def _resolve_existing_harness(data: dict[str, Any]) -> Path | None:
@@ -34,9 +36,9 @@ def _resolve_existing_harness(data: dict[str, Any]) -> Path | None:
     path = Path(str(harness_path))
     if path.is_file():
         return path
-    repo_relative = _HARNESS_ROOT / path.name
-    if repo_relative.is_file():
-        return repo_relative
+    packaged_fixture = _HARNESS_ROOT / path.name
+    if packaged_fixture.is_file():
+        return packaged_fixture
     return None
 
 
@@ -70,7 +72,12 @@ void harness(void) {{
 def _generated_integer_overflow_harness(data: dict[str, Any]) -> str:
     quota_limit = int(data.get("quota_limit", 1000))
     expect_violation = bool(data.get("expect_violation", data.get("failed_assertions")))
-    guard = "" if expect_violation else f"  __CPROVER_assume(used <= {quota_limit});\n"
+    guard = ""
+    if not expect_violation:
+        guard = (
+            f"  __CPROVER_assume(used <= {quota_limit});\n"
+            f"  __CPROVER_assume(delta <= {quota_limit} - used);\n"
+        )
     return f"""#include <assert.h>
 #include <stdint.h>
 
@@ -164,6 +171,7 @@ def compile_cbmc_harness(
             **data,
             "intent_id": intent_id,
             "harness_path": str(existing),
+            "harness_origin": "explicit",
             "entry_function": str(data.get("entry_function", "harness")),
             "unwind": int(data.get("unwind", default_unwind_for_intent(intent_id))),
         }
@@ -175,6 +183,7 @@ def compile_cbmc_harness(
             **data,
             "intent_id": intent_id,
             "harness_path": str(fixture),
+            "harness_origin": "fixture",
             "entry_function": "harness",
             "unwind": int(data.get("unwind", default_unwind_for_intent(intent_id))),
         }
@@ -189,6 +198,7 @@ def compile_cbmc_harness(
         **data,
         "intent_id": intent_id,
         "harness_path": str(harness_path),
+        "harness_origin": "generated",
         "entry_function": "harness",
         "unwind": int(data.get("unwind", default_unwind_for_intent(intent_id))),
         "generated": True,
