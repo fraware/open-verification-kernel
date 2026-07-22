@@ -16,19 +16,48 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install and verify release gates
+        env:
+          OVK_RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           python -m pip install --upgrade pip
+          python scripts/sync_package_data.py
           pip install -e '.[dev]'
+          python scripts/check_release_metadata.py
+          python - <<'PY'
+          import os
+          import ovk
+
+          tag = os.environ["OVK_RELEASE_TAG"]
+          normalized = tag[1:] if tag.startswith("v") else tag
+          if normalized != ovk.__version__:
+              raise SystemExit(f"release tag {tag!r} does not match package version {ovk.__version__!r}")
+          PY
           pytest -q
           ovk release-preflight
           ovk pilot
-          ovk bench --expanded --no-extended --leaderboard .verification/formal-pr-bench-leaderboard.json
+          ovk bench --expanded --leaderboard .verification/formal-pr-bench-leaderboard.json
       - name: Build and inspect package
         run: |
           pip install build twine
           python scripts/sync_package_data.py
           python -m build
           twine check dist/*
+      - name: Smoke-test release wheel
+        run: |
+          WHEEL="$(realpath "$(ls dist/*.whl | head -n 1)")"
+          python -m venv /tmp/ovk-release-wheel
+          /tmp/ovk-release-wheel/bin/python -m pip install "$WHEEL"
+          mkdir -p /tmp/ovk-release-consumer
+          cd /tmp/ovk-release-consumer
+          /tmp/ovk-release-wheel/bin/ovk init
+          /tmp/ovk-release-wheel/bin/ovk doctor
+          /tmp/ovk-release-wheel/bin/python - <<'PY'
+          from ovk import mcp_server
+          from ovk.core.templates_cli import list_templates
+
+          assert len(list_templates()) >= 100
+          assert len(mcp_server.list_capabilities()["capabilities"]) >= 10
+          PY
 
   publish:
     needs: verify
