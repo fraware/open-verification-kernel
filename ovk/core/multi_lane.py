@@ -147,7 +147,7 @@ def load_verification_manifest(path: Path, *, validate: bool = True) -> dict[str
 
 def _manifest_boundary(root: Path) -> Path:
     root_resolved = root.resolve()
-    if root_resolved.name in {".verification", "verification_manifests"}:
+    if root_resolved.name == ".verification" or root_resolved.parent.name == "examples":
         return root_resolved.parent
     return root_resolved
 
