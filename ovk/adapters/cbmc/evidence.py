@@ -19,7 +19,7 @@ def evaluate_cbmc_harness(
     head_sha: str,
     base_sha: str | None = None,
 ) -> VerificationEvidence:
-    """Produce OVK evidence with honest native vs deterministic labeling."""
+    """Produce OVK evidence with honest native, synthetic, and fallback labeling."""
     payload = {**data, "intent_id": data.get("intent_id", "cbmc-harness-check")}
     intent_id = str(payload["intent_id"])
     limits = list(ADAPTER.capability_manifest.get("limits", []))
@@ -35,21 +35,35 @@ def evaluate_cbmc_harness(
             failure_mode=str(compiled.get("failure_mode", "cbmc_assertion_failed")),
         )
 
-    if native is not None and native.get("used_native_binary"):
+    harness_origin = str(compiled.get("harness_origin", "none"))
+    if native is not None and native.get("native_attempted"):
         status = VerificationStatus(str(native.get("status", "unknown")))
         counterexamples = list(native.get("counterexamples", []))
         assumptions = [
             f"{ADAPTER.backend_name} adapter contract evaluation.",
-            f"{ADAPTER.binary_name} native harness executed within stated unwind and memory bounds.",
+            f"{ADAPTER.binary_name} native harness execution was attempted within stated unwind and memory bounds.",
         ]
-        guarantee_type = "bounded_model_checking"
+        if harness_origin == "explicit":
+            guarantee_type = "bounded_model_checking"
+            assumptions.append("The harness was explicitly supplied by the caller and is the verified program model.")
+        else:
+            guarantee_type = "template_harness_model_check"
+            assumptions.append(
+                "The executed harness is a reusable OVK template model selected or generated from extracted risk hints."
+            )
+            limits.append(
+                "Template harness results do not establish that the changed project source was compiled into the checked model."
+            )
+        if native.get("reason"):
+            assumptions.append(str(native["reason"]))
     else:
         status_raw, counterexamples = evaluate_cbmc_input(payload)
         status = VerificationStatus(status_raw)
         assumptions = [
             f"{ADAPTER.backend_name} adapter contract evaluation.",
-            f"{ADAPTER.backend_name} adapter uses deterministic fallback when binary is absent.",
+            f"{ADAPTER.backend_name} adapter uses deterministic fallback when native execution is unavailable.",
             f"{ADAPTER.binary_name} deterministic oracle result used.",
+            "The deterministic oracle classifies supplied findings and does not model-check changed project source.",
         ]
         if obligation_has_runnable_harness(payload) and native is not None:
             assumptions.append(str(native.get("reason", "cbmc binary unavailable.")))
@@ -68,13 +82,18 @@ def evaluate_cbmc_harness(
         subject["base_sha"] = base_sha
 
     generated_artifacts: list[dict[str, Any]] = []
-    if native is not None and native.get("used_native_binary"):
+    if native is not None and native.get("native_attempted"):
         generated_artifacts.append(
             {
                 "kind": "backend_provenance",
                 "backend": ADAPTER.backend_name,
-                "used_native_binary": True,
+                "native_attempted": True,
+                "used_native_binary": bool(native.get("used_native_binary")),
+                "native_status": native.get("status"),
+                "native_reason": native.get("reason"),
                 "harness_path": compiled.get("harness_path"),
+                "harness_origin": harness_origin,
+                "source_path": payload.get("source_path"),
                 "entry_function": compiled.get("entry_function"),
                 "unwind": compiled.get("unwind"),
                 "tool_version": native.get("tool_version"),
@@ -102,5 +121,8 @@ def evaluate_cbmc_harness(
         ],
         counterexamples=counterexamples,
         generated_artifacts=generated_artifacts,
-        decision={"merge_recommendation": recommendation},
+        decision={
+            "merge_recommendation": recommendation,
+            "human_review_required": recommendation in {"require_human_review", "require_stronger_check"},
+        },
     )
