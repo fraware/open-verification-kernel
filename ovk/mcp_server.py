@@ -78,9 +78,11 @@ def list_capabilities() -> dict[str, Any]:
     """Return release metadata and installed backend capability manifests."""
     from ovk.core.capabilities import CapabilityRegistry
 
+    metadata = release_metadata()
     registry = CapabilityRegistry.from_directory(resource_path("adapters"))
     return {
-        "release": release_metadata(),
+        **metadata,
+        "release": metadata,
         "capabilities": registry.all(),
     }
 
