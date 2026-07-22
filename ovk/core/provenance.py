@@ -44,11 +44,20 @@ def git_provenance() -> dict[str, str]:
     }
 
 
-def material_entry(path: Path) -> dict[str, Any]:
-    """Describe one input material with a content digest."""
+def _material_uri(path: Path, *, workspace: Path | None = None) -> str:
+    resolved = path.resolve()
+    root = (workspace or Path.cwd()).resolve()
+    try:
+        return resolved.relative_to(root).as_posix()
+    except ValueError:
+        return resolved.name
+
+
+def material_entry(path: Path, *, workspace: Path | None = None) -> dict[str, Any]:
+    """Describe one input material without leaking absolute local paths."""
     resolved = path.resolve()
     return {
-        "uri": resolved.as_uri(),
+        "uri": _material_uri(resolved, workspace=workspace),
         "digest": {"sha256": sha256_file(resolved)},
         "size_bytes": resolved.stat().st_size,
     }
@@ -59,6 +68,7 @@ def build_provenance_statement(
     *,
     materials: list[Path] | None = None,
     invocation: dict[str, Any] | None = None,
+    workspace: Path | None = None,
 ) -> dict[str, Any]:
     """Build an OVK provenance statement for a release bundle."""
     bundle_payload = bundle.model_dump(mode="json")
@@ -73,7 +83,7 @@ def build_provenance_statement(
             "digest": {"sha256": content_digest(bundle_payload)},
             "decision": bundle.decision,
         },
-        "materials": [material_entry(path) for path in materials or []],
+        "materials": [material_entry(path, workspace=workspace) for path in materials or []],
         "invocation": invocation
         or {
             "config_source": {
