@@ -6,10 +6,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from jsonschema import Draft202012Validator
+
 from ovk.core.change_detection import detect_change_surfaces
 from ovk.core.check_metadata import load_required_check_metadata
 from ovk.core.github_event import load_github_event_metadata, metadata_to_self_protection_defaults
+from ovk.core.json_io import read_json_file
 from ovk.core.router import VerificationBudget
+from ovk.paths import schema_path
 
 
 @dataclass
@@ -27,25 +31,42 @@ class RepositoryContext:
 
 
 def load_verification_policy(config_path: Path = Path(".verification/config.yml")) -> dict[str, Any]:
-    """Load policy knobs from `.verification/config.yml`."""
-    if not config_path.exists():
-        return {"mode": "advisory", "default_on_unknown": "require_human_review"}
-    text = config_path.read_text(encoding="utf-8")
-    try:
-        import yaml
+    """Load and validate policy knobs from `.verification/config.yml`.
 
-        loaded = yaml.safe_load(text)
-        if isinstance(loaded, dict):
-            return loaded
-    except Exception:  # noqa: BLE001 - fall back to line parser
-        pass
-    policy: dict[str, Any] = {}
-    for line in text.splitlines():
-        if ":" not in line or line.strip().startswith("#"):
-            continue
-        key, value = line.split(":", 1)
-        policy[key.strip()] = value.strip()
-    return policy
+    Policy controls fail closed: malformed YAML or schema-invalid settings raise
+    a clear error instead of being reinterpreted by an ad-hoc fallback parser.
+    """
+    if not config_path.exists():
+        return {
+            "schema_version": "ovk.config.v1",
+            "mode": "advisory",
+            "default_on_unknown": "require_human_review",
+        }
+
+    import yaml
+
+    try:
+        loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as error:
+        raise ValueError(f"invalid OVK verification policy YAML at {config_path}: {error}") from error
+    if not isinstance(loaded, dict):
+        raise ValueError(f"OVK verification policy at {config_path} must contain a YAML mapping")
+
+    policy_schema_path = schema_path("verification.config.schema.json")
+    if not policy_schema_path.exists():
+        raise ValueError(f"OVK verification policy schema is missing: {policy_schema_path}")
+    schema = read_json_file(policy_schema_path)
+    validator = Draft202012Validator(schema)
+    errors = sorted(validator.iter_errors(loaded), key=lambda item: list(item.path))
+    if errors:
+        formatted = []
+        for error in errors:
+            location = "/".join(str(part) for part in error.path) or "$"
+            formatted.append(f"{location}: {error.message}")
+        raise ValueError(
+            f"OVK verification policy at {config_path} failed schema validation: " + "; ".join(formatted)
+        )
+    return loaded
 
 
 def budget_from_policy(policy: dict[str, Any]) -> VerificationBudget:
