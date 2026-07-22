@@ -2,20 +2,22 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from ovk.core.artifact_manifest import artifact_entry, build_artifact_manifest, sha256_file
 from ovk.core.attestation_binding import verify_bundle_statement_binding, verify_envelope_manifest_binding
 from ovk.core.attestation_envelope import build_attestation_envelope
 from ovk.core.attestation_signing import verify_envelope_signature
 from ovk.core.json_io import read_json_file, write_json_file
+from ovk.core.models import EvidenceBundle
 from ovk.core.output_validation import validate_generated_json, validate_output_directory
 from ovk.core.provenance import build_provenance_statement
-from ovk.core.models import EvidenceBundle
 from ovk.core.release_layout import ReleaseArtifact, missing_required_artifacts
 from ovk.core.run_outputs import StandardOutputPaths, write_standard_run_outputs
-from ovk.core.artifact_manifest import artifact_entry, build_artifact_manifest, sha256_file
+from ovk.core.sigstore_signing import verify_cosign_bundle
 
 
 DEFAULT_BUNDLE_ARTIFACTS = [
@@ -125,8 +127,21 @@ def write_release_bundle(
     }
 
 
+def _artifact_path_within_root(root: Path, rel_path: str) -> Path | None:
+    candidate = Path(rel_path)
+    if candidate.is_absolute():
+        return None
+    root_resolved = root.resolve()
+    artifact_path = (root / candidate).resolve()
+    try:
+        artifact_path.relative_to(root_resolved)
+    except ValueError:
+        return None
+    return artifact_path
+
+
 def verify_release_bundle(root: Path, layout: dict[str, Any] | None = None) -> list[str]:
-    """Verify a release bundle directory exists and manifest hashes match."""
+    """Verify a release bundle directory, hashes, bindings, and signatures."""
     failures: list[str] = []
     active_layout = layout or release_bundle_layout()
     failures.extend(f"missing artifact: {path}" for path in missing_required_artifacts(root, active_layout))
@@ -138,11 +153,14 @@ def verify_release_bundle(root: Path, layout: dict[str, Any] | None = None) -> l
     manifest = read_json_file(manifest_path)
     for entry in manifest.get("artifacts", []):
         if not isinstance(entry, dict):
+            failures.append("artifact manifest contains a non-object entry")
             continue
         rel_path = str(entry.get("path", ""))
         expected_sha = str(entry.get("sha256", ""))
-        candidate = Path(rel_path)
-        artifact_path = candidate if candidate.is_absolute() else root / rel_path
+        artifact_path = _artifact_path_within_root(root, rel_path)
+        if artifact_path is None:
+            failures.append(f"manifest path escapes bundle root: {rel_path}")
+            continue
         if not artifact_path.exists():
             failures.append(f"manifest references missing file: {rel_path}")
             continue
@@ -155,7 +173,14 @@ def verify_release_bundle(root: Path, layout: dict[str, Any] | None = None) -> l
     if envelope_path.exists():
         envelope = read_json_file(envelope_path)
         if envelope.get("signature") and not verify_envelope_signature(envelope):
-            failures.append("attestation envelope signature verification failed")
+            failures.append("attestation envelope HMAC signature verification failed")
+        sigstore = envelope.get("sigstore")
+        if isinstance(sigstore, dict):
+            unsigned_sigstore = {key: value for key, value in envelope.items() if key != "sigstore"}
+            payload = json.dumps(unsigned_sigstore, sort_keys=True, separators=(",", ":"))
+            bundle_data = sigstore.get("bundle")
+            if not isinstance(bundle_data, dict) or not verify_cosign_bundle(payload, bundle_data):
+                failures.append("attestation envelope Sigstore bundle verification failed")
         if evidence_path.exists():
             bundle = EvidenceBundle.model_validate(read_json_file(evidence_path))
             statement = envelope.get("statement", {})
