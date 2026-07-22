@@ -10,8 +10,6 @@ from pydantic import ValidationError
 
 from ovk.core.models import EvidenceBundle
 from ovk.core.schema_validation import ValidationIssue, ValidationReport, validate_against_schema, validate_file
-
-
 from ovk.paths import ovk_data_root
 
 SCHEMA_ROOT = ovk_data_root() / "schemas"
@@ -86,24 +84,32 @@ def validate_evidence_bundle(instance: dict[str, Any]) -> ValidationReport:
 
 
 def validate_generated_json(instance: dict[str, Any], kind: str) -> ValidationReport:
-    """Validate a generated JSON artifact against its registered schema."""
+    """Validate a generated JSON artifact against its registered schema and semantics."""
     if kind == "evidence":
         return validate_evidence_bundle(instance)
     schema_path = schema_for_kind(kind)
     if schema_path is None or not schema_path.exists():
         return ValidationReport(valid=True, issues=[])
-    schema = json.loads(schema_path.read_text(encoding="utf-8"))
-    return validate_against_schema(instance, schema)
+    report = validate_against_schema(instance, json.loads(schema_path.read_text(encoding="utf-8")))
+    if not report.valid:
+        return report
+    if kind == "quality_report" and instance.get("passed") is not True:
+        return ValidationReport(
+            valid=False,
+            issues=[
+                ValidationIssue(
+                    path=["passed"],
+                    message="evidence quality report records invariant errors",
+                )
+            ],
+        )
+    return report
 
 
 def validate_generated_file(path: Path, kind: str) -> ValidationReport:
     """Validate a generated JSON file on disk."""
-    if kind == "evidence":
-        return validate_evidence_bundle(json.loads(path.read_text(encoding="utf-8")))
-    schema_path = schema_for_kind(kind)
-    if schema_path is None or not schema_path.exists():
-        return ValidationReport(valid=True, issues=[])
-    return validate_file(path, schema_path)
+    instance = json.loads(path.read_text(encoding="utf-8"))
+    return validate_generated_json(instance, kind)
 
 
 def _format_file_validation_failures(path: Path, report: ValidationReport) -> list[str]:
