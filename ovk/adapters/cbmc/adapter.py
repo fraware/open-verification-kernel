@@ -12,6 +12,7 @@ from ovk.adapters.cbmc.harness_compiler import compile_cbmc_harness, obligation_
 from ovk.adapters.cbmc.optional_runner import run_cbmc_harness
 from ovk.adapters.contract import ProofObligation, RawBackendResult
 from ovk.adapters.external.base_adapter import BaseExternalAdapter
+from ovk.paths import resource_path
 
 
 class CbmcAdapter(BaseExternalAdapter):
@@ -20,7 +21,7 @@ class CbmcAdapter(BaseExternalAdapter):
     input_language = "c"
 
     def __init__(self) -> None:
-        manifest_path = Path("adapters/cbmc/capability.json")
+        manifest_path = resource_path("adapters", "cbmc", "capability.json")
         self.capability_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
     def _deterministic_evaluator(self):
@@ -42,12 +43,12 @@ class CbmcAdapter(BaseExternalAdapter):
 
     def run(self, obligation: ProofObligation) -> RawBackendResult:
         native = self._native_result(obligation.input)
-        if native is not None and native.get("used_native_binary"):
+        if native is not None and native.get("native_attempted"):
             return RawBackendResult(
                 backend=self.backend_name,
                 status=str(native.get("status", "unknown")),
                 counterexamples=list(native.get("counterexamples", [])),
-                used_native_binary=True,
+                used_native_binary=bool(native.get("used_native_binary")),
             )
 
         evaluator = self._deterministic_evaluator()
