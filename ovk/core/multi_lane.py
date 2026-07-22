@@ -145,16 +145,24 @@ def load_verification_manifest(path: Path, *, validate: bool = True) -> dict[str
     return manifest
 
 
+def _manifest_boundary(root: Path) -> Path:
+    root_resolved = root.resolve()
+    if root_resolved.name in {".verification", "verification_manifests"}:
+        return root_resolved.parent
+    return root_resolved
+
+
 def _resolve_manifest_file(root: Path, value: str, *, field: str) -> Path:
     candidate = Path(value)
     if candidate.is_absolute():
         raise ValueError(f"verification manifest {field} path must be relative: {value}")
     root_resolved = root.resolve()
+    boundary = _manifest_boundary(root_resolved)
     resolved = (root_resolved / candidate).resolve()
     try:
-        resolved.relative_to(root_resolved)
+        resolved.relative_to(boundary)
     except ValueError as error:
-        raise ValueError(f"verification manifest {field} path escapes manifest root: {value}") from error
+        raise ValueError(f"verification manifest {field} path escapes manifest root boundary: {value}") from error
     if not resolved.is_file():
         raise ValueError(f"verification manifest {field} file does not exist: {value}")
     return resolved
