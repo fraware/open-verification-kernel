@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from ovk.adapters.dafny.deterministic import evaluate_dafny_input
 from ovk.adapters.external.base_adapter import BaseExternalAdapter
+from ovk.paths import resource_path
 
 
 class DafnyAdapter(BaseExternalAdapter):
@@ -15,7 +15,7 @@ class DafnyAdapter(BaseExternalAdapter):
     input_language = "dafny"
 
     def __init__(self) -> None:
-        manifest_path = Path("adapters/dafny/capability.json")
+        manifest_path = resource_path("adapters", "dafny", "capability.json")
         self.capability_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
     def _deterministic_evaluator(self):
