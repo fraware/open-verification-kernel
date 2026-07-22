@@ -19,9 +19,10 @@ from ovk.adapters.opa.self_protection import evaluate_self_protection
 from ovk.adapters.z3.deterministic_path import evaluate_deterministic_authorization_path
 from ovk.adapters.z3.validated_path import evaluate_validated_authorization_path
 from ovk.core.external_adapters import adapter_by_name
+from ovk.paths import resource_path
 
 
-OPA_POLICY_PATH = Path("adapters/opa/policies/self_protection.rego")
+OPA_POLICY_PATH = resource_path("adapters", "opa", "policies", "self_protection.rego")
 
 
 @dataclass(frozen=True)
@@ -46,7 +47,7 @@ class NativeBackendSummary:
     fixture_matches_oracle: bool
 
 
-TIER1_NATIVE_EXECUTION_BACKENDS = frozenset({"opa", "z3", "cbmc", "cedar"})
+TIER1_NATIVE_EXECUTION_BACKENDS = frozenset({"opa", "z3", "cbmc"})
 TIER1_REQUIRED_BACKENDS = frozenset({"opa", "z3", "cbmc", "cedar"})
 
 
@@ -70,8 +71,12 @@ BACKEND_FIXTURES: dict[str, tuple[str, ...]] = {
 }
 
 
+def _fixture_path(path: str) -> Path:
+    return resource_path(*Path(path).parts)
+
+
 def _read_fixture(path: str) -> dict[str, Any]:
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    return json.loads(_fixture_path(path).read_text(encoding="utf-8"))
 
 
 def _probe_external_adapter(backend: str, fixture_path: str) -> NativeBackendProbeResult:
@@ -145,16 +150,14 @@ def _probe_cedar(fixture_path: str) -> NativeBackendProbeResult:
     payload = _read_fixture(fixture_path)
     oracle_status, _ = evaluate_cedar_input(payload)
     probe = probe_cedar_binary()
-    binary_present = bool(probe.get("used_native_binary"))
-    runtime_status = oracle_status
     return NativeBackendProbeResult(
         backend="cedar",
         fixture_path=fixture_path,
-        runtime_status=runtime_status,
+        runtime_status=oracle_status,
         oracle_status=oracle_status,
         binary_name="cedar",
-        binary_present=binary_present,
-        used_native_binary=binary_present,
+        binary_present=bool(probe.get("binary_present")),
+        used_native_binary=False,
     )
 
 
