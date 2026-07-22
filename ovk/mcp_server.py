@@ -5,21 +5,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ovk.adapters.ci_secrets.evidence import evaluate_ci_secrets_exposure
-from ovk.adapters.deployment.evidence import evaluate_approval_state_machine
-from ovk.adapters.infra.evidence import evaluate_infra_exposure
-from ovk.adapters.opa import evaluate_self_protection
-from ovk.adapters.z3.validated_path import evaluate_validated_authorization_path
+from ovk.adapters.workflow.diff_extract import workflow_inputs_from_diff
+from ovk.adapters.workflow.yaml_extract import workflow_yaml_to_ci_secrets_input
 from ovk.core.bundle import make_bundle
 from ovk.core.changed_files import load_changed_files
 from ovk.core.decision import decide
+from ovk.core.diff_parser import is_unified_diff
 from ovk.core.evidence_quality import build_evidence_quality_report
 from ovk.core.models import EvidenceBundle
-from ovk.adapters.workflow.diff_extract import workflow_inputs_from_diff
-from ovk.adapters.workflow.yaml_extract import workflow_yaml_to_ci_secrets_input
-from ovk.core.diff_parser import is_unified_diff
+from ovk.core.multi_lane import evaluate_lane
 from ovk.core.planner import plan_from_changed_files, plan_from_diff_text
 from ovk.core.release_metadata import release_metadata
+from ovk.paths import resource_path
 
 
 TOOLS = [
@@ -78,26 +75,27 @@ def extract_workflows_from_diff(diff_text: str, *, trust_context: str = "untrust
 
 
 def list_capabilities() -> dict[str, Any]:
-    """Return release metadata and supported lanes."""
-    return release_metadata()
+    """Return release metadata and installed backend capability manifests."""
+    from ovk.core.capabilities import CapabilityRegistry
+
+    registry = CapabilityRegistry.from_directory(resource_path("adapters"))
+    return {
+        "release": release_metadata(),
+        "capabilities": registry.all(),
+    }
 
 
 def run_verification(lane: str, input_data: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
-    """Run a lane evaluator and return evidence JSON."""
-    repo = str(kwargs.get("repo", "unknown/repo"))
-    head_sha = str(kwargs.get("head_sha", "unknown"))
-    base_sha = kwargs.get("base_sha")
-    evaluators = {
-        "self_protection": evaluate_self_protection,
-        "authorization": evaluate_validated_authorization_path,
-        "infrastructure": evaluate_infra_exposure,
-        "ci_secrets": evaluate_ci_secrets_exposure,
-        "deployment": evaluate_approval_state_machine,
-    }
-    evaluator = evaluators.get(lane)
-    if evaluator is None:
-        raise ValueError(f"unsupported lane: {lane}")
-    evidence = evaluator(input_data, repo=repo, head_sha=head_sha, base_sha=base_sha)
+    """Run a lane or backend evaluator and return evidence JSON."""
+    evidence = evaluate_lane(
+        lane,
+        input_data,
+        repo=str(kwargs.get("repo", "unknown/repo")),
+        head_sha=str(kwargs.get("head_sha", "unknown")),
+        base_sha=kwargs.get("base_sha"),
+        input_format=str(kwargs.get("input_format", "infra")),
+        policy_path=Path(str(kwargs["policy_path"])) if kwargs.get("policy_path") else None,
+    )
     return evidence.model_dump(mode="json")
 
 
@@ -192,16 +190,14 @@ def select_backends(
     changed_files: list[str] | None = None,
 ) -> dict[str, Any]:
     """Select backends for one intent using capability manifests and repo memory."""
-    from pathlib import Path
-
     from ovk.core.capabilities import CapabilityRegistry
     from ovk.core.intent_registry import IntentRegistry
     from ovk.core.repo_memory import router_historical_priors
     from ovk.core.router import route_intent
     from ovk.core.surface_routing import surface_backend_bonuses
 
-    intents = IntentRegistry.from_directory(Path("templates"))
-    capabilities = CapabilityRegistry.from_directory(Path("adapters"))
+    intents = IntentRegistry.from_directory(resource_path("templates"))
+    capabilities = CapabilityRegistry.from_directory(resource_path("adapters"))
     intent = intents.get(intent_id)
     if intent is None:
         raise ValueError(f"unknown intent: {intent_id}")
