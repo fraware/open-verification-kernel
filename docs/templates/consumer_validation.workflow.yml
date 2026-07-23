@@ -1,0 +1,37 @@
+name: OVK Consumer Validation
+
+# Template only. Copy into a consumer repository and keep the immutable pin.
+# Live examples:
+#   https://github.com/fraware/ovk-consumer-fastapi-terraform
+#   https://github.com/fraware/ovk-consumer-express-actions
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+env:
+  OVK_PACKAGE_VERSION: "1.2.1"
+
+jobs:
+  ovk-consumer-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Run OVK advisory consumer path
+        uses: fraware/open-verification-kernel@v1.2.1
+        with:
+          mode: advisory
+          use-check: "true"
+          emit-check: "true"
+          post-comment: "true"
+      - name: Record pilot ledger reminder
+        run: |
+          echo "Adjudicate this PR into a pilot ledger conforming to schemas/pilot.ledger.schema.json"
+          echo "Do not set production_gate_met=true until 30 human adjudications exist."

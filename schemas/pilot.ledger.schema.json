@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/pilot.ledger.schema.json",
+  "title": "OVK Pilot Ledger",
+  "description": "Machine-readable pilot adjudication ledger (program section 23.2 field set). Scaffolding only \u2014 an empty or example ledger does not imply production readiness or vision completion.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "ledger_id",
+    "ovk_source_version",
+    "entries"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "ovk.pilot_ledger.v1"
+    },
+    "ledger_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "ovk_source_version": {
+      "type": "string",
+      "description": "Immutable OVK tag or commit SHA consumed by this ledger.",
+      "minLength": 1
+    },
+    "consumer_repos": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "production_gate_met": {
+      "type": "boolean",
+      "description": "Must remain false until 30 human-adjudicated PRs per independent consumer repo are complete.",
+      "const": false
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "entry_id",
+          "repository",
+          "ovk_source_version",
+          "pr_identifier",
+          "intent",
+          "recommendation",
+          "human_adjudication",
+          "false_positive",
+          "missed_detection",
+          "unknown_appropriateness",
+          "reviewer_comments",
+          "runtime",
+          "artifacts",
+          "final_disposition"
+        ],
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "repository": {
+            "type": "string",
+            "minLength": 1
+          },
+          "ovk_source_version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "pr_identifier": {
+            "type": "string",
+            "description": "PR number/URL, or synthetic id for automated_scenario runs.",
+            "minLength": 1
+          },
+          "intent": {
+            "type": "string",
+            "minLength": 1
+          },
+          "recommendation": {
+            "type": "string",
+            "enum": [
+              "allow",
+              "allow_with_warning",
+              "block",
+              "require_human_review",
+              "require_stronger_check",
+              "unknown",
+              "n/a"
+            ]
+          },
+          "human_adjudication": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "automated_scenario",
+              "appropriate",
+              "false_positive",
+              "missed_detection",
+              "unknown",
+              "not_applicable"
+            ]
+          },
+          "false_positive": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "missed_detection": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "unknown_appropriateness": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "reviewer_comments": {
+            "type": "string"
+          },
+          "runtime": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "elapsed_ms": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "mode": {
+                "type": "string"
+              },
+              "runner": {
+                "type": "string"
+              }
+            }
+          },
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "final_disposition": {
+            "type": "string",
+            "enum": [
+              "scenario_pass",
+              "scenario_fail",
+              "pending_human",
+              "accepted",
+              "rejected",
+              "deferred"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

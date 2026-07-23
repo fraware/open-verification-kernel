@@ -17,6 +17,7 @@ def _assert_backend(backend: str) -> None:
         assert result.runtime_status == result.oracle_status, (
             f"{backend} fixture {result.fixture_path} diverged from oracle: "
             f"runtime={result.runtime_status}, oracle={result.oracle_status}"
+            + (f", detail={result.detail}" if getattr(result, "detail", None) else "")
         )
         if result.binary_present and backend in TIER1_NATIVE_EXECUTION_BACKENDS:
             assert result.used_native_binary, (

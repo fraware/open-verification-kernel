@@ -71,7 +71,7 @@ FormalPR-Bench scores correctness, routing, repair hints, and realistic PR diffs
 
 ## Known limitations
 
-See [RELEASE.md](RELEASE.md#known-limitations). Adoption readiness: [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md).
+See [RELEASE.md](RELEASE.md#known-limitations). Experimental / non-strict compiler paths: [EXPERIMENTAL_PATHS.md](EXPERIMENTAL_PATHS.md). Adoption readiness: [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md).
 
 ## Upgrading
 

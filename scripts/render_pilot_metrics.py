@@ -11,6 +11,7 @@ from typing import Any
 from ovk.core.json_io import read_json_file, write_json_file
 from ovk.core.release_metadata import OVK_VERSION
 from ovk.core.schema_validation import require_schema_valid
+from ovk.core.verified_source import resolve_verified_source_sha
 from ovk.paths import schema_path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -99,6 +100,7 @@ def render_adoption_summary(
     *,
     registry_path: Path | None = None,
     existing_summary: dict[str, Any] | None = None,
+    verified_source_sha: str | None = None,
 ) -> dict[str, Any]:
     """Build the public adoption summary document from pilot metrics."""
     adoption = metrics.get("adoption", {})
@@ -107,7 +109,8 @@ def render_adoption_summary(
     existing_pilots = None
     if existing_summary is not None:
         existing_pilots = existing_summary.get("external_pilots")
-    return {
+    sha = verified_source_sha or resolve_verified_source_sha()
+    summary: dict[str, Any] = {
         "schema_version": "ovk.adoption_summary.v1",
         "ovk_version": metrics.get("ovk_version", OVK_VERSION),
         "updated_at": metrics.get("collected_at"),
@@ -120,13 +123,18 @@ def render_adoption_summary(
             "manifests_total": pilot_dogfood.get("manifests_total"),
             "median_elapsed_ms": pilot_dogfood.get("median_elapsed_ms"),
             "false_positive_rate": pilot_dogfood.get("false_positive_rate"),
-            "external_manifest": pilot_dogfood.get("external_manifest", "examples/pilot_repos/external_oss_ci_secrets.json"),
+            "external_manifest": pilot_dogfood.get(
+                "external_manifest", "examples/pilot_repos/external_oss_ci_secrets.json"
+            ),
             "weekly_schedule": "0 7 * * 1",
             "workflow": PILOT_DOGFOOD_WORKFLOW,
             "ovk_version_pin": metrics.get("ovk_version", OVK_VERSION),
         },
         "external_pilots": merge_external_pilots(registry, existing_pilots),
     }
+    if sha:
+        summary["verified_source_sha"] = sha
+    return summary
 
 
 def validate_summary(summary: dict[str, Any]) -> None:
@@ -145,6 +153,11 @@ def parse_args() -> argparse.Namespace:
         help="External pilots registry JSON (default: docs/benchmarks/external-pilots-registry.json)",
     )
     parser.add_argument("--output", type=Path, default=ADOPTION_SUMMARY_PATH, help="Output path for adoption-summary.json")
+    parser.add_argument(
+        "--verified-source-sha",
+        default=None,
+        help="Commit that produced the metrics (defaults to GITHUB_SHA / git HEAD)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Print summary without writing files")
     return parser.parse_args()
 
@@ -161,7 +174,12 @@ def main() -> int:
 
         metrics = collect_pilot_metrics(source="local")
     existing_summary = read_json_file(args.output) if args.output.is_file() else None
-    summary = render_adoption_summary(metrics, registry_path=args.registry, existing_summary=existing_summary)
+    summary = render_adoption_summary(
+        metrics,
+        registry_path=args.registry,
+        existing_summary=existing_summary,
+        verified_source_sha=args.verified_source_sha,
+    )
     validate_summary(summary)
     if args.dry_run:
         print(json.dumps(summary, indent=2))

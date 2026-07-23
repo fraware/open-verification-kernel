@@ -82,6 +82,19 @@ def build_provenance_statement(
             "bundle_id": bundle.bundle_id,
             "digest": {"sha256": content_digest(bundle_payload)},
             "decision": bundle.decision,
+            "schema_version": bundle.schema_version,
+        },
+        "control_plane": {
+            "obligation_ids": [item.obligation_id for item in bundle.evidence if item.obligation_id],
+            "routing_ids": [item.routing_id for item in bundle.evidence if item.routing_id],
+            "routing_enforced": [bool(item.routing_enforced) for item in bundle.evidence],
+            "compilers": [item.compiler for item in bundle.evidence if item.compiler],
+            "coverage": [item.coverage for item in bundle.evidence if item.coverage],
+            "selected_backends": [item.selected_backends for item in bundle.evidence],
+            "executed_backends": [item.executed_backends for item in bundle.evidence],
+            "guarantees": [
+                [claim.guarantee_type for claim in item.backend_claims] for item in bundle.evidence
+            ],
         },
         "materials": [material_entry(path, workspace=workspace) for path in materials or []],
         "invocation": invocation

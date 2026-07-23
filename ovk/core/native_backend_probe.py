@@ -34,6 +34,7 @@ class NativeBackendProbeResult:
     binary_name: str
     binary_present: bool
     used_native_binary: bool
+    detail: str | None = None
 
 
 @dataclass(frozen=True)
@@ -122,6 +123,7 @@ def _probe_opa(fixture_path: str) -> NativeBackendProbeResult:
         binary_name="opa",
         binary_present=binary_present,
         used_native_binary=binary_present,
+        detail=str(raw.get("reason") or ""),
     )
 
 

@@ -23,7 +23,7 @@ jobs:
       - name: Run expanded benchmark
         run: ovk bench --expanded --leaderboard .verification/formal-pr-bench-leaderboard.json
       - name: Render shields.io badge JSON
-        run: python scripts/render_bench_badge.py
+        run: python scripts/render_bench_badge.py --verified-source-sha "${GITHUB_SHA}"
       - name: Commit badge artifacts
         run: |
           git config user.name "github-actions[bot]"
@@ -32,6 +32,8 @@ jobs:
           if git diff --staged --quiet; then
             echo "No badge changes to commit"
           else
+            # Badge commits skip CI by design. Health claims must cite verified_source_sha
+            # inside the JSON (the commit that ran the bench), not this commit.
             git commit -m "chore: update FormalPR-Bench badge [skip ci]"
             git push
           fi
@@ -39,5 +41,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: formal-pr-bench-leaderboard
-          path: .verification/formal-pr-bench-leaderboard.json
+          path: |
+            .verification/formal-pr-bench-leaderboard.json
+            docs/benchmarks/leaderboard-badge.json
+            docs/benchmarks/latest-leaderboard-summary.json
           retention-days: 90

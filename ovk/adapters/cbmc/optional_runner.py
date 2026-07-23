@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import re
 import shutil
-import subprocess
 from pathlib import Path
 from typing import Any
+
+from ovk.core.execution_budget import BackendWorker, LocalSubprocessWorker
 
 
 def _parse_cbmc_counterexamples(output: str, *, failure_mode: str) -> list[dict[str, Any]]:
@@ -63,6 +64,7 @@ def run_cbmc_harness(
     unwind: int | None = None,
     timeout_seconds: int = 60,
     failure_mode: str = "cbmc_assertion_failed",
+    worker: BackendWorker | None = None,
 ) -> dict[str, Any]:
     """Run CBMC on a harness file when the binary is available."""
     cbmc_path = shutil.which("cbmc")
@@ -70,7 +72,6 @@ def run_cbmc_harness(
         return {
             "status": "unknown",
             "reason": "cbmc binary not found",
-            "native_attempted": False,
             "used_native_binary": False,
             "counterexamples": [],
         }
@@ -79,7 +80,6 @@ def run_cbmc_harness(
         return {
             "status": "error",
             "reason": f"harness file not found: {harness_path}",
-            "native_attempted": False,
             "used_native_binary": False,
             "counterexamples": [],
         }
@@ -96,15 +96,16 @@ def run_cbmc_harness(
     if unwind is not None:
         command.extend(["--unwind", str(unwind)])
 
-    try:
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
+    active_worker = worker or LocalSubprocessWorker()
+    result = active_worker.run(
+        command,
+        cwd=harness_path.parent,
+        timeout_seconds=float(timeout_seconds),
+        max_stdout_bytes=2_000_000,
+        max_stderr_bytes=500_000,
+    )
+
+    if result.timed_out:
         return {
             "status": "unknown",
             "reason": "cbmc execution timed out",
@@ -112,24 +113,23 @@ def run_cbmc_harness(
             "used_native_binary": True,
             "counterexamples": [],
         }
-    except OSError as error:
+
+    if result.exit_code is None:
         return {
             "status": "error",
-            "reason": f"cbmc execution failed: {error}",
-            "native_attempted": True,
-            "used_native_binary": True,
+            "reason": result.stderr.strip() or "cbmc worker rejected execution",
+            "used_native_binary": False,
             "counterexamples": [],
         }
 
-    combined = f"{completed.stdout}\n{completed.stderr}"
+    combined = f"{result.stdout}\n{result.stderr}"
     version_match = re.search(r"CBMC version ([^\s]+)", combined)
     tool_version = version_match.group(1) if version_match else None
 
-    if completed.returncode != 0 and "VERIFICATION FAILED" not in combined:
+    if result.exit_code != 0 and "VERIFICATION FAILED" not in combined:
         return {
             "status": "error",
-            "reason": completed.stderr.strip() or "cbmc execution failed",
-            "native_attempted": True,
+            "reason": result.stderr.strip() or "cbmc execution failed",
             "used_native_binary": True,
             "tool_version": tool_version,
             "counterexamples": [],
@@ -140,7 +140,6 @@ def run_cbmc_harness(
         return {
             "status": "pass",
             "reason": "CBMC verification successful within bounds.",
-            "native_attempted": True,
             "used_native_binary": True,
             "tool_version": tool_version,
             "counterexamples": [],
@@ -151,7 +150,6 @@ def run_cbmc_harness(
         return {
             "status": "fail",
             "reason": "CBMC reported a reachable violation.",
-            "native_attempted": True,
             "used_native_binary": True,
             "tool_version": tool_version,
             "counterexamples": _parse_cbmc_counterexamples(combined, failure_mode=failure_mode),
@@ -161,7 +159,6 @@ def run_cbmc_harness(
     return {
         "status": "unknown",
         "reason": "cbmc output did not report verification status",
-        "native_attempted": True,
         "used_native_binary": True,
         "tool_version": tool_version,
         "counterexamples": [],

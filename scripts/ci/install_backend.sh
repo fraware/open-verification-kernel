@@ -51,7 +51,7 @@ install_cedar() {
     source "${HOME}/.cargo/env"
     echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
   fi
-  cargo install cedar-policy-cli --version "${CEDAR_CLI_VERSION}" --locked
+  cargo install cedar-policy-cli --version "${CEDAR_CLI_VERSION}" --locked --force
   if [[ -x "${HOME}/.cargo/bin/cedar" ]]; then
     sudo ln -sf "${HOME}/.cargo/bin/cedar" /usr/local/bin/cedar
   fi
@@ -96,10 +96,11 @@ install_lean() {
 install_cbmc() {
   sudo apt-get update -qq
   if ! sudo apt-get install -y -qq "cbmc=${CBMC_APT_VERSION}*" 2>/dev/null; then
+    # Ubuntu 24.04 currently ships CBMC 5.95.x; accept distro fallback.
     sudo apt-get install -y -qq cbmc
   fi
   verify_binary cbmc
-  cbmc --version | grep -E "${CBMC_APT_VERSION%.*}" >/dev/null
+  cbmc --version
 }
 
 install_alloy() {

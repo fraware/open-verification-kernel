@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """Render shields.io badge JSON and public leaderboard summary from FormalPR-Bench output."""
 
 from __future__ import annotations
@@ -7,6 +6,8 @@ import argparse
 import json
 from pathlib import Path
 from typing import Any
+
+from ovk.core.verified_source import resolve_verified_source_sha
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_LEADERBOARD = ROOT / ".verification" / "formal-pr-bench-leaderboard.json"
@@ -26,25 +27,42 @@ def badge_color(cases_passed: int, cases_total: int) -> str:
     return "red"
 
 
-def render_badge(leaderboard: dict[str, Any]) -> dict[str, Any]:
-    """Build shields.io endpoint badge payload."""
+def render_badge(
+    leaderboard: dict[str, Any],
+    *,
+    verified_source_sha: str | None = None,
+) -> dict[str, Any]:
+    """Build shields.io endpoint badge payload.
+
+    ``verified_source_sha`` records the commit that produced the leaderboard,
+    not a later ``[skip ci]`` badge-only commit.
+    """
     summary = leaderboard.get("summary", {})
     cases_total = int(summary.get("cases_total", 0))
     cases_passed = int(summary.get("cases_passed", 0))
     rate = (cases_passed / cases_total * 100.0) if cases_total else 0.0
-    return {
+    sha = verified_source_sha or resolve_verified_source_sha()
+    payload: dict[str, Any] = {
         "schemaVersion": 1,
         "label": "FormalPR-Bench",
         "message": f"{cases_passed}/{cases_total} ({rate:.0f}%)",
         "color": badge_color(cases_passed, cases_total),
     }
+    if sha:
+        payload["verified_source_sha"] = sha
+    return payload
 
 
-def render_summary(leaderboard: dict[str, Any]) -> dict[str, Any]:
+def render_summary(
+    leaderboard: dict[str, Any],
+    *,
+    verified_source_sha: str | None = None,
+) -> dict[str, Any]:
     """Build trimmed public summary for docs and README links."""
     summary = leaderboard.get("summary", {})
     timing = leaderboard.get("timing_ms", {})
-    return {
+    sha = verified_source_sha or resolve_verified_source_sha()
+    payload: dict[str, Any] = {
         "schema_version": "formal_pr_bench.summary.v1",
         "generated_from": leaderboard.get("schema_version", "formal_pr_bench.leaderboard.v1"),
         "cases_total": summary.get("cases_total", 0),
@@ -68,13 +86,26 @@ def render_summary(leaderboard: dict[str, Any]) -> dict[str, Any]:
             "max": timing.get("max"),
         },
     }
+    if sha:
+        payload["verified_source_sha"] = sha
+        payload["provenance_note"] = (
+            "Cite verified_source_sha (and its CI run) for health claims; "
+            "do not treat a later [skip ci] badge commit as the verified source."
+        )
+    return payload
 
 
-def write_outputs(leaderboard_path: Path, *, dry_run: bool = False) -> tuple[dict[str, Any], dict[str, Any]]:
+def write_outputs(
+    leaderboard_path: Path,
+    *,
+    dry_run: bool = False,
+    verified_source_sha: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Read leaderboard and write badge + summary files."""
     leaderboard = json.loads(leaderboard_path.read_text(encoding="utf-8"))
-    badge = render_badge(leaderboard)
-    summary = render_summary(leaderboard)
+    sha = verified_source_sha or resolve_verified_source_sha()
+    badge = render_badge(leaderboard, verified_source_sha=sha)
+    summary = render_summary(leaderboard, verified_source_sha=sha)
     if not dry_run:
         BADGE_PATH.parent.mkdir(parents=True, exist_ok=True)
         BADGE_PATH.write_text(json.dumps(badge, indent=2) + "\n", encoding="utf-8")
@@ -90,16 +121,27 @@ def main() -> int:
         default=DEFAULT_LEADERBOARD,
         help="Path to formal-pr-bench-leaderboard.json",
     )
+    parser.add_argument(
+        "--verified-source-sha",
+        default=None,
+        help="Commit that produced the leaderboard (defaults to GITHUB_SHA / git HEAD)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Compute outputs without writing files")
     args = parser.parse_args()
     if not args.leaderboard.exists():
         print(f"leaderboard not found: {args.leaderboard}")
         return 1
-    badge, summary = write_outputs(args.leaderboard, dry_run=args.dry_run)
+    badge, summary = write_outputs(
+        args.leaderboard,
+        dry_run=args.dry_run,
+        verified_source_sha=args.verified_source_sha,
+    )
     if args.dry_run:
         print(json.dumps({"badge": badge, "summary": summary}, indent=2))
     else:
         print(f"wrote {BADGE_PATH.relative_to(ROOT)} and {SUMMARY_PATH.relative_to(ROOT)}")
+        if summary.get("verified_source_sha"):
+            print(f"verified_source_sha={summary['verified_source_sha']}")
     return 0
 
 

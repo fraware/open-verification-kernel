@@ -20,6 +20,7 @@ Use this index as the canonical entry point. Each guide covers one topic; cross-
 | [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md) | Adoption dashboard — can I pin strict mode today? |
 | [RELEASE_AUDIT.md](RELEASE_AUDIT.md) | Engineering audit responses and metric provenance |
 | [STATUS.md](STATUS.md) | Capabilities, CLI surface, and trust model |
+| [EXPERIMENTAL_PATHS.md](EXPERIMENTAL_PATHS.md) | Honest limits for non-strict compiler/backend paths |
 | [INTEGRATION.md](INTEGRATION.md) | Install locally or in GitHub Actions |
 | [RELEASE.md](RELEASE.md) | Maintainer release guide and known limitations |
 | [MIGRATION.md](MIGRATION.md) | Upgrade paths between versions |
@@ -32,6 +33,8 @@ Use this index as the canonical entry point. Each guide covers one topic; cross-
 | [BACKENDS.md](BACKENDS.md) | Backend requirements in CI, install matrix, fallback semantics |
 | [POLICY.md](POLICY.md) | Verification routing configuration for `.verification/config.yml` |
 | [EXTERNAL_VALIDATION.md](EXTERNAL_VALIDATION.md) | Weekly external validation matrix |
+| [CONSUMER_VALIDATION_CHECKLIST.md](CONSUMER_VALIDATION_CHECKLIST.md) | Immutable-pin consumer validation checklist (scaffolding) |
+| [FORMALPR_HOLDOUT_GOVERNANCE.md](FORMALPR_HOLDOUT_GOVERNANCE.md) | Private FormalPR-Holdout governance stub (no corpus) |
 | [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md) | Advisory→strict rollout on external OSS repos |
 | [PILOT_CASE_STUDIES.md](PILOT_CASE_STUDIES.md) | In-repo pilot metrics and external pilot reporting |
 | [AGENT_REPAIR_LOOP.md](AGENT_REPAIR_LOOP.md) | Counterexample-to-repair workflow for MCP agents |

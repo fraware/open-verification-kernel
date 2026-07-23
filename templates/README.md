@@ -6,7 +6,9 @@ A template is backend-neutral. It describes what must remain true, expected fail
 
 ## Library (100 templates)
 
-The library ships **100** schema-valid intent templates under domain folders:
+The library ships **100** schema-valid intent templates under domain folders.
+Domain counts are derived from `docs/benchmarks/template-conformance.json`
+(regenerate with `python scripts/build_template_conformance.py --print-domain-counts`):
 
 | Domain | Count | Example templates |
 |---|---|---|
@@ -16,6 +18,10 @@ The library ships **100** schema-valid intent templates under domain folders:
 | `data_boundary/` | 15 | `cbmc_buffer_bounds`, `lean_type_safety`, `cbmc_no_use_after_free_auth_cache` |
 | `deployment/` | 17 | `no_skipped_approval_state`, `tla_rollback_safety`, `tla_rollout_requires_green_health` |
 | `infrastructure/` | 19 | `no_public_sensitive_resource`, `alloy_topology_reachability`, `no_public_egress_alloy` |
+
+Production readiness is tracked in the conformance matrix. A template remains
+`catalog_only` unless every required executable link exists; unsupported public
+executable claims are downgraded honestly.
 
 Validate the full library:
 

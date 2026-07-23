@@ -3,8 +3,10 @@ package ovk.self_protection
 violation[msg] {
   input.actor.type == "ai_agent"
   gate := input.ovk_gate_name
-  input.before.required_checks[_] == gate
-  not input.after.required_checks[_] == gate
+  before := {c | c := input.before.required_checks[_]}
+  after := {c | c := input.after.required_checks[_]}
+  before[gate]
+  not after[gate]
   msg := sprintf("required verification gate removed: %s", [gate])
 }
 

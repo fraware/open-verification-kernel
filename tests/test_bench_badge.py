@@ -18,11 +18,12 @@ def test_render_badge_shape() -> None:
         "summary": {"cases_total": 100, "cases_passed": 100},
         "timing_ms": {"p50": 1.0, "p95": 2.0, "max": 3.0},
     }
-    badge = render_badge(leaderboard)
+    badge = render_badge(leaderboard, verified_source_sha="abc1234deadbeef")
     assert badge["schemaVersion"] == 1
     assert badge["label"] == "FormalPR-Bench"
     assert "100/100" in badge["message"]
     assert badge["color"] == "brightgreen"
+    assert badge["verified_source_sha"] == "abc1234deadbeef"
 
 
 def test_render_summary_includes_dimensions() -> None:
@@ -36,11 +37,13 @@ def test_render_summary_includes_dimensions() -> None:
         },
         "timing_ms": {"p50": 1.0, "p95": 2.0, "max": 3.0},
     }
-    summary = render_summary(leaderboard)
+    summary = render_summary(leaderboard, verified_source_sha="sha-source")
     assert summary["schema_version"] == "formal_pr_bench.summary.v1"
     assert summary["cases_passed"] == 9
     assert summary["timing_ms"]["p95"] == 2.0
     assert "lane" in summary["by_category"]
+    assert summary["verified_source_sha"] == "sha-source"
+    assert "skip ci" in summary["provenance_note"]
 
 
 def test_render_summary_includes_real_diff_recall() -> None:
@@ -49,5 +52,5 @@ def test_render_summary_includes_real_diff_recall() -> None:
         "summary": {"cases_total": 10, "cases_passed": 9, "real_diff_recall": 0.95},
         "timing_ms": {"p50": 1.0, "p95": 2.0, "max": 3.0},
     }
-    summary = render_summary(leaderboard)
+    summary = render_summary(leaderboard, verified_source_sha="x" * 40)
     assert summary["real_diff_recall"] == 0.95

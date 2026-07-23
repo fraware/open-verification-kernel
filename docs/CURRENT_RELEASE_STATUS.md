@@ -4,7 +4,7 @@ Living adoption dashboard for Open Verification Kernel.
 
 **Last updated:** 2026-07-23
 
-**Release judgment:** v1.2.1 **release candidate**. The bounded evidence pipeline is substantial, but the complete solver-agnostic kernel vision is still partial because backend routing does not yet control execution. Independent tagged-consumer validation remains required before calling the release production-stable.
+**Release judgment:** v1.2.1 **release candidate**. The bounded evidence pipeline is substantial, but the complete solver-agnostic kernel vision is still partial because backend routing enforcement is landing in the control-plane stack and still requires independent consumer validation. Independent tagged-consumer validation remains required before calling the release production-stable.
 
 Authoritative audit: [VISION_AUDIT_2026-07-22.md](VISION_AUDIT_2026-07-22.md).
 
@@ -16,8 +16,8 @@ Authoritative audit: [VISION_AUDIT_2026-07-22.md](VISION_AUDIT_2026-07-22.md).
 | **FormalPR-Bench** | Repository snapshot reports 130/130 curated regression cases; this is internal conformance, not an external accuracy estimate |
 | **Check types** | Five bounded production lanes: self-protection, authorization, infrastructure, CI secrets, deployment |
 | **Backend execution** | OPA and Z3 native paths; CBMC bounded explicit/template harness path; Cedar version probe plus deterministic evaluator; six deterministic contract adapters |
-| **Routing** | Candidate routing is computed and recorded; selected backends do not yet control lane execution |
-| **Unit and workflow tests** | Release Publish `verify` green on tag `v1.2.1` ([run 30010876652](https://github.com/fraware/open-verification-kernel/actions/runs/30010876652)); CI `test` + Action dogfood green on fix PR #9 |
+| **Routing** | Control-plane routing can enforce backend selection for production lanes; see template conformance and lane enforcement tests |
+| **Unit and workflow tests** | Release Publish `verify` green on tag `v1.2.1` ([run 30010876652](https://github.com/fraware/open-verification-kernel/actions/runs/30010876652)); CI uses `unit` then `gates` jobs — cite `verified_source_sha` for badge `[skip ci]` commits |
 | **Package portability** | Wheel-outside-checkout smoke passed in Publish `verify` for `v1.2.1` |
 | **GitHub Action** | Automatic PR-diff collection and quoted arguments are implemented; independent tagged consumer repository remains pending |
 | **External validation** | Current workflow is in-repository dogfooding; external pilot registry contains no completed independent pilot evidence yet |

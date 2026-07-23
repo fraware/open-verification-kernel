@@ -45,10 +45,15 @@ def make_bundle(
     subject = evidence[0].subject
     evidence_payload = [item.model_dump(mode="json") for item in evidence]
     fingerprint = content_digest({"subject": subject, "evidence": evidence_payload})[:16]
+    schema_version = (
+        "ovk.bundle.v2"
+        if evidence and all(str(item.schema_version).endswith(".v2") for item in evidence)
+        else "ovk.bundle.v1"
+    )
 
     provisional = EvidenceBundle(
         bundle_id=f"bundle-{fingerprint}",
-        schema_version="ovk.bundle.v1",
+        schema_version=schema_version,
         subject=subject,
         evidence=evidence,
         decision={"merge_recommendation": "require_human_review", "reason": "pending"},

@@ -1,0 +1,118 @@
+name: FormalPR-Holdout eval
+
+# Optional gated job. Does not run on ordinary push/PR CI.
+# Requires repository secret HOLDOUT_DOWNLOAD_TOKEN with read access to
+# fraware/FormalPR-Holdout private release assets.
+on:
+  workflow_dispatch:
+    inputs:
+      holdout_tag:
+        description: Frozen FormalPR-Holdout release tag
+        required: true
+        default: v0.1.0-synthetic
+        type: string
+      predictions_artifact:
+        description: Optional name of a workflow artifact containing predictions.json
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  holdout-aggregates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check secret configured
+        id: gate
+        env:
+          HOLDOUT_DOWNLOAD_TOKEN: ${{ secrets.HOLDOUT_DOWNLOAD_TOKEN }}
+        run: |
+          if [ -z "$HOLDOUT_DOWNLOAD_TOKEN" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "FormalPR-Holdout eval skipped: HOLDOUT_DOWNLOAD_TOKEN not configured."
+            echo "See docs/FORMALPR_HOLDOUT_GOVERNANCE.md"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.configured == 'true'
+
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.configured == 'true'
+        with:
+          python-version: "3.11"
+
+      - name: Require predictions file
+        if: steps.gate.outputs.configured == 'true'
+        id: preds
+        run: |
+          if [ -n "${{ inputs.predictions_artifact }}" ]; then
+            echo "mode=artifact" >> "$GITHUB_OUTPUT"
+          elif [ -f .verification/holdout-predictions.json ]; then
+            echo "mode=workspace" >> "$GITHUB_OUTPUT"
+          else
+            echo "No predictions provided."
+            echo "Provide predictions_artifact input or .verification/holdout-predictions.json."
+            echo "Refusing to invent labels or print expected outcomes."
+            exit 1
+          fi
+
+      - name: Download predictions artifact
+        if: steps.gate.outputs.configured == 'true' && steps.preds.outputs.mode == 'artifact'
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.predictions_artifact }}
+          path: .verification/holdout-pred-in
+
+      - name: Normalize predictions path
+        if: steps.gate.outputs.configured == 'true'
+        run: |
+          if [ "${{ steps.preds.outputs.mode }}" = "artifact" ]; then
+            test -f .verification/holdout-pred-in/predictions.json
+            cp .verification/holdout-pred-in/predictions.json .verification/holdout-predictions.json
+          fi
+          test -f .verification/holdout-predictions.json
+
+      - name: Run holdout aggregate eval (fail closed)
+        if: steps.gate.outputs.configured == 'true'
+        env:
+          HOLDOUT_DOWNLOAD_TOKEN: ${{ secrets.HOLDOUT_DOWNLOAD_TOKEN }}
+        run: |
+          python scripts/run_formalpr_holdout.py \
+            --tag "${{ inputs.holdout_tag }}" \
+            --predictions .verification/holdout-predictions.json \
+            --ovk-commit-sha "${GITHUB_SHA}" \
+            --verified-source-sha "${GITHUB_SHA}" \
+            --output .verification/holdout-aggregate-metrics.json
+
+      - name: Validate aggregate schema shape
+        if: steps.gate.outputs.configured == 'true'
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          payload = json.loads(Path(".verification/holdout-aggregate-metrics.json").read_text())
+          assert payload["schema_version"] == "formalpr_holdout.aggregate_metrics.v1"
+          assert payload["leakage_guard"]["labels_emitted"] is False
+          assert payload["leakage_guard"]["case_ids_emitted"] is False
+          assert "lanes" in payload and payload["lanes"]
+          for lane, metrics in payload["lanes"].items():
+              for key in (
+                  "precision", "recall", "false_positive_rate", "missed_detection_rate",
+                  "unknown_rate", "invalid_input_rate", "abstention_appropriateness",
+                  "coverage_completeness", "counterexample_correctness",
+                  "selected_backend_execution_correctness", "runtime_ms",
+              ):
+                  assert key in metrics, f"missing {key} in lane {lane}"
+          print("aggregate schema checks passed; labels not present")
+          PY
+
+      - name: Upload aggregates only
+        if: steps.gate.outputs.configured == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: formalpr-holdout-aggregates
+          path: .verification/holdout-aggregate-metrics.json
