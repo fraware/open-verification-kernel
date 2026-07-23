@@ -3,9 +3,18 @@ name: Publish
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Ignored for safety; workflow_dispatch never publishes to PyPI. Runs verify + keyless Sigstore only."
+        type: boolean
+        default: true
 
 permissions:
   contents: read
+
+env:
+  OVK_CERTIFICATE_OIDC_ISSUER: https://token.actions.githubusercontent.com
 
 jobs:
   verify:
@@ -19,31 +28,28 @@ jobs:
         env:
           OVK_RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
           python scripts/sync_package_data.py
           pip install -e '.[dev]'
           python scripts/check_release_metadata.py
-          python - <<'PY'
-          import os
-          import ovk
-
-          tag = os.environ["OVK_RELEASE_TAG"]
-          normalized = tag[1:] if tag.startswith("v") else tag
-          if normalized != ovk.__version__:
-              raise SystemExit(f"release tag {tag!r} does not match package version {ovk.__version__!r}")
-          PY
+          if [ "${{ github.event_name }}" = "release" ]; then
+            python -c 'import os, ovk; tag=os.environ["OVK_RELEASE_TAG"]; n=tag[1:] if tag.startswith("v") else tag; raise SystemExit(0 if n==ovk.__version__ else f"release tag {tag!r} does not match package version {ovk.__version__!r}")'
+          fi
           pytest -q
           ovk release-preflight
           ovk pilot
           ovk bench --expanded --leaderboard .verification/formal-pr-bench-leaderboard.json
       - name: Build and inspect package
         run: |
+          set -euo pipefail
           pip install build twine
           python scripts/sync_package_data.py
           python -m build
           twine check dist/*
       - name: Smoke-test release wheel
         run: |
+          set -euo pipefail
           WHEEL="$(realpath "$(ls dist/*.whl | head -n 1)")"
           python -m venv /tmp/ovk-release-wheel
           /tmp/ovk-release-wheel/bin/python -m pip install "$WHEEL"
@@ -51,28 +57,119 @@ jobs:
           cd /tmp/ovk-release-consumer
           /tmp/ovk-release-wheel/bin/ovk init
           /tmp/ovk-release-wheel/bin/ovk doctor
-          /tmp/ovk-release-wheel/bin/python - <<'PY'
-          from ovk import mcp_server
-          from ovk.core.templates_cli import list_templates
+          /tmp/ovk-release-wheel/bin/python -c 'from ovk import mcp_server; from ovk.core.templates_cli import list_templates; assert len(list_templates()) >= 100; assert len(mcp_server.list_capabilities()["capabilities"]) >= 10'
+      - name: Upload built distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: ovk-dist
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
 
-          assert len(list_templates()) >= 100
-          assert len(mcp_server.list_capabilities()["capabilities"]) >= 10
-          PY
-
-  publish:
+  sigstore:
+    name: Keyless Sigstore sign and verify
     needs: verify
     runs-on: ubuntu-latest
-    environment: pypi
+    environment: sigstore
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Build package
+      - name: Download built distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: ovk-dist
+          path: dist
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3.8.1
+      - name: Resolve certificate identity
+        id: identity
         run: |
-          python -m pip install --upgrade pip build
-          python scripts/sync_package_data.py
-          python -m build
+          set -euo pipefail
+          IDENTITY="https://github.com/${GITHUB_WORKFLOW_REF}"
+          echo "certificate_identity=${IDENTITY}" >> "$GITHUB_OUTPUT"
+          echo "Resolved certificate identity: ${IDENTITY}"
+          echo "OIDC issuer: ${OVK_CERTIFICATE_OIDC_ISSUER}"
+          case "${GITHUB_REF}" in
+            refs/tags/*)
+              echo "immutable_tag=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "immutable_tag=false" >> "$GITHUB_OUTPUT"
+              if [ "${{ github.event_name }}" = "release" ]; then
+                echo "Refusing release signing for non-tag ref ${GITHUB_REF}" >&2
+                exit 1
+              fi
+              echo "Dry-run / non-tag signing: identity is branch-bound, not a production pin."
+              ;;
+          esac
+      - name: Keyless sign, verify, and tamper-test
+        env:
+          OVK_SIGSTORE_SIGNING: "1"
+          OVK_COSIGN_IDENTITY: ${{ steps.identity.outputs.certificate_identity }}
+          OVK_COSIGN_ISSUER: ${{ env.OVK_CERTIFICATE_OIDC_ISSUER }}
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+          if [ "${{ steps.identity.outputs.immutable_tag }}" = "true" ]; then
+            python scripts/sigstore_release.py \
+              --dist-dir dist \
+              --bundles-dir sigstore-bundles \
+              --summary sigstore-bundles/ovk-sigstore-summary.json \
+              --certificate-identity "${OVK_COSIGN_IDENTITY}" \
+              --certificate-oidc-issuer "${OVK_COSIGN_ISSUER}" \
+              --git-ref "${GITHUB_REF}" \
+              --require-immutable-tag
+          else
+            python scripts/sigstore_release.py \
+              --dist-dir dist \
+              --bundles-dir sigstore-bundles \
+              --summary sigstore-bundles/ovk-sigstore-summary.json \
+              --certificate-identity "${OVK_COSIGN_IDENTITY}" \
+              --certificate-oidc-issuer "${OVK_COSIGN_ISSUER}" \
+              --git-ref "${GITHUB_REF}"
+          fi
+      - name: Retain cosign bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: ovk-sigstore-bundles
+          path: |
+            sigstore-bundles/**
+            dist/*
+          if-no-files-found: error
+          retention-days: 90
+      - name: Attach Sigstore bundles to GitHub Release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "${{ github.event.release.tag_name }}" \
+            sigstore-bundles/*.json \
+            --clobber
+
+  publish:
+    needs: [verify, sigstore]
+    # PyPI only on GitHub Release events. workflow_dispatch is always a
+    # Sigstore/signing dry-run and never publishes a package status.
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download built distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: ovk-dist
+          path: dist
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:

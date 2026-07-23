@@ -9,7 +9,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from ovk.core.models import EvidenceBundle
-from ovk.core.schema_validation import ValidationIssue, ValidationReport, validate_against_schema, validate_file
+from ovk.core.schema_validation import ValidationIssue, ValidationReport, validate_against_schema
 from ovk.paths import ovk_data_root
 
 SCHEMA_ROOT = ovk_data_root() / "schemas"

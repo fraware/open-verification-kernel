@@ -45,6 +45,7 @@ Suggested rollout: local validation → advisory artifacts → advisory check ru
 6. No completed independent repository currently proves the tagged Action and wheel integration.
 7. Current-commit CI evidence is not attached to the latest observed `[skip ci]` HEAD.
 8. Auto-collected branch protection cannot reconstruct removed required checks without trusted before/after data.
+9. Live Sigstore keyless signing on a **protected** Publish run (immutable tag + retained cosign bundles) is implemented in workflow code but the E2E exit remains open until a successful protected run is recorded — see [RELEASE.md](RELEASE.md#sigstorecosign-keyless).
 
 Full analysis and acceptance criteria: [VISION_AUDIT_2026-07-22.md](VISION_AUDIT_2026-07-22.md).
 
