@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/backend.routing.schema.json",
+  "title": "Backend Routing Decision",
+  "type": "object",
+  "required": [
+    "routing_id",
+    "schema_version",
+    "obligation_id",
+    "requested",
+    "eligible",
+    "selected",
+    "rejected",
+    "aggregation_policy",
+    "fallback_policy",
+    "budget",
+    "policy_digest"
+  ],
+  "properties": {
+    "routing_id": { "type": "string", "minLength": 1 },
+    "schema_version": { "type": "string", "const": "ovk.routing.v1" },
+    "obligation_id": { "type": "string", "minLength": 1 },
+    "requested": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "eligible": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["backend", "score", "support", "guarantee_type"],
+        "properties": {
+          "backend": { "type": "string", "minLength": 1 },
+          "score": { "type": "number" },
+          "support": {
+            "type": "string",
+            "enum": ["supported", "partial", "unsupported", "unavailable"]
+          },
+          "guarantee_type": { "type": "string", "minLength": 1 },
+          "reasons": {
+            "type": "array",
+            "items": { "type": "string" },
+            "default": []
+          },
+          "native_available": { "type": "boolean", "default": false }
+        },
+        "additionalProperties": true
+      }
+    },
+    "selected": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["backend", "reason", "expected_guarantee"],
+        "properties": {
+          "backend": { "type": "string", "minLength": 1 },
+          "reason": { "type": "string" },
+          "expected_guarantee": { "type": "string" },
+          "required": { "type": "boolean", "default": true },
+          "score": { "type": "number", "default": 0 }
+        },
+        "additionalProperties": true
+      }
+    },
+    "rejected": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["backend", "reason"],
+        "properties": {
+          "backend": { "type": "string", "minLength": 1 },
+          "reason": { "type": "string" },
+          "support": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["supported", "partial", "unsupported", "unavailable"]
+              },
+              { "type": "null" }
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "aggregation_policy": { "type": "string", "minLength": 1 },
+    "fallback_policy": {
+      "type": "object",
+      "required": ["allow_fallback"],
+      "properties": {
+        "allow_fallback": { "type": "boolean" },
+        "fallback_backends": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "on_timeout": {
+          "type": "string",
+          "enum": ["unknown", "error", "fail", "fallback"],
+          "default": "unknown"
+        },
+        "on_tool_unavailable": {
+          "type": "string",
+          "enum": ["unknown", "error", "fail", "fallback"],
+          "default": "unknown"
+        },
+        "on_invalid_output": {
+          "type": "string",
+          "enum": ["unknown", "error", "fail", "fallback"],
+          "default": "unknown"
+        }
+      },
+      "additionalProperties": true
+    },
+    "budget": {
+      "type": "object",
+      "required": [
+        "total_wall_time_seconds",
+        "per_backend_wall_time_seconds",
+        "max_memory_mb",
+        "max_parallel_backends",
+        "allow_network",
+        "allow_repository_write"
+      ],
+      "properties": {
+        "total_wall_time_seconds": { "type": "number", "minimum": 0 },
+        "per_backend_wall_time_seconds": { "type": "number", "minimum": 0 },
+        "max_memory_mb": { "type": "integer", "minimum": 1 },
+        "max_parallel_backends": { "type": "integer", "minimum": 1 },
+        "allow_network": { "type": "boolean" },
+        "allow_repository_write": { "type": "boolean" },
+        "allowed_backends": {
+          "type": ["array", "null"],
+          "items": { "type": "string" }
+        },
+        "denied_backends": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        }
+      },
+      "additionalProperties": true
+    },
+    "policy_digest": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": true
+}

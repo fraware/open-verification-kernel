@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/backend.execution.schema.json",
+  "title": "Backend Execution Artifacts",
+  "description": "Schemas for backend obligations, execution attempts, normalized results, and aggregate execution records.",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/backend_obligation" },
+    { "$ref": "#/$defs/execution_attempt" },
+    { "$ref": "#/$defs/normalized_backend_result" },
+    { "$ref": "#/$defs/obligation_execution_record" }
+  ],
+  "$defs": {
+    "backend_obligation": {
+      "type": "object",
+      "required": [
+        "backend_obligation_id",
+        "obligation_id",
+        "routing_id",
+        "backend",
+        "adapter_version",
+        "compiler_version",
+        "input_language",
+        "payload",
+        "payload_digest",
+        "expected_guarantee"
+      ],
+      "properties": {
+        "backend_obligation_id": { "type": "string", "minLength": 1 },
+        "obligation_id": { "type": "string", "minLength": 1 },
+        "routing_id": { "type": "string", "minLength": 1 },
+        "backend": { "type": "string", "minLength": 1 },
+        "adapter_version": { "type": "string", "minLength": 1 },
+        "compiler_version": { "type": "string", "minLength": 1 },
+        "input_language": { "type": "string", "minLength": 1 },
+        "payload": { "type": "object", "additionalProperties": true },
+        "payload_digest": { "type": "string", "minLength": 1 },
+        "command_plan": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "environment_requirements": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "expected_guarantee": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": true
+    },
+    "execution_attempt": {
+      "type": "object",
+      "required": [
+        "attempt_id",
+        "backend_obligation_id",
+        "backend",
+        "required",
+        "started_at",
+        "finished_at",
+        "duration_ms",
+        "termination",
+        "native_execution"
+      ],
+      "properties": {
+        "attempt_id": { "type": "string", "minLength": 1 },
+        "backend_obligation_id": { "type": "string", "minLength": 1 },
+        "backend": { "type": "string", "minLength": 1 },
+        "required": { "type": "boolean" },
+        "started_at": { "type": "string", "minLength": 1 },
+        "finished_at": { "type": "string", "minLength": 1 },
+        "duration_ms": { "type": "number", "minimum": 0 },
+        "termination": {
+          "type": "string",
+          "enum": [
+            "completed",
+            "timeout",
+            "resource_exhausted",
+            "tool_unavailable",
+            "tool_error",
+            "invalid_output",
+            "cancelled"
+          ]
+        },
+        "native_execution": { "type": "boolean" },
+        "tool_version": { "type": ["string", "null"] },
+        "tool_digest": { "type": ["string", "null"] },
+        "worker_image_digest": { "type": ["string", "null"] },
+        "exit_code": { "type": ["integer", "null"] },
+        "stdout_digest": { "type": ["string", "null"] },
+        "stderr_digest": { "type": ["string", "null"] },
+        "raw_result_digest": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "normalized_backend_result": {
+      "type": "object",
+      "required": [
+        "attempt_id",
+        "backend",
+        "status",
+        "guarantee_type",
+        "assumptions",
+        "limits",
+        "counterexamples",
+        "generated_artifacts"
+      ],
+      "properties": {
+        "attempt_id": { "type": "string", "minLength": 1 },
+        "backend": { "type": "string", "minLength": 1 },
+        "status": {
+          "type": "string",
+          "enum": ["pass", "fail", "unknown", "error", "skipped"]
+        },
+        "guarantee_type": { "type": "string", "minLength": 1 },
+        "assumptions": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "limits": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "counterexamples": {
+          "type": "array",
+          "items": { "type": "object", "additionalProperties": true }
+        },
+        "generated_artifacts": {
+          "type": "array",
+          "items": { "type": "object", "additionalProperties": true }
+        }
+      },
+      "additionalProperties": true
+    },
+    "obligation_execution_record": {
+      "type": "object",
+      "required": [
+        "obligation",
+        "routing",
+        "backend_obligations",
+        "attempts",
+        "results",
+        "aggregate_status",
+        "merge_recommendation",
+        "aggregation_reason",
+        "open_obligations"
+      ],
+      "properties": {
+        "obligation": {
+          "$ref": "https://openverification.dev/schemas/verification.obligation.schema.json"
+        },
+        "routing": {
+          "$ref": "https://openverification.dev/schemas/backend.routing.schema.json"
+        },
+        "backend_obligations": {
+          "type": "array",
+          "items": {
+            "$ref": "https://openverification.dev/schemas/backend.execution.schema.json#/$defs/backend_obligation"
+          }
+        },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "$ref": "https://openverification.dev/schemas/backend.execution.schema.json#/$defs/execution_attempt"
+          }
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "$ref": "https://openverification.dev/schemas/backend.execution.schema.json#/$defs/normalized_backend_result"
+          }
+        },
+        "aggregate_status": {
+          "type": "string",
+          "enum": ["pass", "fail", "unknown", "error", "skipped"]
+        },
+        "merge_recommendation": {
+          "type": "string",
+          "enum": [
+            "allow",
+            "block",
+            "require_human_review",
+            "allow_with_warning",
+            "require_stronger_check"
+          ]
+        },
+        "aggregation_reason": { "type": "string" },
+        "open_obligations": {
+          "type": "array",
+          "items": { "type": "object", "additionalProperties": true }
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}
