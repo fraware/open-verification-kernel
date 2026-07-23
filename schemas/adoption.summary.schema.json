@@ -15,6 +15,11 @@
     "schema_version": { "const": "ovk.adoption_summary.v1" },
     "ovk_version": { "type": "string", "minLength": 1 },
     "updated_at": { "type": ["string", "null"] },
+    "verified_source_sha": {
+      "type": "string",
+      "minLength": 7,
+      "description": "Git commit that produced the metrics; not a later [skip ci] badge commit."
+    },
     "formal_pr_bench": {
       "type": "object",
       "required": ["cases_total", "cases_passed", "pass_rate"],
