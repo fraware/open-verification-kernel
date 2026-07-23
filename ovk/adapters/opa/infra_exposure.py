@@ -13,7 +13,6 @@ INFRA_EXPOSURE_REGO = r'''
 package ovk.infra_exposure
 
 violation[msg] {
-  some resource
   resource := input.resources[_]
   resource.sensitivity == "confidential"
   resource.public_exposure == true
@@ -21,7 +20,6 @@ violation[msg] {
 }
 
 violation[msg] {
-  some resource
   resource := input.resources[_]
   resource.sensitivity == "restricted"
   resource.public_exposure == true

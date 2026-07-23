@@ -181,9 +181,14 @@ def test_unselected_backend_cannot_affect_decision() -> None:
         ],
         acceptable_guarantees=["exposure_graph_check"],
     )
-    # Aggregation only considers selected backends; forged fail is ignored.
-    assert forged.merge_recommendation == MergeRecommendation.ALLOW
-    assert forged.status == VerificationStatus.PASS
+    # Unexpected backends are a quality error: require review, never allow or block
+    # based on forged unselected fail/pass evidence.
+    assert forged.merge_recommendation == MergeRecommendation.REQUIRE_HUMAN_REVIEW
+    assert forged.status == VerificationStatus.UNKNOWN
+    assert forged.quality_error is True
+    assert "unexpected=['forged-opa']" in forged.reason
+    assert forged.merge_recommendation != MergeRecommendation.BLOCK
+    assert forged.merge_recommendation != MergeRecommendation.ALLOW
 
 
 def test_control_plane_does_not_execute_unselected_backend() -> None:

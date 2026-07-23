@@ -35,10 +35,10 @@ def _resolve_existing_harness(data: dict[str, Any]) -> Path | None:
         return None
     path = Path(str(harness_path))
     if path.is_file():
-        return path
+        return path.resolve()
     packaged_fixture = _HARNESS_ROOT / path.name
     if packaged_fixture.is_file():
-        return packaged_fixture
+        return packaged_fixture.resolve()
     return None
 
 

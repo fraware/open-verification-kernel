@@ -74,8 +74,13 @@ def test_unselected_backend_cannot_submit_evidence_affecting_decision() -> None:
         ],
         acceptable_guarantees=["deterministic_witness"],
     )
-    # Unselected fail must not flip a selected pass to block.
-    assert outcome.merge_recommendation == MergeRecommendation.ALLOW
+    # Unselected fail must not flip a selected pass to block; quality error
+    # forces human review instead of allowing the unexpected backend to decide.
+    assert outcome.merge_recommendation == MergeRecommendation.REQUIRE_HUMAN_REVIEW
+    assert outcome.status == VerificationStatus.UNKNOWN
+    assert outcome.quality_error is True
+    assert "unexpected=['rogue-unselected']" in outcome.reason
+    assert outcome.merge_recommendation != MergeRecommendation.BLOCK
 
 
 def test_selected_backend_omitted_from_execution_requires_review() -> None:

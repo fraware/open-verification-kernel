@@ -137,6 +137,11 @@ def _probe_cbmc(fixture_path: str) -> NativeBackendProbeResult:
         artifact.get("kind") == "backend_provenance" and artifact.get("used_native_binary")
         for artifact in evidence.generated_artifacts
     )
+    detail = None
+    for artifact in evidence.generated_artifacts:
+        if artifact.get("kind") == "backend_provenance" and artifact.get("native_reason"):
+            detail = str(artifact.get("native_reason"))
+            break
     return NativeBackendProbeResult(
         backend="cbmc",
         fixture_path=fixture_path,
@@ -145,6 +150,7 @@ def _probe_cbmc(fixture_path: str) -> NativeBackendProbeResult:
         binary_name="cbmc",
         binary_present=binary_present,
         used_native_binary=used_native,
+        detail=detail,
     )
 
 
