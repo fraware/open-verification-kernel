@@ -84,9 +84,10 @@ def run_cbmc_harness(
             "counterexamples": [],
         }
 
+    harness_abs = harness_path.expanduser().resolve()
     command = [
         cbmc_path,
-        str(harness_path),
+        str(harness_abs),
         "--function",
         entry_function,
         "--trace",
@@ -99,7 +100,7 @@ def run_cbmc_harness(
     active_worker = worker or LocalSubprocessWorker()
     result = active_worker.run(
         command,
-        cwd=harness_path.parent,
+        cwd=harness_abs.parent,
         timeout_seconds=float(timeout_seconds),
         max_stdout_bytes=2_000_000,
         max_stderr_bytes=500_000,
