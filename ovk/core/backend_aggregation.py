@@ -81,12 +81,16 @@ def aggregate_fail_dominant_v1(
     executed = set(by_backend)
     selected_ids = {item.backend for item in selected}
 
-    if selected_ids != executed and not selected_ids.issubset(executed):
+    if selected_ids != executed:
         missing = sorted(selected_ids - executed)
+        unexpected = sorted(executed - selected_ids)
         return AggregationOutcome(
             status=VerificationStatus.UNKNOWN,
             merge_recommendation=MergeRecommendation.REQUIRE_HUMAN_REVIEW,
-            reason=f"selected and executed backend sets differ; missing={missing}",
+            reason=(
+                "selected and executed backend sets differ; "
+                f"missing={missing}; unexpected={unexpected}"
+            ),
             quality_error=True,
         )
 
