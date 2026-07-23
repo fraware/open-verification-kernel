@@ -1,3 +1,4 @@
+from ovk.core.ci_secrets_compiler import compile_ci_secrets_obligation
 from ovk.core.materials import canonical_material_bytes, material_reference_from_payload
 from ovk.core.self_protection_compiler import compile_self_protection_obligation
 
@@ -33,3 +34,27 @@ def test_self_protection_material_sizes_bind_each_payload() -> None:
     assert by_id["self-protection-before"].size_bytes == len(canonical_material_bytes(data["before"]))
     assert by_id["self-protection-after"].size_bytes == len(canonical_material_bytes(data["after"]))
     assert by_id["self-protection-input"].size_bytes == len(canonical_material_bytes(data))
+
+
+def test_ci_secrets_legacy_material_size_binds_input_payload() -> None:
+    data = {
+        "trust_context": "untrusted_fork_pr",
+        "workflows": [
+            {
+                "workflow_id": "ci",
+                "triggers": ["pull_request"],
+                "secrets_used": [],
+                "runs_untrusted_code": False,
+            }
+        ],
+    }
+    obligation = compile_ci_secrets_obligation(
+        data,
+        repo="example/repo",
+        head_sha="head",
+        base_sha="base",
+    )
+    assert len(obligation.materials) == 1
+    reference = obligation.materials[0]
+    assert reference.size_bytes == len(canonical_material_bytes(data))
+    assert reference.size_bytes != len(reference.sha256)
