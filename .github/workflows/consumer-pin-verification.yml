@@ -1,0 +1,87 @@
+name: Consumer Pin Verification
+
+# Optional gate: verify independent consumers still pin immutable OVK v1.2.1
+# (or a configured tag) and never uses: ./
+
+on:
+  workflow_dispatch:
+    inputs:
+      ovk_tag:
+        description: Immutable OVK tag consumers must pin
+        required: true
+        default: v1.2.1
+      fastapi_ref:
+        description: Ref for ovk-consumer-fastapi-terraform
+        required: true
+        default: main
+      express_ref:
+        description: Ref for ovk-consumer-express-actions
+        required: true
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  verify-consumer-pins:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: fraware/ovk-consumer-fastapi-terraform
+            ref: ${{ inputs.fastapi_ref }}
+          - repo: fraware/ovk-consumer-express-actions
+            ref: ${{ inputs.express_ref }}
+    steps:
+      - name: Checkout consumer
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ matrix.repo }}
+          ref: ${{ matrix.ref }}
+          path: consumer
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Assert immutable Action pin
+        env:
+          OVK_TAG: ${{ inputs.ovk_tag }}
+        working-directory: consumer
+        run: |
+          set -euo pipefail
+          echo "Checking ${{ matrix.repo }}@${{ matrix.ref }} for OVK pin ${OVK_TAG}"
+          python - <<'PY'
+          import os, re, sys
+          from pathlib import Path
+          tag = os.environ["OVK_TAG"]
+          workflows = list(Path(".github/workflows").glob("*.yml")) + list(Path(".github/workflows").glob("*.yaml"))
+          if not workflows:
+              sys.exit("no workflow files")
+          failures = []
+          for path in workflows:
+              text = path.read_text(encoding="utf-8")
+              for line in text.splitlines():
+                  m = re.match(r"\s*uses:\s*(\S+)", line)
+                  if not m:
+                      continue
+                  ref = m.group(1).strip().strip("'\"")
+                  if re.match(r"^\./", ref):
+                      failures.append(f"{path.name}: forbidden uses: ./")
+                  if "open-verification-kernel@" in ref and ref.endswith(("@main", "@master", "@HEAD")):
+                      failures.append(f"{path.name}: mutable pin {ref}")
+              if f"fraware/open-verification-kernel@{tag}" not in text and "open-verification-kernel@" in text:
+                  # Allow workflows that do not reference OVK; require pin when present.
+                  pass
+          texts = "\n".join(p.read_text(encoding="utf-8") for p in workflows)
+          if f"fraware/open-verification-kernel@{tag}" not in texts:
+              failures.append(f"missing required pin fraware/open-verification-kernel@{tag}")
+          if failures:
+              print("FAIL")
+              for item in failures:
+                  print(item)
+              raise SystemExit(1)
+          print(f"Pin verification OK for tag {tag}")
+          PY
+          if [ -f scripts/assert_ovk_pin.py ]; then
+            python scripts/assert_ovk_pin.py
+          fi
