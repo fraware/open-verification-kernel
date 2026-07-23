@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from ovk.compilers.github_actions.expressions import secret_names
 from ovk.compilers.github_actions.ir import SecretUse, TrustEdge, TrustNode

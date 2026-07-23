@@ -34,7 +34,7 @@ from ovk.core.execution_models import (
     compute_attempt_id,
     compute_raw_execution_digests,
 )
-from ovk.core.models import MergeRecommendation, VerificationStatus
+from ovk.core.models import VerificationStatus
 from ovk.core.result_cache import ControlPlaneResultCache
 
 

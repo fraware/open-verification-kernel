@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from ovk.adapters.lane import build_default_lane_registry
 from ovk.core.execution_models import (

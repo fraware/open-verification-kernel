@@ -15,7 +15,6 @@ from ovk.core.backend_aggregation import aggregate_fail_dominant_v1
 from ovk.core.backend_control_plane import BackendControlPlane
 from ovk.core.ci_secrets_compiler import COMPILER_ID as CI_SECRETS_COMPILER_ID
 from ovk.core.ci_secrets_compiler import compile_ci_secrets_obligation
-from ovk.core.deployment_compiler import COMPILER_ID as DEPLOYMENT_COMPILER_ID
 from ovk.core.deployment_compiler import compile_deployment_obligation
 from ovk.core.execution_models import BackendSelection, ExecutionBudget, ExecutionContext, NormalizedBackendResult
 from ovk.core.infrastructure_compiler import COMPILER_ID as INFRA_COMPILER_ID

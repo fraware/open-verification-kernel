@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 
 from ovk.adapters.authorization import build_authorization_registry
-from ovk.adapters.ci_secrets import build_ci_secrets_registry
 from ovk.adapters.deployment import build_deployment_registry
-from ovk.adapters.infrastructure import build_infrastructure_registry
 from ovk.core.adapter_runtime import execute_obligations
 from ovk.core.authorization_compiler import compile_authorization_obligation
 from ovk.core.backend_control_plane import BackendControlPlane
@@ -17,7 +13,6 @@ from ovk.core.ci_secrets_compiler import compile_ci_secrets_obligation
 from ovk.core.deployment_compiler import compile_deployment_obligation
 from ovk.core.execution_models import ExecutionBudget, ExecutionContext
 from ovk.core.infrastructure_compiler import compile_infrastructure_obligation
-from ovk.core.models import MergeRecommendation, VerificationStatus
 from ovk.core.router import RoutingConfig, route_obligation
 
 

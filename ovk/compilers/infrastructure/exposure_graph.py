@@ -77,7 +77,6 @@ def concrete_public_paths(
     while queue:
         node, nodes, edge_path = queue.popleft()
         for edge in adjacency.get(node, []):
-            key = (edge.source, edge.target, edge.kind)
             marker = (edge.source, edge.target)
             if marker in seen:
                 continue

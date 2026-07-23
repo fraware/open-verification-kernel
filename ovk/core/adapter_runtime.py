@@ -18,6 +18,7 @@ from ovk.adapters.lane import build_default_lane_registry
 from ovk.adapters.self_protection import build_self_protection_registry
 from ovk.core.authorization_compiler import compile_authorization_obligation
 from ovk.core.backend_control_plane import BackendControlPlane, compare_shadow_to_legacy
+from ovk.core.bundle import content_digest
 from ovk.core.ci_secrets_compiler import compile_ci_secrets_obligation
 from ovk.core.deployment_compiler import compile_deployment_obligation
 from ovk.core.evidence_from_execution import execution_record_to_evidence
@@ -64,10 +65,24 @@ def _attach_execution_metadata(
     data: dict[str, Any],
     routing: dict[str, Any] | None,
     shadow_comparison: dict[str, Any] | None = None,
+    intent_id: str | None = None,
+    job_id: str | None = None,
+    input_format: str | None = None,
 ) -> VerificationEvidence:
-    """Record routing decisions and input digest on evidence artifacts."""
+    """Record routing, input digest, and obligation-scoped evidence identity."""
+    resolved_intent = intent_id or str((routing or {}).get("intent_id") or LANE_TO_INTENT.get(lane, lane))
+    resolved_format = input_format or "infra"
+    identity = {
+        "intent_id": resolved_intent,
+        "lane": lane,
+        "input": data,
+        "input_format": resolved_format,
+        "job_id": job_id,
+    }
+    input_digest = content_digest({"lane": lane, "input": data})
+    evidence_suffix = content_digest(identity)[:12]
     artifacts = list(evidence.generated_artifacts)
-    artifacts.append({"kind": "input_digest", "digest": cache_key(lane, data), "lane": lane})
+    artifacts.append({"kind": "input_digest", "digest": input_digest, "lane": lane})
     if routing is not None:
         artifacts.append(
             {
@@ -76,11 +91,18 @@ def _attach_execution_metadata(
                 "selected": routing.get("selected", []),
                 "rejected": routing.get("rejected", []),
                 "routing_id": routing.get("routing_id"),
+                "routing_enforced": bool(routing.get("routing_enforced")),
+                "executed_backends": [claim.backend for claim in evidence.backend_claims],
             }
         )
     if shadow_comparison is not None:
         artifacts.append(shadow_comparison)
-    return evidence.model_copy(update={"generated_artifacts": artifacts})
+    return evidence.model_copy(
+        update={
+            "evidence_id": f"{evidence.evidence_id}-{evidence_suffix}",
+            "generated_artifacts": artifacts,
+        }
+    )
 
 
 def _legacy_status_and_recommendation(evidence: VerificationEvidence) -> tuple[str, str]:
@@ -407,6 +429,9 @@ def _evaluate_obligation(
                 lane=lane,
                 data=data,
                 routing=routing_by_intent.get(intent_id),
+                intent_id=intent_id,
+                job_id=obligation.get("job_id"),
+                input_format=str(obligation.get("input_format", "infra")),
             )
 
     # Vertical slices: enforced control plane is authoritative.
@@ -432,6 +457,9 @@ def _evaluate_obligation(
             lane=lane,
             data=data,
             routing=routing_by_intent.get(intent_id),
+            intent_id=intent_id,
+            job_id=obligation.get("job_id"),
+            input_format=str(obligation.get("input_format", "infra")),
         )
 
     # Legacy path remains authoritative for non-enforced lanes.
@@ -489,6 +517,9 @@ def _evaluate_obligation(
         data=data,
         routing=routing_by_intent.get(intent_id),
         shadow_comparison=shadow_comparison,
+        intent_id=intent_id,
+        job_id=obligation.get("job_id"),
+        input_format=str(obligation.get("input_format", "infra")),
     )
 
 

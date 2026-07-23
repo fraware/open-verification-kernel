@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ovk.adapters.z3.counterexample import counterexamples_from_obligation
-from ovk.adapters.z3.obligation import AuthorizationObligation, build_authorization_obligation
+from ovk.adapters.z3.obligation import build_authorization_obligation
 from ovk.adapters.z3.validation import validate_authorization_input
 from ovk.core.bundle import content_digest
 from ovk.core.execution_models import (

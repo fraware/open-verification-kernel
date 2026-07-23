@@ -13,7 +13,6 @@ auth helpers are marked ``dynamic`` / ``unsupported``.
 from __future__ import annotations
 
 import re
-from collections import defaultdict
 
 from ovk.compilers.authorization.base import (
     extract_string_literal,
