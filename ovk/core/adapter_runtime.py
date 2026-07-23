@@ -419,10 +419,12 @@ def _evaluate_obligation(
     lane = str(obligation["lane"])
     data = obligation["input"]
     intent_id = str(obligation.get("intent_id") or LANE_TO_INTENT.get(lane, lane))
+    input_format = str(obligation.get("input_format", "infra"))
     key = cache_key(
         lane,
         data,
         subject={"repo": repo, "head_sha": head_sha, **({"base_sha": base_sha} if base_sha else {})},
+        execution_fingerprint={"intent_id": intent_id, "input_format": input_format},
     )
     if use_cache and cache_dir is not None:
         cached = get_cached_evidence(cache_dir, key)

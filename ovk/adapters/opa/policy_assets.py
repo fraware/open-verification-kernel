@@ -13,15 +13,13 @@ from pathlib import Path
 SELF_PROTECTION_REGO = r'''
 package ovk.self_protection
 
-after_has_gate(gate) {
-  input.after.required_checks[_] == gate
-}
-
 violation[msg] {
   input.actor.type == "ai_agent"
   gate := input.ovk_gate_name
-  input.before.required_checks[_] == gate
-  not after_has_gate(gate)
+  before := {c | c := input.before.required_checks[_]}
+  after := {c | c := input.after.required_checks[_]}
+  before[gate]
+  not after[gate]
   msg := sprintf("required verification gate removed: %s", [gate])
 }
 
@@ -40,8 +38,6 @@ violation[msg] {
   msg := "workflow actions permission escalated to write"
 }
 '''.strip() + "\n"
-
-
 def write_self_protection_rego(path: Path) -> None:
     """Write the self-protection Rego policy to disk."""
     path.parent.mkdir(parents=True, exist_ok=True)
