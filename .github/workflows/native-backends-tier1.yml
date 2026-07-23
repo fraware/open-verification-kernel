@@ -101,3 +101,11 @@ jobs:
                   f"{'yes' if result.fixture_matches_oracle else 'no'} |"
               )
           PY
+      - name: Require all Tier 1 matrix jobs to pass
+        env:
+          TIER1_MATRIX_RESULT: ${{ needs.native-backend-tier1.result }}
+        run: |
+          if [ "$TIER1_MATRIX_RESULT" != "success" ]; then
+            echo "Required native backend matrix result: $TIER1_MATRIX_RESULT" >&2
+            exit 1
+          fi
