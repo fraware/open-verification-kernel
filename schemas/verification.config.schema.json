@@ -21,7 +21,12 @@
       "type": "object",
       "properties": {
         "max_wall_time_seconds": { "type": "number", "minimum": 1 },
+        "total_wall_time_seconds": { "type": "number", "minimum": 1 },
+        "per_backend_wall_time_seconds": { "type": "number", "minimum": 1 },
         "max_memory_mb": { "type": "integer", "minimum": 64 },
+        "max_parallel_backends": { "type": "integer", "minimum": 1 },
+        "allow_network": { "type": "boolean" },
+        "allow_repository_write": { "type": "boolean" },
         "allowed_backends": {
           "type": "array",
           "items": { "type": "string", "minLength": 1 },
@@ -38,7 +43,36 @@
     "routing": {
       "type": "object",
       "properties": {
-        "prefer_deterministic": { "type": "boolean" }
+        "mode": {
+          "type": "string",
+          "enum": ["legacy", "shadow", "enforced"],
+          "default": "shadow",
+          "description": "legacy keeps lane evaluators authoritative; shadow runs the control plane for comparison; enforced is gated until acceptance tests pass."
+        },
+        "strategy": {
+          "type": "string",
+          "enum": ["primary_with_optional_corroboration"],
+          "default": "primary_with_optional_corroboration"
+        },
+        "aggregation": {
+          "type": "string",
+          "default": "ovk.aggregate.fail_dominant.v1"
+        },
+        "max_selected_backends": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8,
+          "default": 2
+        },
+        "prefer_deterministic": { "type": "boolean", "default": false },
+        "allow_fallback": { "type": "boolean", "default": false },
+        "accept_partial_primary": { "type": "boolean", "default": false },
+        "enforced_lanes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true,
+          "description": "Lanes permitted to use enforced control-plane execution once acceptance tests pass."
+        }
       },
       "additionalProperties": false
     },
