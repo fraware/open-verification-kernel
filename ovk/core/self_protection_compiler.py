@@ -7,11 +7,11 @@ from typing import Any
 from ovk.core.bundle import content_digest
 from ovk.core.execution_models import (
     AbstractionCoverage,
-    MaterialReference,
     VerificationObligation,
     compute_abstraction_digest,
     compute_obligation_id,
 )
+from ovk.core.materials import material_reference_from_payload
 from ovk.core.models import RiskSeverity, VerificationSubject
 
 COMPILER_ID = "ovk.self_protection.neutral.v1"
@@ -72,30 +72,27 @@ def compile_self_protection_obligation(
         )
 
     materials = [
-        MaterialReference(
+        material_reference_from_payload(
             material_id="self-protection-before",
             kind="branch_protection",
             uri="ovk-material:self_protection/before",
-            sha256=content_digest(before),
-            size_bytes=len(content_digest(before)),
+            payload=before,
             source_revision=base_sha,
             trusted=metadata_trusted and has_before,
         ),
-        MaterialReference(
+        material_reference_from_payload(
             material_id="self-protection-after",
             kind="branch_protection",
             uri="ovk-material:self_protection/after",
-            sha256=content_digest(after),
-            size_bytes=len(content_digest(after)),
+            payload=after,
             source_revision=head_sha,
             trusted=metadata_trusted and has_after,
         ),
-        MaterialReference(
+        material_reference_from_payload(
             material_id="self-protection-input",
             kind="diff",
             uri="ovk-material:self_protection/input",
-            sha256=content_digest(data),
-            size_bytes=len(content_digest(data)),
+            payload=data,
             source_revision=head_sha,
             trusted=False,
         ),
