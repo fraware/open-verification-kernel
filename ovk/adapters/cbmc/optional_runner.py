@@ -109,7 +109,8 @@ def run_cbmc_harness(
         return {
             "status": "unknown",
             "reason": "cbmc execution timed out",
-            "used_native_binary": False,
+            "native_attempted": True,
+            "used_native_binary": True,
             "counterexamples": [],
         }
 

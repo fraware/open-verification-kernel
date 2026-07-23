@@ -1,4 +1,3 @@
-import subprocess
 from pathlib import Path
 
 from ovk.adapters.cbmc import evidence as cbmc_evidence
@@ -26,11 +25,20 @@ def test_cbmc_timeout_is_native_unknown_not_fallback(monkeypatch, tmp_path: Path
     harness.write_text("void harness(void) {}\n", encoding="utf-8")
     monkeypatch.setattr("ovk.adapters.cbmc.optional_runner.shutil.which", lambda _name: "/usr/bin/cbmc")
 
-    def timeout(*args, **kwargs):
-        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout", 60))
+    class TimeoutWorker:
+        def run(self, command, *, cwd, env=None, timeout_seconds, max_stdout_bytes=0, max_stderr_bytes=0):
+            from ovk.core.execution_budget import WorkerResult
 
-    monkeypatch.setattr("ovk.adapters.cbmc.optional_runner.subprocess.run", timeout)
-    result = run_cbmc_harness(harness_path=harness, timeout_seconds=1)
+            return WorkerResult(
+                exit_code=None,
+                timed_out=True,
+                stdout="",
+                stderr="",
+                cwd=str(cwd),
+                command=tuple(command),
+            )
+
+    result = run_cbmc_harness(harness_path=harness, timeout_seconds=1, worker=TimeoutWorker())
     assert result["status"] == "unknown"
     assert result["native_attempted"] is True
     assert result["used_native_binary"] is True

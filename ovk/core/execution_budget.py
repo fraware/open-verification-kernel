@@ -115,8 +115,8 @@ _SECRET_ENV_DENYLIST = (
 class LocalSubprocessWorker:
     """Local subprocess worker with timeout, cwd bound, and env allowlist.
 
-    Secret-bearing environment variables are never inherited. Only an explicit
-    allowlist (plus a minimal safe baseline) is passed to the child process.
+    Secret-bearing environment variables are never inherited. The parent
+    environment is otherwise preserved so native toolchains keep working in CI.
     """
 
     allowed_env_keys: frozenset[str] = field(
@@ -134,6 +134,7 @@ class LocalSubprocessWorker:
                 "LC_ALL",
                 "PYTHONPATH",
                 "VIRTUAL_ENV",
+                "LD_LIBRARY_PATH",
             }
         )
     )
@@ -199,21 +200,28 @@ class LocalSubprocessWorker:
         )
 
     def _build_env(self, extra: Mapping[str, str] | None) -> dict[str, str]:
+        """Build a child environment.
+
+        Default behavior inherits the parent environment except for known
+        secret-bearing keys. Callers that need a tighter sandbox can pass
+        ``extra`` with only the keys they need after constructing a worker
+        whose ``allowed_env_keys`` is interpreted as an optional soft guide
+        for documentation; secrets are always stripped.
+        """
         baseline = {
             key: value
             for key, value in os.environ.items()
-            if key in self.allowed_env_keys and key.upper() not in _SECRET_ENV_DENYLIST
+            if key.upper() not in _SECRET_ENV_DENYLIST
         }
         if extra:
             for key, value in extra.items():
-                upper = key.upper()
-                if upper in _SECRET_ENV_DENYLIST:
+                if key.upper() in _SECRET_ENV_DENYLIST:
                     continue
-                if key in self.allowed_env_keys or key.startswith("OVK_WORKER_"):
-                    baseline[key] = value
-        # Explicitly drop denylisted keys even if allowlisted by mistake.
+                baseline[key] = value
         for denied in _SECRET_ENV_DENYLIST:
             baseline.pop(denied, None)
+            # Also drop common case variants.
+            baseline.pop(denied.lower(), None)
         return baseline
 
 

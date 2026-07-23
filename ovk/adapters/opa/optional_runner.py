@@ -79,16 +79,19 @@ def run_opa_policy(
             "violations": [],
         }
 
-    if result.exit_code != 0:
-        return {
-            "status": "error",
-            "reason": result.stderr.strip() or "opa execution failed",
-            "violations": [],
-        }
+    payload: dict[str, Any] | None = None
+    if result.stdout.strip():
+        try:
+            parsed = json.loads(result.stdout)
+            if isinstance(parsed, dict):
+                payload = parsed
+        except json.JSONDecodeError:
+            payload = None
 
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError:
+    if payload is None:
+        detail = result.stderr.strip() or result.stdout.strip() or "opa execution failed"
+        if result.exit_code != 0:
+            return {"status": "error", "reason": detail, "violations": []}
         return {"status": "error", "reason": "opa returned invalid JSON", "violations": []}
 
     values: list[Any] = []
