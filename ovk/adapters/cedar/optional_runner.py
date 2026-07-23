@@ -1,60 +1,63 @@
-"""Optional Cedar CLI probe for toolchain availability."""
+"""Optional Cedar CLI runner for native contract probing."""
 
 from __future__ import annotations
 
 import shutil
-import subprocess
+import tempfile
+from pathlib import Path
 from typing import Any
 
+from ovk.core.execution_budget import BackendWorker, LocalSubprocessWorker
 
-def probe_cedar_binary(*, timeout_seconds: int = 10) -> dict[str, Any]:
-    """Probe Cedar CLI availability without claiming policy evaluation."""
+
+def probe_cedar_binary(
+    *,
+    timeout_seconds: int = 10,
+    worker: BackendWorker | None = None,
+) -> dict[str, Any]:
+    """Probe the Cedar CLI when available; never fabricate pass/fail from absence."""
     cedar_path = shutil.which("cedar")
     if cedar_path is None:
         return {
             "status": "unknown",
             "reason": "cedar binary not found",
-            "binary_present": False,
             "used_native_binary": False,
         }
 
-    try:
-        completed = subprocess.run(
+    active_worker = worker or LocalSubprocessWorker()
+    with tempfile.TemporaryDirectory() as tmp:
+        result = active_worker.run(
             [cedar_path, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-            check=False,
+            cwd=Path(tmp),
+            timeout_seconds=float(timeout_seconds),
+            max_stdout_bytes=64_000,
+            max_stderr_bytes=64_000,
         )
-    except subprocess.TimeoutExpired:
+
+    if result.timed_out:
         return {
             "status": "unknown",
-            "reason": "cedar version probe timed out",
-            "binary_present": True,
-            "used_native_binary": False,
-        }
-    except OSError as error:
-        return {
-            "status": "error",
-            "reason": f"cedar version probe failed: {error}",
-            "binary_present": True,
+            "reason": "cedar execution timed out",
             "used_native_binary": False,
         }
 
-    if completed.returncode != 0:
+    if result.exit_code is None:
         return {
             "status": "error",
-            "reason": completed.stderr.strip() or "cedar --version failed",
-            "binary_present": True,
+            "reason": result.stderr.strip() or "cedar worker rejected execution",
             "used_native_binary": False,
         }
 
-    version = completed.stdout.strip() or completed.stderr.strip()
+    if result.exit_code != 0:
+        return {
+            "status": "error",
+            "reason": result.stderr.strip() or "cedar --version failed",
+            "used_native_binary": False,
+        }
+
     return {
         "status": "pass",
-        "reason": version or "cedar binary responsive",
-        "binary_present": True,
-        "used_native_binary": False,
-        "version": version,
-        "probe_type": "version_only",
+        "reason": result.stdout.strip() or "cedar binary responsive",
+        "used_native_binary": True,
+        "version": result.stdout.strip(),
     }
