@@ -8,18 +8,14 @@ from ovk.adapters.z3.obligation import build_authorization_obligation, obligatio
 from ovk.adapters.z3.validation import validate_authorization_input
 from ovk.compilers.authorization import CoveragePolicy, strict_allow_permitted
 from ovk.core.bundle import content_digest
-from ovk.core.compiler_bridge import (
-    compile_authorization_ir,
-    coverage_policy_from_dict,
-    material_refs_from_digest,
-)
+from ovk.core.compiler_bridge import compile_authorization_ir, coverage_policy_from_dict
 from ovk.core.execution_models import (
     AbstractionCoverage,
-    MaterialReference,
     VerificationObligation,
     compute_abstraction_digest,
     compute_obligation_id,
 )
+from ovk.core.materials import material_reference_from_payload
 from ovk.core.models import RiskSeverity, VerificationSubject
 
 COMPILER_ID = "ovk.authorization.neutral.v1"
@@ -77,7 +73,7 @@ def compile_authorization_obligation(
             },
         }
         material_refs = [
-            material_refs_from_digest(
+            material_reference_from_payload(
                 material_id=content_digest({"path": path})[:32],
                 kind="source_file",
                 uri=f"ovk-material:authorization/source/{path}",
@@ -88,12 +84,11 @@ def compile_authorization_obligation(
         ]
         if not material_refs:
             material_refs = [
-                MaterialReference(
+                material_reference_from_payload(
                     material_id=content_digest({"authorization": lane_input})[:32],
                     kind="diff",
                     uri="ovk-material:authorization/input",
-                    sha256=content_digest(lane_input),
-                    size_bytes=len(content_digest(lane_input)),
+                    payload=lane_input,
                     source_revision=head_sha,
                     trusted=False,
                 )
@@ -161,12 +156,11 @@ def compile_authorization_obligation(
     abstraction["strict_allow_permitted"] = strict_allow_permitted(coverage, coverage_policy)
 
     materials = [
-        MaterialReference(
+        material_reference_from_payload(
             material_id=content_digest({"authorization": data})[:32],
             kind="diff",
             uri="ovk-material:authorization/input",
-            sha256=content_digest(data),
-            size_bytes=len(content_digest(data)),
+            payload=data,
             source_revision=head_sha,
             trusted=False,
         )
