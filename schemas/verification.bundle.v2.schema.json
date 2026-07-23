@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/verification.bundle.v2.schema.json",
+  "title": "Verification Evidence Bundle v2",
+  "type": "object",
+  "required": ["bundle_id", "schema_version", "subject", "evidence", "decision"],
+  "properties": {
+    "bundle_id": { "type": "string" },
+    "schema_version": { "type": "string", "const": "ovk.bundle.v2" },
+    "subject": {
+      "type": "object",
+      "required": ["repo", "head_sha"],
+      "properties": {
+        "repo": { "type": "string" },
+        "pull_request": { "type": ["integer", "string"] },
+        "base_sha": { "type": "string" },
+        "head_sha": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "verification.evidence.v2.schema.json" }
+    },
+    "open_obligations": {
+      "type": "array",
+      "items": { "type": "object", "additionalProperties": true }
+    },
+    "decision": {
+      "type": "object",
+      "required": ["merge_recommendation"],
+      "properties": {
+        "merge_recommendation": {
+          "type": "string",
+          "enum": ["allow", "block", "require_human_review", "allow_with_warning", "require_stronger_check"]
+        },
+        "reason": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "attestation": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

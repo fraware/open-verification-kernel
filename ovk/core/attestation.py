@@ -32,9 +32,35 @@ def bundle_to_statement(bundle: EvidenceBundle) -> dict[str, Any]:
             {
                 "intent_id": evidence.intent.get("intent_id"),
                 "title": evidence.intent.get("title"),
+                "severity": (evidence.intent.get("risk") or {}).get("severity")
+                if isinstance(evidence.intent.get("risk"), dict)
+                else None,
                 "claims": [claim.model_dump(mode="json") for claim in evidence.backend_claims],
                 "counterexamples": evidence.counterexamples,
                 "decision": evidence.decision,
+                "obligation_id": evidence.obligation_id,
+                "routing_id": evidence.routing_id,
+                "compiler": evidence.compiler,
+                "coverage": evidence.coverage,
+                "materials": evidence.materials,
+                "requested_backends": evidence.requested_backends,
+                "eligible_backends": evidence.eligible_backends,
+                "selected_backends": evidence.selected_backends,
+                "executed_backends": evidence.executed_backends,
+                "aggregation_policy": evidence.aggregation_policy,
+                "routing_enforced": evidence.routing_enforced,
+                "open_artifacts": [
+                    item
+                    for item in (evidence.generated_artifacts or [])
+                    if isinstance(item, dict)
+                    and item.get("kind")
+                    in {
+                        "backend_disagreement",
+                        "quality_error",
+                        "incomplete_abstraction",
+                        "backend_provenance",
+                    }
+                ],
             }
         )
 

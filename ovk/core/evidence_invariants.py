@@ -219,4 +219,177 @@ def check_evidence_bundle_invariants(bundle: EvidenceBundle) -> list[EvidenceInv
                     message="bundle_id must be content-addressed from subject and evidence (OVK-INV-008)",
                 )
             )
+
+    issues.extend(_check_control_plane_invariants(bundle))
+    return issues
+
+
+def _check_control_plane_invariants(bundle: EvidenceBundle) -> list[EvidenceInvariantIssue]:
+    """Evaluate OVK-INV-009 through OVK-INV-020 for evidence v2 / enforced records."""
+    issues: list[EvidenceInvariantIssue] = []
+    for index, evidence in enumerate(bundle.evidence):
+        path = f"evidence[{index}]"
+        is_v2 = str(evidence.schema_version).endswith(".v2") or evidence.routing_enforced
+        if not is_v2 and evidence.obligation_id is None and evidence.routing_id is None:
+            continue
+
+        selected = list(evidence.selected_backends or [])
+        executed = list(evidence.executed_backends or [])
+        attempted = list(evidence.attempted_backends or [])
+        eligible = list(evidence.eligible_backends or [])
+        attempts = list(evidence.execution_attempts or [])
+
+        required_selected = selected  # v2 preview treats selected list as required execution set
+        if sorted(required_selected) != sorted(executed) and evidence.routing_enforced:
+            # Allow attempted-but-errored backends to appear in attempted without executed parity
+            # only when attempts explicitly record them; otherwise flag INV-009.
+            if sorted(required_selected) != sorted(attempted):
+                issues.append(
+                    EvidenceInvariantIssue(
+                        path=f"{path}.selected_backends",
+                        message="selected backends must equal required execution set (OVK-INV-009)",
+                    )
+                )
+
+        for backend in executed:
+            if eligible and backend not in eligible:
+                issues.append(
+                    EvidenceInvariantIssue(
+                        path=f"{path}.executed_backends",
+                        message=f"executed backend {backend!r} was not eligible (OVK-INV-010)",
+                    )
+                )
+            if selected and backend not in selected:
+                issues.append(
+                    EvidenceInvariantIssue(
+                        path=f"{path}.executed_backends",
+                        message=f"executed backend {backend!r} was not selected (OVK-INV-010)",
+                    )
+                )
+
+        if evidence.obligation_id:
+            for attempt_index, attempt in enumerate(attempts):
+                if not isinstance(attempt, dict):
+                    continue
+                # Attempts bind via backend_obligation_id / obligation linkage in control plane.
+                if attempt.get("obligation_id") not in {None, evidence.obligation_id}:
+                    issues.append(
+                        EvidenceInvariantIssue(
+                            path=f"{path}.execution_attempts[{attempt_index}]",
+                            message="every attempt must refer to the evidence obligation (OVK-INV-011)",
+                        )
+                    )
+
+        if evidence.routing_id is not None and not str(evidence.routing_id).strip():
+            issues.append(
+                EvidenceInvariantIssue(
+                    path=f"{path}.routing_id",
+                    message="routing ID must be present and non-empty (OVK-INV-012)",
+                )
+            )
+
+        for claim_index, claim in enumerate(evidence.backend_claims):
+            native_claimed = any(
+                artifact.get("kind") == "backend_provenance"
+                and str(artifact.get("backend", "")).lower() == claim.backend.lower()
+                and artifact.get("native_execution") is True
+                for artifact in evidence.generated_artifacts
+            )
+            if native_claimed:
+                has_tool = bool(claim.tool_version) or any(
+                    artifact.get("kind") == "backend_provenance"
+                    and str(artifact.get("backend", "")).lower() == claim.backend.lower()
+                    and (artifact.get("tool_digest") or artifact.get("termination"))
+                    for artifact in evidence.generated_artifacts
+                )
+                if not has_tool:
+                    issues.append(
+                        EvidenceInvariantIssue(
+                            path=f"{path}.backend_claims[{claim_index}]",
+                            message="native claim requires native execution provenance (OVK-INV-013)",
+                        )
+                    )
+
+        if evidence.aggregation_policy and evidence.decision.get("aggregation_reason") is None and evidence.routing_enforced:
+            # aggregation_reason is optional on legacy decision dicts; required for enforced v2.
+            if "aggregation_reason" not in evidence.decision:
+                issues.append(
+                    EvidenceInvariantIssue(
+                        path=f"{path}.decision.aggregation_reason",
+                        message="aggregate decision must record aggregation policy reason (OVK-INV-014)",
+                    )
+                )
+
+        if evidence.materials:
+            for material_index, material in enumerate(evidence.materials):
+                if not isinstance(material, dict):
+                    continue
+                digest = material.get("sha256")
+                if not digest:
+                    issues.append(
+                        EvidenceInvariantIssue(
+                            path=f"{path}.materials[{material_index}].sha256",
+                            message="material digests must be present (OVK-INV-015)",
+                        )
+                    )
+
+        coverage = evidence.coverage or {}
+        recommendation = _decision_value(evidence.decision, "merge_recommendation")
+        if recommendation == "allow" and isinstance(coverage, dict):
+            status = str(coverage.get("status", ""))
+            if status in {"unknown", "partial"} and evidence.routing_enforced:
+                issues.append(
+                    EvidenceInvariantIssue(
+                        path=f"{path}.coverage",
+                        message="coverage is insufficient for allow recommendation (OVK-INV-016)",
+                        severity="error",
+                    )
+                )
+
+        if evidence.decision.get("fallback_used") is True and evidence.decision.get("fallback_accepted") is not True:
+            issues.append(
+                EvidenceInvariantIssue(
+                    path=f"{path}.decision",
+                    message="fallback guarantee must be accepted by intent and policy (OVK-INV-017)",
+                )
+            )
+
+        compiler = evidence.compiler or {}
+        if evidence.routing_enforced:
+            if not compiler.get("compiler_id") or not compiler.get("compiler_version"):
+                issues.append(
+                    EvidenceInvariantIssue(
+                        path=f"{path}.compiler",
+                        message="compiler identity must be present (OVK-INV-018)",
+                    )
+                )
+            for claim_index, claim in enumerate(evidence.backend_claims):
+                if not claim.adapter_version and not claim.tool_version:
+                    issues.append(
+                        EvidenceInvariantIssue(
+                            path=f"{path}.backend_claims[{claim_index}]",
+                            message="adapter or tool version must be present (OVK-INV-018)",
+                        )
+                    )
+
+        # OVK-INV-019: cache identity participation is validated when cache metadata artifacts exist.
+        cache_artifacts = [a for a in evidence.generated_artifacts if a.get("kind") == "cache_identity"]
+        for artifact in cache_artifacts:
+            if not artifact.get("environment_digest"):
+                issues.append(
+                    EvidenceInvariantIssue(
+                        path=f"{path}.generated_artifacts",
+                        message="execution environment fingerprint must participate in cache identity (OVK-INV-019)",
+                    )
+                )
+
+        # OVK-INV-020 checked at attestation binding time; also flag missing routing_id on enforced.
+        if evidence.routing_enforced and not evidence.routing_id:
+            issues.append(
+                EvidenceInvariantIssue(
+                    path=f"{path}.routing_id",
+                    message="enforced evidence must include routing_id for attestation binding (OVK-INV-020)",
+                )
+            )
+
     return issues

@@ -45,6 +45,29 @@ def verify_bundle_statement_binding(bundle: EvidenceBundle, statement: dict[str,
                 message="attestation bundle_id does not match evidence bundle",
             )
         )
+
+    # OVK-INV-020: evidence and attestation routing IDs agree.
+    evidence_items = verification.get("evidence", [])
+    if isinstance(evidence_items, list):
+        for index, evidence in enumerate(bundle.evidence):
+            if not evidence.routing_id:
+                continue
+            if index >= len(evidence_items) or not isinstance(evidence_items[index], dict):
+                issues.append(
+                    EvidenceInvariantIssue(
+                        path=f"predicate.verification.evidence[{index}].routing_id",
+                        message="attestation evidence entry missing for routing ID binding (OVK-INV-020)",
+                    )
+                )
+                continue
+            stated_routing = evidence_items[index].get("routing_id")
+            if stated_routing != evidence.routing_id:
+                issues.append(
+                    EvidenceInvariantIssue(
+                        path=f"predicate.verification.evidence[{index}].routing_id",
+                        message="evidence and attestation routing IDs disagree (OVK-INV-020)",
+                    )
+                )
     return issues
 
 
