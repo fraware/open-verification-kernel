@@ -35,6 +35,25 @@ class RiskSeverity(str, Enum):
     CRITICAL = "critical"
 
 
+class SourceRange(BaseModel):
+    """Byte- or line-oriented span within a repository path."""
+
+    path: str
+    start_line: int | None = None
+    end_line: int | None = None
+    start_column: int | None = None
+    end_column: int | None = None
+
+
+class VerificationSubject(BaseModel):
+    """Repository revision under verification (matches evidence subject shape)."""
+
+    repo: str
+    head_sha: str
+    pull_request: int | str | None = None
+    base_sha: str | None = None
+
+
 class VerificationIntent(BaseModel):
     intent_id: str
     version: str = "0.1.0"

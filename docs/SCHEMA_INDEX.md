@@ -20,7 +20,10 @@ JSON schemas for OVK objects. See also [ARTIFACTS.md](ARTIFACTS.md).
 | [artifact.manifest.schema.json](../schemas/artifact.manifest.schema.json) | ovk.artifact_manifest.v1 | `ovk-artifact-manifest.json`; validated by `ovk validate-outputs` |
 | [verification.intent.schema.json](../schemas/verification.intent.schema.json) | n/a | `templates/**/*.intent.json` |
 | [verification.capability.schema.json](../schemas/verification.capability.schema.json) | n/a | `adapters/*/capability.json` |
-| [verification.obligation.schema.json](../schemas/verification.obligation.schema.json) | n/a | obligation payloads |
+| [verification.obligation.schema.json](../schemas/verification.obligation.schema.json) | ovk.obligation.v1 | typed backend-neutral obligations (`ovk.core.execution_models`) |
+| [backend.routing.schema.json](../schemas/backend.routing.schema.json) | ovk.routing.v1 | typed routing decisions |
+| [backend.execution.schema.json](../schemas/backend.execution.schema.json) | n/a | backend obligations, attempts, normalized results, execution records |
+| [abstraction.coverage.schema.json](../schemas/abstraction.coverage.schema.json) | n/a | abstraction coverage reports |
 | [verification.result.schema.json](../schemas/verification.result.schema.json) | n/a | backend result payloads |
 | [self_protection.input.schema.json](../schemas/self_protection.input.schema.json) | n/a | `examples/no_agent_self_approval/` metadata and canonical inputs |
 | [infrastructure.input.schema.json](../schemas/infrastructure.input.schema.json) | ovk.infrastructure.input.v1 | `examples/infrastructure_exposure/` |

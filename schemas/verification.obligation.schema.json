@@ -3,29 +3,106 @@
   "$id": "https://openverification.dev/schemas/verification.obligation.schema.json",
   "title": "Verification Obligation",
   "type": "object",
-  "required": ["obligation_id", "intent_id", "backend"],
+  "required": [
+    "obligation_id",
+    "schema_version",
+    "subject",
+    "intent_id",
+    "intent_version",
+    "lane",
+    "property_kind",
+    "severity",
+    "compiler_id",
+    "compiler_version",
+    "materials",
+    "abstraction",
+    "abstraction_digest",
+    "coverage",
+    "acceptable_guarantees",
+    "required_capabilities",
+    "policy_digest"
+  ],
   "properties": {
-    "obligation_id": { "type": "string" },
-    "intent_id": { "type": "string" },
-    "backend": { "type": "string" },
-    "query_polarity": {
-      "type": "string",
-      "enum": ["find_counterexample", "prove_property", "evaluate_policy", "check_model", "custom"]
-    },
-    "input": { "type": "object", "additionalProperties": true },
-    "policy": { "type": "string" },
-    "query": { "type": "string" },
-    "constraints": { "type": "array", "items": { "type": "string" } },
-    "model": { "type": "object", "additionalProperties": true },
-    "assumptions": { "type": "array", "items": { "type": "string" } },
-    "budget": {
+    "obligation_id": { "type": "string", "minLength": 1 },
+    "schema_version": { "type": "string", "const": "ovk.obligation.v1" },
+    "subject": {
       "type": "object",
+      "required": ["repo", "head_sha"],
       "properties": {
-        "timeout_seconds": { "type": "integer", "minimum": 1 },
-        "max_memory_mb": { "type": "integer", "minimum": 1 }
+        "repo": { "type": "string", "minLength": 1 },
+        "head_sha": { "type": "string", "minLength": 1 },
+        "pull_request": { "type": ["integer", "string", "null"] },
+        "base_sha": { "type": ["string", "null"] }
       },
       "additionalProperties": true
-    }
+    },
+    "intent_id": { "type": "string", "minLength": 1 },
+    "intent_version": { "type": "string", "minLength": 1 },
+    "lane": { "type": "string", "minLength": 1 },
+    "property_kind": { "type": "string", "minLength": 1 },
+    "severity": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "critical"]
+    },
+    "compiler_id": { "type": "string", "minLength": 1 },
+    "compiler_version": { "type": "string", "minLength": 1 },
+    "materials": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["material_id", "kind", "uri", "sha256", "size_bytes"],
+        "properties": {
+          "material_id": { "type": "string", "minLength": 1 },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "diff",
+              "source_file",
+              "workflow",
+              "terraform_plan",
+              "kubernetes_object",
+              "policy",
+              "branch_protection",
+              "deployment_policy",
+              "generated_harness",
+              "explicit_harness"
+            ]
+          },
+          "uri": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "minLength": 64, "maxLength": 64 },
+          "size_bytes": { "type": "integer", "minimum": 0 },
+          "source_revision": { "type": ["string", "null"] },
+          "source_range": {
+            "type": ["object", "null"],
+            "required": ["path"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "start_line": { "type": ["integer", "null"] },
+              "end_line": { "type": ["integer", "null"] },
+              "start_column": { "type": ["integer", "null"] },
+              "end_column": { "type": ["integer", "null"] }
+            },
+            "additionalProperties": true
+          },
+          "trusted": { "type": "boolean", "default": false }
+        },
+        "additionalProperties": true
+      }
+    },
+    "abstraction": { "type": "object", "additionalProperties": true },
+    "abstraction_digest": { "type": "string", "minLength": 1 },
+    "coverage": {
+      "$ref": "https://openverification.dev/schemas/abstraction.coverage.schema.json"
+    },
+    "acceptable_guarantees": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "required_capabilities": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "policy_digest": { "type": "string", "minLength": 1 }
   },
   "additionalProperties": true
 }
