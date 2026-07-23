@@ -101,7 +101,7 @@ gh workflow run Publish.yml --ref main -f dry_run=true
 gh run watch
 ```
 
-`workflow_dispatch` never publishes to PyPI. Dry-run signatures are bound to `@refs/heads/main` (or the dispatched branch). They exercise Fulcio/Rekor and retention but are **not** a production pin. Production consumers must verify against an immutable tag identity (below).
+`workflow_dispatch` never publishes to PyPI and skips the full release-gate suite so keyless signing can be exercised while unrelated CI failures exist on `main`. It still builds the sdist/wheel, signs with cosign, verifies, tampers, and retains bundles. Dry-run signatures are bound to `@refs/heads/main` (or the dispatched branch). They are **not** a production pin. Production consumers must verify against an immutable tag identity (below). Full release events still run the complete verify suite before signing and PyPI publish.
 
 ## Attestation signing
 

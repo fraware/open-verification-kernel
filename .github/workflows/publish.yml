@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Ignored for safety; workflow_dispatch never publishes to PyPI. Runs verify + keyless Sigstore only."
+        description: "Ignored for safety; workflow_dispatch never publishes to PyPI. Builds artifacts and exercises keyless Sigstore only."
         type: boolean
         default: true
 
@@ -18,6 +18,7 @@ env:
 
 jobs:
   verify:
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,9 +34,7 @@ jobs:
           python scripts/sync_package_data.py
           pip install -e '.[dev]'
           python scripts/check_release_metadata.py
-          if [ "${{ github.event_name }}" = "release" ]; then
-            python -c 'import os, ovk; tag=os.environ["OVK_RELEASE_TAG"]; n=tag[1:] if tag.startswith("v") else tag; raise SystemExit(0 if n==ovk.__version__ else f"release tag {tag!r} does not match package version {ovk.__version__!r}")'
-          fi
+          python -c 'import os, ovk; tag=os.environ["OVK_RELEASE_TAG"]; n=tag[1:] if tag.startswith("v") else tag; raise SystemExit(0 if n==ovk.__version__ else f"release tag {tag!r} does not match package version {ovk.__version__!r}")'
           pytest -q
           ovk release-preflight
           ovk pilot
@@ -66,9 +65,37 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  build-dry-run:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build package for Sigstore dry-run
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip build twine
+          python scripts/sync_package_data.py
+          pip install -e '.[dev]'
+          python scripts/check_release_metadata.py
+          python -m build
+          twine check dist/*
+      - name: Upload built distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: ovk-dist
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
   sigstore:
     name: Keyless Sigstore sign and verify
-    needs: verify
+    needs: [verify, build-dry-run]
+    if: |
+      always() &&
+      (needs.verify.result == 'success' || needs.build-dry-run.result == 'success')
     runs-on: ubuntu-latest
     environment: sigstore
     permissions:
@@ -155,9 +182,10 @@ jobs:
 
   publish:
     needs: [verify, sigstore]
-    # PyPI only on GitHub Release events. workflow_dispatch is always a
-    # Sigstore/signing dry-run and never publishes a package status.
-    if: github.event_name == 'release'
+    if: |
+      github.event_name == 'release' &&
+      needs.verify.result == 'success' &&
+      needs.sigstore.result == 'success'
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
