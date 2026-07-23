@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence
 
+from ovk.core.backend_ids import normalize_allowed_backends, normalize_denied_backends
 from ovk.core.execution_models import ExecutionBudget
 
 __all__ = [
@@ -35,13 +36,14 @@ def execution_budget_from_policy(policy: dict[str, Any] | None) -> ExecutionBudg
     if not isinstance(routing, dict):
         routing = {}
 
-    allowed = budget_section.get("allowed_backends")
-    if allowed is None:
-        allowed = policy.get("allowed_backends")
+    allowed_raw = budget_section.get("allowed_backends")
+    if allowed_raw is None:
+        allowed_raw = policy.get("allowed_backends")
     denied_raw = budget_section.get("denied_backends")
     if denied_raw is None:
         denied_raw = policy.get("denied_backends", [])
-    denied = [str(item) for item in denied_raw] if isinstance(denied_raw, (list, tuple)) else []
+    allowed = normalize_allowed_backends(allowed_raw)
+    denied = normalize_denied_backends(denied_raw)
 
     total = float(
         budget_section.get(
@@ -62,7 +64,7 @@ def execution_budget_from_policy(policy: dict[str, Any] | None) -> ExecutionBudg
         max_parallel_backends=int(budget_section.get("max_parallel_backends", routing.get("max_selected_backends", 2))),
         allow_network=bool(budget_section.get("allow_network", False)),
         allow_repository_write=bool(budget_section.get("allow_repository_write", False)),
-        allowed_backends=[str(item) for item in allowed] if isinstance(allowed, (list, tuple)) else None,
+        allowed_backends=allowed,
         denied_backends=denied,
     )
 
