@@ -9,12 +9,13 @@ from __future__ import annotations
 from typing import Any
 
 from ovk.core.bundle import content_digest
-from ovk.core.compiler_bridge import material_refs_from_digest, register_cbmc_project
+from ovk.core.compiler_bridge import register_cbmc_project
 from ovk.core.execution_models import (
     VerificationObligation,
     compute_abstraction_digest,
     compute_obligation_id,
 )
+from ovk.core.materials import material_reference_from_payload
 from ovk.core.models import RiskSeverity, VerificationSubject
 
 COMPILER_VERSION = "0.1.0"
@@ -40,7 +41,7 @@ def compile_cbmc_obligation(
         "project_grounded": guarantee == "bounded_project_model_check",
     }
     materials = [
-        material_refs_from_digest(
+        material_reference_from_payload(
             material_id=content_digest({"cbmc": compiler_id})[:32],
             kind="generated_harness" if project.harnesses else "source_file",
             uri=f"ovk-material:cbmc/{compiler_id}",
