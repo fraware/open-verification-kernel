@@ -6,18 +6,14 @@ from typing import Any
 
 from ovk.adapters.infra.validation import validate_infra_input
 from ovk.core.bundle import content_digest
-from ovk.core.compiler_bridge import (
-    compile_infrastructure_ir,
-    infrastructure_coverage,
-    material_refs_from_digest,
-)
+from ovk.core.compiler_bridge import compile_infrastructure_ir, infrastructure_coverage
 from ovk.core.execution_models import (
     AbstractionCoverage,
-    MaterialReference,
     VerificationObligation,
     compute_abstraction_digest,
     compute_obligation_id,
 )
+from ovk.core.materials import material_reference_from_payload
 from ovk.core.models import RiskSeverity, VerificationSubject
 
 COMPILER_ID = "ovk.infrastructure.neutral.v1"
@@ -48,7 +44,7 @@ def compile_infrastructure_obligation(
         coverage = infrastructure_coverage(ir)
         kind = "terraform_plan" if "terraform" in compiler_id else "kubernetes_object"
         materials = [
-            material_refs_from_digest(
+            material_reference_from_payload(
                 material_id=content_digest({"infra": compiler_id})[:32],
                 kind=kind,
                 uri=f"ovk-material:infrastructure/{compiler_id}",
@@ -115,12 +111,11 @@ def compile_infrastructure_obligation(
         )
 
     materials = [
-        MaterialReference(
+        material_reference_from_payload(
             material_id="infrastructure-input",
             kind="diff",
             uri="ovk-material:infrastructure/input",
-            sha256=content_digest(data),
-            size_bytes=len(content_digest(data)),
+            payload=data,
             source_revision=head_sha,
             trusted=False,
         )
