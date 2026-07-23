@@ -2,5 +2,6 @@
   "schemaVersion": 1,
   "label": "FormalPR-Bench",
   "message": "130/130 (100%)",
-  "color": "brightgreen"
+  "color": "brightgreen",
+  "verified_source_sha": "a87a9de99b77bf25a4ce058642a35f42ab3cd075"
 }
