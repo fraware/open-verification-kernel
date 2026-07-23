@@ -8,6 +8,7 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
+from ovk.core.backend_ids import normalize_allowed_backends, normalize_denied_backends
 from ovk.core.change_detection import detect_change_surfaces
 from ovk.core.check_metadata import load_required_check_metadata
 from ovk.core.github_event import load_github_event_metadata, metadata_to_self_protection_defaults
@@ -74,10 +75,16 @@ def budget_from_policy(policy: dict[str, Any]) -> VerificationBudget:
     budget_section = policy.get("budget", {})
     if not isinstance(budget_section, dict):
         budget_section = {}
-    allowed = budget_section.get("allowed_backends") or policy.get("allowed_backends")
-    denied = budget_section.get("denied_backends") or policy.get("denied_backends", [])
-    allowed_set = frozenset(str(item) for item in allowed) if isinstance(allowed, (list, tuple)) else None
-    denied_set = frozenset(str(item) for item in denied) if isinstance(denied, (list, tuple)) else frozenset()
+    allowed_raw = budget_section.get("allowed_backends")
+    if allowed_raw is None:
+        allowed_raw = policy.get("allowed_backends")
+    denied_raw = budget_section.get("denied_backends")
+    if denied_raw is None:
+        denied_raw = policy.get("denied_backends", [])
+    allowed = normalize_allowed_backends(allowed_raw)
+    denied = normalize_denied_backends(denied_raw)
+    allowed_set = frozenset(allowed) if allowed is not None else None
+    denied_set = frozenset(denied)
     max_wall = float(budget_section.get("max_wall_time_seconds", policy.get("max_wall_time_seconds", 30.0)))
     max_memory = int(budget_section.get("max_memory_mb", policy.get("max_memory_mb", 512)))
     routing_section = policy.get("routing", {})
