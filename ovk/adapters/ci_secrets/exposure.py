@@ -32,6 +32,31 @@ def find_ci_secrets_counterexamples(data: dict[str, Any]) -> list[dict[str, Any]
     """Find workflows that expose secrets in untrusted contexts."""
     counterexamples: list[dict[str, Any]] = []
     trust_context = str(data.get("trust_context", "untrusted_fork_pr"))
+    # Trust-flow compiler findings participate in enforcement when present.
+    findings = data.get("trust_findings")
+    if isinstance(findings, list):
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            kind = str(finding.get("kind") or "")
+            if kind in {
+                "untrusted_code_with_secret",
+                "untrusted_code_with_write_token",
+                "untrusted_code_with_protected_env",
+                "untrusted_code_with_privileged_capability",
+                "secrets_inherit",
+            }:
+                counterexamples.append(
+                    {
+                        "summary": str(finding.get("summary") or kind),
+                        "failure_mode": FAILURE_MODE,
+                        "workflow_id": ",".join(str(item) for item in finding.get("node_ids") or [])
+                        or "trust-flow",
+                        "triggers": [],
+                        "trust_context": trust_context,
+                        "trust_finding_kind": kind,
+                    }
+                )
     for workflow in _workflows(data):
         workflow_id = str(workflow.get("workflow_id", "unknown"))
         if trust_context.startswith("untrusted") and _untrusted_trigger(workflow) and _uses_secrets(workflow):
