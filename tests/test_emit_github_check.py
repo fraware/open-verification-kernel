@@ -7,9 +7,17 @@ from scripts.emit_github_check import _post_check_run, main
 
 
 def _write_evidence(path: Path, recommendation: str = "block") -> None:
-    source = Path("ovk-evidence.json")
-    payload = json.loads(source.read_text(encoding="utf-8"))
-    payload["decision"]["merge_recommendation"] = recommendation
+    payload = {
+        "schema_version": "ovk.bundle.v1",
+        "bundle_id": "emit-check-test",
+        "subject": {"repo": "owner/repo", "head_sha": "abc123"},
+        "evidence": [],
+        "open_obligations": [],
+        "decision": {
+            "merge_recommendation": recommendation,
+            "reason": "unit-test fixture",
+        },
+    }
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 

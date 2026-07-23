@@ -34,6 +34,20 @@ def test_workflow_inputs_from_diff_blocks_secrets_on_pull_request() -> None:
     assert bundle.decision["merge_recommendation"] == "block"
 
 
+def test_workflow_inputs_from_diff_skips_incomplete_yaml_fragments() -> None:
+    """Partial hunks can reconstruct non-documents; do not crash the check path."""
+    text = """diff --git a/.github/workflows/partial.yml b/.github/workflows/partial.yml
+--- a/.github/workflows/partial.yml
++++ b/.github/workflows/partial.yml
+@@ -1,4 +1,4 @@
+ ]
+ env:
+-  OVK_PACKAGE_VERSION: "1.2.0"
++  OVK_PACKAGE_VERSION: "1.2.1"
+"""
+    assert workflow_inputs_from_diff(text) == []
+
+
 def test_plan_from_diff_includes_workflow_lane_inputs() -> None:
     text = DIFF_PATH.read_text(encoding="utf-8")
     plan = plan_from_diff_text(text)
