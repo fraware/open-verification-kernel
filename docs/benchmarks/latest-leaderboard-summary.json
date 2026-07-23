@@ -49,10 +49,10 @@
     }
   },
   "timing_ms": {
-    "p50": 0.17346400000661788,
-    "p95": 24.893725999994842,
-    "max": 41.747100000002035
+    "p50": 0.16554699999460354,
+    "p95": 24.24425800000307,
+    "max": 38.928114999997376
   },
-  "verified_source_sha": "a27b2b5d1cacff290c33af228f1cd8190604f08d",
+  "verified_source_sha": "5bd045a68778e90b79c4a459aa424e2bc9fd62c6",
   "provenance_note": "Cite verified_source_sha (and its CI run) for health claims; do not treat a later [skip ci] badge commit as the verified source."
 }
