@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,27 @@ from ovk.core.github_event import load_github_event_metadata, metadata_to_self_p
 from ovk.core.json_io import read_json_file
 from ovk.core.router import VerificationBudget
 from ovk.paths import schema_path
+
+POLICY_REPOSITORY_PATH = ".verification/config.yml"
+SAFE_UNTRUSTED_POLICY: dict[str, Any] = {
+    "schema_version": "ovk.config.v1",
+    "mode": "strict",
+    "default_on_unknown": "block",
+    "budget": {
+        "allow_network": False,
+        "allow_repository_write": False,
+    },
+    "routing": {
+        "mode": "shadow",
+        "strategy": "primary_with_optional_corroboration",
+        "aggregation": "ovk.aggregate.fail_dominant.v1",
+        "max_selected_backends": 1,
+        "prefer_deterministic": True,
+        "allow_fallback": False,
+        "accept_partial_primary": False,
+        "enforced_lanes": [],
+    },
+}
 
 
 @dataclass
@@ -31,33 +53,13 @@ class RepositoryContext:
     policy: dict[str, Any] = field(default_factory=dict)
 
 
-def load_verification_policy(config_path: Path = Path(".verification/config.yml")) -> dict[str, Any]:
-    """Load and validate policy knobs from `.verification/config.yml`.
-
-    Policy controls fail closed: malformed YAML or schema-invalid settings raise
-    a clear error instead of being reinterpreted by an ad-hoc fallback parser.
-    """
-    if not config_path.exists():
-        return {
-            "schema_version": "ovk.config.v1",
-            "mode": "advisory",
-            "default_on_unknown": "require_human_review",
-        }
-
-    import yaml
-
-    try:
-        loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as error:
-        raise ValueError(f"invalid OVK verification policy YAML at {config_path}: {error}") from error
+def _validate_policy_mapping(loaded: object, *, source: str) -> dict[str, Any]:
     if not isinstance(loaded, dict):
-        raise ValueError(f"OVK verification policy at {config_path} must contain a YAML mapping")
-
+        raise ValueError(f"OVK verification policy from {source} must contain a YAML mapping")
     policy_schema_path = schema_path("verification.config.schema.json")
     if not policy_schema_path.exists():
         raise ValueError(f"OVK verification policy schema is missing: {policy_schema_path}")
-    schema = read_json_file(policy_schema_path)
-    validator = Draft202012Validator(schema)
+    validator = Draft202012Validator(read_json_file(policy_schema_path))
     errors = sorted(validator.iter_errors(loaded), key=lambda item: list(item.path))
     if errors:
         formatted = []
@@ -65,9 +67,92 @@ def load_verification_policy(config_path: Path = Path(".verification/config.yml"
             location = "/".join(str(part) for part in error.path) or "$"
             formatted.append(f"{location}: {error.message}")
         raise ValueError(
-            f"OVK verification policy at {config_path} failed schema validation: " + "; ".join(formatted)
+            f"OVK verification policy from {source} failed schema validation: "
+            + "; ".join(formatted)
         )
-    return loaded
+    return dict(loaded)
+
+
+def _parse_policy_text(text: str, *, source: str) -> dict[str, Any]:
+    import yaml
+
+    try:
+        loaded = yaml.safe_load(text)
+    except yaml.YAMLError as error:
+        raise ValueError(f"invalid OVK verification policy YAML from {source}: {error}") from error
+    return _validate_policy_mapping(loaded, source=source)
+
+
+def load_verification_policy(config_path: Path = Path(POLICY_REPOSITORY_PATH)) -> dict[str, Any]:
+    """Load and validate policy knobs from `.verification/config.yml`."""
+    if not config_path.exists():
+        return {
+            "schema_version": "ovk.config.v1",
+            "mode": "advisory",
+            "default_on_unknown": "require_human_review",
+        }
+    return _parse_policy_text(
+        config_path.read_text(encoding="utf-8"),
+        source=str(config_path),
+    )
+
+
+def _policy_changed(changed_files: list[str], config_path: Path) -> bool:
+    normalized_target = config_path.as_posix().lstrip("./")
+    return any(str(path).replace("\\", "/").lstrip("./") == normalized_target for path in changed_files)
+
+
+def load_trusted_verification_policy(
+    *,
+    changed_files: list[str],
+    base_sha: str | None,
+    config_path: Path = Path(POLICY_REPOSITORY_PATH),
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Load policy from a trusted source when the PR changes its own policy.
+
+    A pull request must never govern its own verification through a modified
+    `.verification/config.yml`. When that path changes, OVK reads the base
+    revision with `git show`. If the base material is unavailable or invalid,
+    a conservative built-in policy is used and the source is recorded.
+    """
+    if not _policy_changed(changed_files, config_path):
+        return load_verification_policy(config_path), {
+            "policy_source": "workspace",
+            "policy_path": config_path.as_posix(),
+        }
+
+    if base_sha:
+        try:
+            completed = subprocess.run(
+                ["git", "show", f"{base_sha}:{config_path.as_posix()}"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError):
+            completed = None
+        if completed is not None and completed.returncode == 0 and completed.stdout.strip():
+            try:
+                policy = _parse_policy_text(
+                    completed.stdout,
+                    source=f"base revision {base_sha}:{config_path.as_posix()}",
+                )
+            except ValueError:
+                policy = None
+            if policy is not None:
+                return policy, {
+                    "policy_source": "base_revision",
+                    "policy_revision": base_sha,
+                    "policy_path": config_path.as_posix(),
+                }
+
+    return dict(SAFE_UNTRUSTED_POLICY), {
+        "policy_source": "safe_builtin",
+        "policy_revision": base_sha,
+        "policy_path": config_path.as_posix(),
+        "policy_warning": "pull request policy was not trusted for its own verification",
+    }
 
 
 def budget_from_policy(policy: dict[str, Any]) -> VerificationBudget:
@@ -85,7 +170,9 @@ def budget_from_policy(policy: dict[str, Any]) -> VerificationBudget:
     denied = normalize_denied_backends(denied_raw)
     allowed_set = frozenset(allowed) if allowed is not None else None
     denied_set = frozenset(denied)
-    max_wall = float(budget_section.get("max_wall_time_seconds", policy.get("max_wall_time_seconds", 30.0)))
+    max_wall = float(
+        budget_section.get("max_wall_time_seconds", policy.get("max_wall_time_seconds", 30.0))
+    )
     max_memory = int(budget_section.get("max_memory_mb", policy.get("max_memory_mb", 512)))
     routing_section = policy.get("routing", {})
     prefer_deterministic = False
@@ -109,7 +196,7 @@ def build_repository_context(
     head_sha: str = "unknown",
     base_sha: str | None = None,
 ) -> RepositoryContext:
-    """Build repository context from PR metadata and changed files."""
+    """Build repository context from PR metadata and trusted policy materials."""
     files = changed_files or []
     branch_metadata: dict[str, Any] = {}
     actor_type = "unknown"
@@ -123,6 +210,11 @@ def build_repository_context(
         branch_metadata["github"] = defaults
     if check_metadata_path is not None and check_metadata_path.exists():
         branch_metadata.update(load_required_check_metadata(check_metadata_path))
+    policy, policy_metadata = load_trusted_verification_policy(
+        changed_files=files,
+        base_sha=base_sha,
+    )
+    branch_metadata["verification_policy"] = policy_metadata
     surfaces = [surface.__dict__ for surface in detect_change_surfaces(files)]
     return RepositoryContext(
         repo=repo,
@@ -132,5 +224,5 @@ def build_repository_context(
         changed_files=files,
         surfaces=surfaces,
         branch_metadata=branch_metadata,
-        policy=load_verification_policy(),
+        policy=policy,
     )
