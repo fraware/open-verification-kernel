@@ -16,7 +16,9 @@ def test_provenance_includes_bundle_digest() -> None:
 
 def test_material_entry_resolves_relative_paths() -> None:
     entry = material_entry(Path("examples/infrastructure_exposure/input_private_sensitive_resource.json"))
-    assert entry["uri"].startswith("file:///")
+    assert entry["uri"] == "examples/infrastructure_exposure/input_private_sensitive_resource.json"
+    assert not Path(entry["uri"]).is_absolute()
+    assert ":" not in entry["uri"].split("/", 1)[0]
     assert entry["digest"]["sha256"]
     assert entry["size_bytes"] > 0
 

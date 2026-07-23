@@ -12,7 +12,7 @@ permissions:
   checks: write
 
 env:
-  OVK_PACKAGE_VERSION: "1.2.0"
+  OVK_PACKAGE_VERSION: "1.2.1"
 
 jobs:
   ovk-required-check:
@@ -26,7 +26,7 @@ jobs:
           git fetch origin "${{ github.base_ref }}"
           git diff "origin/${{ github.base_ref }}...HEAD" > ovk-pr.diff
       - name: Run OVK strict check (required)
-        uses: fraware/open-verification-kernel@v1.2.0
+        uses: fraware/open-verification-kernel@v1.2.1
         with:
           mode: strict
           use-check: "true"

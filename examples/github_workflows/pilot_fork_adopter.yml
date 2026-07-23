@@ -13,7 +13,7 @@ permissions:
   pull-requests: write
 
 env:
-  OVK_PACKAGE_VERSION: "1.2.0"
+  OVK_PACKAGE_VERSION: "1.2.1"
 
 jobs:
   ovk-ci-secrets-pilot:
@@ -27,14 +27,14 @@ jobs:
           git fetch origin "${{ github.base_ref }}"
           git diff "origin/${{ github.base_ref }}...HEAD" > ovk-pr.diff
       - name: OVK advisory check
-        uses: fraware/open-verification-kernel@v1.2.0
+        uses: fraware/open-verification-kernel@v1.2.1
         with:
           mode: advisory
           use-check: "true"
           changed-files: ovk-pr.diff
           post-comment: "false"
       - name: OVK advisory verify (ci_secrets lane manifest)
-        uses: fraware/open-verification-kernel@v1.2.0
+        uses: fraware/open-verification-kernel@v1.2.1
         with:
           mode: advisory
           verification-manifest: .verification/ci_secrets_pilot.json

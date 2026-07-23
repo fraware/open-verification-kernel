@@ -7,7 +7,7 @@ permissions:
   contents: write
 
 env:
-  OVK_PACKAGE_VERSION: "1.2.0"
+  OVK_PACKAGE_VERSION: "1.2.1"
 
 jobs:
   refresh-adoption-summary:
