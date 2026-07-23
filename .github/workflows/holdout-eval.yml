@@ -2,7 +2,8 @@ name: FormalPR-Holdout eval
 
 # Optional gated job. Does not run on ordinary push/PR CI.
 # Requires repository secret HOLDOUT_DOWNLOAD_TOKEN with read access to
-# fraware/FormalPR-Holdout private release assets.
+# fraware/FormalPR-Holdout private release assets. The independently recorded
+# asset SHA-256 is required so a mutable/replaced release asset cannot execute.
 on:
   workflow_dispatch:
     inputs:
@@ -10,6 +11,10 @@ on:
         description: Frozen FormalPR-Holdout release tag
         required: true
         default: v0.1.0-synthetic
+        type: string
+      holdout_asset_sha256:
+        description: Independently recorded SHA-256 of the frozen release asset
+        required: true
         type: string
       predictions_artifact:
         description: Optional name of a workflow artifact containing predictions.json
@@ -44,6 +49,12 @@ jobs:
         if: steps.gate.outputs.configured == 'true'
         with:
           python-version: "3.11"
+
+      - name: Install OVK runner dependencies
+        if: steps.gate.outputs.configured == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
 
       - name: Require predictions file
         if: steps.gate.outputs.configured == 'true'
@@ -80,34 +91,31 @@ jobs:
         if: steps.gate.outputs.configured == 'true'
         env:
           HOLDOUT_DOWNLOAD_TOKEN: ${{ secrets.HOLDOUT_DOWNLOAD_TOKEN }}
+          HOLDOUT_ASSET_SHA256: ${{ inputs.holdout_asset_sha256 }}
         run: |
           python scripts/run_formalpr_holdout.py \
             --tag "${{ inputs.holdout_tag }}" \
+            --asset-sha256 "${HOLDOUT_ASSET_SHA256}" \
             --predictions .verification/holdout-predictions.json \
             --ovk-commit-sha "${GITHUB_SHA}" \
             --verified-source-sha "${GITHUB_SHA}" \
             --output .verification/holdout-aggregate-metrics.json
 
-      - name: Validate aggregate schema shape
+      - name: Validate aggregate schema and leakage guard
         if: steps.gate.outputs.configured == 'true'
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
+          from scripts.run_formalpr_holdout import assert_aggregate_safe
+
           payload = json.loads(Path(".verification/holdout-aggregate-metrics.json").read_text())
+          assert_aggregate_safe(payload)
           assert payload["schema_version"] == "formalpr_holdout.aggregate_metrics.v1"
           assert payload["leakage_guard"]["labels_emitted"] is False
           assert payload["leakage_guard"]["case_ids_emitted"] is False
-          assert "lanes" in payload and payload["lanes"]
-          for lane, metrics in payload["lanes"].items():
-              for key in (
-                  "precision", "recall", "false_positive_rate", "missed_detection_rate",
-                  "unknown_rate", "invalid_input_rate", "abstention_appropriateness",
-                  "coverage_completeness", "counterexample_correctness",
-                  "selected_backend_execution_correctness", "runtime_ms",
-              ):
-                  assert key in metrics, f"missing {key} in lane {lane}"
-          print("aggregate schema checks passed; labels not present")
+          assert payload["leakage_guard"]["fail_closed"] is True
+          print("aggregate schema and leakage checks passed")
           PY
 
       - name: Upload aggregates only
