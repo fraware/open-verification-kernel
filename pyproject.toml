@@ -1,6 +1,6 @@
 [project]
 name = "open-verification-kernel"
-version = "1.2.0"
+version = "1.2.1"
 description = "Solver-agnostic verification kernel for AI-agent engineering workflows"
 readme = "README.md"
 requires-python = ">=3.10"

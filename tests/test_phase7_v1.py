@@ -56,7 +56,7 @@ def test_v1_readiness_checklist() -> None:
     required_backends = {"opa", "z3", "cedar", "tla+", "kani", "dafny", "verus", "lean", "cbmc", "alloy"}
     assert required_backends.issubset(backends)
     assert len(list_templates()) >= 100
-    assert metadata["version"] == "1.2.0"
+    assert metadata["version"] == "1.2.1"
     assert "ovk bench" in metadata["supported_commands"]
 
 

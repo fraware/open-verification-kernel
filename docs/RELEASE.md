@@ -4,7 +4,7 @@ Maintainer guide for shipping Open Verification Kernel. Current readiness: [CURR
 
 ## Current release candidate
 
-Package version: `1.2.0`.
+Package version: `1.2.1`.
 
 Release judgment: **release candidate**. The five bounded evidence lanes, artifact chain, CLI, MCP surface, and composite Action are implemented. Backend routing remains advisory, external tagged-consumer validation remains pending, and the current source commit must pass all gates below before publication.
 
@@ -63,13 +63,15 @@ Before tagging:
 Tag and create the release only after the source gates are attributable:
 
 ```bash
-git tag -s v1.2.0 <VERIFIED_SOURCE_SHA>
-git push origin v1.2.0
-gh release create v1.2.0 \
+git tag -s v1.2.1 <VERIFIED_SOURCE_SHA>
+git push origin v1.2.1
+gh release create v1.2.1 \
   --verify-tag \
-  --title "OVK v1.2.0" \
-  --notes-file docs/RELEASE_NOTES_v1.2.0.md
+  --title "OVK v1.2.1" \
+  --notes-file docs/RELEASE_NOTES_v1.2.1.md
 ```
+
+Note: `v1.2.0` already exists as an immutable tag on an earlier commit without the protected Publish Sigstore path. Do not move that tag.
 
 ## Package publication
 
@@ -125,11 +127,11 @@ https://token.actions.githubusercontent.com
 https://github.com/fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/vX.Y.Z
 ```
 
-Example for v1.2.0:
+Example for v1.2.1:
 
 ```bash
 export OVK_SIGSTORE_SIGNING=1
-export OVK_COSIGN_IDENTITY='https://github.com/fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/v1.2.0'
+export OVK_COSIGN_IDENTITY='https://github.com/fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/v1.2.1'
 export OVK_COSIGN_ISSUER='https://token.actions.githubusercontent.com'
 ```
 
@@ -138,7 +140,7 @@ Consumer verification of a retained bundle:
 ```bash
 cosign verify-blob \
   --bundle path/to/artifact.cosign.bundle.json \
-  --certificate-identity "https://github.com/fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/v1.2.0" \
+  --certificate-identity "https://github.com/fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/v1.2.1" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   path/to/artifact.whl
 ```
@@ -190,7 +192,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
-      - uses: fraware/open-verification-kernel@v1.2.0
+      - uses: fraware/open-verification-kernel@v1.2.1
         with:
           mode: advisory
           use-check: "true"
@@ -204,6 +206,7 @@ When `changed-files` is omitted, the Action materializes the pull-request diff a
 
 | Version | Changelog |
 |---|---|
+| v1.2.1 | [RELEASE_NOTES_v1.2.1.md](RELEASE_NOTES_v1.2.1.md) |
 | v1.2.0 | [RELEASE_NOTES_v1.2.0.md](RELEASE_NOTES_v1.2.0.md) |
 | v1.1.0 | [RELEASE_NOTES_v1.1.0.md](RELEASE_NOTES_v1.1.0.md) |
 | v1.0.0 | [RELEASE_NOTES_v1.0.0.md](RELEASE_NOTES_v1.0.0.md) |

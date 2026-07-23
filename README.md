@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![FormalPR-Bench](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/fraware/open-verification-kernel/main/docs/benchmarks/leaderboard-badge.json)](docs/benchmarks/latest-leaderboard-summary.json)
-[![Docs](https://img.shields.io/badge/docs-v1.2.0-green.svg)](docs/README.md)
+[![Docs](https://img.shields.io/badge/docs-v1.2.1-green.svg)](docs/README.md)
 
 [Quick start](#quick-start) · [Add to CI](#github-actions) · [Contribute](#contribute) · [Documentation](docs/README.md)
 
@@ -119,7 +119,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: fraware/open-verification-kernel@v1.2.0
+      - uses: fraware/open-verification-kernel@v1.2.1
         with:
           mode: advisory          # switch to strict when ready
           use-check: "true"       # analyze the PR diff automatically

@@ -91,11 +91,18 @@ runs:
       shell: bash
       working-directory: ${{ github.action_path }}
       run: |
+        set -euo pipefail
         python -m pip install --upgrade pip
-        if [ -n "${OVK_PACKAGE_VERSION:-}" ]; then
-          pip install "open-verification-kernel==${OVK_PACKAGE_VERSION}" || pip install .
-        else
+        install_from_checkout() {
+          # package_data/ is generated and gitignored; sync before non-editable install
+          # so schemas/templates/adapters ship into site-packages.
+          python scripts/sync_package_data.py
           pip install .
+        }
+        if [ -n "${OVK_PACKAGE_VERSION:-}" ]; then
+          pip install "open-verification-kernel==${OVK_PACKAGE_VERSION}" || install_from_checkout
+        else
+          install_from_checkout
         fi
     - name: Initialize verification directory if needed
       shell: bash

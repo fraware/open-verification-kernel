@@ -124,9 +124,11 @@ def test_repo_memory_feeds_router_priors(tmp_path: Path) -> None:
         memory_dir=memory_dir,
     )
     rates = backend_success_rates(memory_dir=memory_dir)
-    assert rates["z3"] == 0.5
-    priors = router_historical_priors(memory_dir=memory_dir)
-    assert priors["z3"] == 0.5
+    # pass and fail are both conclusive verifier outcomes for reliability priors
+    assert rates["z3"] == 1.0
+    priors = router_historical_priors(memory_dir=memory_dir, enabled=True)
+    assert priors["z3"] == 1.0
+    assert router_historical_priors(memory_dir=memory_dir, enabled=False) == {}
 
 
 def test_mcp_select_backends_uses_surface_routing() -> None:

@@ -55,7 +55,7 @@ def test_synthetic_cbmc_harness_is_not_labeled_as_project_source_proof(monkeypat
     )
     claim = evidence.backend_claims[0]
     assert claim.guarantee_type == "template_harness_model_check"
-    assert any("does not establish" in limit for limit in claim.limits)
+    assert any("do not establish" in limit for limit in claim.limits)
     provenance = next(item for item in evidence.generated_artifacts if item.get("kind") == "backend_provenance")
     assert provenance["harness_origin"] == "fixture"
 
