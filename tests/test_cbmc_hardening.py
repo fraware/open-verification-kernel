@@ -44,6 +44,59 @@ def test_cbmc_timeout_is_native_unknown_not_fallback(monkeypatch, tmp_path: Path
     assert result["used_native_binary"] is True
 
 
+def test_cbmc_successful_run_sets_native_attempted(monkeypatch, tmp_path: Path) -> None:
+    """Regression: native success must set native_attempted so probes/evidence see it."""
+    harness = tmp_path / "harness.c"
+    harness.write_text("void harness(void) {}\n", encoding="utf-8")
+    monkeypatch.setattr("ovk.adapters.cbmc.optional_runner.shutil.which", lambda _name: "/usr/bin/cbmc")
+
+    class SuccessWorker:
+        def run(self, command, *, cwd, env=None, timeout_seconds, max_stdout_bytes=0, max_stderr_bytes=0):
+            from ovk.core.execution_budget import WorkerResult
+
+            return WorkerResult(
+                exit_code=0,
+                timed_out=False,
+                stdout="CBMC version 5.95.1\nVERIFICATION SUCCESSFUL\n",
+                stderr="",
+                cwd=str(cwd),
+                command=tuple(command),
+            )
+
+    result = run_cbmc_harness(harness_path=harness, worker=SuccessWorker())
+    assert result["status"] == "pass"
+    assert result["native_attempted"] is True
+    assert result["used_native_binary"] is True
+
+
+def test_cbmc_evidence_records_native_use_on_successful_runner(monkeypatch) -> None:
+    monkeypatch.setattr(
+        cbmc_evidence,
+        "run_cbmc_harness",
+        lambda **_kwargs: {
+            "status": "pass",
+            "reason": "CBMC verification successful within bounds.",
+            "native_attempted": True,
+            "used_native_binary": True,
+            "counterexamples": [],
+        },
+    )
+    evidence = cbmc_evidence.evaluate_cbmc_harness(
+        {
+            "intent_id": "cbmc-harness-check",
+            "harness_path": "examples/backends/cbmc_harness/buffer_bounds_pass.c",
+            "entry_function": "harness",
+            "unwind": 16,
+        },
+        repo="test/repo",
+        head_sha="abc12345",
+    )
+    provenance = next(item for item in evidence.generated_artifacts if item.get("kind") == "backend_provenance")
+    assert provenance["used_native_binary"] is True
+    assert provenance["native_attempted"] is True
+    assert evidence.backend_claims[0].guarantee_type == "bounded_model_checking"
+
+
 def test_synthetic_cbmc_harness_is_not_labeled_as_project_source_proof(monkeypatch) -> None:
     monkeypatch.setattr(
         cbmc_evidence,

@@ -1,18 +1,19 @@
 package ovk.self_protection
 
+after_has_gate(gate) {
+  input.after.required_checks[_] == gate
+}
+
 violation[msg] {
   input.actor.type == "ai_agent"
   gate := input.ovk_gate_name
-  before := {c | c := input.before.required_checks[_]}
-  after := {c | c := input.after.required_checks[_]}
-  before[gate]
-  not after[gate]
+  input.before.required_checks[_] == gate
+  not after_has_gate(gate)
   msg := sprintf("required verification gate removed: %s", [gate])
 }
 
 violation[msg] {
   input.actor.type == "ai_agent"
-  some path
   path := input.changed_files[_]
   startswith(path, ".verification/")
   msg := sprintf("verification configuration changed: %s", [path])

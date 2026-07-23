@@ -118,6 +118,7 @@ def run_cbmc_harness(
         return {
             "status": "error",
             "reason": result.stderr.strip() or "cbmc worker rejected execution",
+            "native_attempted": True,
             "used_native_binary": False,
             "counterexamples": [],
         }
@@ -130,6 +131,7 @@ def run_cbmc_harness(
         return {
             "status": "error",
             "reason": result.stderr.strip() or "cbmc execution failed",
+            "native_attempted": True,
             "used_native_binary": True,
             "tool_version": tool_version,
             "counterexamples": [],
@@ -140,6 +142,7 @@ def run_cbmc_harness(
         return {
             "status": "pass",
             "reason": "CBMC verification successful within bounds.",
+            "native_attempted": True,
             "used_native_binary": True,
             "tool_version": tool_version,
             "counterexamples": [],
@@ -150,6 +153,7 @@ def run_cbmc_harness(
         return {
             "status": "fail",
             "reason": "CBMC reported a reachable violation.",
+            "native_attempted": True,
             "used_native_binary": True,
             "tool_version": tool_version,
             "counterexamples": _parse_cbmc_counterexamples(combined, failure_mode=failure_mode),
@@ -159,6 +163,7 @@ def run_cbmc_harness(
     return {
         "status": "unknown",
         "reason": "cbmc output did not report verification status",
+        "native_attempted": True,
         "used_native_binary": True,
         "tool_version": tool_version,
         "counterexamples": [],

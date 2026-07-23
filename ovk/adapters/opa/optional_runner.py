@@ -94,6 +94,18 @@ def run_opa_policy(
             return {"status": "error", "reason": detail, "violations": []}
         return {"status": "error", "reason": "opa returned invalid JSON", "violations": []}
 
+    # OPA emits parseable JSON with an "errors" array on compile/eval failure.
+    # Never treat that (or a non-zero exit) as an empty-pass oracle match.
+    opa_errors = payload.get("errors")
+    if result.exit_code != 0 or opa_errors:
+        detail = _format_opa_errors(opa_errors) or result.stderr.strip() or result.stdout.strip()
+        return {
+            "status": "error",
+            "reason": detail or "opa execution failed",
+            "violations": [],
+            "raw": payload,
+        }
+
     values: list[Any] = []
     for item in payload.get("result", []):
         for expression in item.get("expressions", []):
@@ -112,3 +124,23 @@ def run_opa_policy(
         "violations": violations,
         "raw": payload,
     }
+
+
+def _format_opa_errors(errors: Any) -> str:
+    """Render OPA JSON error payloads into a compact reason string."""
+    if not isinstance(errors, list) or not errors:
+        return ""
+    messages: list[str] = []
+    for item in errors:
+        if isinstance(item, dict):
+            message = str(item.get("message") or "").strip()
+            location = item.get("location") if isinstance(item.get("location"), dict) else {}
+            file_name = str(location.get("file") or "").strip()
+            row = location.get("row")
+            if message and file_name and row is not None:
+                messages.append(f"{file_name}:{row}: {message}")
+            elif message:
+                messages.append(message)
+        elif item:
+            messages.append(str(item))
+    return "; ".join(messages)
