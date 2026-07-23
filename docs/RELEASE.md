@@ -160,7 +160,7 @@ Required signing evidence:
 - [x] Sigstore-signed bundle validates with the trusted identity and issuer on a **protected** `workflow_dispatch` dry-run ([run 30008891551](https://github.com/fraware/open-verification-kernel/actions/runs/30008891551); identity `@refs/heads/main`, environment `sigstore` with required reviewers, retained `ovk-sigstore-bundles`);
 - [x] tampered evidence, manifest, statement, and envelope each fail validation (unit / release verifier); same-workflow artifact tamper test exercised in the dry-run above;
 - [x] signature and transparency artifacts retained as workflow artifacts on the dry-run above;
-- [ ] **Not complete until immutable-tag protected release E2E:** a GitHub **Release** event on an immutable `refs/tags/v*` (full `verify` job green + keyless cosign + release-attached bundles) has succeeded end to end. Branch dry-runs do not alone close the production pin. Do not claim production signing complete until that box is checked.
+- [x] **Immutable-tag protected release E2E:** GitHub Release `v1.2.1` ([release](https://github.com/fraware/open-verification-kernel/releases/tag/v1.2.1); [Publish run 30010876652](https://github.com/fraware/open-verification-kernel/actions/runs/30010876652)) — `verify` green, keyless cosign with `--require-immutable-tag`, identity `.../publish.yml@refs/tags/v1.2.1`, issuer `https://token.actions.githubusercontent.com`, cosign bundles attached to the Release. Production consumers must pin that tag identity (not `@refs/heads/main`).
 
 ## Independent consumer gate
 
