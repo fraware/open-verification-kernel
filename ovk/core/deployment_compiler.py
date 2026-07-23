@@ -5,18 +5,14 @@ from __future__ import annotations
 from typing import Any
 
 from ovk.core.bundle import content_digest
-from ovk.core.compiler_bridge import (
-    compile_deployment_ir,
-    deployment_coverage,
-    material_refs_from_digest,
-)
+from ovk.core.compiler_bridge import compile_deployment_ir, deployment_coverage
 from ovk.core.execution_models import (
     AbstractionCoverage,
-    MaterialReference,
     VerificationObligation,
     compute_abstraction_digest,
     compute_obligation_id,
 )
+from ovk.core.materials import material_reference_from_payload
 from ovk.core.models import RiskSeverity, VerificationSubject
 
 COMPILER_ID = "ovk.deployment.neutral.v1"
@@ -46,7 +42,7 @@ def compile_deployment_obligation(
                 lane_input[key] = data[key]
         coverage = deployment_coverage(ir)
         materials = [
-            material_refs_from_digest(
+            material_reference_from_payload(
                 material_id=content_digest({"deployment": compiler_id})[:32],
                 kind="deployment_policy",
                 uri=f"ovk-material:deployment/{compiler_id}",
@@ -89,12 +85,11 @@ def compile_deployment_obligation(
         warnings=["state machine abstraction missing"],
     )
     materials = [
-        MaterialReference(
+        material_reference_from_payload(
             material_id="deployment-input",
             kind="diff",
             uri="ovk-material:deployment/input",
-            sha256=content_digest(data),
-            size_bytes=len(content_digest(data)),
+            payload=data,
             source_revision=head_sha,
             trusted=False,
         )
