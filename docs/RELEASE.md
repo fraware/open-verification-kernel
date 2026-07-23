@@ -73,7 +73,7 @@ gh release create v1.2.0 \
 
 ## Package publication
 
-The release-triggered Publish workflow:
+The release-triggered Publish workflow (`.github/workflows/publish.yml`):
 
 1. verifies release-tag/package-version equality;
 2. synchronizes package data;
@@ -81,7 +81,9 @@ The release-triggered Publish workflow:
 4. builds and checks the sdist and wheel;
 5. installs the wheel in an isolated environment outside the checkout;
 6. validates packaged templates, capabilities, MCP discovery, and `ovk doctor`;
-7. publishes to PyPI only after the protected `pypi` environment permits it.
+7. keyless-signs distributions with cosign in the protected `sigstore` environment (`id-token: write`);
+8. verifies signatures in the same workflow against the exact identity + OIDC issuer, runs a tamper test, and retains cosign bundles;
+9. publishes to PyPI only after the protected `pypi` environment permits it (skipped on `workflow_dispatch` dry-run).
 
 PyPI configuration:
 
@@ -90,15 +92,40 @@ PyPI configuration:
 - require maintainer review for the environment;
 - retain the built distributions and verification artifacts.
 
+### Sigstore dry-run (no PyPI publish)
+
+After this workflow is on `main`:
+
+```bash
+gh workflow run Publish.yml --ref main -f dry_run=true
+gh run watch
+```
+
+`workflow_dispatch` never publishes to PyPI. Dry-run signatures are bound to `@refs/heads/main` (or the dispatched branch). They exercise Fulcio/Rekor and retention but are **not** a production pin. Production consumers must verify against an immutable tag identity (below).
+
 ## Attestation signing
 
 ### HMAC
 
 Set `OVK_SIGNING_KEY` only in a controlled internal environment. Any consumer verifying the HMAC must possess the same secret. A signed envelope fails verification when the key is unavailable or different.
 
-### Sigstore/cosign
+### Sigstore/cosign (keyless)
 
-Explicit Sigstore signing fails closed. The release workflow must supply:
+Explicit Sigstore signing fails closed. The protected Publish `sigstore` job has `id-token: write` and signs with `cosign sign-blob` (no long-lived keys in git or secrets).
+
+**Exact OIDC issuer (GitHub Actions):**
+
+```text
+https://token.actions.githubusercontent.com
+```
+
+**Exact workflow identity (production / immutable tag):**
+
+```text
+https://github.com/fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/vX.Y.Z
+```
+
+Example for v1.2.0:
 
 ```bash
 export OVK_SIGSTORE_SIGNING=1
@@ -106,15 +133,32 @@ export OVK_COSIGN_IDENTITY='https://github.com/fraware/open-verification-kernel/
 export OVK_COSIGN_ISSUER='https://token.actions.githubusercontent.com'
 ```
 
-The exact identity must reflect the actual protected release workflow and tag policy. Verification binds the cosign bundle to both the expected certificate identity and OIDC issuer. Do not enable Sigstore signing until the release workflow has `id-token: write` and the identity policy has been tested end to end.
+Consumer verification of a retained bundle:
+
+```bash
+cosign verify-blob \
+  --bundle path/to/artifact.cosign.bundle.json \
+  --certificate-identity "https://github.com/fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/v1.2.0" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  path/to/artifact.whl
+```
+
+Policy:
+
+- Trust only the Publish workflow path above; do not accept arbitrary workflows in this repository.
+- Trust only immutable `refs/tags/v*` identities for production artifacts.
+- The `sigstore` GitHub Environment should require maintainer reviewers (same class of protection as `pypi`).
+- Cosign bundles and `ovk-sigstore-summary.json` are retained as workflow artifacts (90 days) and attached to the GitHub Release on `release` events.
+- Same-workflow steps: sign → verify with exact identity/issuer → mutate a copy and expect verify failure (`scripts/sigstore_release.py`).
 
 Required signing evidence:
 
-- [ ] unsigned bundle validates;
-- [ ] HMAC-signed bundle validates with the correct key and fails with the wrong or missing key;
-- [ ] Sigstore-signed bundle validates with the trusted identity and issuer;
-- [ ] tampered evidence, manifest, statement, and envelope each fail validation;
-- [ ] signature and transparency artifacts are retained with the release.
+- [x] unsigned bundle validates;
+- [x] HMAC-signed bundle validates with the correct key and fails with the wrong or missing key;
+- [ ] Sigstore-signed bundle validates with the trusted identity and issuer (**live protected-release E2E**);
+- [x] tampered evidence, manifest, statement, and envelope each fail validation (unit / release verifier);
+- [ ] signature and transparency artifacts are retained with a real protected release (**live E2E**);
+- [ ] **Not complete until protected release E2E:** a GitHub **protected** Publish run (environment reviewers + keyless cosign against release artifacts, preferably an immutable tag) has succeeded end to end. Optional CI unit tests and branch dry-runs do not alone close this gate. Do not claim production signing complete until that box is checked.
 
 ## Independent consumer gate
 
