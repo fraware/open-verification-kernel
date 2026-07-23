@@ -30,20 +30,37 @@ def run_opa_policy(
     if opa_path is None:
         return {"status": "unknown", "reason": "opa binary not found", "violations": []}
 
+    policy_abs = Path(policy_path).expanduser().resolve()
+    input_abs = Path(input_path).expanduser().resolve()
+    if not policy_abs.is_file():
+        return {
+            "status": "error",
+            "reason": f"opa policy not found: {policy_abs}",
+            "violations": [],
+        }
+    if not input_abs.is_file():
+        return {
+            "status": "error",
+            "reason": f"opa input not found: {input_abs}",
+            "violations": [],
+        }
+
     command = [
         opa_path,
         "eval",
         "--format",
         "json",
         "--data",
-        str(policy_path),
+        str(policy_abs),
         "--input",
-        str(input_path),
+        str(input_abs),
         query,
     ]
 
     active_worker = worker or LocalSubprocessWorker()
-    work_cwd = cwd or input_path.parent
+    # Default to the caller's cwd (historic behavior). Temp input dirs break relative
+    # package-data policy resolution when callers pass non-absolute paths.
+    work_cwd = Path(cwd).resolve() if cwd is not None else Path.cwd().resolve()
     result = active_worker.run(
         command,
         cwd=work_cwd,

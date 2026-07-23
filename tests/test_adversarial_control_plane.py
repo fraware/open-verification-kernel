@@ -363,5 +363,11 @@ def test_generated_regression_tests_path_constrained(tmp_path: Path, monkeypatch
     with pytest.raises(ValueError, match="auto-execution"):
         write_generated_tests(bundle, out, allow_auto_exec=True)
 
+    # Use an absolute path under the filesystem root so Linux CI and Windows
+    # both treat it as outside cwd/temp/.verification (Windows drive-letter
+    # strings are not absolute on Linux).
+    import tempfile as _tempfile
+
+    outside = Path(Path(_tempfile.gettempdir()).resolve().anchor) / "ovk-escape-forbidden-tests"
     with pytest.raises(ValueError, match="path traversal|outside workspace or temp"):
-        write_generated_tests(bundle, Path("C:/Windows/System32/ovk-escape-tests"))
+        write_generated_tests(bundle, outside)
