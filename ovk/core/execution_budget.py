@@ -3,7 +3,8 @@
 ``ExecutionBudget`` is defined in ``ovk.core.execution_models``. This module
 re-exports it, provides policy conversion helpers, and defines the worker
 protocol that enforces subprocess environment bounds. Adapters describe
-computation; workers enforce timeout, cwd, env allowlist, and output caps.
+computation; workers enforce timeout, cwd, an environment allowlist, and
+output caps.
 """
 
 from __future__ import annotations
@@ -98,27 +99,38 @@ class BackendWorker(Protocol):
     ) -> WorkerResult: ...
 
 
-# Environment variable names that must never be inherited into backend workers.
-_SECRET_ENV_DENYLIST = (
-    "AWS_SECRET_ACCESS_KEY",
-    "AWS_SESSION_TOKEN",
-    "AZURE_CLIENT_SECRET",
-    "GITHUB_TOKEN",
-    "GH_TOKEN",
-    "NPM_TOKEN",
-    "OPENAI_API_KEY",
-    "OVK_SIGNING_KEY",
-    "PRIVATE_KEY",
-    "SSH_AUTH_SOCK",
+# Environment variable names that must never be passed, even when a caller
+# supplies them explicitly. The worker otherwise starts from a minimal
+# allowlisted parent environment and accepts explicit non-secret additions.
+_SECRET_ENV_DENYLIST = frozenset(
+    {
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AZURE_CLIENT_ID",
+        "AZURE_CLIENT_SECRET",
+        "AZURE_TENANT_ID",
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "HOLDOUT_DOWNLOAD_TOKEN",
+        "NPM_TOKEN",
+        "OPENAI_API_KEY",
+        "OVK_SIGNING_KEY",
+        "PRIVATE_KEY",
+        "PYPI_API_TOKEN",
+        "SSH_AUTH_SOCK",
+    }
 )
 
 
 @dataclass
 class LocalSubprocessWorker:
-    """Local subprocess worker with timeout, cwd bound, and env allowlist.
+    """Local subprocess worker with timeout, cwd bound, and minimal environment.
 
-    Secret-bearing environment variables are never inherited. The parent
-    environment is otherwise preserved so native toolchains keep working in CI.
+    Only keys in ``allowed_env_keys`` are inherited from the parent. Callers may
+    pass explicit non-secret variables through ``env``. Known credential keys
+    are rejected in both inherited and explicit environments.
     """
 
     allowed_env_keys: frozenset[str] = field(
@@ -137,6 +149,9 @@ class LocalSubprocessWorker:
                 "PYTHONPATH",
                 "VIRTUAL_ENV",
                 "LD_LIBRARY_PATH",
+                "DYLD_LIBRARY_PATH",
+                "SSL_CERT_FILE",
+                "SSL_CERT_DIR",
             }
         )
     )
@@ -164,6 +179,16 @@ class LocalSubprocessWorker:
                     command=tuple(command),
                 )
 
+        if timeout_seconds <= 0:
+            return WorkerResult(
+                exit_code=None,
+                timed_out=True,
+                stdout="",
+                stderr="execution budget permits no backend wall time",
+                cwd=str(cwd_resolved),
+                command=tuple(command),
+            )
+
         child_env = self._build_env(env)
         try:
             completed = subprocess.run(
@@ -171,7 +196,7 @@ class LocalSubprocessWorker:
                 cwd=str(cwd_resolved),
                 env=child_env,
                 capture_output=True,
-                timeout=timeout_seconds if timeout_seconds > 0 else None,
+                timeout=timeout_seconds,
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
@@ -202,28 +227,18 @@ class LocalSubprocessWorker:
         )
 
     def _build_env(self, extra: Mapping[str, str] | None) -> dict[str, str]:
-        """Build a child environment.
-
-        Default behavior inherits the parent environment except for known
-        secret-bearing keys. Callers that need a tighter sandbox can pass
-        ``extra`` with only the keys they need after constructing a worker
-        whose ``allowed_env_keys`` is interpreted as an optional soft guide
-        for documentation; secrets are always stripped.
-        """
+        """Build a minimal child environment from allowlisted and explicit keys."""
+        allowed_upper = {key.upper() for key in self.allowed_env_keys}
         baseline = {
             key: value
             for key, value in os.environ.items()
-            if key.upper() not in _SECRET_ENV_DENYLIST
+            if key.upper() in allowed_upper and key.upper() not in _SECRET_ENV_DENYLIST
         }
         if extra:
             for key, value in extra.items():
                 if key.upper() in _SECRET_ENV_DENYLIST:
                     continue
                 baseline[key] = value
-        for denied in _SECRET_ENV_DENYLIST:
-            baseline.pop(denied, None)
-            # Also drop common case variants.
-            baseline.pop(denied.lower(), None)
         return baseline
 
 
