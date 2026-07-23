@@ -50,3 +50,22 @@ def write_infra_exposure_rego(path: Path) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(INFRA_EXPOSURE_REGO, encoding="utf-8")
+
+
+def resolve_self_protection_policy_path() -> Path:
+    """Return a usable Rego policy path, preferring packaged assets then writing a temp copy."""
+    candidates = [
+        Path("adapters/opa/policies/self_protection.rego"),
+        Path("ovk/package_data/adapters/opa/policies/self_protection.rego"),
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.resolve()
+    from ovk.paths import ovk_data_root
+
+    packaged = ovk_data_root() / "adapters" / "opa" / "policies" / "self_protection.rego"
+    if packaged.exists():
+        return packaged.resolve()
+    fallback = Path(".verification") / "generated_policies" / "self_protection.rego"
+    write_self_protection_rego(fallback)
+    return fallback.resolve()
