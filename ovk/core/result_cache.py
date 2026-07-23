@@ -38,11 +38,26 @@ NAMESPACE_BACKEND_RESULTS = "backend-results"
 NAMESPACE_AGGREGATE = "aggregate"
 
 
-def cache_key(lane: str, data: dict[str, Any], *, policy_digest: str | None = None) -> str:
-    """Build a stable legacy cache key for a lane input."""
-    payload: dict[str, Any] = {"lane": lane, "input": data}
+def cache_key(
+    lane: str,
+    data: dict[str, Any],
+    *,
+    policy_digest: str | None = None,
+    subject: dict[str, Any] | None = None,
+    execution_fingerprint: dict[str, Any] | None = None,
+) -> str:
+    """Build a stable legacy cache key for a lane input and execution context."""
+    payload: dict[str, Any] = {
+        "ovk_version": OVK_VERSION,
+        "lane": lane,
+        "input": data,
+    }
     if policy_digest:
         payload["policy"] = policy_digest
+    if subject:
+        payload["subject"] = subject
+    if execution_fingerprint:
+        payload["execution"] = execution_fingerprint
     return content_digest(payload)
 
 

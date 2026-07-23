@@ -51,7 +51,7 @@ install_cedar() {
     source "${HOME}/.cargo/env"
     echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
   fi
-  cargo install cedar-policy-cli --version "${CEDAR_CLI_VERSION}" --locked
+  cargo install cedar-policy-cli --version "${CEDAR_CLI_VERSION}" --locked --force
   if [[ -x "${HOME}/.cargo/bin/cedar" ]]; then
     sudo ln -sf "${HOME}/.cargo/bin/cedar" /usr/local/bin/cedar
   fi

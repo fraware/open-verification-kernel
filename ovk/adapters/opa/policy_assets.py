@@ -13,11 +13,15 @@ from pathlib import Path
 SELF_PROTECTION_REGO = r'''
 package ovk.self_protection
 
+after_has_gate(gate) {
+  input.after.required_checks[_] == gate
+}
+
 violation[msg] {
   input.actor.type == "ai_agent"
   gate := input.ovk_gate_name
   input.before.required_checks[_] == gate
-  not input.after.required_checks[_] == gate
+  not after_has_gate(gate)
   msg := sprintf("required verification gate removed: %s", [gate])
 }
 
