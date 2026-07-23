@@ -155,10 +155,10 @@ Required signing evidence:
 
 - [x] unsigned bundle validates;
 - [x] HMAC-signed bundle validates with the correct key and fails with the wrong or missing key;
-- [ ] Sigstore-signed bundle validates with the trusted identity and issuer (**live protected-release E2E**);
-- [x] tampered evidence, manifest, statement, and envelope each fail validation (unit / release verifier);
-- [ ] signature and transparency artifacts are retained with a real protected release (**live E2E**);
-- [ ] **Not complete until protected release E2E:** a GitHub **protected** Publish run (environment reviewers + keyless cosign against release artifacts, preferably an immutable tag) has succeeded end to end. Optional CI unit tests and branch dry-runs do not alone close this gate. Do not claim production signing complete until that box is checked.
+- [x] Sigstore-signed bundle validates with the trusted identity and issuer on a **protected** `workflow_dispatch` dry-run ([run 30008891551](https://github.com/fraware/open-verification-kernel/actions/runs/30008891551); identity `@refs/heads/main`, environment `sigstore` with required reviewers, retained `ovk-sigstore-bundles`);
+- [x] tampered evidence, manifest, statement, and envelope each fail validation (unit / release verifier); same-workflow artifact tamper test exercised in the dry-run above;
+- [x] signature and transparency artifacts retained as workflow artifacts on the dry-run above;
+- [ ] **Not complete until immutable-tag protected release E2E:** a GitHub **Release** event on an immutable `refs/tags/v*` (full `verify` job green + keyless cosign + release-attached bundles) has succeeded end to end. Branch dry-runs do not alone close the production pin. Do not claim production signing complete until that box is checked.
 
 ## Independent consumer gate
 
