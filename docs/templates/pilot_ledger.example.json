@@ -1,0 +1,33 @@
+{
+  "schema_version": "ovk.pilot_ledger.v1",
+  "ledger_id": "example-pilot-ledger",
+  "description": "Example only. production_gate_met must remain false until 30 human-adjudicated PRs exist per independent consumer.",
+  "ovk_source_version": "v1.2.1",
+  "consumer_repos": [
+    "fraware/ovk-consumer-fastapi-terraform",
+    "fraware/ovk-consumer-express-actions"
+  ],
+  "production_gate_met": false,
+  "entries": [
+    {
+      "entry_id": "example-automated-scenario",
+      "repository": "fraware/ovk-consumer-fastapi-terraform",
+      "ovk_source_version": "v1.2.1",
+      "pr_identifier": "automated_scenario:advisory_passing",
+      "intent": "advisory_passing_pr",
+      "recommendation": "allow",
+      "human_adjudication": "automated_scenario",
+      "false_positive": null,
+      "missed_detection": null,
+      "unknown_appropriateness": null,
+      "reviewer_comments": "Example seed row. Not a human adjudication.",
+      "runtime": {
+        "elapsed_ms": 1000,
+        "mode": "automated_scenario",
+        "runner": "scripts/run_scenario_matrix.py"
+      },
+      "artifacts": ["artifacts/scenario-matrix/advisory-passing/ovk-evidence.json"],
+      "final_disposition": "scenario_pass"
+    }
+  ]
+}

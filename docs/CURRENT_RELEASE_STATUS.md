@@ -19,7 +19,7 @@ Authoritative audit: [VISION_AUDIT_2026-07-22.md](VISION_AUDIT_2026-07-22.md).
 | **Routing** | Candidate routing is computed and recorded; selected backends do not yet control lane execution |
 | **Unit and workflow tests** | Release Publish `verify` green on tag `v1.2.1` ([run 30010876652](https://github.com/fraware/open-verification-kernel/actions/runs/30010876652)); CI `test` + Action dogfood green on fix PR #9 |
 | **Package portability** | Wheel-outside-checkout smoke passed in Publish `verify` for `v1.2.1` |
-| **GitHub Action** | Automatic PR-diff collection and quoted arguments are implemented; independent tagged consumer repository remains pending |
+| **GitHub Action** | Automatic PR-diff collection and quoted arguments are implemented; independent tagged consumers exist for `v1.2.1` (automated scenarios; human adjudications outstanding) |
 | **External validation** | Current workflow is in-repository dogfooding; external pilot registry contains no completed independent pilot evidence yet |
 | **Sigstore** | Immutable-tag keyless E2E closed for `v1.2.1` (see gap #9) |
 OVK is not complete formal verification of arbitrary code. It provides explainable, conservative checks for a bounded set of high-risk changes and emits explicit unknown and human-review outcomes.
@@ -60,7 +60,7 @@ Before tagging or publishing v1.2.0:
 - [ ] run full expanded FormalPR-Bench and release preflight;
 - [ ] validate a complete release bundle, including evidence-quality semantics;
 - [ ] exercise HMAC signing and identity-bound Sigstore signing according to release policy;
-- [ ] run the immutable Action or release wheel in an independent consumer repository;
+- [x] run the immutable Action or release wheel in independent consumer repositories ([fastapi-terraform](https://github.com/fraware/ovk-consumer-fastapi-terraform), [express-actions](https://github.com/fraware/ovk-consumer-express-actions)); see [CONSUMER_VALIDATION_CHECKLIST.md](CONSUMER_VALIDATION_CHECKLIST.md) — automated scenarios only; 30 human adjudications still outstanding;
 - [ ] update status with exact source SHA and workflow links;
 - [ ] keep the package classifier at Beta until independent pilots and backend-routing enforcement meet the production gate.
 

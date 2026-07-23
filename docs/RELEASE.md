@@ -164,14 +164,25 @@ Required signing evidence:
 
 ## Independent consumer gate
 
-Before describing v1.2.0 as production-stable:
+Independent tagged consumers for **v1.2.1** (Action + cosign-verified Release wheel):
 
-- [ ] create a separate fixture repository;
-- [ ] invoke `fraware/open-verification-kernel@v1.2.0`, never `uses: ./`;
-- [ ] test advisory allow, advisory block, strict block, unknown/review, comment, and check-run paths;
-- [ ] test a fork pull request with reduced token permissions;
-- [ ] install the published wheel independently;
-- [ ] complete at least two adjudicated advisory pilots according to [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md).
+| Consumer | URL |
+|---|---|
+| FastAPI + Terraform | https://github.com/fraware/ovk-consumer-fastapi-terraform |
+| Express + GitHub Actions | https://github.com/fraware/ovk-consumer-express-actions |
+
+Checklist and ledger schema: [CONSUMER_VALIDATION_CHECKLIST.md](CONSUMER_VALIDATION_CHECKLIST.md), `schemas/pilot.ledger.schema.json`. Optional OVK workflow: `.github/workflows/consumer-pin-verification.yml` (`workflow_dispatch`).
+
+Before describing the release as production-stable:
+
+- [x] create separate fixture repositories (two independent consumers above);
+- [x] invoke `fraware/open-verification-kernel@v1.2.1`, never `uses: ./`;
+- [x] automate advisory allow/block, strict block, malformed abstraction, comment/check-run contracts, release bundle, wheel install, cache reuse, policy change, backend unavailable, native timeout, and generated regression artifacts;
+- [x] document fork-PR reduced permissions with a dry simulation (`pull_request`, not `pull_request_target`);
+- [x] install the Release wheel independently with cosign verify-blob (PyPI still optional until published);
+- [ ] complete a true cross-fork PR adjudication in each consumer ledger;
+- [ ] complete 30 human-adjudicated PRs per independent consumer (automated_scenario seeds do not count);
+- [ ] complete additional adjudicated advisory pilots according to [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md).
 
 ## External consumer example
 

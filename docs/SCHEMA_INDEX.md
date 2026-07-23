@@ -28,6 +28,7 @@ JSON schemas for OVK objects. See also [ARTIFACTS.md](ARTIFACTS.md).
 | [verification.config.schema.json](../schemas/verification.config.schema.json) | ovk.config.v1 | `.verification/config.yml` policy routing config |
 | [formal_pr_bench.leaderboard.schema.json](../schemas/formal_pr_bench.leaderboard.schema.json) | formal_pr_bench.leaderboard.v1 | `ovk bench --leaderboard` |
 | [pilot.report.schema.json](../schemas/pilot.report.schema.json) | ovk.pilot_report.v1 | `ovk pilot --output report.json` |
+| [pilot.ledger.schema.json](../schemas/pilot.ledger.schema.json) | ovk.pilot_ledger.v1 | Independent consumer pilot ledgers (program section 23.2) |
 | [pilot.metrics.schema.json](../schemas/pilot.metrics.schema.json) | ovk.pilot_metrics.v1 | `scripts/collect_pilot_metrics.py --output pilot-metrics.json` |
 | [adoption.summary.schema.json](../schemas/adoption.summary.schema.json) | ovk.adoption_summary.v1 | `docs/benchmarks/adoption-summary.json` |
 | [external.pilot.schema.json](../schemas/external.pilot.schema.json) | n/a | `docs/benchmarks/external-pilots-registry.json` items |
