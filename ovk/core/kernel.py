@@ -150,6 +150,7 @@ def execute_kernel(
             cache_dir=cache_dir,
             use_cache=use_cache,
             parallel=parallel,
+            policy=ctx.policy if isinstance(ctx.policy, dict) else None,
         )
         bundle = make_bundle(evidence_items, **decision_options)
 
