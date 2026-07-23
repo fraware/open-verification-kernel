@@ -1,77 +1,132 @@
 # OVK Release Status
 
-Living adoption dashboard for Open Verification Kernel.
+Living release and adoption dashboard for Open Verification Kernel.
 
 **Last updated:** 2026-07-23
 
-**Release judgment:** v1.2.1 **release candidate**. The bounded evidence pipeline is substantial, but the complete solver-agnostic kernel vision is still partial because backend routing enforcement is landing in the control-plane stack and still requires independent consumer validation. Independent tagged-consumer validation remains required before calling the release production-stable.
+## Release judgment
 
-Authoritative audit: [VISION_AUDIT_2026-07-22.md](VISION_AUDIT_2026-07-22.md).
+The currently published and signed release is `v1.2.1` at commit:
+
+`a27d5720f4350c00bca34f71d991c31f5a2f38c7`
+
+Release workflow run `30010876652` successfully completed release verification, package build, isolated wheel smoke, and keyless Sigstore signing for that tag. PyPI publication was skipped.
+
+Current `main` is a post-v1.2.1 development line. It adds the typed backend control plane, enforced lane adapters, source compilers, evidence v2, template conformance, holdout infrastructure, consumer validation scaffolding, and later audit fixes. The v1.2.1 run does not validate these post-tag changes.
+
+**Current-main judgment:** advanced release candidate for a future `v1.3.0-rc.1`, pending P0 trust fixes and current-source CI.
+
+Authoritative current audit:
+
+- [DEEP_AUDIT_2026-07-23_R2.md](DEEP_AUDIT_2026-07-23_R2.md)
+
+Standalone engineer instructions:
+
+- [ENGINEERING_PROGRAM_2026-07-23_R2.md](ENGINEERING_PROGRAM_2026-07-23_R2.md)
 
 ## At a glance
 
 | Signal | Current state |
 |---|---|
-| **Package version** | `1.2.1` release candidate; immutable tag `v1.2.1` cut; PyPI `publish` job was skipped on the release run and must be confirmed separately |
-| **FormalPR-Bench** | Repository snapshot reports 130/130 curated regression cases; this is internal conformance, not an external accuracy estimate |
-| **Check types** | Five bounded production lanes: self-protection, authorization, infrastructure, CI secrets, deployment |
-| **Backend execution** | OPA and Z3 native paths; CBMC bounded explicit/template harness path; Cedar version probe plus deterministic evaluator; six deterministic contract adapters |
-| **Routing** | Control-plane routing can enforce backend selection for production lanes; see template conformance and lane enforcement tests |
-| **Unit and workflow tests** | Release Publish `verify` green on tag `v1.2.1` ([run 30010876652](https://github.com/fraware/open-verification-kernel/actions/runs/30010876652)); CI uses `unit` then `gates` jobs — cite `verified_source_sha` for badge `[skip ci]` commits |
-| **Package portability** | Wheel-outside-checkout smoke passed in Publish `verify` for `v1.2.1` |
-| **GitHub Action** | Automatic PR-diff collection and quoted arguments are implemented; independent tagged consumer repository remains pending |
-| **External validation** | Current workflow is in-repository dogfooding; external pilot registry contains no completed independent pilot evidence yet |
-| **Sigstore** | Immutable-tag keyless E2E closed for `v1.2.1` (see gap #9) |
-OVK is not complete formal verification of arbitrary code. It provides explainable, conservative checks for a bounded set of high-risk changes and emits explicit unknown and human-review outcomes.
+| **Published/signed release** | `v1.2.1` at `a27d572…`; valid evidence for the previous release only |
+| **Current development line** | Post-v1.2.1 control-plane architecture; requires a new release-candidate cycle |
+| **FormalPR-Bench** | Repository snapshot reports 130/130 curated regression cases; internal conformance, not external accuracy |
+| **Production lanes** | Self-protection, authorization, infrastructure, CI secrets, deployment |
+| **Backend routing** | Typed routing controls execution inside explicitly enforced lane paths |
+| **Default routing mode** | Shadow; legacy evidence remains authoritative unless lanes are explicitly enforced |
+| **Native semantic paths** | OPA and Z3; CBMC supports bounded explicit/template harness paths |
+| **Deterministic adapters** | Five lane implementations plus external contract adapters |
+| **Current-source CI** | Must be rerun after the latest engineer and audit changes |
+| **Independent consumers** | Two public consumer repositories exist, but they currently pin `v1.2.1`, not current `main` |
+| **Holdout** | Evaluator plumbing exists; prediction/evaluation separation and current-wheel evaluation remain incomplete |
+| **Package status** | Beta |
+
+OVK is not complete formal verification of arbitrary code. It provides conservative verification evidence for bounded, explicitly modeled risk profiles.
+
+## What is now achieved
+
+- typed backend-neutral obligations;
+- typed capability assessment and routing decisions;
+- registry-controlled selected backend execution;
+- five lane-specific enforced paths;
+- fail-dominant aggregation;
+- evidence v2 generation;
+- routing- and environment-bound cache keys;
+- source compiler packages;
+- template catalog separation;
+- manifests, provenance, attestations, HMAC, and Sigstore support;
+- automatic GitHub Action PR-diff collection;
+- two independent consumer repositories and immutable-pin checks.
+
+## Current P0 gaps
+
+1. Execution-attempt identity includes nondeterministic duration data.
+2. Cache hits do not preserve the original execution attempt and can reconstruct native provenance from current tool availability.
+3. Compiler/backend guarantee mismatch is silently rewritten instead of rejected.
+4. Required-primary selection does not enforce `coverage_requirements_met`.
+5. Fallback acceptance is not constrained to configured backend, guarantee, and failure cause.
+6. Self-protection metadata is trusted by default unless policy explicitly disables trust.
+7. Deterministic in-process adapters cannot be hard-cancelled.
+8. Kernel inference and enforced execution still use separate routing paths.
+9. Evidence v2 schema and invariants do not fully recompute and cross-bind routing, attempts, aggregate decisions, and materials.
+10. Lane-specific infrastructure policy is not fully compiled into enforced execution semantics.
+11. Source compilers remain advisory/profile-limited despite some `strict_eligible` labels.
+12. Template strict eligibility is based primarily on executable-link presence.
+13. Consumer repositories validate the previous release tag rather than current control-plane source.
+14. Current source lacks attributable release-candidate CI, native-backend, consumer, and holdout evidence.
+
+## Direct audit fixes now on current main
+
+- CI-secrets material byte size now binds canonical serialized bytes.
+- Backend subprocess workers inherit only a minimal allowlisted environment.
+- Unknown ambient credentials are excluded from backend workers.
+- Non-positive backend timeout prevents execution.
+- Remote FormalPR-Holdout assets require an independently supplied SHA-256.
+- Holdout archive extraction rejects traversal, links, devices, and special files.
+- Downloaded holdout evaluators run without GitHub or holdout tokens.
+- Holdout aggregates receive full JSON-schema and leakage-guard validation.
+
+These fixes require a fresh current-source CI run.
 
 ## Adoption readiness
 
-| Mode | Current recommendation | Conditions |
+| Mode | Recommendation | Conditions |
 |---|---|---|
-| **Local/demo** | Appropriate after current CI is green | Use shipped examples and inspect assumptions and limits |
-| **Advisory Action** | Appropriate for pilots after current CI is green | Collect adjudicated false positives, unknowns, and missed detections |
-| **Strict required check** | Repository-specific only | Calibrate on real diffs; use trusted abstraction sources and protected policy metadata |
-| **Production-stable general enforcement** | Not yet | Requires enforced backend routing, source-grounded compilers, independent pilots, and attributable release CI |
+| **Local/demo** | Appropriate after current-source CI | Inspect assumptions, limits, and profile coverage |
+| **Shadow Action** | Appropriate after current-source CI | Compare typed and legacy results; retain disagreements |
+| **Advisory enforced lane** | Controlled pilots only | Explicit lane policy, trusted materials, coverage review |
+| **Strict required check** | Repository/profile-specific | P0 fixes, calibrated source profile, protected policy and metadata |
+| **Production-stable general enforcement** | Not yet | Current-source release evidence, semantic profiles, holdout, consumer pilots |
 
-Suggested rollout: local validation → advisory artifacts → advisory check run/comment → calibrated strict lane → protected required check.
+## Release path
 
-## Current high-priority gaps
+The next release should use a new release-candidate version such as:
 
-1. Backend routing is advisory metadata and does not control compilation or execution.
-2. The 100-template catalog does not equal 100 executable, end-to-end properties.
-3. Authorization, infrastructure, CI workflow, and deployment diff extraction remain heuristic.
-4. Cedar and six other external adapters do not perform native proof/policy execution.
-5. FormalPR-Bench is an internal curated regression corpus without an independent holdout.
-6. No completed independent repository currently proves the tagged Action and wheel integration.
-7. Current-commit CI evidence is not attached to the latest observed `[skip ci]` HEAD.
-8. Auto-collected branch protection cannot reconstruct removed required checks without trusted before/after data.
-9. Live Sigstore keyless signing: protected `workflow_dispatch` dry-run succeeded ([run 30008891551](https://github.com/fraware/open-verification-kernel/actions/runs/30008891551)). **Immutable-tag Release E2E is closed** for `v1.2.1` ([release](https://github.com/fraware/open-verification-kernel/releases/tag/v1.2.1); [Publish run 30010876652](https://github.com/fraware/open-verification-kernel/actions/runs/30010876652); identity `@refs/tags/v1.2.1`, release-attached `*.cosign.bundle.json`). PyPI `publish` was skipped on that run and remains a separate follow-up — see [RELEASE.md](RELEASE.md#sigstorecosign-keyless).
+`v1.3.0-rc.1`
 
-Full analysis and acceptance criteria: [VISION_AUDIT_2026-07-22.md](VISION_AUDIT_2026-07-22.md).
+Before that tag:
 
-## Maintainer release gates
-
-Before tagging or publishing v1.2.0:
-
-- [ ] run all CI and native Tier 1 jobs on a non-`[skip ci]` source commit;
-- [ ] confirm wheel smoke from a directory outside the checkout;
-- [ ] confirm automatic-diff composite Action dogfood;
-- [ ] confirm package version matches the release tag;
-- [ ] run full expanded FormalPR-Bench and release preflight;
-- [ ] validate a complete release bundle, including evidence-quality semantics;
-- [ ] exercise HMAC signing and identity-bound Sigstore signing according to release policy;
-- [ ] run the immutable Action or release wheel in an independent consumer repository;
-- [ ] update status with exact source SHA and workflow links;
-- [ ] keep the package classifier at Beta until independent pilots and backend-routing enforcement meet the production gate.
+- [ ] close execution identity and cache provenance defects;
+- [ ] enforce coverage and guarantee contracts;
+- [ ] implement constrained fallback semantics;
+- [ ] default self-protection metadata to untrusted;
+- [ ] unify kernel routing;
+- [ ] hard-isolate authoritative adapters;
+- [ ] strengthen evidence and cross-artifact material binding;
+- [ ] run current-source general and native CI;
+- [ ] update both consumer repositories to the immutable release-candidate pin;
+- [ ] dispatch and verify consumer scenarios;
+- [ ] generate label-separated holdout predictions from the exact release-candidate artifact;
+- [ ] retain exact source SHA, workflow IDs, wheel digest, Action artifacts, and signing bundles.
 
 ## Related documents
 
 | Document | Purpose |
 |---|---|
-| [VISION_AUDIT_2026-07-22.md](VISION_AUDIT_2026-07-22.md) | Current deep code, artifact, vision, and engineering audit |
-| [STATUS.md](STATUS.md) | Command and lane inventory |
-| [BACKENDS.md](BACKENDS.md) | Exact backend execution maturity and guarantee classes |
-| [INTEGRATION.md](INTEGRATION.md) | Installation and GitHub Action setup |
-| [RELEASE.md](RELEASE.md) | Maintainer release procedure |
-| [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md) | Independent advisory pilot process |
-| [BENCHMARK.md](BENCHMARK.md) | Internal benchmark format and execution |
+| [DEEP_AUDIT_2026-07-23_R2.md](DEEP_AUDIT_2026-07-23_R2.md) | Fresh independent code, artifact, release, and vision audit |
+| [ENGINEERING_PROGRAM_2026-07-23_R2.md](ENGINEERING_PROGRAM_2026-07-23_R2.md) | Standalone implementation instructions and acceptance gates |
+| [POST_MERGE_DEEP_AUDIT_2026-07-23.md](POST_MERGE_DEEP_AUDIT_2026-07-23.md) | Earlier post-merge audit, retained for history |
+| [BACKENDS.md](BACKENDS.md) | Backend execution maturity |
+| [RELEASE.md](RELEASE.md) | Release procedure |
+| [FORMALPR_HOLDOUT_GOVERNANCE.md](FORMALPR_HOLDOUT_GOVERNANCE.md) | Holdout governance |
+| [CONSUMER_VALIDATION_CHECKLIST.md](CONSUMER_VALIDATION_CHECKLIST.md) | Consumer validation checklist |
