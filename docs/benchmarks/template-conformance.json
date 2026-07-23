@@ -1,0 +1,3459 @@
+{
+  "counts_by_domain": {
+    "agent_authority": 12,
+    "authorization": 18,
+    "ci_cd": 19,
+    "data_boundary": 15,
+    "deployment": 17,
+    "infrastructure": 19
+  },
+  "counts_by_status": {
+    "catalog_only": 95,
+    "strict_eligible": 5
+  },
+  "production_statuses": [
+    "deprecated",
+    "catalog_only",
+    "experimental",
+    "advisory",
+    "strict_eligible"
+  ],
+  "required_executable_links": [
+    "intent_file",
+    "lane_evaluator",
+    "neutral_compiler",
+    "backend_registry",
+    "pass_example",
+    "fail_example",
+    "enforcement_test"
+  ],
+  "required_row_fields": [
+    "intent_id",
+    "path",
+    "domain",
+    "version",
+    "production_status",
+    "risk_severity",
+    "property_kind",
+    "acceptable_evidence_kinds",
+    "claimed_backends",
+    "executable_links",
+    "missing_executable_links",
+    "lane",
+    "notes"
+  ],
+  "schema_version": "ovk.template_conformance.v1",
+  "template_count": 100,
+  "templates": [
+    {
+      "acceptable_evidence_kinds": [
+        "generated_regression_test",
+        "policy_check"
+      ],
+      "claimed_backends": [],
+      "domain": "agent_authority",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "agent-authority-guard-11",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/agent_authority/agent_authority_guard_11.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "runtime_monitorable",
+      "risk_severity": "critical",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "generated_regression_test",
+        "policy_check"
+      ],
+      "claimed_backends": [],
+      "domain": "agent_authority",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "agent-authority-guard-17",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/agent_authority/agent_authority_guard_17.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "runtime_monitorable",
+      "risk_severity": "critical",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "generated_regression_test",
+        "policy_check"
+      ],
+      "claimed_backends": [],
+      "domain": "agent_authority",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "agent-authority-guard-5",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/agent_authority/agent_authority_guard_5.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "runtime_monitorable",
+      "risk_severity": "critical",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "agent_authority",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "agent-guard-11",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/agent_authority/agent_guard_11.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "agent_authority",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "agent-guard-17",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/agent_authority/agent_guard_17.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "agent_authority",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "agent-guard-23",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/agent_authority/agent_guard_23.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "agent_authority",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "agent-guard-29",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/agent_authority/agent_guard_29.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "agent_authority",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "agent-guard-35",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/agent_authority/agent_guard_35.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "agent_authority",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "agent-guard-41",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/agent_authority/agent_guard_41.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "agent_authority",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "agent-guard-5",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/agent_authority/agent_guard_5.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "proof"
+      ],
+      "claimed_backends": [
+        "dafny"
+      ],
+      "domain": "agent_authority",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "dafny-authority-invariant",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: dafny"
+      ],
+      "path": "templates/agent_authority/dafny_authority_invariant.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "critical",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "policy_check"
+      ],
+      "claimed_backends": [
+        "opa"
+      ],
+      "domain": "agent_authority",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "opa-self-approval-block",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: opa"
+      ],
+      "path": "templates/agent_authority/opa_self_approval_block.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "runtime_monitorable",
+      "risk_severity": "critical",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "policy_check",
+        "smt_counterexample"
+      ],
+      "claimed_backends": [],
+      "domain": "authorization",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "authorization-guard-12",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/authorization/authorization_guard_12.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "access_control",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "policy_check",
+        "smt_counterexample"
+      ],
+      "claimed_backends": [],
+      "domain": "authorization",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "authorization-guard-18",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/authorization/authorization_guard_18.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "access_control",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "policy_check",
+        "smt_counterexample"
+      ],
+      "claimed_backends": [],
+      "domain": "authorization",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "authorization-guard-6",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/authorization/authorization_guard_6.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "access_control",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "policy_check"
+      ],
+      "claimed_backends": [
+        "cedar"
+      ],
+      "domain": "authorization",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "cedar-cross-account-deny",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: cedar"
+      ],
+      "path": "templates/authorization/cedar_cross_account_deny.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "access_control",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "generated_regression_test",
+        "policy_check"
+      ],
+      "claimed_backends": [
+        "cedar"
+      ],
+      "domain": "authorization",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "cedar-deny-precedence-preserved",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: cedar"
+      ],
+      "path": "templates/authorization/cedar_deny_precedence_preserved.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "policy_check"
+      ],
+      "claimed_backends": [
+        "cedar"
+      ],
+      "domain": "authorization",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "cedar-iam-admin-deny",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: cedar"
+      ],
+      "path": "templates/authorization/cedar_iam_admin_deny.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "access_control",
+      "risk_severity": "critical",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "counterexample_trace",
+        "policy_check"
+      ],
+      "claimed_backends": [
+        "cedar"
+      ],
+      "domain": "authorization",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "cedar-no-wildcard-admin-allow",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: cedar"
+      ],
+      "path": "templates/authorization/cedar_no_wildcard_admin_allow.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "access_control",
+      "risk_severity": "critical",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "policy_check",
+        "smt_counterexample"
+      ],
+      "claimed_backends": [
+        "cedar"
+      ],
+      "domain": "authorization",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "cedar-principal-scope-preserved",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: cedar"
+      ],
+      "path": "templates/authorization/cedar_principal_scope_preserved.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "access_control",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "generated_regression_test",
+        "policy_check",
+        "smt_counterexample"
+      ],
+      "claimed_backends": [
+        "authorization-deterministic",
+        "z3-native"
+      ],
+      "domain": "authorization",
+      "executable_links": {
+        "backend_registry": true,
+        "enforcement_test": true,
+        "fail_example": true,
+        "intent_file": true,
+        "lane_evaluator": true,
+        "neutral_compiler": true,
+        "pass_example": true
+      },
+      "intent_id": "no-admin-route-bypass",
+      "lane": "authorization",
+      "missing_executable_links": [],
+      "notes": [
+        "all required executable links present"
+      ],
+      "path": "templates/authorization/no_admin_route_bypass.intent.json",
+      "production_status": "strict_eligible",
+      "property_kind": "access_control",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "policy_check"
+      ],
+      "claimed_backends": [
+        "cedar"
+      ],
+      "domain": "authorization",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "no-privilege-escalation-cedar",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: cedar"
+      ],
+      "path": "templates/authorization/no_privilege_escalation_cedar.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "access_control",
+      "risk_severity": "critical",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "authorization",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "route-guard-12",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/authorization/route_guard_12.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "access_control",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "authorization",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "route-guard-18",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/authorization/route_guard_18.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "access_control",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "authorization",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "route-guard-24",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/authorization/route_guard_24.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "access_control",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "authorization",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "route-guard-30",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/authorization/route_guard_30.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "access_control",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "authorization",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "route-guard-36",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/authorization/route_guard_36.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "access_control",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "authorization",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "route-guard-42",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/authorization/route_guard_42.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "access_control",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "authorization",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "route-guard-6",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/authorization/route_guard_6.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "access_control",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "model_check",
+        "smt_counterexample"
+      ],
+      "claimed_backends": [
+        "kani"
+      ],
+      "domain": "authorization",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "rust-kani-bounds-check",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: kani"
+      ],
+      "path": "templates/authorization/rust_kani_bounds_check.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "safety",
+      "risk_severity": "critical",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "human_approval",
+        "policy_check"
+      ],
+      "claimed_backends": [
+        "opa-native",
+        "self-protection-deterministic"
+      ],
+      "domain": "ci_cd",
+      "executable_links": {
+        "backend_registry": true,
+        "enforcement_test": true,
+        "fail_example": true,
+        "intent_file": true,
+        "lane_evaluator": true,
+        "neutral_compiler": true,
+        "pass_example": true
+      },
+      "intent_id": "agent-cannot-disable-own-ci-gate",
+      "lane": "self_protection",
+      "missing_executable_links": [],
+      "notes": [
+        "all required executable links present"
+      ],
+      "path": "templates/ci_cd/agent_cannot_disable_own_gate.intent.json",
+      "production_status": "strict_eligible",
+      "property_kind": "invariant",
+      "risk_severity": "critical",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "generated_regression_test",
+        "policy_check"
+      ],
+      "claimed_backends": [],
+      "domain": "ci_cd",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "ci-cd-guard-14",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/ci_cd/ci_cd_guard_14.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "data_boundary",
+      "risk_severity": "critical",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "generated_regression_test",
+        "policy_check"
+      ],
+      "claimed_backends": [],
+      "domain": "ci_cd",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "ci-cd-guard-2",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/ci_cd/ci_cd_guard_2.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "data_boundary",
+      "risk_severity": "critical",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "generated_regression_test",
+        "policy_check"
+      ],
+      "claimed_backends": [],
+      "domain": "ci_cd",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "ci-cd-guard-20",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/ci_cd/ci_cd_guard_20.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "data_boundary",
+      "risk_severity": "critical",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "generated_regression_test",
+        "policy_check"
+      ],
+      "claimed_backends": [],
+      "domain": "ci_cd",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "ci-cd-guard-8",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/ci_cd/ci_cd_guard_8.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "data_boundary",
+      "risk_severity": "critical",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "ci_cd",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "ci-guard-14",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/ci_cd/ci_guard_14.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "safety",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "ci_cd",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "ci-guard-2",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/ci_cd/ci_guard_2.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "safety",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "ci_cd",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "ci-guard-20",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/ci_cd/ci_guard_20.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "safety",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "ci_cd",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "ci-guard-26",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/ci_cd/ci_guard_26.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "safety",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "ci_cd",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "ci-guard-32",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/ci_cd/ci_guard_32.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "safety",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "ci_cd",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "ci-guard-38",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/ci_cd/ci_guard_38.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "safety",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "ci_cd",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "ci-guard-44",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/ci_cd/ci_guard_44.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "safety",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "ci_cd",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "ci-guard-8",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/ci_cd/ci_guard_8.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "safety",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "analysis_report",
+        "model_check"
+      ],
+      "claimed_backends": [
+        "kani"
+      ],
+      "domain": "ci_cd",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "kani-bounded-loop-termination",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: kani"
+      ],
+      "path": "templates/ci_cd/kani_bounded_loop_termination.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "generated_regression_test",
+        "model_check"
+      ],
+      "claimed_backends": [
+        "kani"
+      ],
+      "domain": "ci_cd",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "kani-no-panic-in-auth-flow",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: kani"
+      ],
+      "path": "templates/ci_cd/kani_no_panic_in_auth_flow.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "safety",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "counterexample_trace",
+        "model_check"
+      ],
+      "claimed_backends": [
+        "kani"
+      ],
+      "domain": "ci_cd",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "kani-no-unsafe-pointer-deref",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: kani"
+      ],
+      "path": "templates/ci_cd/kani_no_unsafe_pointer_deref.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "safety",
+      "risk_severity": "critical",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [
+        "ci-secrets-deterministic"
+      ],
+      "domain": "ci_cd",
+      "executable_links": {
+        "backend_registry": true,
+        "enforcement_test": true,
+        "fail_example": true,
+        "intent_file": true,
+        "lane_evaluator": true,
+        "neutral_compiler": true,
+        "pass_example": true
+      },
+      "intent_id": "no-secrets-in-untrusted-context",
+      "lane": "ci_secrets",
+      "missing_executable_links": [],
+      "notes": [
+        "all required executable links present"
+      ],
+      "path": "templates/ci_cd/no_secrets_in_untrusted_context.intent.json",
+      "production_status": "strict_eligible",
+      "property_kind": "data_boundary",
+      "risk_severity": "critical",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "proof"
+      ],
+      "claimed_backends": [
+        "verus"
+      ],
+      "domain": "ci_cd",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "verus-build-integrity",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: verus"
+      ],
+      "path": "templates/ci_cd/verus_build_integrity.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "safety",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "smt_counterexample"
+      ],
+      "claimed_backends": [
+        "z3"
+      ],
+      "domain": "ci_cd",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "z3-secret-flow-check",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: z3"
+      ],
+      "path": "templates/ci_cd/z3_secret_flow_check.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "data_boundary",
+      "risk_severity": "critical",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "memory_model"
+      ],
+      "claimed_backends": [
+        "cbmc"
+      ],
+      "domain": "data_boundary",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "cbmc-buffer-bounds",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: cbmc"
+      ],
+      "path": "templates/data_boundary/cbmc_buffer_bounds.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "data_boundary",
+      "risk_severity": "critical",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "analysis_report",
+        "model_check"
+      ],
+      "claimed_backends": [
+        "cbmc"
+      ],
+      "domain": "data_boundary",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "cbmc-no-integer-overflow-quota",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: cbmc"
+      ],
+      "path": "templates/data_boundary/cbmc_no_integer_overflow_quota.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "counterexample_trace",
+        "model_check"
+      ],
+      "claimed_backends": [
+        "cbmc"
+      ],
+      "domain": "data_boundary",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "cbmc-no-unchecked-buffer-copy",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: cbmc"
+      ],
+      "path": "templates/data_boundary/cbmc_no_unchecked_buffer_copy.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "safety",
+      "risk_severity": "critical",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "generated_regression_test",
+        "model_check"
+      ],
+      "claimed_backends": [
+        "cbmc"
+      ],
+      "domain": "data_boundary",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "cbmc-no-use-after-free-auth-cache",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: cbmc"
+      ],
+      "path": "templates/data_boundary/cbmc_no_use_after_free_auth_cache.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "safety",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "memory_model",
+        "smt_counterexample"
+      ],
+      "claimed_backends": [],
+      "domain": "data_boundary",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "data-boundary-guard-10",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/data_boundary/data_boundary_guard_10.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "safety",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "memory_model",
+        "smt_counterexample"
+      ],
+      "claimed_backends": [],
+      "domain": "data_boundary",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "data-boundary-guard-16",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/data_boundary/data_boundary_guard_16.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "safety",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "memory_model",
+        "smt_counterexample"
+      ],
+      "claimed_backends": [],
+      "domain": "data_boundary",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "data-boundary-guard-4",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/data_boundary/data_boundary_guard_4.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "safety",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "data_boundary",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "data-guard-10",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/data_boundary/data_guard_10.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "data_boundary",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "data_boundary",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "data-guard-16",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/data_boundary/data_guard_16.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "data_boundary",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "data_boundary",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "data-guard-22",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/data_boundary/data_guard_22.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "data_boundary",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "data_boundary",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "data-guard-28",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/data_boundary/data_guard_28.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "data_boundary",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "data_boundary",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "data-guard-34",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/data_boundary/data_guard_34.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "data_boundary",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "data_boundary",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "data-guard-4",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/data_boundary/data_guard_4.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "data_boundary",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "data_boundary",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "data-guard-40",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/data_boundary/data_guard_40.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "data_boundary",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "proof"
+      ],
+      "claimed_backends": [
+        "lean"
+      ],
+      "domain": "data_boundary",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "lean-type-safety",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: lean"
+      ],
+      "path": "templates/data_boundary/lean_type_safety.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "deployment",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "deploy-guard-15",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/deployment/deploy_guard_15.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "deployment",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "deploy-guard-21",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/deployment/deploy_guard_21.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "deployment",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "deploy-guard-27",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/deployment/deploy_guard_27.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "deployment",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "deploy-guard-3",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/deployment/deploy_guard_3.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "deployment",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "deploy-guard-33",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/deployment/deploy_guard_33.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "deployment",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "deploy-guard-39",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/deployment/deploy_guard_39.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "deployment",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "deploy-guard-45",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/deployment/deploy_guard_45.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "deployment",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "deploy-guard-9",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/deployment/deploy_guard_9.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "model_check",
+        "trace"
+      ],
+      "claimed_backends": [],
+      "domain": "deployment",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "deployment-guard-15",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/deployment/deployment_guard_15.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "model_check",
+        "trace"
+      ],
+      "claimed_backends": [],
+      "domain": "deployment",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "deployment-guard-3",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/deployment/deployment_guard_3.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "model_check",
+        "trace"
+      ],
+      "claimed_backends": [],
+      "domain": "deployment",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "deployment-guard-9",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/deployment/deployment_guard_9.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [
+        "deployment-deterministic"
+      ],
+      "domain": "deployment",
+      "executable_links": {
+        "backend_registry": true,
+        "enforcement_test": true,
+        "fail_example": true,
+        "intent_file": true,
+        "lane_evaluator": true,
+        "neutral_compiler": true,
+        "pass_example": true
+      },
+      "intent_id": "no-skipped-approval-state",
+      "lane": "deployment",
+      "missing_executable_links": [],
+      "notes": [
+        "all required executable links present"
+      ],
+      "path": "templates/deployment/no_skipped_approval_state.intent.json",
+      "production_status": "strict_eligible",
+      "property_kind": "invariant",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "model_check"
+      ],
+      "claimed_backends": [
+        "tla"
+      ],
+      "domain": "deployment",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "tla-approval-state-machine",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: tla"
+      ],
+      "path": "templates/deployment/tla_approval_state_machine.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "model_check",
+        "state_machine_check"
+      ],
+      "claimed_backends": [
+        "tla"
+      ],
+      "domain": "deployment",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "tla-eventual-rollback-from-failed-canary",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: tla"
+      ],
+      "path": "templates/deployment/tla_eventual_rollback_from_failed_canary.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "liveness",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "model_check",
+        "state_machine_check"
+      ],
+      "claimed_backends": [
+        "tla"
+      ],
+      "domain": "deployment",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "tla-no-skipped-approval-transition",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: tla"
+      ],
+      "path": "templates/deployment/tla_no_skipped_approval_transition.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "critical",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "model_check"
+      ],
+      "claimed_backends": [
+        "tla"
+      ],
+      "domain": "deployment",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "tla-rollback-safety",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: tla"
+      ],
+      "path": "templates/deployment/tla_rollback_safety.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "safety",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "generated_regression_test",
+        "state_machine_check"
+      ],
+      "claimed_backends": [
+        "tla"
+      ],
+      "domain": "deployment",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "tla-rollout-requires-green-health",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: tla"
+      ],
+      "path": "templates/deployment/tla_rollout_requires_green_health.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "safety",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "graph_reachability",
+        "policy_check"
+      ],
+      "claimed_backends": [
+        "alloy"
+      ],
+      "domain": "infrastructure",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "alloy-admin-path-requires-jump-host",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: alloy"
+      ],
+      "path": "templates/infrastructure/alloy_admin_path_requires_jump_host.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "forbidden_configuration",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "graph_reachability",
+        "model_check"
+      ],
+      "claimed_backends": [
+        "alloy"
+      ],
+      "domain": "infrastructure",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "alloy-no-public-to-private-db-path",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: alloy"
+      ],
+      "path": "templates/infrastructure/alloy_no_public_to_private_db_path.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "data_boundary",
+      "risk_severity": "critical",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "graph_reachability",
+        "policy_check"
+      ],
+      "claimed_backends": [
+        "alloy"
+      ],
+      "domain": "infrastructure",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "alloy-private-service-not-public-component",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: alloy"
+      ],
+      "path": "templates/infrastructure/alloy_private_service_not_public_component.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "topology_model"
+      ],
+      "claimed_backends": [
+        "alloy"
+      ],
+      "domain": "infrastructure",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "alloy-topology-reachability",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: alloy"
+      ],
+      "path": "templates/infrastructure/alloy_topology_reachability.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "invariant",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "infrastructure",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "infra-guard-1",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/infrastructure/infra_guard_1.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "forbidden_configuration",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "infrastructure",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "infra-guard-13",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/infrastructure/infra_guard_13.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "forbidden_configuration",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "infrastructure",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "infra-guard-19",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/infrastructure/infra_guard_19.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "forbidden_configuration",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "infrastructure",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "infra-guard-25",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/infrastructure/infra_guard_25.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "forbidden_configuration",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "infrastructure",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "infra-guard-31",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/infrastructure/infra_guard_31.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "forbidden_configuration",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "infrastructure",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "infra-guard-37",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/infrastructure/infra_guard_37.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "forbidden_configuration",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "infrastructure",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "infra-guard-43",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/infrastructure/infra_guard_43.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "forbidden_configuration",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [],
+      "claimed_backends": [],
+      "domain": "infrastructure",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "infra-guard-7",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/infrastructure/infra_guard_7.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "forbidden_configuration",
+      "risk_severity": "medium",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "policy_check",
+        "topology_model"
+      ],
+      "claimed_backends": [],
+      "domain": "infrastructure",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "infrastructure-guard-1",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/infrastructure/infrastructure_guard_1.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "data_boundary",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "policy_check",
+        "topology_model"
+      ],
+      "claimed_backends": [],
+      "domain": "infrastructure",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "infrastructure-guard-13",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/infrastructure/infrastructure_guard_13.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "data_boundary",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "policy_check",
+        "topology_model"
+      ],
+      "claimed_backends": [],
+      "domain": "infrastructure",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "infrastructure-guard-19",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/infrastructure/infrastructure_guard_19.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "data_boundary",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "policy_check",
+        "topology_model"
+      ],
+      "claimed_backends": [],
+      "domain": "infrastructure",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "infrastructure-guard-7",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/infrastructure/infrastructure_guard_7.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "data_boundary",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "policy_check"
+      ],
+      "claimed_backends": [],
+      "domain": "infrastructure",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "memory-safe-config",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered"
+      ],
+      "path": "templates/infrastructure/memory_safe_config.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "forbidden_configuration",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "topology_model"
+      ],
+      "claimed_backends": [
+        "alloy"
+      ],
+      "domain": "infrastructure",
+      "executable_links": {
+        "backend_registry": false,
+        "enforcement_test": false,
+        "fail_example": false,
+        "intent_file": true,
+        "lane_evaluator": false,
+        "neutral_compiler": false,
+        "pass_example": false
+      },
+      "intent_id": "no-public-egress-alloy",
+      "lane": null,
+      "missing_executable_links": [
+        "backend_registry",
+        "enforcement_test",
+        "fail_example",
+        "lane_evaluator",
+        "neutral_compiler",
+        "pass_example"
+      ],
+      "notes": [
+        "no enforced executable path registered",
+        "downgraded unsupported public executable claim for backends: alloy"
+      ],
+      "path": "templates/infrastructure/no_public_egress_alloy.intent.json",
+      "production_status": "catalog_only",
+      "property_kind": "forbidden_configuration",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    },
+    {
+      "acceptable_evidence_kinds": [
+        "policy_check",
+        "smt_reachability"
+      ],
+      "claimed_backends": [
+        "infrastructure-deterministic"
+      ],
+      "domain": "infrastructure",
+      "executable_links": {
+        "backend_registry": true,
+        "enforcement_test": true,
+        "fail_example": true,
+        "intent_file": true,
+        "lane_evaluator": true,
+        "neutral_compiler": true,
+        "pass_example": true
+      },
+      "intent_id": "no-public-sensitive-resource",
+      "lane": "infrastructure",
+      "missing_executable_links": [],
+      "notes": [
+        "all required executable links present"
+      ],
+      "path": "templates/infrastructure/no_public_sensitive_resource.intent.json",
+      "production_status": "strict_eligible",
+      "property_kind": "data_boundary",
+      "risk_severity": "high",
+      "version": "0.1.0"
+    }
+  ]
+}
