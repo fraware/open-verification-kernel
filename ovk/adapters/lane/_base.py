@@ -186,9 +186,7 @@ class LaneEvaluatorAdapter:
             },
             expected_guarantee=self.guarantee_type,
         )
-        return provisional.model_copy(
-            update={"backend_obligation_id": compute_backend_obligation_id(provisional)}
-        )
+        return provisional.model_copy(update={"backend_obligation_id": compute_backend_obligation_id(provisional)})
 
     def fingerprint(self, backend_obligation: BackendObligation) -> BackendEnvironmentFingerprint:
         env_payload = {
@@ -249,11 +247,6 @@ class LaneEvaluatorAdapter:
 
         finished_at = _utc_now_iso()
         duration_ms = (time.perf_counter() - started) * 1000.0
-        # Soft budget recording only; hard isolation arrives with the control plane.
-        if duration_ms > budget.per_backend_wall_time_seconds * 1000.0 and termination == "completed":
-            termination = "timeout"
-            raw_result["status"] = "unknown"
-            raw_result["timeout"] = True
 
         raw = RawBackendExecution(
             backend=self.backend_id,

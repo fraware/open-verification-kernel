@@ -7,11 +7,11 @@ from typing import Any
 from ovk.core.bundle import content_digest
 from ovk.core.execution_models import (
     AbstractionCoverage,
-    MaterialReference,
     VerificationObligation,
     compute_abstraction_digest,
     compute_obligation_id,
 )
+from ovk.core.materials import material_reference_from_payload
 from ovk.core.models import RiskSeverity, VerificationSubject
 
 LANE_PROPERTY_KIND: dict[str, str] = {
@@ -43,12 +43,11 @@ def build_shadow_obligation(
 ) -> VerificationObligation:
     """Construct a backend-neutral obligation for shadow control-plane execution."""
     subject = VerificationSubject(repo=repo, head_sha=head_sha, base_sha=base_sha)
-    material = MaterialReference(
+    material = material_reference_from_payload(
         material_id=content_digest({"lane": lane, "input": data})[:32],
         kind="diff",
         uri=f"ovk-material:lane/{lane}",
-        sha256=content_digest(data),
-        size_bytes=len(content_digest(data)),
+        payload=data,
         source_revision=head_sha,
         trusted=False,
     )

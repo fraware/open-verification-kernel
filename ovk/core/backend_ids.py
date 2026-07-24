@@ -46,15 +46,9 @@ BACKEND_ALIASES: dict[str, frozenset[str]] = {
             "lane-deployment",
         }
     ),
-    "self_protection": frozenset(
-        {"opa-native", "self-protection-deterministic", "lane-self-protection"}
-    ),
-    "authorization": frozenset(
-        {"z3-native", "authorization-deterministic", "lane-authorization"}
-    ),
-    "infrastructure": frozenset(
-        {"infrastructure-deterministic", "lane-infrastructure"}
-    ),
+    "self_protection": frozenset({"opa-native", "self-protection-deterministic", "lane-self-protection"}),
+    "authorization": frozenset({"z3-native", "authorization-deterministic", "lane-authorization"}),
+    "infrastructure": frozenset({"infrastructure-deterministic", "lane-infrastructure"}),
     "ci_secrets": frozenset({"ci-secrets-deterministic", "lane-ci-secrets"}),
     "deployment": frozenset({"deployment-deterministic", "lane-deployment"}),
 }

@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/verification.evidence.v3.schema.json",
+  "title": "Verification Evidence v3",
+  "type": "object",
+  "required": [
+    "evidence_id",
+    "schema_version",
+    "subject",
+    "intent",
+    "backend_claims",
+    "decision",
+    "obligation_id",
+    "routing_id",
+    "material_set_digest",
+    "compiler",
+    "materials",
+    "coverage",
+    "requested_backends",
+    "eligible_backends",
+    "selected_backends",
+    "attempted_backends",
+    "executed_backends",
+    "execution_attempts",
+    "aggregation_policy",
+    "routing_enforced"
+  ],
+  "properties": {
+    "evidence_id": { "type": "string", "minLength": 1 },
+    "schema_version": { "type": "string", "const": "ovk.evidence.v3" },
+    "subject": {
+      "type": "object",
+      "required": ["repo", "head_sha"],
+      "properties": {
+        "repo": { "type": "string" },
+        "pull_request": { "type": ["integer", "string", "null"] },
+        "head_sha": { "type": "string" },
+        "base_sha": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "change_origin": { "type": "object", "additionalProperties": true },
+    "intent": {
+      "type": "object",
+      "required": ["intent_id", "title"],
+      "properties": {
+        "intent_id": { "type": "string" },
+        "title": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "backend_claims": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["backend", "guarantee_type", "status"],
+        "properties": {
+          "backend": { "type": "string" },
+          "guarantee_type": { "type": "string" },
+          "status": { "type": "string", "enum": ["pass", "fail", "unknown", "error", "skipped"] },
+          "assumptions": { "type": "array", "items": { "type": "string" } },
+          "limits": { "type": "array", "items": { "type": "string" } },
+          "tool_version": { "type": ["string", "null"] },
+          "adapter_version": { "type": ["string", "null"] }
+        },
+        "additionalProperties": true
+      }
+    },
+    "counterexamples": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+    "generated_artifacts": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+    "decision": {
+      "type": "object",
+      "required": ["merge_recommendation", "routing_enforced", "aggregation_reason"],
+      "properties": {
+        "merge_recommendation": {
+          "type": "string",
+          "enum": ["allow", "block", "require_human_review", "allow_with_warning", "require_stronger_check"]
+        },
+        "human_review_required": { "type": "boolean" },
+        "routing_enforced": { "type": "boolean" },
+        "aggregation_reason": { "type": "string" },
+        "fallback_used": { "type": "boolean" },
+        "fallback_accepted": { "type": "boolean" },
+        "fallback_cause": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "obligation_id": { "type": "string", "minLength": 1 },
+    "routing_id": { "type": "string", "minLength": 1 },
+    "material_set_digest": { "type": "string", "minLength": 1 },
+    "compiler": {
+      "type": "object",
+      "required": ["compiler_id", "compiler_version"],
+      "properties": {
+        "compiler_id": { "type": "string" },
+        "compiler_version": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "materials": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["material_id", "sha256"],
+        "properties": {
+          "material_id": { "type": "string" },
+          "sha256": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "coverage": { "type": "object", "additionalProperties": true },
+    "requested_backends": { "type": "array", "items": { "type": "string" } },
+    "eligible_backends": { "type": "array", "items": { "type": "string" } },
+    "selected_backends": { "type": "array", "items": { "type": "string" } },
+    "attempted_backends": { "type": "array", "items": { "type": "string" } },
+    "executed_backends": { "type": "array", "items": { "type": "string" } },
+    "execution_attempts": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+    "aggregation_policy": { "type": "string", "minLength": 1 },
+    "routing_enforced": { "type": "boolean" }
+  },
+  "additionalProperties": true
+}

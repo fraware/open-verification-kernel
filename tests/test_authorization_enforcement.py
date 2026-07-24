@@ -62,7 +62,9 @@ def test_policy_changes_selected_backend_execution() -> None:
         obligation,
         registry,
         context=context,
-        config=RoutingConfig(prefer_deterministic=True, max_selected_backends=1, enforced_lanes=frozenset({"authorization"})),
+        config=RoutingConfig(
+            prefer_deterministic=True, max_selected_backends=1, enforced_lanes=frozenset({"authorization"})
+        ),
         policy=det_policy,
     )
     assert [item.backend for item in routing.selected] == ["authorization-deterministic"]
@@ -101,7 +103,7 @@ def test_enforced_authorization_emits_v2_preview_fields() -> None:
     )
     evidence = evidence_items[0]
     assert evidence.routing_enforced is True
-    assert evidence.schema_version == "ovk.evidence.v2"
+    assert evidence.schema_version == "ovk.evidence.v3"
     assert evidence.obligation_id
     assert evidence.routing_id
     assert evidence.selected_backends
@@ -154,7 +156,9 @@ def test_authorization_disagreement_blocks() -> None:
     outcome = aggregate_fail_dominant_v1(
         obligation_id="obl",
         selected=[
-            BackendSelection(backend="z3-native", reason="p", expected_guarantee="smt_refutation_search", required=True),
+            BackendSelection(
+                backend="z3-native", reason="p", expected_guarantee="smt_refutation_search", required=True
+            ),
             BackendSelection(
                 backend="authorization-deterministic",
                 reason="c",

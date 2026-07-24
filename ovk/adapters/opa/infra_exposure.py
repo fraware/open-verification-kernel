@@ -9,7 +9,8 @@ from ovk.adapters.infra.exposure import find_exposure_counterexamples
 from ovk.core.models import VerificationEvidence
 
 
-INFRA_EXPOSURE_REGO = r'''
+INFRA_EXPOSURE_REGO = (
+    r"""
 package ovk.infra_exposure
 
 violation[msg] {
@@ -25,7 +26,9 @@ violation[msg] {
   resource.public_exposure == true
   msg := sprintf("sensitive resource publicly exposed: %s", [resource.resource_id])
 }
-'''.strip() + "\n"
+""".strip()
+    + "\n"
+)
 
 
 def _deterministic_infra_opa(data: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
@@ -33,7 +36,9 @@ def _deterministic_infra_opa(data: dict[str, Any]) -> tuple[str, list[dict[str, 
     if counterexamples:
         return "fail", counterexamples
     if not data.get("resources"):
-        return "unknown", [{"summary": "resources must be a non-empty list", "failure_mode": "infrastructure_abstraction_invalid"}]
+        return "unknown", [
+            {"summary": "resources must be a non-empty list", "failure_mode": "infrastructure_abstraction_invalid"}
+        ]
     return "pass", []
 
 

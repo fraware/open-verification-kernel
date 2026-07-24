@@ -141,7 +141,15 @@ def test_validate_registry_rejects_invalid_row(tmp_path: Path) -> None:
     registry = {
         "schema_version": "ovk.external_pilots_registry.v1",
         "updated_at": "2026-06-10T00:00:00Z",
-        "external_pilots": [{"repository": "bad/repo", "status": "unknown", "check_types": ["ci_secrets"], "strict_enabled": False, "ovk_version_pin": "1.2.0"}],
+        "external_pilots": [
+            {
+                "repository": "bad/repo",
+                "status": "unknown",
+                "check_types": ["ci_secrets"],
+                "strict_enabled": False,
+                "ovk_version_pin": "1.2.0",
+            }
+        ],
     }
     with pytest.raises(ValueError, match="external pilots registry failed schema validation"):
         validate_registry(registry)

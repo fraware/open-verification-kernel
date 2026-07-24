@@ -99,4 +99,3 @@ def test_auth_obligation_cli_writes_quality_output(tmp_path: Path) -> None:
     payload = json.loads(quality.read_text(encoding="utf-8"))
     assert payload["schema_version"] == "ovk.evidence_quality.v1"
     assert payload["passed"] is True
-

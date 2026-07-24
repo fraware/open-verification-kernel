@@ -78,12 +78,8 @@ def test_control_plane_cache_hit_and_subject_mismatch(tmp_path: Path) -> None:
 def test_policy_digest_mismatch_does_not_reuse_cache(tmp_path: Path) -> None:
     data = json.loads(Path("examples/auth_regression/input_admin_protected.json").read_text(encoding="utf-8"))
     registry = build_authorization_registry()
-    obligation_a = compile_authorization_obligation(
-        data, repo="r", head_sha="h", policy_digest="policy-a"
-    )
-    obligation_b = compile_authorization_obligation(
-        data, repo="r", head_sha="h", policy_digest="policy-b"
-    )
+    obligation_a = compile_authorization_obligation(data, repo="r", head_sha="h", policy_digest="policy-a")
+    obligation_b = compile_authorization_obligation(data, repo="r", head_sha="h", policy_digest="policy-b")
     assert obligation_a.policy_digest != obligation_b.policy_digest
     budget = _budget()
     cache = ControlPlaneResultCache(HardenedResultCache(tmp_path))
@@ -127,13 +123,20 @@ def test_worker_timeout_never_deterministic_pass(tmp_path: Path) -> None:
 def test_worker_env_allowlist_no_secret_inheritance(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("GITHUB_TOKEN", "leak-me")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "also-leak")
+    monkeypatch.setenv("CUSTOM_UNKNOWN_CRED", "should-not-inherit")
     monkeypatch.setenv("PATH", os.environ.get("PATH", ""))
     worker = LocalSubprocessWorker(bound_roots=(tmp_path,))
     result = worker.run(
         [
             "python",
             "-c",
-            "import os; print(os.environ.get('GITHUB_TOKEN','')+os.environ.get('AWS_SECRET_ACCESS_KEY',''))",
+            (
+                "import os; "
+                "print('TOK=' + os.environ.get('GITHUB_TOKEN','')); "
+                "print('AWS=' + os.environ.get('AWS_SECRET_ACCESS_KEY','')); "
+                "print('UNK=' + os.environ.get('CUSTOM_UNKNOWN_CRED','')); "
+                "print('SAFE=' + os.environ.get('OVK_WORKER_SAFE',''))"
+            ),
         ],
         cwd=tmp_path,
         env={"GITHUB_TOKEN": "should-not-pass", "OVK_WORKER_SAFE": "ok"},
@@ -143,6 +146,21 @@ def test_worker_env_allowlist_no_secret_inheritance(tmp_path: Path, monkeypatch)
     assert "leak-me" not in result.stdout
     assert "also-leak" not in result.stdout
     assert "should-not-pass" not in result.stdout
+    assert "should-not-inherit" not in result.stdout
+    assert "SAFE=ok" in result.stdout
+
+
+def test_worker_rejects_non_positive_wall_budget(tmp_path: Path) -> None:
+    worker = LocalSubprocessWorker(bound_roots=(tmp_path,))
+    result = worker.run(
+        ["python", "-c", "print('should-not-run')"],
+        cwd=tmp_path,
+        timeout_seconds=0,
+    )
+    assert result.exit_code is None
+    assert result.timed_out is False
+    assert "non-positive" in result.stderr
+    assert "should-not-run" not in result.stdout
 
 
 def test_opa_runner_uses_worker_timeout(tmp_path: Path) -> None:

@@ -115,7 +115,4 @@ def test_validated_path_valid_input_does_not_emit_validation_failure() -> None:
         repo="example/repo",
         head_sha="abc",
     )
-    assert all(
-        item.get("failure_mode") != "authorization_abstraction_invalid"
-        for item in evidence.counterexamples
-    )
+    assert all(item.get("failure_mode") != "authorization_abstraction_invalid" for item in evidence.counterexamples)

@@ -29,6 +29,8 @@ def test_graph_disconnected_sensitive_resource_allows() -> None:
 
 
 def test_empty_graph_becomes_invalid_infra_input() -> None:
-    evidence = evaluate_infra_exposure(graph_to_infra_input({"nodes": [], "edges": []}), repo="example/repo", head_sha="abc")
+    evidence = evaluate_infra_exposure(
+        graph_to_infra_input({"nodes": [], "edges": []}), repo="example/repo", head_sha="abc"
+    )
     assert evidence.backend_claims[0].status.value == "unknown"
     assert evidence.decision["merge_recommendation"] == "require_human_review"

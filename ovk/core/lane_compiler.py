@@ -60,10 +60,14 @@ def compile_lane_inputs_from_plan(
     if diff_text and is_unified_diff(diff_text):
         if "ci_secrets" in lanes_needed:
             for index, data in enumerate(workflow_inputs_from_diff(diff_text)):
-                jobs.append({"lane": "ci_secrets", "data": data, "input_format": "infra", "job_id": f"ci_secrets_{index}"})
+                jobs.append(
+                    {"lane": "ci_secrets", "data": data, "input_format": "infra", "job_id": f"ci_secrets_{index}"}
+                )
         if "authorization" in lanes_needed:
             for index, data in enumerate(authorization_inputs_from_diff(diff_text)):
-                jobs.append({"lane": "authorization", "data": data, "input_format": "infra", "job_id": f"authorization_{index}"})
+                jobs.append(
+                    {"lane": "authorization", "data": data, "input_format": "infra", "job_id": f"authorization_{index}"}
+                )
         if "infrastructure" in lanes_needed:
             for index, item in enumerate(infra_inputs_from_diff(diff_text)):
                 jobs.append(
@@ -76,7 +80,9 @@ def compile_lane_inputs_from_plan(
                 )
         if "deployment" in lanes_needed:
             for index, data in enumerate(deployment_inputs_from_diff(diff_text)):
-                jobs.append({"lane": "deployment", "data": data, "input_format": "infra", "job_id": f"deployment_{index}"})
+                jobs.append(
+                    {"lane": "deployment", "data": data, "input_format": "infra", "job_id": f"deployment_{index}"}
+                )
         if "backend" in lanes_needed:
             candidate_intents = set(plan.get("candidate_intents", []))
             for index, data in enumerate(cbmc_inputs_from_diff(diff_text)):
@@ -97,7 +103,9 @@ def compile_lane_inputs_from_plan(
     if isinstance(suggested.get("ci_secrets"), list):
         existing = sum(1 for job in jobs if job["lane"] == "ci_secrets")
         for index, data in enumerate(suggested["ci_secrets"][existing:]):
-            jobs.append({"lane": "ci_secrets", "data": data, "input_format": "infra", "job_id": f"ci_secrets_suggested_{index}"})
+            jobs.append(
+                {"lane": "ci_secrets", "data": data, "input_format": "infra", "job_id": f"ci_secrets_suggested_{index}"}
+            )
 
     return jobs
 

@@ -12,6 +12,8 @@ from ovk.core.execution_models import (
     BackendEnvironmentFingerprint,
     BackendObligation,
     BackendSelection,
+    CachedBackendExecution,
+    ExecutionAttempt,
     ExecutionBudget,
     FallbackPolicy,
     NormalizedBackendResult,
@@ -24,6 +26,7 @@ from ovk.core.execution_models import (
 from ovk.core.models import RiskSeverity, VerificationStatus, VerificationSubject
 from ovk.core.result_cache import (
     CACHE_SCHEMA_VERSION,
+    CACHE_SCHEMA_VERSION_V2,
     NAMESPACE_BACKEND_RESULTS,
     HardenedResultCache,
     build_aggregate_key_components,
@@ -43,7 +46,9 @@ def _budget() -> ExecutionBudget:
     )
 
 
-def _obligation(*, repo: str = "acme/api", head_sha: str = "abc", base_sha: str | None = "def") -> VerificationObligation:
+def _obligation(
+    *, repo: str = "acme/api", head_sha: str = "abc", base_sha: str | None = "def"
+) -> VerificationObligation:
     abstraction = {"kind": "test", "input": {"x": 1}}
     provisional = VerificationObligation(
         obligation_id="pending",
@@ -118,6 +123,35 @@ def _fingerprint() -> BackendEnvironmentFingerprint:
     )
 
 
+def _cached_execution(result: NormalizedBackendResult, *, native: bool = False) -> CachedBackendExecution:
+    attempt = ExecutionAttempt(
+        attempt_id=result.attempt_id,
+        backend_obligation_id="bo-1",
+        backend=result.backend,
+        required=True,
+        started_at="2026-01-01T00:00:00Z",
+        finished_at="2026-01-01T00:00:01Z",
+        duration_ms=10.0,
+        termination="completed",
+        native_execution=native,
+        tool_version="0.1.0",
+        tool_digest="tool-digest",
+        exit_code=0,
+        raw_result_digest="raw-digest",
+    )
+    return CachedBackendExecution(
+        attempt=attempt,
+        native_execution=native,
+        tool_version=attempt.tool_version,
+        tool_digest=attempt.tool_digest,
+        termination=attempt.termination,
+        exit_code=attempt.exit_code,
+        raw_result_digest=attempt.raw_result_digest,
+        environment_fingerprint="env-1",
+        normalized_result=result,
+    )
+
+
 def test_key_components_include_required_fields() -> None:
     obligation = _obligation()
     routing = _routing(obligation)
@@ -166,7 +200,7 @@ def test_subject_mismatch_is_cache_miss(tmp_path: Path) -> None:
         status=VerificationStatus.PASS,
         guarantee_type="exposure_graph_check",
     )
-    cache.put_backend_result(components, result)
+    cache.put_backend_result(components, _cached_execution(result))
 
     other = _obligation(repo="other/repo")
     other_components = build_backend_result_key_components(
@@ -207,11 +241,13 @@ def test_routing_mismatch_is_cache_miss(tmp_path: Path) -> None:
     )
     cache.put_backend_result(
         components,
-        NormalizedBackendResult(
-            attempt_id="a1",
-            backend="infrastructure-deterministic",
-            status=VerificationStatus.PASS,
-            guarantee_type="exposure_graph_check",
+        _cached_execution(
+            NormalizedBackendResult(
+                attempt_id="a1",
+                backend="infrastructure-deterministic",
+                status=VerificationStatus.PASS,
+                guarantee_type="exposure_graph_check",
+            )
         ),
     )
     mismatched = dict(components)
@@ -298,11 +334,85 @@ def test_round_trip_backend_result(tmp_path: Path) -> None:
         guarantee_type="exposure_graph_check",
         counterexamples=[{"summary": "exposed"}],
     )
-    cache.put_backend_result(components, result)
+    cache.put_backend_result(components, _cached_execution(result))
     loaded = cache.get_backend_result(components)
     assert loaded is not None
     assert loaded.status == VerificationStatus.FAIL
     assert loaded.counterexamples == [{"summary": "exposed"}]
+    cached = cache.get_cached_execution(components)
+    assert cached is not None
+    assert cached.native_execution is False
+    assert cached.schema_version == CACHE_SCHEMA_VERSION
+
+
+def test_v2_cache_entries_are_invalidated(tmp_path: Path) -> None:
+    cache = HardenedResultCache(tmp_path)
+    obligation = _obligation()
+    routing = _routing(obligation)
+    backend_obligation = _backend_obligation(obligation, routing)
+    components = build_backend_result_key_components(
+        obligation=obligation,
+        routing=routing,
+        backend_obligation=backend_obligation,
+        fingerprint=_fingerprint(),
+    )
+    key = digest_key_components(components)
+    path = cache.namespace_dir(NAMESPACE_BACKEND_RESULTS) / f"{key}.json"
+    import json
+
+    path.write_text(
+        json.dumps(
+            {
+                "cached_at": 1.0,
+                "key_digest": key,
+                "key_components": components,
+                "payload": {
+                    "schema_version": CACHE_SCHEMA_VERSION_V2,
+                    "normalized_result": {
+                        "attempt_id": "a1",
+                        "backend": "infrastructure-deterministic",
+                        "status": "pass",
+                        "guarantee_type": "exposure_graph_check",
+                        "assumptions": [],
+                        "limits": [],
+                        "counterexamples": [],
+                        "generated_artifacts": [],
+                    },
+                },
+                "meta": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert cache.get_cached_execution(components) is None
+    assert not path.exists()
+
+
+def test_cache_hit_preserves_native_provenance(tmp_path: Path) -> None:
+    """Adversarial: current tool availability must not rewrite cached native flag."""
+    cache = HardenedResultCache(tmp_path)
+    obligation = _obligation()
+    routing = _routing(obligation)
+    backend_obligation = _backend_obligation(obligation, routing)
+    components = build_backend_result_key_components(
+        obligation=obligation,
+        routing=routing,
+        backend_obligation=backend_obligation,
+        fingerprint=_fingerprint(),
+    )
+    result = NormalizedBackendResult(
+        attempt_id="native-a1",
+        backend="infrastructure-deterministic",
+        status=VerificationStatus.PASS,
+        guarantee_type="exposure_graph_check",
+    )
+    cache.put_backend_result(components, _cached_execution(result, native=True))
+    # Simulate environment where native is no longer available — hit must replay True.
+    loaded = cache.get_cached_execution(components)
+    assert loaded is not None
+    assert loaded.native_execution is True
+    assert loaded.attempt.native_execution is True
+    assert loaded.tool_digest == "tool-digest"
 
 
 def test_unknown_namespace_rejected(tmp_path: Path) -> None:

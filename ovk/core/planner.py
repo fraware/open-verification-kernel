@@ -16,7 +16,31 @@ from ovk.core.change_detection import detect_change_surfaces, infer_candidate_in
 from ovk.core.diff_parser import extract_changed_paths, is_unified_diff
 from ovk.core.intent_registry import IntentRegistry
 from ovk.core.router import route_intent
+from ovk.core.routing_pipeline import build_authoritative_routing_plan
 from ovk.paths import resource_path
+
+
+def plan_from_lane_obligations(
+    obligations: list[dict[str, Any]],
+    *,
+    policy: dict[str, Any] | None = None,
+    repo: str = "unknown/repo",
+    head_sha: str = "unknown",
+    base_sha: str | None = None,
+) -> dict[str, Any]:
+    """Build a plan whose routing uses compile-then-route authoritative decisions."""
+    plan = build_authoritative_routing_plan(
+        obligations,
+        policy=policy,
+        repo=repo,
+        head_sha=head_sha,
+        base_sha=base_sha,
+    )
+    return {
+        "obligations": obligations,
+        "routing": plan.routing_metadata_list(),
+        "routing_by_intent": plan.legacy_routing_by_intent(),
+    }
 
 
 def plan_from_changed_files(

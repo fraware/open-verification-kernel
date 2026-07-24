@@ -83,8 +83,7 @@ def find_skipped_approval_paths(data: dict[str, Any]) -> list[dict[str, Any]]:
                     counterexamples.append(
                         {
                             "summary": (
-                                f"Production state {state} is reachable from {previous} "
-                                "without a prior approval gate."
+                                f"Production state {state} is reachable from {previous} without a prior approval gate."
                             ),
                             "failure_mode": FAILURE_MODE,
                             "path": path,

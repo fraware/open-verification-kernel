@@ -367,10 +367,28 @@ def test_attempt_id_excludes_wall_clock_timestamps() -> None:
     assert "attempt_id" not in digest_input
     assert "started_at" not in digest_input
     assert "finished_at" not in digest_input
+    assert "duration_ms" not in digest_input
     shifted = attempt.model_copy(
-        update={"started_at": "2099-01-01T00:00:00Z", "finished_at": "2099-01-01T00:00:01Z"}
+        update={
+            "started_at": "2099-01-01T00:00:00Z",
+            "finished_at": "2099-01-01T00:00:01Z",
+            "duration_ms": 99999.0,
+        }
     )
     assert compute_attempt_id(shifted) == compute_attempt_id(attempt)
+
+
+def test_attempt_id_stable_across_duration_jitter() -> None:
+    """Equivalent semantic attempts must share IDs despite timing jitter."""
+    base = _attempt("bo-stable")
+    variants = [
+        base.model_copy(update={"duration_ms": 1.0}),
+        base.model_copy(update={"duration_ms": 50.5}),
+        base.model_copy(update={"duration_ms": 1200.0, "started_at": "2026-07-01T00:00:00Z"}),
+        base.model_copy(update={"duration_ms": 0.0}),
+    ]
+    ids = {compute_attempt_id(item) for item in [base, *variants]}
+    assert len(ids) == 1
 
 
 def test_attempt_id_changes_when_termination_changes() -> None:

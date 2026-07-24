@@ -152,7 +152,9 @@ def parse_args() -> argparse.Namespace:
         default=EXTERNAL_PILOTS_REGISTRY_PATH,
         help="External pilots registry JSON (default: docs/benchmarks/external-pilots-registry.json)",
     )
-    parser.add_argument("--output", type=Path, default=ADOPTION_SUMMARY_PATH, help="Output path for adoption-summary.json")
+    parser.add_argument(
+        "--output", type=Path, default=ADOPTION_SUMMARY_PATH, help="Output path for adoption-summary.json"
+    )
     parser.add_argument(
         "--verified-source-sha",
         default=None,

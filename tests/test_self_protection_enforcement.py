@@ -71,7 +71,7 @@ def test_enforced_self_protection_blocks_gate_removal() -> None:
     )
     evidence = evidence_items[0]
     assert evidence.routing_enforced is True
-    assert evidence.schema_version == "ovk.evidence.v2"
+    assert evidence.schema_version == "ovk.evidence.v3"
     assert evidence.decision.get("merge_recommendation") == "block"
     assert evidence.selected_backends
     assert "self-protection-deterministic" in (evidence.selected_backends or []) or "opa-native" in (
@@ -80,13 +80,18 @@ def test_enforced_self_protection_blocks_gate_removal() -> None:
 
 
 def test_untrusted_metadata_cannot_allow(monkeypatch: pytest.MonkeyPatch) -> None:
-    data = _load_example("input_gate_preserved.json") if Path("examples/no_agent_self_approval/input_gate_preserved.json").exists() or Path("ovk/package_data/examples/no_agent_self_approval/input_gate_preserved.json").exists() else {
-        "actor": {"type": "ai_agent", "id": "bot"},
-        "changed_files": ["README.md"],
-        "before": {"required_checks": ["ovk-verify"]},
-        "after": {"required_checks": ["ovk-verify"]},
-        "ovk_gate_name": "ovk-verify",
-    }
+    data = (
+        _load_example("input_gate_preserved.json")
+        if Path("examples/no_agent_self_approval/input_gate_preserved.json").exists()
+        or Path("ovk/package_data/examples/no_agent_self_approval/input_gate_preserved.json").exists()
+        else {
+            "actor": {"type": "ai_agent", "id": "bot"},
+            "changed_files": ["README.md"],
+            "before": {"required_checks": ["ovk-verify"]},
+            "after": {"required_checks": ["ovk-verify"]},
+            "ovk_gate_name": "ovk-verify",
+        }
+    )
     if isinstance(data, str):
         data = _load_example("input_gate_preserved.json")
     evidence_items = execute_obligations(

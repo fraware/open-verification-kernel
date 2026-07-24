@@ -17,7 +17,9 @@ def _is_iac_path(path: str) -> bool:
     suffix = PurePosixPath(normalized).suffix
     if suffix in IAC_SUFFIXES:
         return True
-    return any(marker in normalized for marker in ("/k8s/", "/kubernetes/", "/deploy/", "deployment")) or normalized.startswith(("k8s/", "kubernetes/"))
+    return any(
+        marker in normalized for marker in ("/k8s/", "/kubernetes/", "/deploy/", "deployment")
+    ) or normalized.startswith(("k8s/", "kubernetes/"))
 
 
 def _iam_policy_is_overly_permissive(resource_type: str, lines: list[str]) -> bool:
@@ -27,9 +29,9 @@ def _iam_policy_is_overly_permissive(resource_type: str, lines: list[str]) -> bo
     joined = "\n".join(lines).lower()
     if "iam_policy" not in resource_type.lower():
         return False
-    if 'principal' in joined and "*" in joined and ("admin" in joined or "action" in joined):
+    if "principal" in joined and "*" in joined and ("admin" in joined or "action" in joined):
         return True
-    return 'action' in joined and 'resource' in joined and "*" in joined
+    return "action" in joined and "resource" in joined and "*" in joined
 
 
 def _parse_tf_hunk(content: str) -> dict | None:

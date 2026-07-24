@@ -4,6 +4,7 @@ name: FormalPR-Holdout eval
 # Requires repository secret HOLDOUT_DOWNLOAD_TOKEN with read access to
 # fraware/FormalPR-Holdout private release assets. The independently recorded
 # asset SHA-256 is required so a mutable/replaced release asset cannot execute.
+# Prefer workflow input asset_sha256; otherwise repository variable HOLDOUT_ASSET_SHA256.
 on:
   workflow_dispatch:
     inputs:
@@ -12,9 +13,10 @@ on:
         required: true
         default: v0.1.0-synthetic
         type: string
-      holdout_asset_sha256:
-        description: Independently recorded SHA-256 of the frozen release asset
-        required: true
+      asset_sha256:
+        description: Immutable SHA-256 of the release asset (overrides repo variable)
+        required: false
+        default: ""
         type: string
       predictions_artifact:
         description: Optional name of a workflow artifact containing predictions.json
@@ -33,13 +35,19 @@ jobs:
         id: gate
         env:
           HOLDOUT_DOWNLOAD_TOKEN: ${{ secrets.HOLDOUT_DOWNLOAD_TOKEN }}
+          HOLDOUT_ASSET_SHA256: ${{ inputs.asset_sha256 || vars.HOLDOUT_ASSET_SHA256 }}
         run: |
           if [ -z "$HOLDOUT_DOWNLOAD_TOKEN" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "FormalPR-Holdout eval skipped: HOLDOUT_DOWNLOAD_TOKEN not configured."
             echo "See docs/FORMALPR_HOLDOUT_GOVERNANCE.md"
+          elif [ -z "$HOLDOUT_ASSET_SHA256" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "FormalPR-Holdout eval skipped: HOLDOUT_ASSET_SHA256 not configured."
+            echo "Provide workflow input asset_sha256 or repository variable HOLDOUT_ASSET_SHA256."
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "asset_sha256=$HOLDOUT_ASSET_SHA256" >> "$GITHUB_OUTPUT"
           fi
 
       - uses: actions/checkout@v4
@@ -49,12 +57,6 @@ jobs:
         if: steps.gate.outputs.configured == 'true'
         with:
           python-version: "3.11"
-
-      - name: Install OVK runner dependencies
-        if: steps.gate.outputs.configured == 'true'
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .
 
       - name: Require predictions file
         if: steps.gate.outputs.configured == 'true'
@@ -87,35 +89,61 @@ jobs:
           fi
           test -f .verification/holdout-predictions.json
 
-      - name: Run holdout aggregate eval (fail closed)
+      - name: Download holdout asset (token only here)
         if: steps.gate.outputs.configured == 'true'
+        id: download
         env:
           HOLDOUT_DOWNLOAD_TOKEN: ${{ secrets.HOLDOUT_DOWNLOAD_TOKEN }}
-          HOLDOUT_ASSET_SHA256: ${{ inputs.holdout_asset_sha256 }}
         run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from scripts.run_formalpr_holdout import download_release_asset, verify_asset_sha256
+
+          tag = "${{ inputs.holdout_tag }}"
+          asset_name = f"FormalPR-Holdout-{tag}.tar.gz"
+          dest = Path(".verification") / asset_name
+          dest.parent.mkdir(parents=True, exist_ok=True)
+          download_release_asset(
+              repo="fraware/FormalPR-Holdout",
+              tag=tag,
+              asset_name=asset_name,
+              dest=dest,
+              token=os.environ["HOLDOUT_DOWNLOAD_TOKEN"],
+          )
+          verify_asset_sha256(dest, "${{ steps.gate.outputs.asset_sha256 }}")
+          print(f"downloaded and verified {dest}")
+          PY
+          echo "artifact=.verification/FormalPR-Holdout-${{ inputs.holdout_tag }}.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Run holdout aggregate eval (fail closed, no tokens)
+        if: steps.gate.outputs.configured == 'true'
+        env:
+          # Explicitly unset download tokens for the evaluator process.
+          HOLDOUT_DOWNLOAD_TOKEN: ""
+          GITHUB_TOKEN: ""
+          GH_TOKEN: ""
+        run: |
+          unset HOLDOUT_DOWNLOAD_TOKEN GITHUB_TOKEN GH_TOKEN || true
           python scripts/run_formalpr_holdout.py \
+            --artifact "${{ steps.download.outputs.artifact }}" \
+            --asset-sha256 "${{ steps.gate.outputs.asset_sha256 }}" \
             --tag "${{ inputs.holdout_tag }}" \
-            --asset-sha256 "${HOLDOUT_ASSET_SHA256}" \
             --predictions .verification/holdout-predictions.json \
             --ovk-commit-sha "${GITHUB_SHA}" \
             --verified-source-sha "${GITHUB_SHA}" \
             --output .verification/holdout-aggregate-metrics.json
 
-      - name: Validate aggregate schema and leakage guard
+      - name: Validate aggregate schema shape
         if: steps.gate.outputs.configured == 'true'
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-          from scripts.run_formalpr_holdout import assert_aggregate_safe
-
+          from scripts.run_formalpr_holdout import validate_aggregate_schema
           payload = json.loads(Path(".verification/holdout-aggregate-metrics.json").read_text())
-          assert_aggregate_safe(payload)
-          assert payload["schema_version"] == "formalpr_holdout.aggregate_metrics.v1"
-          assert payload["leakage_guard"]["labels_emitted"] is False
-          assert payload["leakage_guard"]["case_ids_emitted"] is False
-          assert payload["leakage_guard"]["fail_closed"] is True
-          print("aggregate schema and leakage checks passed")
+          validate_aggregate_schema(payload)
+          print("aggregate schema checks passed; labels not present")
           PY
 
       - name: Upload aggregates only

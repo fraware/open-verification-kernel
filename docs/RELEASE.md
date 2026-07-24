@@ -1,6 +1,6 @@
 # OVK Release
 
-Maintainer guide for shipping Open Verification Kernel. Current readiness: [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md). Full code and artifact assessment: [VISION_AUDIT_2026-07-22.md](VISION_AUDIT_2026-07-22.md).
+Maintainer guide for shipping Open Verification Kernel. Current readiness: [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md). Authoritative audit: [DEEP_AUDIT_2026-07-23_R2.md](DEEP_AUDIT_2026-07-23_R2.md). Engineering program: [ENGINEERING_PROGRAM_2026-07-23_R2.md](ENGINEERING_PROGRAM_2026-07-23_R2.md). Historical: [VISION_AUDIT_2026-07-22.md](VISION_AUDIT_2026-07-22.md).
 
 ## Current release candidate
 

@@ -105,9 +105,7 @@ def resolve_local_reusable(
         child = load_workflow_file(local_path)
         child["_ovk_path"] = str(local_path.resolve())
         loaded.append(child)
-        nested, nested_findings = resolve_local_reusable(
-            child, repo_root=repo_root, visiting=set(visiting)
-        )
+        nested, nested_findings = resolve_local_reusable(child, repo_root=repo_root, visiting=set(visiting))
         loaded.extend(nested)
         findings.extend(nested_findings)
     if path:

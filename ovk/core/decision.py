@@ -7,11 +7,7 @@ from ovk.core.models import EvidenceBundle, MergeRecommendation, VerificationSta
 
 def evidence_has_status(bundle: EvidenceBundle, status: VerificationStatus) -> bool:
     """Return true if any backend claim in the bundle has the given status."""
-    return any(
-        claim.status == status
-        for evidence in bundle.evidence
-        for claim in evidence.backend_claims
-    )
+    return any(claim.status == status for evidence in bundle.evidence for claim in evidence.backend_claims)
 
 
 def evidence_has_unknown_like(bundle: EvidenceBundle) -> bool:
@@ -21,11 +17,7 @@ def evidence_has_unknown_like(bundle: EvidenceBundle) -> bool:
         VerificationStatus.ERROR,
         VerificationStatus.SKIPPED,
     }
-    return any(
-        claim.status in unknown_like
-        for evidence in bundle.evidence
-        for claim in evidence.backend_claims
-    )
+    return any(claim.status in unknown_like for evidence in bundle.evidence for claim in evidence.backend_claims)
 
 
 def _unknown_like_recommendation(
@@ -90,11 +82,16 @@ def decide_with_reason(
 ) -> dict[str, str]:
     """Return merge recommendation and human-readable reason for bundle construction."""
     recommendation = decide(bundle, enforce=enforce, default_on_unknown=default_on_unknown)
-    from_unknown = recommendation in {
-        MergeRecommendation.BLOCK,
-        MergeRecommendation.REQUIRE_HUMAN_REVIEW,
-        MergeRecommendation.ALLOW_WITH_WARNING,
-    } and evidence_has_unknown_like(bundle) and not evidence_has_status(bundle, VerificationStatus.FAIL)
+    from_unknown = (
+        recommendation
+        in {
+            MergeRecommendation.BLOCK,
+            MergeRecommendation.REQUIRE_HUMAN_REVIEW,
+            MergeRecommendation.ALLOW_WITH_WARNING,
+        }
+        and evidence_has_unknown_like(bundle)
+        and not evidence_has_status(bundle, VerificationStatus.FAIL)
+    )
     return {
         "merge_recommendation": recommendation.value,
         "reason": _decision_reason(recommendation, from_unknown=from_unknown),

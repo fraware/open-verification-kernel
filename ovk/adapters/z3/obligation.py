@@ -82,10 +82,7 @@ def obligation_to_dict(obligation: AuthorizationObligation) -> dict[str, Any]:
                 "path": route.path,
                 "admin_only_before": route.admin_only_before,
                 "admin_only_after": route.admin_only_after,
-                "reachable_after": [
-                    {"role": witness.role, "via": witness.via}
-                    for witness in route.reachable_after
-                ],
+                "reachable_after": [{"role": witness.role, "via": witness.via} for witness in route.reachable_after],
             }
             for route in obligation.routes
         ],

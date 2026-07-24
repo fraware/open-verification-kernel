@@ -2,14 +2,9 @@
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from typing import Any
 
-from ovk.adapters.z3.executor import run_authorization_obligation_with_z3
-from ovk.adapters.z3.obligation import build_authorization_obligation
-from ovk.adapters.z3.result import normalize_z3_authorization_result
-from ovk.adapters.z3.validation import validate_authorization_input
 from ovk.core.bundle import content_digest
 from ovk.core.execution_models import (
     BackendCapabilityAssessment,
@@ -27,9 +22,10 @@ from ovk.core.execution_models import (
     VerificationObligation,
     compute_backend_obligation_id,
     compute_payload_digest,
-    compute_raw_execution_digests,
 )
+from ovk.core.execution_budget import BackendWorker
 from ovk.core.models import VerificationStatus
+from ovk.core.worker_runner import run_with_required_worker
 
 
 def _utc_now_iso() -> str:
@@ -160,9 +156,7 @@ class Z3NativeAuthorizationAdapter:
             environment_requirements={"native": True, "binary": "z3-solver"},
             expected_guarantee="smt_refutation_search",
         )
-        return provisional.model_copy(
-            update={"backend_obligation_id": compute_backend_obligation_id(provisional)}
-        )
+        return provisional.model_copy(update={"backend_obligation_id": compute_backend_obligation_id(provisional)})
 
     def fingerprint(self, backend_obligation: BackendObligation) -> BackendEnvironmentFingerprint:
         native = z3_available()
@@ -193,82 +187,18 @@ class Z3NativeAuthorizationAdapter:
         self,
         backend_obligation: BackendObligation,
         budget: ExecutionBudget,
+        *,
+        worker: BackendWorker | None = None,
     ) -> RawBackendExecution:
-        started = time.perf_counter()
-        started_at = _utc_now_iso()
-        data = dict(backend_obligation.payload.get("input") or {})
-        if budget.per_backend_wall_time_seconds <= 0:
-            raw = RawBackendExecution(
-                backend=self.backend_id,
-                backend_obligation_id=backend_obligation.backend_obligation_id,
-                termination="timeout",
-                native_execution=True,
-                exit_code=1,
-                raw_result={"status": "unknown", "reason": "budget timeout", "models": []},
-                started_at=started_at,
-                finished_at=_utc_now_iso(),
-                duration_ms=(time.perf_counter() - started) * 1000.0,
-                tool_version=self.adapter_version,
-            )
-            return raw.model_copy(update=compute_raw_execution_digests(raw))
-
-        issues = validate_authorization_input(data)
-        if issues:
-            raw = RawBackendExecution(
-                backend=self.backend_id,
-                backend_obligation_id=backend_obligation.backend_obligation_id,
-                termination="invalid_output",
-                native_execution=False,
-                exit_code=1,
-                raw_result={"status": "unknown", "reason": "malformed input", "issues": issues, "models": []},
-                started_at=started_at,
-                finished_at=_utc_now_iso(),
-                duration_ms=(time.perf_counter() - started) * 1000.0,
-                tool_version=self.adapter_version,
-            )
-            return raw.model_copy(update=compute_raw_execution_digests(raw))
-
-        if not z3_available():
-            # Explicit non-fallback: native adapter reports unavailable/unknown.
-            raw = RawBackendExecution(
-                backend=self.backend_id,
-                backend_obligation_id=backend_obligation.backend_obligation_id,
-                termination="tool_unavailable",
-                native_execution=False,
-                exit_code=1,
-                raw_result={
-                    "status": "unknown",
-                    "reason": "z3-solver is not installed",
-                    "models": [],
-                },
-                started_at=started_at,
-                finished_at=_utc_now_iso(),
-                duration_ms=(time.perf_counter() - started) * 1000.0,
-                tool_version=self.adapter_version,
-            )
-            return raw.model_copy(update=compute_raw_execution_digests(raw))
-
-        auth_obligation = build_authorization_obligation(data)
-        native_raw = run_authorization_obligation_with_z3(auth_obligation)
-        normalized = normalize_z3_authorization_result(native_raw)
-        raw = RawBackendExecution(
+        return run_with_required_worker(
+            worker,
             backend=self.backend_id,
             backend_obligation_id=backend_obligation.backend_obligation_id,
-            termination="completed",
-            native_execution=True,
-            exit_code=0,
-            raw_result={
-                "status": normalized["status"],
-                "reason": native_raw.get("reason"),
-                "models": native_raw.get("models", []),
-                "counterexamples": normalized.get("counterexamples", []),
-            },
-            started_at=started_at,
-            finished_at=_utc_now_iso(),
-            duration_ms=(time.perf_counter() - started) * 1000.0,
-            tool_version=self.adapter_version,
+            adapter_version=self.adapter_version,
+            evaluator_id="z3-authorization-native",
+            payload=dict(backend_obligation.payload),
+            timeout_seconds=budget.per_backend_wall_time_seconds,
         )
-        return raw.model_copy(update=compute_raw_execution_digests(raw))
 
     def normalize(
         self,

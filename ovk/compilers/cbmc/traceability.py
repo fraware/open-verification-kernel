@@ -36,7 +36,5 @@ def validate_project_traceability(project: CbmcProject) -> list[str]:
             if record.get(field) in (None, [], ""):
                 failures.append(f"{harness.harness_id}: missing {field}")
         if project.guarantee_type == "bounded_project_model_check" and not harness.includes_project_code:
-            failures.append(
-                f"{harness.harness_id}: bounded_project_model_check requires includes_project_code"
-            )
+            failures.append(f"{harness.harness_id}: bounded_project_model_check requires includes_project_code")
     return failures

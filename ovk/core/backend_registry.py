@@ -34,8 +34,7 @@ def _validate_capability_manifest(manifest: BackendCapabilityManifest) -> None:
     report = validate_against_schema(payload, schema)
     if not report.valid:
         issues = "; ".join(
-            f"{'/'.join(str(part) for part in issue.path) or '$'}: {issue.message}"
-            for issue in report.issues
+            f"{'/'.join(str(part) for part in issue.path) or '$'}: {issue.message}" for issue in report.issues
         )
         raise BackendRegistryError(f"capability manifest failed schema validation: {issues}")
 
@@ -68,15 +67,11 @@ class BackendRegistry:
             raise BackendRegistryError(f"duplicate backend registration: {backend_id}")
         adapter_key = (adapter_id, adapter_version)
         if adapter_key in self._adapter_keys:
-            raise BackendRegistryError(
-                f"duplicate adapter identity: {adapter_id}@{adapter_version}"
-            )
+            raise BackendRegistryError(f"duplicate adapter identity: {adapter_id}@{adapter_version}")
 
         manifest = adapter.manifest()
         if not isinstance(manifest, BackendCapabilityManifest):
-            raise BackendRegistryError(
-                f"adapter {backend_id!r} manifest() must return BackendCapabilityManifest"
-            )
+            raise BackendRegistryError(f"adapter {backend_id!r} manifest() must return BackendCapabilityManifest")
         tool = manifest.tool
         if tool.adapter != adapter_id:
             raise BackendRegistryError(
@@ -93,17 +88,13 @@ class BackendRegistry:
         if not manifest.supported_domains:
             raise BackendRegistryError(f"adapter {backend_id!r} must declare supported_domains")
         if not manifest.supported_property_kinds:
-            raise BackendRegistryError(
-                f"adapter {backend_id!r} must declare supported_property_kinds"
-            )
+            raise BackendRegistryError(f"adapter {backend_id!r} must declare supported_property_kinds")
         _validate_capability_manifest(manifest)
 
         # Require compile/run surface present (Protocol methods).
         for method_name in ("can_handle", "compile", "fingerprint", "run", "normalize", "explain"):
             if not callable(getattr(adapter, method_name, None)):
-                raise BackendRegistryError(
-                    f"adapter {backend_id!r} is missing required method {method_name}"
-                )
+                raise BackendRegistryError(f"adapter {backend_id!r} is missing required method {method_name}")
 
         self._by_backend[backend_id] = adapter
         self._adapter_keys.add(adapter_key)
@@ -142,8 +133,7 @@ class BackendRegistry:
             assessment = adapter.can_handle(obligation, context)
             if assessment.backend != adapter.backend_id:
                 raise BackendRegistryError(
-                    f"adapter {adapter.backend_id!r} returned assessment for "
-                    f"backend {assessment.backend!r}"
+                    f"adapter {adapter.backend_id!r} returned assessment for backend {assessment.backend!r}"
                 )
             assessments.append(assessment)
         return sorted(

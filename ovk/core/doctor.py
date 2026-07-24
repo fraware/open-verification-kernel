@@ -122,7 +122,9 @@ def _check_manifest_example() -> DoctorCheck:
     try:
         data = read_json_file(manifest)
         lanes = data.get("lanes", [])
-        return DoctorCheck("example_manifest", isinstance(lanes, list) and len(lanes) >= 5, f"{len(lanes)} lanes in example manifest")
+        return DoctorCheck(
+            "example_manifest", isinstance(lanes, list) and len(lanes) >= 5, f"{len(lanes)} lanes in example manifest"
+        )
     except Exception as error:  # noqa: BLE001
         return DoctorCheck("example_manifest", False, str(error))
 

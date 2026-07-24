@@ -56,8 +56,5 @@ def smt_plan_to_dict(plan: SmtPlan) -> dict:
     return {
         "obligation_id": plan.obligation_id,
         "query_polarity": plan.query_polarity,
-        "clauses": [
-            {"name": clause.name, "expression": clause.expression}
-            for clause in plan.clauses
-        ],
+        "clauses": [{"name": clause.name, "expression": clause.expression} for clause in plan.clauses],
     }

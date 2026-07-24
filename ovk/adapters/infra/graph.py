@@ -40,9 +40,7 @@ def _adjacency(data: dict[str, Any]) -> dict[str, list[str]]:
 
 def _entrypoints(nodes: dict[str, dict[str, Any]]) -> list[str]:
     return [
-        node_id
-        for node_id, node in nodes.items()
-        if node.get("external") is True or node.get("kind") == "external"
+        node_id for node_id, node in nodes.items() if node.get("external") is True or node.get("kind") == "external"
     ]
 
 

@@ -96,6 +96,7 @@ class VerificationEvidence(BaseModel):
     routing_id: str | None = None
     compiler: dict[str, Any] | None = None
     materials: list[dict[str, Any]] | None = None
+    material_set_digest: str | None = None
     coverage: dict[str, Any] | None = None
     requested_backends: list[str] | None = None
     eligible_backends: list[str] | None = None

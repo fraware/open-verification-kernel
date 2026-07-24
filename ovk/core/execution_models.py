@@ -214,9 +214,21 @@ class FallbackPolicy(BaseModel):
 
     allow_fallback: bool = False
     fallback_backends: list[str] = Field(default_factory=list)
+    acceptable_fallback_guarantees: list[str] = Field(default_factory=list)
     on_timeout: FallbackOutcome = "unknown"
     on_tool_unavailable: FallbackOutcome = "unknown"
     on_invalid_output: FallbackOutcome = "unknown"
+    on_resource_exhausted: FallbackOutcome = "unknown"
+
+    def outcome_for_termination(self, termination: TerminationKind | str) -> FallbackOutcome:
+        """Map a termination kind to the configured fallback outcome."""
+        mapping: dict[str, FallbackOutcome] = {
+            "timeout": self.on_timeout,
+            "tool_unavailable": self.on_tool_unavailable,
+            "invalid_output": self.on_invalid_output,
+            "resource_exhausted": self.on_resource_exhausted,
+        }
+        return mapping.get(str(termination), "unknown")
 
 
 class BackendCapabilityAssessment(BaseModel):
@@ -429,6 +441,25 @@ class NormalizedBackendResult(BaseModel):
     generated_artifacts: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class CachedBackendExecution(BaseModel):
+    """Provenance-preserving cache payload for a backend execution (ovk.cache.v3).
+
+    Cache hits must replay this record rather than synthesizing a new attempt or
+    re-inferring ``native_execution`` from current tool availability.
+    """
+
+    schema_version: Literal["ovk.cache.v3"] = "ovk.cache.v3"
+    attempt: ExecutionAttempt
+    native_execution: bool
+    tool_version: str | None = None
+    tool_digest: str | None = None
+    termination: TerminationKind
+    exit_code: int | None = None
+    raw_result_digest: str | None = None
+    environment_fingerprint: str
+    normalized_result: NormalizedBackendResult
+
+
 class ObligationExecutionRecord(BaseModel):
     """Full typed record of compiling, routing, and executing one obligation."""
 
@@ -441,6 +472,9 @@ class ObligationExecutionRecord(BaseModel):
     merge_recommendation: MergeRecommendation
     aggregation_reason: str
     open_obligations: list[dict[str, Any]] = Field(default_factory=list)
+    fallback_used: bool = False
+    fallback_accepted: bool = False
+    fallback_cause: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -557,15 +591,18 @@ def compute_backend_obligation_id(
 
 
 def attempt_digest_input(attempt: ExecutionAttempt | dict[str, Any]) -> dict[str, Any]:
-    """Canonical digest payload for an execution attempt (excludes ``attempt_id`` and wall-clock times).
+    """Canonical digest payload for an execution attempt (excludes identity and timing).
 
-    Timestamps are excluded so identical executions remain content-addressable when
-    wall-clock values differ; ``duration_ms`` and termination/output digests remain.
+    ``attempt_id``, wall-clock timestamps, and ``duration_ms`` are excluded so
+    otherwise equivalent executions remain content-addressable across sequential,
+    parallel, cached, and uncached runs. Duration remains observational metadata
+    on the attempt object itself.
     """
     data = dict(_dump_json(attempt))
     data.pop("attempt_id", None)
     data.pop("started_at", None)
     data.pop("finished_at", None)
+    data.pop("duration_ms", None)
     return data
 
 

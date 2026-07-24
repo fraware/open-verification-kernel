@@ -20,10 +20,7 @@ def _assert_backend(backend: str) -> None:
             + (f", detail={result.detail}" if getattr(result, "detail", None) else "")
         )
         if result.binary_present and backend in TIER1_NATIVE_EXECUTION_BACKENDS:
-            assert result.used_native_binary, (
-                f"{backend} detected {result.binary_name} "
-                "but did not report native use"
-            )
+            assert result.used_native_binary, f"{backend} detected {result.binary_name} but did not report native use"
 
 
 @requires_native_ci

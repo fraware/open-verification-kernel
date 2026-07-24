@@ -35,7 +35,9 @@ Protected labels live only in private release assets (and gitignored local
 - Publishes **aggregate metrics only**; fails closed if labels or case ids would be printed.
 - Ordinary `CI` jobs do **not** checkout holdout labels.
 
-Runner: `scripts/run_formalpr_holdout.py`.
+Runner: `scripts/run_formalpr_holdout.py` (requires immutable `--asset-sha256`).
+
+Label-separated prediction/eval flow (Sprint 8): [HOLDOUT_LABEL_SEPARATION.md](HOLDOUT_LABEL_SEPARATION.md).
 
 ## What this is not
 

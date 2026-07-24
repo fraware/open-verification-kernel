@@ -197,9 +197,7 @@ def test_malformed_backend_output_maps_to_error_or_invalid() -> None:
         config=RoutingConfig(prefer_deterministic=True, max_selected_backends=1, accept_partial_primary=True),
         policy={"budget": {"allowed_backends": ["authorization-deterministic"]}},
     )
-    record = BackendControlPlane(use_hardened_cache=False).execute(
-        obligation, routing, registry=registry, cache=None
-    )
+    record = BackendControlPlane(use_hardened_cache=False).execute(obligation, routing, registry=registry, cache=None)
     assert record.results
     assert record.results[0].status in {VerificationStatus.UNKNOWN, VerificationStatus.ERROR}
     assert record.attempts[0].termination in {"invalid_output", "completed", "tool_error"}
@@ -229,9 +227,7 @@ def test_incomplete_abstraction_cannot_allow_under_strict() -> None:
         ),
         policy={"budget": {"allowed_backends": ["authorization-deterministic"]}},
     )
-    record = BackendControlPlane(use_hardened_cache=False).execute(
-        obligation, routing, registry=registry, cache=None
-    )
+    record = BackendControlPlane(use_hardened_cache=False).execute(obligation, routing, registry=registry, cache=None)
     evidence = execution_record_to_evidence(record, routing_enforced=True)
     assert evidence.decision["merge_recommendation"] != "allow"
 
@@ -266,9 +262,7 @@ def test_backend_timeout_never_deterministic_pass_fallback() -> None:
                 ]
             }
         )
-    record = BackendControlPlane(use_hardened_cache=False).execute(
-        obligation, routing, registry=registry, cache=None
-    )
+    record = BackendControlPlane(use_hardened_cache=False).execute(obligation, routing, registry=registry, cache=None)
     assert record.aggregate_status != VerificationStatus.PASS
     assert record.merge_recommendation != MergeRecommendation.ALLOW
     assert record.attempts[0].termination == "timeout"
@@ -311,9 +305,7 @@ def test_render_and_attestation_expose_enforced_fields() -> None:
         config=RoutingConfig(prefer_deterministic=True, max_selected_backends=1),
         policy={"budget": {"allowed_backends": ["authorization-deterministic"]}},
     )
-    record = BackendControlPlane(use_hardened_cache=False).execute(
-        obligation, routing, registry=registry, cache=None
-    )
+    record = BackendControlPlane(use_hardened_cache=False).execute(obligation, routing, registry=registry, cache=None)
     evidence = execution_record_to_evidence(record, routing_enforced=True, schema_version="ovk.evidence.v2")
     markdown = render_evidence_markdown(evidence)
     assert "Compiler:" in markdown

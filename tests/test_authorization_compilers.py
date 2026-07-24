@@ -161,7 +161,10 @@ def admin():
 
 def test_acceptance_corpus_meets_program_targets() -> None:
     cases = build_corpus(meet_targets=True)
-    by_framework = {"fastapi": {"pass": 0, "fail": 0, "incomplete": 0}, "express": {"pass": 0, "fail": 0, "incomplete": 0}}
+    by_framework = {
+        "fastapi": {"pass": 0, "fail": 0, "incomplete": 0},
+        "express": {"pass": 0, "fail": 0, "incomplete": 0},
+    }
     for case in cases:
         classified = classify_case(case)
         assert classified == case.category, f"{case.case_id} expected {case.category} got {classified}"

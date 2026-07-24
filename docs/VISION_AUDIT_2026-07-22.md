@@ -1,5 +1,7 @@
 # OVK Vision Audit — 2026-07-22
 
+> **Historical.** For current release judgment and P0 trust gaps, use [DEEP_AUDIT_2026-07-23_R2.md](DEEP_AUDIT_2026-07-23_R2.md) and [ENGINEERING_PROGRAM_2026-07-23_R2.md](ENGINEERING_PROGRAM_2026-07-23_R2.md). This document predates the typed backend control plane and describes routing as advisory metadata.
+
 ## Executive judgment
 
 Open Verification Kernel has achieved a credible **verification evidence product** for a bounded set of high-risk pull-request changes. It can infer five core checks from diffs, compile normalized lane inputs, execute deterministic or selected native checkers, aggregate evidence, produce conservative merge recommendations, render review output, and write hash-bound release bundles.

@@ -187,11 +187,7 @@ def build_corpus(*, meet_targets: bool = True) -> list[CorpusCase]:
 
 
 def classify_case(case: CorpusCase) -> Category:
-    compiler = (
-        FastApiAuthorizationCompiler()
-        if case.framework == "fastapi"
-        else ExpressAuthorizationCompiler()
-    )
+    compiler = FastApiAuthorizationCompiler() if case.framework == "fastapi" else ExpressAuthorizationCompiler()
     materials = materials_from_pair(
         path=case.path,
         base_source=case.base if case.base else None,

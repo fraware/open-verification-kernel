@@ -69,8 +69,7 @@ def missing_release_layout_schema_coverage(layout: dict[str, Any]) -> list[str]:
 
 def _issues_from_pydantic(error: ValidationError) -> list[ValidationIssue]:
     return [
-        ValidationIssue(path=[str(part) for part in issue["loc"]], message=issue["msg"])
-        for issue in error.errors()
+        ValidationIssue(path=[str(part) for part in issue["loc"]], message=issue["msg"]) for issue in error.errors()
     ]
 
 
@@ -113,10 +112,7 @@ def validate_generated_file(path: Path, kind: str) -> ValidationReport:
 
 
 def _format_file_validation_failures(path: Path, report: ValidationReport) -> list[str]:
-    return [
-        f"{path.name} validation at {issue.path}: {issue.message}"
-        for issue in report.issues
-    ]
+    return [f"{path.name} validation at {issue.path}: {issue.message}" for issue in report.issues]
 
 
 def validate_output_directory(root: Path) -> list[str]:

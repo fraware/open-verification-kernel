@@ -21,27 +21,21 @@ from ovk.core.sigstore_release import (
 
 def test_github_certificate_identity_from_workflow_ref() -> None:
     identity = github_certificate_identity(
-        workflow_ref=(
-            "fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/v1.2.0"
-        )
+        workflow_ref=("fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/v1.2.0")
     )
     assert identity == (
-        "https://github.com/fraware/open-verification-kernel/"
-        ".github/workflows/publish.yml@refs/tags/v1.2.0"
+        "https://github.com/fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/v1.2.0"
     )
 
 
 def test_github_certificate_identity_rejects_foreign_repo() -> None:
     with pytest.raises(ValueError, match="unexpected workflow_ref"):
-        github_certificate_identity(
-            workflow_ref="evil/repo/.github/workflows/publish.yml@refs/tags/v1.2.0"
-        )
+        github_certificate_identity(workflow_ref="evil/repo/.github/workflows/publish.yml@refs/tags/v1.2.0")
 
 
 def test_production_tag_identity_matches_release_policy() -> None:
     assert production_tag_identity("v1.2.0") == (
-        "https://github.com/fraware/open-verification-kernel/"
-        ".github/workflows/publish.yml@refs/tags/v1.2.0"
+        "https://github.com/fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/v1.2.0"
     )
     assert production_tag_identity("refs/tags/v1.2.0") == production_tag_identity("v1.2.0")
 

@@ -23,7 +23,9 @@ from ovk.core.router import RoutingConfig, route_obligation
 from ovk.core.shadow_obligation import build_shadow_obligation
 
 
-def _result(backend: str, status: VerificationStatus, *, guarantee: str = "smt_refutation_search") -> NormalizedBackendResult:
+def _result(
+    backend: str, status: VerificationStatus, *, guarantee: str = "smt_refutation_search"
+) -> NormalizedBackendResult:
     return NormalizedBackendResult(
         attempt_id=f"att-{backend}",
         backend=backend,

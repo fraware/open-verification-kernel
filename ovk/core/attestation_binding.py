@@ -68,6 +68,14 @@ def verify_bundle_statement_binding(bundle: EvidenceBundle, statement: dict[str,
                         message="evidence and attestation routing IDs disagree (OVK-INV-020)",
                     )
                 )
+            stated_material_set = evidence_items[index].get("material_set_digest")
+            if evidence.material_set_digest and stated_material_set != evidence.material_set_digest:
+                issues.append(
+                    EvidenceInvariantIssue(
+                        path=f"predicate.verification.evidence[{index}].material_set_digest",
+                        message="evidence and attestation material_set_digest disagree (OVK-INV-021)",
+                    )
+                )
     return issues
 
 

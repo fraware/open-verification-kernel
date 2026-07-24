@@ -218,7 +218,9 @@ def test_deployment_github_environments_compiler() -> None:
         obligation,
         registry,
         context=ExecutionContext(subject=obligation.subject, budget=budget, policy_digest="p"),
-        config=RoutingConfig(prefer_deterministic=True, max_selected_backends=1, enforced_lanes=frozenset({"deployment"})),
+        config=RoutingConfig(
+            prefer_deterministic=True, max_selected_backends=1, enforced_lanes=frozenset({"deployment"})
+        ),
     )
     record = BackendControlPlane().execute(obligation, routing, registry=registry)
     assert record.results

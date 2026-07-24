@@ -37,10 +37,7 @@ class DeploymentIR(BaseModel):
         return {
             "initial_state": self.initial_state,
             "states": [item.name for item in self.states],
-            "transitions": [
-                {"from": item.source, "to": item.target, "label": item.label}
-                for item in self.transitions
-            ],
+            "transitions": [{"from": item.source, "to": item.target, "label": item.label} for item in self.transitions],
             "required_states": list(self.required_states),
             "production_states": list(self.production_states),
             "warnings": list(self.warnings),

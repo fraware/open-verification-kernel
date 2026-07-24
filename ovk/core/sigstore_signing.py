@@ -39,9 +39,7 @@ def _configured_trust_identity() -> tuple[str, str]:
     identity = os.environ.get(COSIGN_IDENTITY_ENV, "").strip()
     issuer = os.environ.get(COSIGN_ISSUER_ENV, "").strip()
     if not identity or not issuer:
-        raise RuntimeError(
-            "OVK Sigstore signing requires OVK_COSIGN_IDENTITY and OVK_COSIGN_ISSUER"
-        )
+        raise RuntimeError("OVK Sigstore signing requires OVK_COSIGN_IDENTITY and OVK_COSIGN_ISSUER")
     return identity, issuer
 
 

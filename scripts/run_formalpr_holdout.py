@@ -60,13 +60,23 @@ def _fail(msg: str) -> None:
     raise SystemExit(f"fail-closed: {msg}")
 
 
+_ALLOWED_META_KEYS = frozenset(
+    {
+        "labels_emitted",
+        "case_ids_emitted",
+        "fail_closed",
+        "sanitizer_version",
+    }
+)
+
+
 def _walk_keys(value: Any, *, path: str = "$") -> list[tuple[str, str]]:
     findings: list[tuple[str, str]] = []
     if isinstance(value, dict):
         for key, child in value.items():
             key_text = str(key)
             lowered = key_text.lower()
-            if any(fragment in lowered for fragment in FORBIDDEN_KEY_FRAGMENTS):
+            if key_text not in _ALLOWED_META_KEYS and any(fragment in lowered for fragment in FORBIDDEN_KEY_FRAGMENTS):
                 findings.append((f"{path}.{key_text}", key_text))
             findings.extend(_walk_keys(child, path=f"{path}.{key_text}"))
     elif isinstance(value, list):
@@ -138,6 +148,95 @@ def verify_asset_digest(path: Path, expected_sha256: str | None) -> str:
     return actual
 
 
+_SHA256_RE = __import__("re").compile(r"^[0-9a-fA-F]{64}$")
+_TOKEN_ENV_KEYS = frozenset(
+    {
+        "HOLDOUT_DOWNLOAD_TOKEN",
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+        "ACTIONS_RUNTIME_TOKEN",
+    }
+)
+_REQUIRED_AGGREGATE_KEYS = (
+    "schema_version",
+    "benchmark",
+    "holdout_release_tag",
+    "ovk_commit_sha",
+    "cases_scored",
+    "lanes",
+    "leakage_guard",
+)
+
+
+def verify_asset_sha256(path: Path, expected_sha256: str) -> str:
+    if not _SHA256_RE.match(expected_sha256):
+        _fail("asset SHA-256 must be a 64-character hex digest")
+    digest = sha256_file(path)
+    if digest.lower() != expected_sha256.lower():
+        _fail("asset SHA-256 mismatch")
+    return digest
+
+
+def validate_aggregate_schema(payload: dict[str, Any]) -> None:
+    """Fail-closed structural validation for holdout aggregate metrics."""
+    for key in _REQUIRED_AGGREGATE_KEYS:
+        if key not in payload:
+            _fail(f"aggregate missing required key {key!r}")
+    if payload.get("schema_version") != "formalpr_holdout.aggregate_metrics.v1":
+        _fail("unexpected aggregate schema_version")
+    if payload.get("benchmark") != "FormalPR-Holdout":
+        _fail("unexpected aggregate benchmark")
+    lanes = payload.get("lanes")
+    if not isinstance(lanes, dict) or not lanes:
+        _fail("aggregate lanes must be a non-empty object")
+    for lane, metrics in lanes.items():
+        if not isinstance(metrics, dict):
+            _fail(f"lane {lane!r} metrics must be an object")
+        for key in (
+            "precision",
+            "recall",
+            "false_positive_rate",
+            "missed_detection_rate",
+            "unknown_rate",
+            "coverage_completeness",
+            "counterexample_correctness",
+            "selected_backend_execution_correctness",
+            "runtime_ms",
+        ):
+            if key not in metrics:
+                _fail(f"missing {key} in lane {lane}")
+    assert_aggregate_safe(payload)
+
+
+def _isolated_eval_env() -> dict[str, str]:
+    """Build an evaluator environment without download/GitHub tokens."""
+    allow = {
+        "PATH",
+        "PATHEXT",
+        "SYSTEMROOT",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "HOME",
+        "USERPROFILE",
+        "LANG",
+        "LC_ALL",
+        "PYTHONPATH",
+        "VIRTUAL_ENV",
+        "PYTHONNOUSERSITE",
+        "PYTHONUTF8",
+        "PYTHONIOENCODING",
+    }
+    env = {k: v for k, v in os.environ.items() if k.upper() in allow}
+    env["PYTHONNOUSERSITE"] = "1"
+    for key in list(env):
+        if key.upper() in _TOKEN_ENV_KEYS:
+            env.pop(key, None)
+    for denied in _TOKEN_ENV_KEYS:
+        env.pop(denied, None)
+    return env
+
+
 def download_release_asset(
     *,
     repo: str,
@@ -180,12 +279,12 @@ def download_release_asset(
 def _safe_member_target(dest: Path, member_name: str) -> Path:
     pure = PurePosixPath(member_name)
     if pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
-        _fail(f"unsafe archive member path: {member_name!r}")
+        _fail(f"unsafe archive member path (unsafe path / path traversal): {member_name!r}")
     target = (dest / Path(*pure.parts)).resolve()
     try:
         target.relative_to(dest.resolve())
     except ValueError:
-        _fail(f"archive member escapes extraction root: {member_name!r}")
+        _fail(f"archive member escapes extraction root (path traversal forbidden): {member_name!r}")
     return target
 
 
@@ -198,7 +297,7 @@ def extract_tarball(tarball: Path, dest: Path) -> Path:
         for member in members:
             target = _safe_member_target(dest, member.name)
             if member.issym() or member.islnk() or member.isdev() or member.isfifo():
-                _fail(f"archive contains forbidden special member: {member.name!r}")
+                _fail(f"forbidden special member: link member forbidden: {member.name!r}")
             if member.isdir():
                 target.mkdir(parents=True, exist_ok=True)
                 continue
@@ -282,7 +381,7 @@ def run_harness(
     proc = subprocess.run(
         cmd,
         cwd=str(release_root),
-        env=_harness_environment(output.parent / "harness-home"),
+        env=_isolated_eval_env(),
         capture_output=True,
         text=True,
         check=False,
@@ -308,8 +407,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--asset-sha256",
-        default=None,
-        help="Expected immutable SHA-256. Required for remote downloads.",
+        required=True,
+        help="Immutable SHA-256 hex digest of the release asset (required)",
     )
     parser.add_argument(
         "--artifact",
@@ -331,6 +430,8 @@ def main(argv: list[str] | None = None) -> int:
     token = os.environ.get("HOLDOUT_DOWNLOAD_TOKEN") or os.environ.get("GITHUB_TOKEN")
     asset_name = args.asset_name or f"FormalPR-Holdout-{args.tag}.tar.gz"
     expected_digest = args.asset_sha256 or os.environ.get("HOLDOUT_ASSET_SHA256")
+    if not expected_digest:
+        _fail("HOLDOUT_ASSET_SHA256 or --asset-sha256 is required")
 
     with tempfile.TemporaryDirectory(prefix="ovk-holdout-") as tmp:
         tmp_path = Path(tmp)
@@ -353,8 +454,13 @@ def main(argv: list[str] | None = None) -> int:
                 dest=tmp_path / asset_name,
                 token=token,
             )
-        verify_asset_digest(tarball, expected_digest)
+        verify_asset_sha256(tarball, expected_digest)
         release_root = extract_tarball(tarball, tmp_path / "extract")
+        # Predictions must be label-free before the evaluator sees them.
+        pred_payload = json.loads(args.predictions.read_text(encoding="utf-8"))
+        from scripts.digest_holdout_predictions import assert_predictions_label_free
+
+        assert_predictions_label_free(pred_payload)
         payload = run_harness(
             release_root=release_root,
             predictions=args.predictions,

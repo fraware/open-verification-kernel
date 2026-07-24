@@ -3,8 +3,7 @@
 ``ExecutionBudget`` is defined in ``ovk.core.execution_models``. This module
 re-exports it, provides policy conversion helpers, and defines the worker
 protocol that enforces subprocess environment bounds. Adapters describe
-computation; workers enforce timeout, cwd, an environment allowlist, and
-output caps.
+computation; workers enforce timeout, cwd, env allowlist, and output caps.
 """
 
 from __future__ import annotations
@@ -126,11 +125,12 @@ _SECRET_ENV_DENYLIST = frozenset(
 
 @dataclass
 class LocalSubprocessWorker:
-    """Local subprocess worker with timeout, cwd bound, and minimal environment.
+    """Local subprocess worker with timeout, cwd bound, and env allowlist.
 
-    Only keys in ``allowed_env_keys`` are inherited from the parent. Callers may
-    pass explicit non-secret variables through ``env``. Known credential keys
-    are rejected in both inherited and explicit environments.
+    Child processes inherit only configured safe parent variables, plus any
+    explicit non-secret additions supplied by the caller. Secret-bearing
+    names are always stripped from inherited and explicit environments.
+    Non-positive wall-time budgets are rejected without starting a process.
     """
 
     allowed_env_keys: frozenset[str] = field(
@@ -227,18 +227,29 @@ class LocalSubprocessWorker:
         )
 
     def _build_env(self, extra: Mapping[str, str] | None) -> dict[str, str]:
-        """Build a minimal child environment from allowlisted and explicit keys."""
-        allowed_upper = {key.upper() for key in self.allowed_env_keys}
-        baseline = {
-            key: value
-            for key, value in os.environ.items()
-            if key.upper() in allowed_upper and key.upper() not in _SECRET_ENV_DENYLIST
-        }
+        """Build a child environment from the configured allowlist only.
+
+        Parent variables are inherited only when their names appear in
+        ``allowed_env_keys``. Explicit ``extra`` keys are merged unless they
+        match the secret denylist. Secret-bearing names are always removed.
+        """
+        allow = {key.upper() for key in self.allowed_env_keys}
+        baseline: dict[str, str] = {}
+        for key, value in os.environ.items():
+            if key.upper() in allow and key.upper() not in _SECRET_ENV_DENYLIST:
+                baseline[key] = value
         if extra:
             for key, value in extra.items():
                 if key.upper() in _SECRET_ENV_DENYLIST:
                     continue
                 baseline[key] = value
+        for denied in _SECRET_ENV_DENYLIST:
+            baseline.pop(denied, None)
+            baseline.pop(denied.lower(), None)
+            # Drop any case variant that might have been injected.
+            for existing in list(baseline):
+                if existing.upper() == denied.upper():
+                    baseline.pop(existing, None)
         return baseline
 
 

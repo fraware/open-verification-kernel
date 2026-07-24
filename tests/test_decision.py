@@ -38,10 +38,7 @@ def test_unknown_requires_human_review_in_enforce_mode() -> None:
 
 
 def test_unknown_blocks_when_default_on_unknown_is_block() -> None:
-    assert (
-        decide(make_bundle("unknown"), enforce=True, default_on_unknown="block")
-        == MergeRecommendation.BLOCK
-    )
+    assert decide(make_bundle("unknown"), enforce=True, default_on_unknown="block") == MergeRecommendation.BLOCK
 
 
 def test_unknown_allows_with_warning_when_configured() -> None:
