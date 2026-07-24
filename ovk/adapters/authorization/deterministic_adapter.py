@@ -6,9 +6,6 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from ovk.adapters.z3.counterexample import counterexamples_from_obligation
-from ovk.adapters.z3.obligation import build_authorization_obligation
-from ovk.adapters.z3.validation import validate_authorization_input
 from ovk.core.bundle import content_digest
 from ovk.core.execution_models import (
     BackendCapabilityAssessment,
@@ -26,9 +23,10 @@ from ovk.core.execution_models import (
     VerificationObligation,
     compute_backend_obligation_id,
     compute_payload_digest,
-    compute_raw_execution_digests,
 )
+from ovk.core.execution_budget import BackendWorker
 from ovk.core.models import VerificationStatus
+from ovk.core.worker_runner import run_with_required_worker
 
 
 def _utc_now_iso() -> str:
@@ -161,55 +159,18 @@ class AuthorizationDeterministicAdapter:
         self,
         backend_obligation: BackendObligation,
         budget: ExecutionBudget,
+        *,
+        worker: BackendWorker | None = None,
     ) -> RawBackendExecution:
-        started = time.perf_counter()
-        started_at = _utc_now_iso()
-        data = dict(backend_obligation.payload.get("input") or {})
-        issues = validate_authorization_input(data)
-        if issues:
-            raw_result = {
-                "status": "unknown",
-                "reason": "malformed authorization input",
-                "issues": issues,
-                "models": [],
-            }
-            termination = "invalid_output"
-        else:
-            auth_obligation = build_authorization_obligation(data)
-            counterexamples = counterexamples_from_obligation(auth_obligation)
-            raw_result = {
-                "status": "fail" if counterexamples else "pass",
-                "reason": (
-                    "deterministic violation witness found"
-                    if counterexamples
-                    else "no deterministic violation witness found"
-                ),
-                "models": counterexamples,
-                "counterexamples": counterexamples,
-            }
-            termination = "completed"
-        # Soft timeout signal for tests: budget of 0 forces timeout.
-        duration_ms = (time.perf_counter() - started) * 1000.0
-        if budget.per_backend_wall_time_seconds <= 0:
-            termination = "timeout"
-            raw_result = {
-                "status": "unknown",
-                "reason": "budget timeout",
-                "models": [],
-            }
-        raw = RawBackendExecution(
+        return run_with_required_worker(
+            worker,
             backend=self.backend_id,
             backend_obligation_id=backend_obligation.backend_obligation_id,
-            termination=termination,  # type: ignore[arg-type]
-            native_execution=False,
-            exit_code=0 if termination == "completed" else 1,
-            raw_result=raw_result,
-            started_at=started_at,
-            finished_at=_utc_now_iso(),
-            duration_ms=duration_ms,
-            tool_version=self.adapter_version,
+            adapter_version=self.adapter_version,
+            evaluator_id="authorization-deterministic",
+            payload=dict(backend_obligation.payload),
+            timeout_seconds=budget.per_backend_wall_time_seconds,
         )
-        return raw.model_copy(update=compute_raw_execution_digests(raw))
 
     def normalize(
         self,

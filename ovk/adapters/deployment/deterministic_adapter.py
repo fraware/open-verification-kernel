@@ -26,7 +26,9 @@ from ovk.core.execution_models import (
     compute_payload_digest,
     compute_raw_execution_digests,
 )
+from ovk.core.execution_budget import BackendWorker
 from ovk.core.models import VerificationStatus
+from ovk.core.worker_runner import run_with_required_worker
 
 
 def _utc_now_iso() -> str:
@@ -154,51 +156,22 @@ class DeploymentDeterministicAdapter:
             native_available=False,
         )
 
-    def run(self, backend_obligation: BackendObligation, budget: ExecutionBudget) -> RawBackendExecution:
-        started = time.perf_counter()
-        started_at = _utc_now_iso()
-        if budget.per_backend_wall_time_seconds <= 0:
-            raw = RawBackendExecution(
-                backend=self.backend_id,
-                backend_obligation_id=backend_obligation.backend_obligation_id,
-                termination="timeout",
-                native_execution=False,
-                exit_code=1,
-                raw_result={"status": "unknown", "reason": "budget timeout", "counterexamples": []},
-                started_at=started_at,
-                finished_at=_utc_now_iso(),
-                duration_ms=(time.perf_counter() - started) * 1000.0,
-                tool_version=self.adapter_version,
-            )
-            return raw.model_copy(update=compute_raw_execution_digests(raw))
-
-        data = dict(backend_obligation.payload.get("input") or {})
-        if not data.get("states") or not data.get("transitions"):
-            status = "unknown"
-            counterexamples = [
-                {
-                    "summary": "State machine abstraction is missing states or transitions.",
-                    "failure_mode": "missing_state_machine_abstraction",
-                }
-            ]
-            termination = "invalid_output"
-        else:
-            counterexamples = find_skipped_approval_paths(data)
-            status = "fail" if counterexamples else "pass"
-            termination = "completed"
-        raw = RawBackendExecution(
+    def run(
+        self,
+        backend_obligation: BackendObligation,
+        budget: ExecutionBudget,
+        *,
+        worker: BackendWorker | None = None,
+    ) -> RawBackendExecution:
+        return run_with_required_worker(
+            worker,
             backend=self.backend_id,
             backend_obligation_id=backend_obligation.backend_obligation_id,
-            termination=termination,  # type: ignore[arg-type]
-            native_execution=False,
-            exit_code=0 if termination == "completed" else 1,
-            raw_result={"status": status, "counterexamples": counterexamples},
-            started_at=started_at,
-            finished_at=_utc_now_iso(),
-            duration_ms=(time.perf_counter() - started) * 1000.0,
-            tool_version=self.adapter_version,
+            adapter_version=self.adapter_version,
+            evaluator_id="deployment-deterministic",
+            payload=dict(backend_obligation.payload),
+            timeout_seconds=budget.per_backend_wall_time_seconds,
         )
-        return raw.model_copy(update=compute_raw_execution_digests(raw))
 
     def normalize(
         self,
