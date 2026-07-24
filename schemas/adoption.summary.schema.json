@@ -18,7 +18,12 @@
     "verified_source_sha": {
       "type": "string",
       "minLength": 7,
-      "description": "Git commit that produced the metrics; not a later [skip ci] badge commit."
+      "description": "Git commit with a complete observed required-workflow set; never a [skip ci] badge-only commit."
+    },
+    "benchmark_source_sha": {
+      "type": "string",
+      "minLength": 7,
+      "description": "Git commit measured by FormalPR-Bench / badge artifacts."
     },
     "formal_pr_bench": {
       "type": "object",
