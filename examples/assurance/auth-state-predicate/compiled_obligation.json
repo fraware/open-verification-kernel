@@ -1,0 +1,24 @@
+{
+  "backend_id": "auth-state-predicate",
+  "input": {
+    "authoritative_state": {
+      "roles": [
+        "reader",
+        "admin"
+      ],
+      "status": "approved"
+    },
+    "predicates": [
+      {
+        "expected": "approved",
+        "kind": "field_equals",
+        "path": "status"
+      },
+      {
+        "kind": "set_contains",
+        "member": "admin",
+        "path": "roles"
+      }
+    ]
+  }
+}

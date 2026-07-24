@@ -1,0 +1,22 @@
+{
+  "after_db": "tests/assurance/fixtures/sql/after.sqlite",
+  "after_file_digest": "sha256:aa7a3ab1d89f25013f58a15364b0db335f213bc6597e3810326f8ed54cedde79",
+  "before_db": "tests/assurance/fixtures/sql/before.sqlite",
+  "before_file_digest": "sha256:e463f8662135ca210087fd32c8cbd58087f657d2a30d0e07fedea7080751651a",
+  "diff": {
+    "after_schema_digest": "sha256:9e592e4a30e6c67c5bd4d061f205f98c1b31930b70006728e6b5182b1ff34b3c",
+    "before_schema_digest": "sha256:9e592e4a30e6c67c5bd4d061f205f98c1b31930b70006728e6b5182b1ff34b3c",
+    "changed_tables": [
+      "items"
+    ],
+    "schema_changed": false,
+    "tables": [
+      {
+        "after_digest": "sha256:6fe4337d214065194d3d57dd08823e93b7edafd4771ba4e8203b8e1270376b5c",
+        "before_digest": "sha256:a980c14b37f47e4f62454f83bd37790ceee73a71ea725cd1684b591786fe1a09",
+        "changed": true,
+        "table": "items"
+      }
+    ]
+  }
+}

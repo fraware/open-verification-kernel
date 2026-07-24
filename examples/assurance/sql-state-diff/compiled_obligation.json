@@ -1,0 +1,10 @@
+{
+  "backend_id": "sql-state-diff",
+  "input": {
+    "after_db": "tests/assurance/fixtures/sql/after.sqlite",
+    "before_db": "tests/assurance/fixtures/sql/before.sqlite",
+    "expect_changed_tables": [
+      "items"
+    ]
+  }
+}

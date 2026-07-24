@@ -1,0 +1,83 @@
+{
+  "applicability": {
+    "status": "active",
+    "valid_from": "2026-07-24T21:36:00Z"
+  },
+  "artifact_type": "VerifierProfile.v1",
+  "assumptions": [
+    "Offline SQLite before/after fixtures."
+  ],
+  "canonical_configuration": {
+    "after_db": "tests/assurance/fixtures/sql/after.sqlite",
+    "before_db": "tests/assurance/fixtures/sql/before.sqlite",
+    "expect_changed_tables": [
+      "items"
+    ],
+    "timeout_ms": 5000
+  },
+  "claim_surface": {
+    "decision_space": [
+      "accept",
+      "reject",
+      "indeterminate_execution_error",
+      "indeterminate_out_of_scope",
+      "indeterminate_insufficient_evidence"
+    ],
+    "guarantee_class": "observational",
+    "out_of_scope_claim_ids": [
+      "claim.formal.full_correctness"
+    ],
+    "supported_claim_ids": [
+      "claim.sql.state_diff"
+    ]
+  },
+  "configuration": {
+    "config_digest": "sha256:629fe4b76f48b2e978bbb4d6a4944950506df2105d03f7886c290808bab4d48d",
+    "ensemble_digest": null,
+    "model_digest": null,
+    "policy_digest": null,
+    "prompt_digest": null,
+    "resource_limit_digest": "sha256:2c84141f555be7ec76d2a87e31c10afc1f6493b7e4a1e8c299de4b17186a4e62",
+    "rubric_digest": null,
+    "test_suite_digest": null,
+    "threshold_digest": null
+  },
+  "created_at": "2026-07-24T21:36:00Z",
+  "execution_controls": {
+    "timeout_ms": 5000
+  },
+  "implementation": {
+    "entry_point": "ovk.adapters.assurance.sql_diff.SqlStateDiffAdapter",
+    "implementation_digest": "sha256:5bd5edfeea269697c8bed1bd3d407e646ee0ea8b8491e4e755dde145bef69ed5",
+    "language": "python",
+    "name": "SqlStateDiffAdapter",
+    "normalization_implementation_version": "ovk.normalize.v1",
+    "version": "0.1.0"
+  },
+  "integrity": {
+    "artifact_digest": "sha256:cfb3c8e462fdf28dbc11e49789fb495ec6bb4d4e66b2dcce4be869a9066ec816",
+    "canonicalization_version": "v1"
+  },
+  "known_blind_spots": [
+    "Does not prove application-level invariants beyond table digests."
+  ],
+  "limitations_notice": "Profile binds configuration and digests only; it does not claim checker correctness beyond recorded results.",
+  "mechanism": {
+    "allows_abstention": true,
+    "description": "OVK assurance snapshot for backend sql-state-diff",
+    "determinism": "deterministic",
+    "mechanism_class": "static_analysis"
+  },
+  "producer": "OVK",
+  "producer_version": "1.2.1",
+  "redacted_environment": {
+    "entries": {},
+    "environment_digest": "sha256:360192276458ec94bbc60a175efd2e5b1e9b8981250956a6e612300dd01eaf89",
+    "redacted_keys": [],
+    "redaction_policy_id": "ovk-redact-v1"
+  },
+  "schema_version": "v1",
+  "source_commit": "e7097351c9a09a2e9f3626fb981f089b14b8cb4d",
+  "source_repo": "https://github.com/fraware/open-verification-kernel",
+  "verifier_profile_id": "vp-sql-state-diff-44471e42"
+}

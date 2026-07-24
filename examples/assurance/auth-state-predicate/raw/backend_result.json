@@ -1,0 +1,36 @@
+{
+  "authoritative_state_digest": "sha256:5d16d6a4be324402478388cae54ad185559238cb77a8045e79206652792697b3",
+  "evaluation": {
+    "message": null,
+    "ok": true,
+    "results": [
+      {
+        "actual": "approved",
+        "expected": "approved",
+        "index": 0,
+        "kind": "field_equals",
+        "passed": true,
+        "path": "status",
+        "predicate": {
+          "expected": "approved",
+          "kind": "field_equals",
+          "path": "status"
+        }
+      },
+      {
+        "index": 1,
+        "kind": "set_contains",
+        "member": "admin",
+        "passed": true,
+        "path": "roles",
+        "predicate": {
+          "kind": "set_contains",
+          "member": "admin",
+          "path": "roles"
+        }
+      }
+    ],
+    "unsupported": false
+  },
+  "predicate_count": 2
+}

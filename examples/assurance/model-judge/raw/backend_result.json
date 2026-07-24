@@ -1,0 +1,21 @@
+{
+  "decoding": {
+    "temperature": "0"
+  },
+  "decoding_digest": "sha256:303d9f781130627c7a29a97f09943bb30d1f1c0aa332eb4bf56d84a05b70c809",
+  "judge_client": "contract_fake",
+  "judgment": {
+    "passed": true,
+    "provider": "contract_fake",
+    "rationale": "contract_fake score=0.427 threshold=0.0",
+    "raw_response_digest": "sha256:4c4273c30b72b0b07dc8acb9260cf79bd67d2458d2b4cf3ee77c320b40b5256d",
+    "score": "0.427"
+  },
+  "model": "contract-fake-v1",
+  "prompt_digest": "sha256:d888275c79594f9fbede5c46847738b5411903c917b592bc0ba07a206afcd6c3",
+  "rubric": {
+    "threshold": "0.0"
+  },
+  "rubric_digest": "sha256:a97a053fa918da930ab63066f004a269e0cce91dc153fb7c33b419ab6d56e527",
+  "seed": null
+}

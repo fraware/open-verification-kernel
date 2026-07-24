@@ -1,0 +1,8 @@
+{
+  "input_digest": "sha256:89fad2250c40a8782c969ec588c11841ae2e6b78315d46f5c1e98873cafeae9c",
+  "normalized_digest": "sha256:bb817eb885a0f0cbedd59adbc523d9170e6f25769c6d5508195e3758664291e6",
+  "producer": "OVK",
+  "producer_version": "1.2.1",
+  "profile_digest": "sha256:610a2c95dd4f61ea801796b8489d63876783b146363cd647e694b21792e3fce5",
+  "raw_digest": "sha256:ffd8e70cc31a62dbff8e80ded7b4d48ca64815f45b2906b0fbe355af26aad2c4"
+}

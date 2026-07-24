@@ -1,0 +1,6 @@
+{
+  "backend_id": "pytest-suite",
+  "input": {
+    "suite_path": "tests/assurance/fixtures/pytest_suite"
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "artifact_type": "VerifierInvocationRecord.v1",
+  "assumptions": [],
+  "canonicalization_version": "v1",
+  "command": {
+    "argv": [
+      "ovk-adapter-model-judge",
+      "judge"
+    ],
+    "cwd": ".",
+    "env_digest": "sha256:360192276458ec94bbc60a175efd2e5b1e9b8981250956a6e612300dd01eaf89",
+    "limits": {
+      "timeout_ms": 1000
+    }
+  },
+  "compiled_obligation": {
+    "digest": "sha256:f5f4f3f46610cef40a5ca90620b10ad94845e7b56972e955abc2d2d2836b3746",
+    "media_type": "application/json",
+    "path": "compiled_obligation.json"
+  },
+  "completed_at": "2026-07-24T21:36:01Z",
+  "exit": {
+    "code": 0,
+    "kind": "exited"
+  },
+  "guarantee_class": "empirically_measured",
+  "input_digest": "sha256:82514c33e40ab5e3720dca02d1ebb9c9bfbfddff0376798315ce2aefd11abfea",
+  "integrity": {
+    "artifact_digest": "sha256:c118a84a927458073c3323ef57611bcf5e5f65ed4fbec70b4a0f7c52d344165e",
+    "canonicalization_version": "v1"
+  },
+  "invocation_id": "vi-model-judge-82514c33",
+  "limits": [],
+  "normalized_result_digest": "sha256:87ceab11811711bd7917dbbc17af60c37be4c9b866ccb8225c653957906a96d8",
+  "normalizer_version": "ovk.normalize.v1",
+  "producer": "OVK",
+  "producer_version": "1.2.1",
+  "profile_ref": {
+    "artifact_type": "VerifierProfile.v1",
+    "profile_digest": "sha256:1c756e47c72513d5cf793d4b18b82556fd174e58b365e760988abd8105deee5e",
+    "verifier_profile_id": "vp-model-judge-c7c7864d"
+  },
+  "raw_backend_result_digest": "sha256:a651c7279ccc5256b5d0e399ecc5cde39cd6ab811571eac4db7b5f42787ff840",
+  "schema_version": "v1",
+  "started_at": "2026-07-24T21:36:01Z",
+  "stderr_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+  "stdout_digest": "sha256:9d1a88a9be142044520f8d016156bb5a2c1e80b481b11ee3267edd4d487e9492"
+}

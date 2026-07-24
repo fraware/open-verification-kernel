@@ -1,0 +1,29 @@
+{
+  "command_stable": [
+    "python",
+    "-m",
+    "pytest",
+    "tests/assurance/fixtures/pytest_suite",
+    "-q"
+  ],
+  "exit_code": 0,
+  "junit_summary": {
+    "cases": [
+      {
+        "classname": "tests.assurance.fixtures.pytest_suite.test_offline_suite",
+        "name": "test_fixture_passes",
+        "status": "passed"
+      },
+      {
+        "classname": "tests.assurance.fixtures.pytest_suite.test_offline_suite",
+        "name": "test_fixture_also_passes",
+        "status": "passed"
+      }
+    ],
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "tests": 2
+  },
+  "suite_digest": "sha256:549b66ee77b5651c2a2fa37ef227bf8912956e69ae74d3bba6deff5abd1f9793"
+}

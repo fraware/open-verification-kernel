@@ -1,0 +1,96 @@
+{
+  "applicability": {
+    "status": "active",
+    "valid_from": "2026-07-24T21:36:01Z"
+  },
+  "artifact_type": "VerifierProfile.v1",
+  "assumptions": [
+    "Model judgments are empirical and may vary."
+  ],
+  "canonical_configuration": {
+    "decoding": {
+      "temperature": "0"
+    },
+    "judge_client": "contract_fake",
+    "model": "contract-fake-v1",
+    "prompt": "",
+    "rubric": {
+      "threshold": "0.0"
+    },
+    "timeout_ms": 1000
+  },
+  "claim_surface": {
+    "decision_space": [
+      "accept",
+      "reject",
+      "indeterminate_execution_error",
+      "indeterminate_out_of_scope",
+      "indeterminate_insufficient_evidence"
+    ],
+    "guarantee_class": "empirically_measured",
+    "out_of_scope_claim_ids": [
+      "claim.formal.full_correctness",
+      "claim.formally_checked"
+    ],
+    "supported_claim_ids": [
+      "claim.model_judge.empirical"
+    ]
+  },
+  "configuration": {
+    "config_digest": "sha256:3ba19cc7497cda9dc7ac7d0739678499727f67d5b373f0e8419da196c4aac806",
+    "ensemble_digest": null,
+    "model_digest": "sha256:ef9516ee9a9c935d95f1a1b17e318c6971d14497da14bfdec4cecbfa9f9ad7fb",
+    "policy_digest": null,
+    "prompt_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+    "resource_limit_digest": "sha256:1018384d24a8f0e4355abb757c1f2a09cd29e654b16233620871bc251b7a46de",
+    "rubric_digest": "sha256:a97a053fa918da930ab63066f004a269e0cce91dc153fb7c33b419ab6d56e527",
+    "test_suite_digest": null,
+    "threshold_digest": "sha256:16522468b17d5af6df90b05f6f6b8a1258ecb7b824dab04bfc63e1ed623558c7"
+  },
+  "created_at": "2026-07-24T21:36:01Z",
+  "execution_controls": {
+    "timeout_ms": 1000
+  },
+  "external_dependencies": [
+    {
+      "dependency_id": "model-judge-client",
+      "identity": "contract_fake",
+      "kind": "service",
+      "optional": true
+    }
+  ],
+  "implementation": {
+    "entry_point": "ovk.adapters.assurance.model_judge.ModelJudgeAdapter",
+    "implementation_digest": "sha256:501ada679ad1d07a2776b1b08f7c8487200fb31e3d6b413ba51b4e480f1a6a82",
+    "language": "python",
+    "name": "ModelJudgeAdapter",
+    "normalization_implementation_version": "ovk.normalize.v1",
+    "version": "0.1.0"
+  },
+  "integrity": {
+    "artifact_digest": "sha256:1c756e47c72513d5cf793d4b18b82556fd174e58b365e760988abd8105deee5e",
+    "canonicalization_version": "v1"
+  },
+  "known_blind_spots": [
+    "Cannot upgrade to formally_checked."
+  ],
+  "limitations_notice": "Profile binds configuration and digests only; it does not claim checker correctness beyond recorded results.",
+  "mechanism": {
+    "allows_abstention": true,
+    "description": "OVK assurance snapshot for backend model-judge",
+    "determinism": "stochastic",
+    "mechanism_class": "model_judge"
+  },
+  "producer": "OVK",
+  "producer_version": "1.2.1",
+  "redacted_environment": {
+    "entries": {},
+    "environment_digest": "sha256:360192276458ec94bbc60a175efd2e5b1e9b8981250956a6e612300dd01eaf89",
+    "redacted_keys": [],
+    "redaction_policy_id": "ovk-redact-v1"
+  },
+  "schema_version": "v1",
+  "source_commit": "e7097351c9a09a2e9f3626fb981f089b14b8cb4d",
+  "source_repo": "https://github.com/fraware/open-verification-kernel",
+  "verifier_profile_id": "vp-model-judge-c7c7864d"
+}

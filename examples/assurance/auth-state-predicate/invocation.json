@@ -1,0 +1,48 @@
+{
+  "artifact_type": "VerifierInvocationRecord.v1",
+  "assumptions": [],
+  "canonicalization_version": "v1",
+  "command": {
+    "argv": [
+      "ovk-adapter-auth-state-predicate",
+      "exact-predicate"
+    ],
+    "cwd": ".",
+    "env_digest": "sha256:360192276458ec94bbc60a175efd2e5b1e9b8981250956a6e612300dd01eaf89",
+    "limits": {
+      "timeout_ms": 1000
+    }
+  },
+  "compiled_obligation": {
+    "digest": "sha256:600df83e94767b9881eecfed1aec55eebd4cf2b0dbd8447756e64b37ab1abf6e",
+    "media_type": "application/json",
+    "path": "compiled_obligation.json"
+  },
+  "completed_at": "2026-07-24T21:35:55Z",
+  "exit": {
+    "code": 0,
+    "kind": "exited"
+  },
+  "guarantee_class": "observational",
+  "input_digest": "sha256:89fad2250c40a8782c969ec588c11841ae2e6b78315d46f5c1e98873cafeae9c",
+  "integrity": {
+    "artifact_digest": "sha256:d4f4dc8d7eb41ef0599b28cd691728c2fe3aa448d592a7970a0f3f46e4fc5d44",
+    "canonicalization_version": "v1"
+  },
+  "invocation_id": "vi-auth-state-predicate-89fad225",
+  "limits": [],
+  "normalized_result_digest": "sha256:bb817eb885a0f0cbedd59adbc523d9170e6f25769c6d5508195e3758664291e6",
+  "normalizer_version": "ovk.normalize.v1",
+  "producer": "OVK",
+  "producer_version": "1.2.1",
+  "profile_ref": {
+    "artifact_type": "VerifierProfile.v1",
+    "profile_digest": "sha256:610a2c95dd4f61ea801796b8489d63876783b146363cd647e694b21792e3fce5",
+    "verifier_profile_id": "vp-auth-state-predicate-3386a8ab"
+  },
+  "raw_backend_result_digest": "sha256:ffd8e70cc31a62dbff8e80ded7b4d48ca64815f45b2906b0fbe355af26aad2c4",
+  "schema_version": "v1",
+  "started_at": "2026-07-24T21:35:55Z",
+  "stderr_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+  "stdout_digest": "sha256:2faed1418d56b08b21a2d29fdac2030e7e87272342c23a144a4d52554c23a182"
+}

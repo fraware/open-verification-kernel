@@ -1,0 +1,27 @@
+{
+  "decision": "accept",
+  "failures": 0,
+  "guarantee_class": "runtime_observed",
+  "skipped": 0,
+  "skipped_visible": false,
+  "status": "pass",
+  "test_report": {
+    "cases": [
+      {
+        "classname": "tests.assurance.fixtures.pytest_suite.test_offline_suite",
+        "name": "test_fixture_passes",
+        "status": "passed"
+      },
+      {
+        "classname": "tests.assurance.fixtures.pytest_suite.test_offline_suite",
+        "name": "test_fixture_also_passes",
+        "status": "passed"
+      }
+    ],
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "tests": 2
+  },
+  "threshold": 0
+}

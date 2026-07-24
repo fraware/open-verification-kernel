@@ -1,0 +1,49 @@
+{
+  "artifact_type": "VerificationResult.v1",
+  "check_groups": [
+    {
+      "checks": [
+        {
+          "check_id": "auth-state-predicate-predicate",
+          "mandatory": true,
+          "status": "passed"
+        }
+      ],
+      "kind": "authority"
+    }
+  ],
+  "claim_ids": [
+    "claim.auth_state.exact_predicate"
+  ],
+  "created_at": "2026-07-24T21:35:55Z",
+  "decision": "accept",
+  "declared_input_guarantee_class": "observational",
+  "execution_status": "completed",
+  "guarantee_class": "observational",
+  "input_bundle_digest": "sha256:89fad2250c40a8782c969ec588c11841ae2e6b78315d46f5c1e98873cafeae9c",
+  "integrity": {
+    "artifact_digest": "sha256:a6304325b3bf038c793cac6c62d6e3cd42ff810acf2c0256d07c8b5334982054",
+    "canonicalization_version": "v1"
+  },
+  "invocation_ref": {
+    "invocation_digest": "sha256:d4f4dc8d7eb41ef0599b28cd691728c2fe3aa448d592a7970a0f3f46e4fc5d44",
+    "invocation_id": "vi-auth-state-predicate-89fad225"
+  },
+  "normalization_applied": true,
+  "normalized_result_digest": "sha256:bb817eb885a0f0cbedd59adbc523d9170e6f25769c6d5508195e3758664291e6",
+  "normalizer_version": "ovk.normalize.v1",
+  "producer": "OVK",
+  "producer_version": "1.2.1",
+  "raw_backend_output_digest": "sha256:ffd8e70cc31a62dbff8e80ded7b4d48ca64815f45b2906b0fbe355af26aad2c4",
+  "resource_limits": {
+    "wall_time_ms": 0
+  },
+  "schema_version": "v1",
+  "source_commit": "e7097351c9a09a2e9f3626fb981f089b14b8cb4d",
+  "source_repo": "https://github.com/fraware/open-verification-kernel",
+  "verification_result_id": "vr-auth-state-predicate-89fad225",
+  "verifier_profile": {
+    "profile_digest": "sha256:610a2c95dd4f61ea801796b8489d63876783b146363cd647e694b21792e3fce5",
+    "verifier_profile_id": "vp-auth-state-predicate-3386a8ab"
+  }
+}

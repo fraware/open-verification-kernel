@@ -1,0 +1,48 @@
+{
+  "artifact_type": "VerifierInvocationRecord.v1",
+  "assumptions": [],
+  "canonicalization_version": "v1",
+  "command": {
+    "argv": [
+      "ovk-adapter-sql-state-diff",
+      "sqlite-diff"
+    ],
+    "cwd": ".",
+    "env_digest": "sha256:360192276458ec94bbc60a175efd2e5b1e9b8981250956a6e612300dd01eaf89",
+    "limits": {
+      "timeout_ms": 5000
+    }
+  },
+  "compiled_obligation": {
+    "digest": "sha256:7d9e5c21c54117dc7753ca8ce1e915231a278ba40c5460aeccd9c7a0808a256d",
+    "media_type": "application/json",
+    "path": "compiled_obligation.json"
+  },
+  "completed_at": "2026-07-24T21:36:00Z",
+  "exit": {
+    "code": 0,
+    "kind": "exited"
+  },
+  "guarantee_class": "observational",
+  "input_digest": "sha256:bed20dcf292ee4871001bfa1d86b5382a49c0288a329120b0021cbe4abc0d2e4",
+  "integrity": {
+    "artifact_digest": "sha256:9e9100265e506fc169def68f51cf01076921dbb62f8bcce545720c41d2216262",
+    "canonicalization_version": "v1"
+  },
+  "invocation_id": "vi-sql-state-diff-bed20dcf",
+  "limits": [],
+  "normalized_result_digest": "sha256:44676b2f4c54fd11d73ab5d15c6956867b4ecac7fdea898181d6653ea741f8c6",
+  "normalizer_version": "ovk.normalize.v1",
+  "producer": "OVK",
+  "producer_version": "1.2.1",
+  "profile_ref": {
+    "artifact_type": "VerifierProfile.v1",
+    "profile_digest": "sha256:cfb3c8e462fdf28dbc11e49789fb495ec6bb4d4e66b2dcce4be869a9066ec816",
+    "verifier_profile_id": "vp-sql-state-diff-44471e42"
+  },
+  "raw_backend_result_digest": "sha256:ffe49b4f57e66cebdc9984322836c3040882c1396edb9596a5b074ba7858b970",
+  "schema_version": "v1",
+  "started_at": "2026-07-24T21:36:00Z",
+  "stderr_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+  "stdout_digest": "sha256:2faed1418d56b08b21a2d29fdac2030e7e87272342c23a144a4d52554c23a182"
+}

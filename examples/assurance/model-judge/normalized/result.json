@@ -1,0 +1,12 @@
+{
+  "decision": "accept",
+  "guarantee_class": "empirically_measured",
+  "model_judgment": {
+    "passed": true,
+    "provider": "contract_fake",
+    "rationale": "contract_fake score=0.427 threshold=0.0",
+    "raw_response_digest": "sha256:4c4273c30b72b0b07dc8acb9260cf79bd67d2458d2b4cf3ee77c320b40b5256d",
+    "score": "0.427"
+  },
+  "status": "pass"
+}

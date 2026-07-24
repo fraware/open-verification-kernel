@@ -1,0 +1,49 @@
+{
+  "artifact_type": "VerificationResult.v1",
+  "check_groups": [
+    {
+      "checks": [
+        {
+          "check_id": "sql-state-diff-predicate",
+          "mandatory": true,
+          "status": "passed"
+        }
+      ],
+      "kind": "authority"
+    }
+  ],
+  "claim_ids": [
+    "claim.sql.state_diff"
+  ],
+  "created_at": "2026-07-24T21:36:00Z",
+  "decision": "accept",
+  "declared_input_guarantee_class": "observational",
+  "execution_status": "completed",
+  "guarantee_class": "observational",
+  "input_bundle_digest": "sha256:bed20dcf292ee4871001bfa1d86b5382a49c0288a329120b0021cbe4abc0d2e4",
+  "integrity": {
+    "artifact_digest": "sha256:1d47d46622009a5783c506c3012190b55b3a14a672f4931bf2eecbfc3b793356",
+    "canonicalization_version": "v1"
+  },
+  "invocation_ref": {
+    "invocation_digest": "sha256:9e9100265e506fc169def68f51cf01076921dbb62f8bcce545720c41d2216262",
+    "invocation_id": "vi-sql-state-diff-bed20dcf"
+  },
+  "normalization_applied": true,
+  "normalized_result_digest": "sha256:44676b2f4c54fd11d73ab5d15c6956867b4ecac7fdea898181d6653ea741f8c6",
+  "normalizer_version": "ovk.normalize.v1",
+  "producer": "OVK",
+  "producer_version": "1.2.1",
+  "raw_backend_output_digest": "sha256:ffe49b4f57e66cebdc9984322836c3040882c1396edb9596a5b074ba7858b970",
+  "resource_limits": {
+    "wall_time_ms": 0
+  },
+  "schema_version": "v1",
+  "source_commit": "e7097351c9a09a2e9f3626fb981f089b14b8cb4d",
+  "source_repo": "https://github.com/fraware/open-verification-kernel",
+  "verification_result_id": "vr-sql-state-diff-bed20dcf",
+  "verifier_profile": {
+    "profile_digest": "sha256:cfb3c8e462fdf28dbc11e49789fb495ec6bb4d4e66b2dcce4be869a9066ec816",
+    "verifier_profile_id": "vp-sql-state-diff-44471e42"
+  }
+}

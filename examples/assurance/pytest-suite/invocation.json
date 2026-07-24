@@ -1,0 +1,52 @@
+{
+  "artifact_type": "VerifierInvocationRecord.v1",
+  "assumptions": [],
+  "canonicalization_version": "v1",
+  "command": {
+    "argv": [
+      "python",
+      "-m",
+      "pytest",
+      "tests/assurance/fixtures/pytest_suite",
+      "--junitxml=junit.xml",
+      "-q"
+    ],
+    "cwd": ".",
+    "env_digest": "sha256:360192276458ec94bbc60a175efd2e5b1e9b8981250956a6e612300dd01eaf89",
+    "limits": {
+      "timeout_ms": 60000
+    }
+  },
+  "compiled_obligation": {
+    "digest": "sha256:5b28f3e45224f5b990850e1462fc950959a88b920e3e43371c9606bf03c16ff5",
+    "media_type": "application/json",
+    "path": "compiled_obligation.json"
+  },
+  "completed_at": "2026-07-24T21:36:00Z",
+  "exit": {
+    "code": 0,
+    "kind": "exited"
+  },
+  "guarantee_class": "runtime_observed",
+  "input_digest": "sha256:49fa0764c4b0af82001671f21867f4627e0838359cbff8e43812fe7bded63d10",
+  "integrity": {
+    "artifact_digest": "sha256:8ae3685822f58889eaad93a01778bbe5ec2473d51a7220f5771b0d84663de93d",
+    "canonicalization_version": "v1"
+  },
+  "invocation_id": "vi-pytest-suite-49fa0764",
+  "limits": [],
+  "normalized_result_digest": "sha256:dc9844cb40e11b16bb9c2bedf11de5b25059452347c37ff395232829b8010168",
+  "normalizer_version": "ovk.normalize.v1",
+  "producer": "OVK",
+  "producer_version": "1.2.1",
+  "profile_ref": {
+    "artifact_type": "VerifierProfile.v1",
+    "profile_digest": "sha256:bf68a48df883371361add66e9acb27d48423bc8a88dd1b4f2597ad2cd2c5007a",
+    "verifier_profile_id": "vp-pytest-suite-9802dd51"
+  },
+  "raw_backend_result_digest": "sha256:32c7b704db35bf722b523113b5225e96fd7b752d1337aed2bbca88d7a478cbac",
+  "schema_version": "v1",
+  "started_at": "2026-07-24T21:35:56Z",
+  "stderr_digest": "sha256:e66cd32423ccc8c683a0f56c15f5ab190b7dc4398891ed3f27cc929b9300c72b",
+  "stdout_digest": "sha256:420c5b8381ee64a381690b1ffdab7f88f26257a2b1c49119cf4e71d7db840160"
+}

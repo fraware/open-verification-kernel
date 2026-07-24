@@ -1,0 +1,88 @@
+{
+  "applicability": {
+    "status": "active",
+    "valid_from": "2026-07-24T21:35:56Z"
+  },
+  "artifact_type": "VerifierProfile.v1",
+  "assumptions": [
+    "Observational pytest execution only."
+  ],
+  "canonical_configuration": {
+    "suite_path": "tests/assurance/fixtures/pytest_suite",
+    "threshold": 0,
+    "timeout_ms": 60000
+  },
+  "claim_surface": {
+    "decision_space": [
+      "accept",
+      "reject",
+      "indeterminate_execution_error",
+      "indeterminate_out_of_scope",
+      "indeterminate_insufficient_evidence"
+    ],
+    "guarantee_class": "runtime_observed",
+    "out_of_scope_claim_ids": [
+      "claim.formal.full_correctness"
+    ],
+    "supported_claim_ids": [
+      "claim.pytest.runtime_observed"
+    ]
+  },
+  "configuration": {
+    "config_digest": "sha256:1018014a6bae15ac1e0093f3d6982e5c689aab33d43d708a53356db854a3ad2e",
+    "ensemble_digest": null,
+    "model_digest": null,
+    "policy_digest": null,
+    "prompt_digest": null,
+    "resource_limit_digest": "sha256:cca428700bd0ca10a53960e042b27d423e4245274e9a166c2d70c50ce3fb1a0c",
+    "rubric_digest": null,
+    "test_suite_digest": "sha256:549b66ee77b5651c2a2fa37ef227bf8912956e69ae74d3bba6deff5abd1f9793",
+    "threshold_digest": "sha256:5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+  },
+  "created_at": "2026-07-24T21:35:56Z",
+  "execution_controls": {
+    "timeout_ms": 60000
+  },
+  "external_dependencies": [
+    {
+      "dependency_id": "pytest",
+      "identity": "pytest",
+      "kind": "library",
+      "optional": false
+    }
+  ],
+  "implementation": {
+    "entry_point": "ovk.adapters.assurance.pytest_suite.PytestSuiteAdapter",
+    "implementation_digest": "sha256:a3651554436c0d5e073ce7e200576a610296f9469a085645804d097f57f8ecc8",
+    "language": "python",
+    "name": "PytestSuiteAdapter",
+    "normalization_implementation_version": "ovk.normalize.v1",
+    "version": "0.1.0"
+  },
+  "integrity": {
+    "artifact_digest": "sha256:bf68a48df883371361add66e9acb27d48423bc8a88dd1b4f2597ad2cd2c5007a",
+    "canonicalization_version": "v1"
+  },
+  "known_blind_spots": [
+    "Passing tests do not imply formal correctness."
+  ],
+  "limitations_notice": "Profile binds configuration and digests only; it does not claim checker correctness beyond recorded results.",
+  "mechanism": {
+    "allows_abstention": true,
+    "description": "OVK assurance snapshot for backend pytest-suite",
+    "determinism": "deterministic",
+    "mechanism_class": "test_suite"
+  },
+  "producer": "OVK",
+  "producer_version": "1.2.1",
+  "redacted_environment": {
+    "entries": {},
+    "environment_digest": "sha256:360192276458ec94bbc60a175efd2e5b1e9b8981250956a6e612300dd01eaf89",
+    "redacted_keys": [],
+    "redaction_policy_id": "ovk-redact-v1"
+  },
+  "schema_version": "v1",
+  "source_commit": "e7097351c9a09a2e9f3626fb981f089b14b8cb4d",
+  "source_repo": "https://github.com/fraware/open-verification-kernel",
+  "verifier_profile_id": "vp-pytest-suite-9802dd51"
+}

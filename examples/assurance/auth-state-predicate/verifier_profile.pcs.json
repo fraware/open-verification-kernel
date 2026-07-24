@@ -1,0 +1,78 @@
+{
+  "applicability": {
+    "status": "active",
+    "valid_from": "2026-07-24T21:35:55Z"
+  },
+  "artifact_type": "VerifierProfile.v1",
+  "assumptions": [
+    "Authoritative state materials are caller-declared and complete."
+  ],
+  "canonical_configuration": {
+    "timeout_ms": 1000
+  },
+  "claim_surface": {
+    "decision_space": [
+      "accept",
+      "reject",
+      "indeterminate_execution_error",
+      "indeterminate_out_of_scope",
+      "indeterminate_insufficient_evidence"
+    ],
+    "guarantee_class": "observational",
+    "out_of_scope_claim_ids": [
+      "claim.formal.full_correctness"
+    ],
+    "supported_claim_ids": [
+      "claim.auth_state.exact_predicate"
+    ]
+  },
+  "configuration": {
+    "config_digest": "sha256:1018384d24a8f0e4355abb757c1f2a09cd29e654b16233620871bc251b7a46de",
+    "ensemble_digest": null,
+    "model_digest": null,
+    "policy_digest": null,
+    "prompt_digest": null,
+    "resource_limit_digest": "sha256:1018384d24a8f0e4355abb757c1f2a09cd29e654b16233620871bc251b7a46de",
+    "rubric_digest": null,
+    "test_suite_digest": null,
+    "threshold_digest": null
+  },
+  "created_at": "2026-07-24T21:35:55Z",
+  "execution_controls": {
+    "timeout_ms": 1000
+  },
+  "implementation": {
+    "entry_point": "ovk.adapters.assurance.auth_state.AuthoritativeStateAdapter",
+    "implementation_digest": "sha256:f26e8ad83c8c3d031391077de282b9aa9374d0cf2144f2aaa7f2b6d71c4217f6",
+    "language": "python",
+    "name": "AuthoritativeStateAdapter",
+    "normalization_implementation_version": "ovk.normalize.v1",
+    "version": "0.1.0"
+  },
+  "integrity": {
+    "artifact_digest": "sha256:610a2c95dd4f61ea801796b8489d63876783b146363cd647e694b21792e3fce5",
+    "canonicalization_version": "v1"
+  },
+  "known_blind_spots": [
+    "Does not discover undeclared state materials."
+  ],
+  "limitations_notice": "Profile binds configuration and digests only; it does not claim checker correctness beyond recorded results.",
+  "mechanism": {
+    "allows_abstention": true,
+    "description": "OVK assurance snapshot for backend auth-state-predicate",
+    "determinism": "deterministic",
+    "mechanism_class": "static_analysis"
+  },
+  "producer": "OVK",
+  "producer_version": "1.2.1",
+  "redacted_environment": {
+    "entries": {},
+    "environment_digest": "sha256:360192276458ec94bbc60a175efd2e5b1e9b8981250956a6e612300dd01eaf89",
+    "redacted_keys": [],
+    "redaction_policy_id": "ovk-redact-v1"
+  },
+  "schema_version": "v1",
+  "source_commit": "e7097351c9a09a2e9f3626fb981f089b14b8cb4d",
+  "source_repo": "https://github.com/fraware/open-verification-kernel",
+  "verifier_profile_id": "vp-auth-state-predicate-3386a8ab"
+}
