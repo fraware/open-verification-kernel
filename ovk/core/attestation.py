@@ -40,6 +40,7 @@ def bundle_to_statement(bundle: EvidenceBundle) -> dict[str, Any]:
                 "decision": evidence.decision,
                 "obligation_id": evidence.obligation_id,
                 "routing_id": evidence.routing_id,
+                "material_set_digest": evidence.material_set_digest,
                 "compiler": evidence.compiler,
                 "coverage": evidence.coverage,
                 "materials": evidence.materials,

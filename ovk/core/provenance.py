@@ -87,6 +87,9 @@ def build_provenance_statement(
         "control_plane": {
             "obligation_ids": [item.obligation_id for item in bundle.evidence if item.obligation_id],
             "routing_ids": [item.routing_id for item in bundle.evidence if item.routing_id],
+            "material_set_digests": [
+                item.material_set_digest for item in bundle.evidence if item.material_set_digest
+            ],
             "routing_enforced": [bool(item.routing_enforced) for item in bundle.evidence],
             "compilers": [item.compiler for item in bundle.evidence if item.compiler],
             "coverage": [item.coverage for item in bundle.evidence if item.coverage],

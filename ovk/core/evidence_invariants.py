@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ovk.core.bundle import content_digest
+from ovk.core.materials import compute_material_set_digest
 from ovk.core.models import EvidenceBundle, VerificationStatus
 
 
@@ -230,7 +231,8 @@ def _check_control_plane_invariants(bundle: EvidenceBundle) -> list[EvidenceInva
     for index, evidence in enumerate(bundle.evidence):
         path = f"evidence[{index}]"
         is_v2 = str(evidence.schema_version).endswith(".v2") or evidence.routing_enforced
-        if not is_v2 and evidence.obligation_id is None and evidence.routing_id is None:
+        is_v3 = str(evidence.schema_version).endswith(".v3")
+        if not is_v2 and not is_v3 and evidence.obligation_id is None and evidence.routing_id is None:
             continue
 
         selected = list(evidence.selected_backends or [])
@@ -332,6 +334,23 @@ def _check_control_plane_invariants(bundle: EvidenceBundle) -> list[EvidenceInva
                             message="material digests must be present (OVK-INV-015)",
                         )
                     )
+            if is_v3 or evidence.routing_enforced:
+                expected_material_set = compute_material_set_digest(evidence.materials)
+                stated_material_set = evidence.material_set_digest
+                if not stated_material_set:
+                    issues.append(
+                        EvidenceInvariantIssue(
+                            path=f"{path}.material_set_digest",
+                            message="evidence v3 must include material_set_digest (OVK-INV-021)",
+                        )
+                    )
+                elif stated_material_set != expected_material_set:
+                    issues.append(
+                        EvidenceInvariantIssue(
+                            path=f"{path}.material_set_digest",
+                            message="material_set_digest must match recomputed canonical digest (OVK-INV-021)",
+                        )
+                    )
 
         coverage = evidence.coverage or {}
         recommendation = _decision_value(evidence.decision, "merge_recommendation")
@@ -383,7 +402,33 @@ def _check_control_plane_invariants(bundle: EvidenceBundle) -> list[EvidenceInva
                     )
                 )
 
-        # OVK-INV-020 checked at attestation binding time; also flag missing routing_id on enforced.
+        if is_v3 or evidence.routing_enforced:
+            trace_artifacts = [a for a in evidence.generated_artifacts if a.get("kind") == "control_plane_trace"]
+            if not trace_artifacts and is_v3:
+                issues.append(
+                    EvidenceInvariantIssue(
+                        path=f"{path}.generated_artifacts",
+                        message="evidence v3 must include control_plane_trace artifact (OVK-INV-022)",
+                    )
+                )
+            elif trace_artifacts:
+                trace = trace_artifacts[0]
+                if trace.get("routing_id") not in {None, evidence.routing_id}:
+                    issues.append(
+                        EvidenceInvariantIssue(
+                            path=f"{path}.generated_artifacts",
+                            message="control_plane_trace routing_id must match evidence routing_id (OVK-INV-022)",
+                        )
+                    )
+                trace_digest = trace.get("material_set_digest")
+                if is_v3 and trace_digest and trace_digest != evidence.material_set_digest:
+                    issues.append(
+                        EvidenceInvariantIssue(
+                            path=f"{path}.generated_artifacts",
+                            message="control_plane_trace material_set_digest must match evidence (OVK-INV-021)",
+                        )
+                    )
+
         if evidence.routing_enforced and not evidence.routing_id:
             issues.append(
                 EvidenceInvariantIssue(
