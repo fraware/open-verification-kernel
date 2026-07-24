@@ -1,0 +1,51 @@
+{
+  "capability_id": "assurance-fixture-invalid-v1",
+  "tool": {
+    "name": "fixture-backend",
+    "adapter": "fixture-adapter",
+    "adapter_version": "0.1.0",
+    "version": "0.1.0"
+  },
+  "backend_class": "custom",
+  "supported_domains": ["assurance_test"],
+  "supported_property_kinds": ["exact_predicate"],
+  "guarantee": {
+    "type": "exact_predicate",
+    "meaning_of_pass": "pass",
+    "meaning_of_fail": "fail",
+    "meaning_of_unknown": "unknown"
+  },
+  "assurance": {
+    "assurance_capable": true,
+    "verifier_identity": {
+      "verifier_id": "ovk.fixture.invalid",
+      "implementation_name": "FixtureAdapter"
+    },
+    "decision_semantics": {
+      "decision_space": ["accept", "reject"],
+      "guarantee_class": "observational"
+    },
+    "mechanism_class": "static_analysis",
+    "determinism": "deterministic",
+    "evidence_channels": ["raw_backend_result"],
+    "replay_support": {
+      "supported": true
+    },
+    "configuration_snapshot_support": {
+      "supported": false
+    },
+    "mutation_dimensions": [],
+    "abstention": {
+      "allows_abstention": true
+    },
+    "failure_behavior": {
+      "missing_checker": "indeterminate",
+      "timeout": "indeterminate",
+      "parser_failure": "indeterminate",
+      "unsupported_input": "indeterminate",
+      "external_service_error": "indeterminate"
+    },
+    "external_dependencies": [],
+    "known_limits": []
+  }
+}

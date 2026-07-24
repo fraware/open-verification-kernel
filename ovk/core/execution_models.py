@@ -167,6 +167,174 @@ class BackendGuaranteeDeclaration(BaseModel):
     meaning_of_unknown: str
 
 
+# ---------------------------------------------------------------------------
+# Optional verifier-assurance capability section (VA-01+)
+# ---------------------------------------------------------------------------
+
+AssuranceDecision = Literal[
+    "accept",
+    "reject",
+    "indeterminate_insufficient_evidence",
+    "indeterminate_execution_error",
+    "indeterminate_out_of_scope",
+    "indeterminate_configuration_drift",
+]
+
+AssuranceGuaranteeClass = Literal[
+    "observational",
+    "runtime_observed",
+    "empirically_measured",
+    "human_reviewed",
+    "certificate_checked",
+    "formally_checked",
+    "unchecked_advisory",
+]
+
+AssuranceMechanismClass = Literal[
+    "static_analysis",
+    "dynamic_analysis",
+    "policy_engine",
+    "test_suite",
+    "model_judge",
+    "human_review",
+    "formal_proof",
+    "replay",
+    "hybrid",
+    "other",
+]
+
+AssuranceDeterminism = Literal["deterministic", "stochastic"]
+
+AssuranceEvidenceChannel = Literal[
+    "stdout",
+    "stderr",
+    "raw_backend_result",
+    "normalized_result",
+    "proof",
+    "counterexample",
+    "test_report",
+    "state_diff",
+    "model_judgment",
+    "compiled_obligation",
+]
+
+AssuranceMutationDimension = Literal[
+    "remove_success_predicate",
+    "remove_process_predicate",
+    "remove_authority_predicate",
+    "change_threshold",
+    "reduce_test_subset",
+    "alter_timeout",
+    "suppress_error",
+    "change_rubric",
+    "change_prompt",
+    "ensemble_quorum",
+    "hidden_state_access",
+    "policy_bundle",
+    "abstention",
+    "other",
+]
+
+AssuranceDependencyKind = Literal[
+    "binary",
+    "container",
+    "library",
+    "service",
+    "dataset",
+    "model",
+    "toolchain",
+    "other",
+]
+
+AssuranceFailureOutcome = Literal["indeterminate"]
+
+
+class AssuranceVerifierIdentity(BaseModel):
+    """Identity block inside an optional assurance capability section."""
+
+    verifier_id: str
+    implementation_name: str
+    entry_point: str | None = None
+    pcs_profile_artifact_type: Literal["VerifierProfile.v1"] | None = None
+
+
+class AssuranceDecisionSemantics(BaseModel):
+    """Decision vocabulary and guarantee class for assurance-capable adapters."""
+
+    decision_space: list[AssuranceDecision]
+    guarantee_class: AssuranceGuaranteeClass
+    supported_claim_ids: list[str] = Field(default_factory=list)
+    out_of_scope_claim_ids: list[str] = Field(default_factory=list)
+
+
+class AssuranceReplaySupport(BaseModel):
+    """Whether invocation replay is supported for this adapter."""
+
+    supported: bool
+    compares_raw_digest: bool | None = None
+    compares_normalized_digest: bool | None = None
+    notes: str | None = None
+
+
+class AssuranceSnapshotSupport(BaseModel):
+    """Whether configuration snapshots / PCS profiles are supported."""
+
+    supported: bool
+    exports_pcs_profile: bool | None = None
+    notes: str | None = None
+
+
+class AssuranceAbstention(BaseModel):
+    """Abstention / indeterminate allowance declaration."""
+
+    allows_abstention: bool
+    notes: str | None = None
+
+
+class AssuranceFailureBehavior(BaseModel):
+    """Fail-closed mapping from checker failures to indeterminate outcomes."""
+
+    missing_checker: AssuranceFailureOutcome = "indeterminate"
+    timeout: AssuranceFailureOutcome = "indeterminate"
+    parser_failure: AssuranceFailureOutcome = "indeterminate"
+    unsupported_input: AssuranceFailureOutcome = "indeterminate"
+    external_service_error: AssuranceFailureOutcome = "indeterminate"
+
+
+class AssuranceExternalDependency(BaseModel):
+    """External dependency declared on an assurance capability section."""
+
+    dependency_id: str
+    kind: AssuranceDependencyKind
+    identity: str
+    optional: bool | None = None
+
+
+class AssuranceCapabilitySection(BaseModel):
+    """Optional verifier-assurance capability declaration.
+
+    Absent from a manifest means ordinary-only. When ``assurance_capable`` is
+    True, snapshot and replay support must be advertised and failure modes must
+    remain indeterminate (never silent accept).
+    """
+
+    assurance_capable: bool
+    verifier_identity: AssuranceVerifierIdentity
+    decision_semantics: AssuranceDecisionSemantics
+    mechanism_class: AssuranceMechanismClass
+    determinism: AssuranceDeterminism
+    evidence_channels: list[AssuranceEvidenceChannel]
+    replay_support: AssuranceReplaySupport
+    configuration_snapshot_support: AssuranceSnapshotSupport
+    mutation_dimensions: list[AssuranceMutationDimension] = Field(default_factory=list)
+    abstention: AssuranceAbstention
+    failure_behavior: AssuranceFailureBehavior
+    external_dependencies: list[AssuranceExternalDependency] = Field(default_factory=list)
+    known_limits: list[str] = Field(default_factory=list)
+    requires_authoritative_state: bool | None = None
+    requires_complete_trajectory: bool | None = None
+
+
 class BackendCapabilityManifest(BaseModel):
     """Typed capability declaration for a registered backend."""
 
@@ -182,6 +350,7 @@ class BackendCapabilityManifest(BaseModel):
     result_format: str | None = None
     counterexample_format: str | None = None
     timeout_behavior: TimeoutBehavior = "unknown"
+    assurance: AssuranceCapabilitySection | None = None
 
 
 class BackendEnvironmentFingerprint(BaseModel):

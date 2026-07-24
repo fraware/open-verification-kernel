@@ -8,7 +8,7 @@ adapters are migrated onto the typed obligation path.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Mapping, Protocol, runtime_checkable
 
 from ovk.core.execution_models import (
     BackendCapabilityAssessment,
@@ -153,3 +153,33 @@ class BackendAdapter(Protocol):
         self,
         result: NormalizedBackendResult,
     ) -> TypedHumanExplanation: ...
+
+
+# ---------------------------------------------------------------------------
+# Verifier-assurance adapter protocol (opt-in; does not alter ordinary path)
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class AssuranceCapableAdapter(Protocol):
+    """Opt-in protocol for adapters that participate in verifier-assurance.
+
+    Ordinary ``BackendAdapter`` methods remain unchanged. Assurance surfaces
+    (snapshot, typed mutations, optional ``run_assurance``) are additive and
+    only invoked from ``ovk verifier …`` / ``ovk.assurance`` runners.
+    """
+
+    backend_id: str
+    adapter_id: str
+    adapter_version: str
+
+    def manifest(self) -> BackendCapabilityManifest: ...
+
+    def snapshot_config(
+        self,
+        config: Mapping[str, Any] | None = None,
+        *,
+        environment: Mapping[str, str] | None = None,
+    ) -> Any: ...
+
+    def supported_mutation_dimensions(self) -> list[str]: ...

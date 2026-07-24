@@ -39,7 +39,254 @@
     "limits": { "type": "array", "items": { "type": "string" } },
     "result_format": { "type": "string" },
     "counterexample_format": { "type": "string" },
-    "timeout_behavior": { "type": "string", "enum": ["unknown", "error", "fail"] }
+    "timeout_behavior": { "type": "string", "enum": ["unknown", "error", "fail"] },
+    "assurance": {
+      "type": "object",
+      "description": "Optional verifier-assurance capability declaration. Absent => ordinary-only.",
+      "required": [
+        "assurance_capable",
+        "verifier_identity",
+        "decision_semantics",
+        "mechanism_class",
+        "determinism",
+        "evidence_channels",
+        "replay_support",
+        "configuration_snapshot_support",
+        "mutation_dimensions",
+        "abstention",
+        "failure_behavior",
+        "external_dependencies",
+        "known_limits"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "assurance_capable": { "type": "boolean" },
+        "verifier_identity": {
+          "type": "object",
+          "required": ["verifier_id", "implementation_name"],
+          "additionalProperties": false,
+          "properties": {
+            "verifier_id": { "type": "string", "minLength": 1 },
+            "implementation_name": { "type": "string", "minLength": 1 },
+            "entry_point": { "type": "string", "minLength": 1 },
+            "pcs_profile_artifact_type": {
+              "type": "string",
+              "const": "VerifierProfile.v1"
+            }
+          }
+        },
+        "decision_semantics": {
+          "type": "object",
+          "required": ["decision_space", "guarantee_class"],
+          "additionalProperties": false,
+          "properties": {
+            "decision_space": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "accept",
+                  "reject",
+                  "indeterminate_insufficient_evidence",
+                  "indeterminate_execution_error",
+                  "indeterminate_out_of_scope",
+                  "indeterminate_configuration_drift"
+                ]
+              }
+            },
+            "guarantee_class": {
+              "type": "string",
+              "enum": [
+                "observational",
+                "runtime_observed",
+                "empirically_measured",
+                "human_reviewed",
+                "certificate_checked",
+                "formally_checked",
+                "unchecked_advisory"
+              ]
+            },
+            "supported_claim_ids": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "out_of_scope_claim_ids": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "mechanism_class": {
+          "type": "string",
+          "enum": [
+            "static_analysis",
+            "dynamic_analysis",
+            "policy_engine",
+            "test_suite",
+            "model_judge",
+            "human_review",
+            "formal_proof",
+            "replay",
+            "hybrid",
+            "other"
+          ]
+        },
+        "requires_authoritative_state": { "type": "boolean" },
+        "requires_complete_trajectory": { "type": "boolean" },
+        "determinism": {
+          "type": "string",
+          "enum": ["deterministic", "stochastic"]
+        },
+        "evidence_channels": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": [
+              "stdout",
+              "stderr",
+              "raw_backend_result",
+              "normalized_result",
+              "proof",
+              "counterexample",
+              "test_report",
+              "state_diff",
+              "model_judgment",
+              "compiled_obligation"
+            ]
+          }
+        },
+        "replay_support": {
+          "type": "object",
+          "required": ["supported"],
+          "additionalProperties": false,
+          "properties": {
+            "supported": { "type": "boolean" },
+            "compares_raw_digest": { "type": "boolean" },
+            "compares_normalized_digest": { "type": "boolean" },
+            "notes": { "type": "string", "minLength": 1 }
+          }
+        },
+        "configuration_snapshot_support": {
+          "type": "object",
+          "required": ["supported"],
+          "additionalProperties": false,
+          "properties": {
+            "supported": { "type": "boolean" },
+            "exports_pcs_profile": { "type": "boolean" },
+            "notes": { "type": "string", "minLength": 1 }
+          }
+        },
+        "mutation_dimensions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "remove_success_predicate",
+              "remove_process_predicate",
+              "remove_authority_predicate",
+              "change_threshold",
+              "reduce_test_subset",
+              "alter_timeout",
+              "suppress_error",
+              "change_rubric",
+              "change_prompt",
+              "ensemble_quorum",
+              "hidden_state_access",
+              "policy_bundle",
+              "abstention",
+              "other"
+            ]
+          }
+        },
+        "abstention": {
+          "type": "object",
+          "required": ["allows_abstention"],
+          "additionalProperties": false,
+          "properties": {
+            "allows_abstention": { "type": "boolean" },
+            "notes": { "type": "string", "minLength": 1 }
+          }
+        },
+        "failure_behavior": {
+          "type": "object",
+          "required": [
+            "missing_checker",
+            "timeout",
+            "parser_failure",
+            "unsupported_input",
+            "external_service_error"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "missing_checker": { "type": "string", "const": "indeterminate" },
+            "timeout": { "type": "string", "const": "indeterminate" },
+            "parser_failure": { "type": "string", "const": "indeterminate" },
+            "unsupported_input": { "type": "string", "const": "indeterminate" },
+            "external_service_error": { "type": "string", "const": "indeterminate" }
+          }
+        },
+        "external_dependencies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["dependency_id", "kind", "identity"],
+            "additionalProperties": false,
+            "properties": {
+              "dependency_id": { "type": "string", "minLength": 1 },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "binary",
+                  "container",
+                  "library",
+                  "service",
+                  "dataset",
+                  "model",
+                  "toolchain",
+                  "other"
+                ]
+              },
+              "identity": { "type": "string", "minLength": 1 },
+              "optional": { "type": "boolean" }
+            }
+          }
+        },
+        "known_limits": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "assurance_capable": { "const": true } },
+            "required": ["assurance_capable"]
+          },
+          "then": {
+            "properties": {
+              "configuration_snapshot_support": {
+                "properties": { "supported": { "const": true } },
+                "required": ["supported"]
+              },
+              "replay_support": {
+                "properties": { "supported": { "const": true } },
+                "required": ["supported"]
+              },
+              "failure_behavior": { "required": [
+                "missing_checker",
+                "timeout",
+                "parser_failure",
+                "unsupported_input",
+                "external_service_error"
+              ] }
+            }
+          }
+        }
+      ]
+    }
   },
   "additionalProperties": true
 }

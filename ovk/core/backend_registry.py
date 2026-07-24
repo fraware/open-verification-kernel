@@ -24,6 +24,60 @@ class BackendRegistryError(ValueError):
     """Raised when registry registration or lookup invariants are violated."""
 
 
+def _validate_assurance_section(manifest: BackendCapabilityManifest) -> None:
+    """Validate optional assurance claims for internal consistency.
+
+    Missing ``assurance`` remains valid (ordinary-only). When present and
+    ``assurance_capable`` is True, snapshot+replay must be supported, failure
+    behavior must be indeterminate, and decision_space must be non-empty.
+    """
+    section = manifest.assurance
+    if section is None:
+        return
+    if not section.assurance_capable:
+        return
+
+    if not section.configuration_snapshot_support.supported:
+        raise BackendRegistryError(
+            f"adapter capability {manifest.capability_id!r} claims assurance_capable "
+            "but configuration_snapshot_support.supported is false"
+        )
+    if not section.replay_support.supported:
+        raise BackendRegistryError(
+            f"adapter capability {manifest.capability_id!r} claims assurance_capable "
+            "but replay_support.supported is false"
+        )
+    if not section.decision_semantics.decision_space:
+        raise BackendRegistryError(
+            f"adapter capability {manifest.capability_id!r} claims assurance_capable "
+            "but decision_semantics.decision_space is empty"
+        )
+    if not section.evidence_channels:
+        raise BackendRegistryError(
+            f"adapter capability {manifest.capability_id!r} claims assurance_capable "
+            "but evidence_channels is empty"
+        )
+    failure = section.failure_behavior
+    for field_name in (
+        "missing_checker",
+        "timeout",
+        "parser_failure",
+        "unsupported_input",
+        "external_service_error",
+    ):
+        if getattr(failure, field_name) != "indeterminate":
+            raise BackendRegistryError(
+                f"adapter capability {manifest.capability_id!r} assurance failure_behavior."
+                f"{field_name} must be 'indeterminate'"
+            )
+    identity = section.verifier_identity
+    if not identity.verifier_id.strip() or not identity.implementation_name.strip():
+        raise BackendRegistryError(
+            f"adapter capability {manifest.capability_id!r} assurance verifier_identity "
+            "must declare non-empty verifier_id and implementation_name"
+        )
+
+
 def _validate_capability_manifest(manifest: BackendCapabilityManifest) -> None:
     """Validate a typed capability manifest against the JSON schema."""
     schema_file = schema_path("verification.capability.schema.json")
@@ -37,6 +91,7 @@ def _validate_capability_manifest(manifest: BackendCapabilityManifest) -> None:
             f"{'/'.join(str(part) for part in issue.path) or '$'}: {issue.message}" for issue in report.issues
         )
         raise BackendRegistryError(f"capability manifest failed schema validation: {issues}")
+    _validate_assurance_section(manifest)
 
 
 def _require_adapter_identity(adapter: BackendAdapter) -> tuple[str, str, str]:
