@@ -1,0 +1,8 @@
+{
+  "schema_version": "pcs.verifier_profile.v0",
+  "profile_id": "ovk-basic-v0",
+  "config_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "status": "active",
+  "suite": "ovk.offline_check.v0",
+  "rubric": "ovk.rubric.pin.v0"
+}
