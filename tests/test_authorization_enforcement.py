@@ -101,7 +101,7 @@ def test_enforced_authorization_emits_v2_preview_fields() -> None:
     )
     evidence = evidence_items[0]
     assert evidence.routing_enforced is True
-    assert evidence.schema_version == "ovk.evidence.v2"
+    assert evidence.schema_version == "ovk.evidence.v3"
     assert evidence.obligation_id
     assert evidence.routing_id
     assert evidence.selected_backends

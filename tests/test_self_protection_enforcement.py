@@ -71,7 +71,7 @@ def test_enforced_self_protection_blocks_gate_removal() -> None:
     )
     evidence = evidence_items[0]
     assert evidence.routing_enforced is True
-    assert evidence.schema_version == "ovk.evidence.v2"
+    assert evidence.schema_version == "ovk.evidence.v3"
     assert evidence.decision.get("merge_recommendation") == "block"
     assert evidence.selected_backends
     assert "self-protection-deterministic" in (evidence.selected_backends or []) or "opa-native" in (
