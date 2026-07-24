@@ -24,6 +24,7 @@ from ovk.core.execution_budget import BackendWorker, LocalSubprocessWorker
 from ovk.core.execution_models import (
     BackendEnvironmentFingerprint,
     BackendObligation,
+    CachedBackendExecution,
     ExecutionAttempt,
     ExecutionBudget,
     NormalizedBackendResult,
@@ -39,11 +40,11 @@ from ovk.core.result_cache import ControlPlaneResultCache
 
 
 class ResultCache(Protocol):
-    """Minimal cache protocol used by the control plane."""
+    """Minimal cache protocol used by the control plane (ovk.cache.v3)."""
 
-    def get(self, key: str) -> NormalizedBackendResult | None: ...
+    def get(self, key: str) -> CachedBackendExecution | None: ...
 
-    def put(self, key: str, value: NormalizedBackendResult, *, meta: dict[str, Any]) -> None: ...
+    def put(self, key: str, value: CachedBackendExecution, *, meta: dict[str, Any]) -> None: ...
 
 
 _CACHE_UNSET = object()
@@ -127,6 +128,37 @@ def _error_raw(
                 "category": type(exc).__name__,
                 "message": str(exc),
                 "stage": stage,
+            },
+        },
+        started_at=started_at,
+        finished_at=finished_at,
+        duration_ms=(time.perf_counter() - started_perf) * 1000.0,
+    )
+    return raw.model_copy(update=compute_raw_execution_digests(raw))
+
+
+def _compiler_contract_error_raw(
+    *,
+    backend: str,
+    backend_obligation_id: str,
+    message: str,
+    started_at: str,
+    started_perf: float,
+) -> RawBackendExecution:
+    finished_at = _utc_now_iso()
+    raw = RawBackendExecution(
+        backend=backend,
+        backend_obligation_id=backend_obligation_id,
+        termination="invalid_output",
+        native_execution=False,
+        exit_code=1,
+        stderr=message,
+        raw_result={
+            "status": "error",
+            "error": {
+                "category": "compiler_contract",
+                "message": message,
+                "stage": "compile",
             },
         },
         started_at=started_at,
@@ -235,7 +267,8 @@ class BackendControlPlane:
             results=results,
             policy=routing.aggregation_policy,
             acceptable_guarantees=obligation.acceptable_guarantees,
-            fallback_accepted=routing.fallback_policy.allow_fallback,
+            fallback_policy=routing.fallback_policy,
+            attempts=attempts,
         )
         open_obligations: list[dict[str, Any]] = []
         if outcome.disagreement is not None:
@@ -261,6 +294,9 @@ class BackendControlPlane:
             merge_recommendation=outcome.merge_recommendation,
             aggregation_reason=outcome.reason,
             open_obligations=open_obligations,
+            fallback_used=outcome.fallback_used,
+            fallback_accepted=outcome.fallback_accepted,
+            fallback_cause=outcome.fallback_cause,
         )
 
     def _execute_one(
@@ -292,8 +328,35 @@ class BackendControlPlane:
                     f"{selection_backend!r}"
                 )
             if compiled.expected_guarantee != expected_guarantee and expected_guarantee:
-                # Record expected guarantee from routing when adapter differs only by alias.
-                compiled = compiled.model_copy(update={"expected_guarantee": expected_guarantee})
+                message = (
+                    "compiler contract violation: compiled guarantee "
+                    f"{compiled.expected_guarantee!r} does not match routing "
+                    f"expected guarantee {expected_guarantee!r}"
+                )
+                raw = _compiler_contract_error_raw(
+                    backend=selection_backend,
+                    backend_obligation_id=compiled.backend_obligation_id,
+                    message=message,
+                    started_at=started_at,
+                    started_perf=started_perf,
+                )
+                attempt = _attempt_from_raw(raw=raw, required=required)
+                result = NormalizedBackendResult(
+                    attempt_id=attempt.attempt_id,
+                    backend=selection_backend,
+                    status=VerificationStatus.UNKNOWN,
+                    guarantee_type=expected_guarantee,
+                    assumptions=[],
+                    limits=["compiler guarantee mismatch; execution skipped"],
+                    counterexamples=[
+                        {
+                            "summary": message,
+                            "failure_mode": "compiler_contract_violation",
+                        }
+                    ],
+                    generated_artifacts=[],
+                )
+                return attempt, result, compiled
 
             fingerprint = adapter.fingerprint(compiled)
             components = control_plane_cache_components(
@@ -314,37 +377,37 @@ class BackendControlPlane:
                     bind(key, components)
                 cached = cache.get(key)
                 if cached is not None:
-                    attempt = ExecutionAttempt(
-                        attempt_id="pending",
-                        backend_obligation_id=compiled.backend_obligation_id,
-                        backend=selection_backend,
-                        required=required,
-                        started_at=started_at,
-                        finished_at=_utc_now_iso(),
-                        duration_ms=(time.perf_counter() - started_perf) * 1000.0,
-                        termination="completed",
-                        native_execution=fingerprint.native_available,
-                        tool_version=fingerprint.tool_version,
-                        tool_digest=fingerprint.tool_digest,
-                        worker_image_digest=fingerprint.worker_image_digest,
-                        raw_result_digest=content_digest({"cache_hit": True, "key": key}),
+                    # Replay stored provenance; never re-infer native_execution.
+                    stored_attempt = cached.attempt
+                    result = cached.normalized_result.model_copy(
+                        update={"attempt_id": stored_attempt.attempt_id}
                     )
-                    attempt = attempt.model_copy(update={"attempt_id": compute_attempt_id(attempt)})
-                    result = cached.model_copy(update={"attempt_id": attempt.attempt_id})
-                    return attempt, result, compiled
+                    return stored_attempt, result, compiled
 
             raw = self._run_adapter(adapter, compiled, budget)
             normalized = adapter.normalize(raw, compiled)
             attempt = _attempt_from_raw(raw=raw, required=required)
             result = normalized.model_copy(update={"attempt_id": attempt.attempt_id})
             if cache is not None:
+                cached_exec = CachedBackendExecution(
+                    attempt=attempt,
+                    native_execution=attempt.native_execution,
+                    tool_version=attempt.tool_version,
+                    tool_digest=attempt.tool_digest,
+                    termination=attempt.termination,
+                    exit_code=attempt.exit_code,
+                    raw_result_digest=attempt.raw_result_digest,
+                    environment_fingerprint=fingerprint.environment_digest,
+                    normalized_result=result,
+                )
                 cache.put(
                     key,
-                    result,
+                    cached_exec,
                     meta={
                         "environment_digest": fingerprint.environment_digest,
                         "raw_result_digest": raw.raw_result_digest,
                         "created_at": _utc_now_iso(),
+                        "cache_schema_version": "ovk.cache.v3",
                     },
                 )
             return attempt, result, compiled
