@@ -42,11 +42,18 @@ solvers = [
 mcp = [
   "mcp>=1.0.0"
 ]
+# Verifier-assurance depends on pcs-core schemas/validator.
+# Pin identity (commit): docs/PCS_PIN.md — fb588a41a7eab68064429e3c4dfb26c328b9863d
+# Sibling editable remains the local fallback: pip install -e "../pcs-core/python"
+# After pcs-core publishes a versioned VA release, replace with: pcs-core==<version>
+assurance = [
+  "pcs-core @ git+https://github.com/SentinelOps-CI/pcs-core@fb588a41a7eab68064429e3c4dfb26c328b9863d#subdirectory=python",
+]
 backends-wave1 = []
 backends-wave2 = []
 all = [
   "z3-solver>=4.13.0",
-  "mcp>=1.0.0"
+  "mcp>=1.0.0",
 ]
 
 [project.scripts]
