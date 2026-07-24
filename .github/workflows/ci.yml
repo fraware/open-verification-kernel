@@ -266,3 +266,42 @@ jobs:
         with:
           name: template-conformance
           path: docs/benchmarks/template-conformance.json
+
+  assurance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pcs-core pin
+        uses: actions/checkout@v4
+        with:
+          repository: SentinelOps-CI/pcs-core
+          ref: fb588a41a7eab68064429e3c4dfb26c328b9863d
+          path: pcs-core
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install OVK with assurance pin
+        env:
+          OVK_PCS_CORE_PATH: ${{ github.workspace }}/pcs-core
+        run: |
+          python -m pip install --upgrade pip
+          python scripts/sync_package_data.py
+          pip install --no-cache-dir -e '.[dev]'
+          pip install --no-cache-dir -e './pcs-core/python'
+      - name: Verify PCS pin digests
+        env:
+          OVK_PCS_CORE_PATH: ${{ github.workspace }}/pcs-core
+        run: |
+          python -c "from ovk.assurance.pin import require_pcs_pin, verify_pin_digests, PCS_PIN_COMMIT; print(require_pcs_pin()); print(PCS_PIN_COMMIT); print(verify_pin_digests())"
+      - name: Assurance pytest
+        env:
+          OVK_PCS_CORE_PATH: ${{ github.workspace }}/pcs-core
+        run: pytest tests/assurance -q --tb=short
+      - name: PCS conformance suite
+        working-directory: pcs-core
+        run: pcs conformance run --suite verifier-assurance
+      - name: Ordinary surfaces still pass
+        run: |
+          python scripts/check_command_surface.py
+          python scripts/validate_capabilities.py
+          ovk check --changed-files examples/multi_surface/pr_combined.diff --output-dir .ovk-assurance-ordinary --advisory
