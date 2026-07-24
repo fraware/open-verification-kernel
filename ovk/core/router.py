@@ -237,6 +237,32 @@ def select_primary_with_optional_corroboration(
                 )
             )
             continue
+        if not assessment.coverage_requirements_met:
+            score = _adjust_score_for_preferences(
+                backend=assessment.backend,
+                score=float(assessment.score),
+                prefer_deterministic=config.prefer_deterministic,
+            )
+            if config.accept_partial_primary:
+                eligible.append(
+                    BackendCandidate(
+                        backend=assessment.backend,
+                        score=score,
+                        support="partial",
+                        guarantee_type=assessment.guarantee_type,
+                        reasons=reasons + ["incomplete coverage; not eligible as required primary"],
+                        native_available=assessment.native_available,
+                    )
+                )
+            else:
+                rejected.append(
+                    BackendRejection(
+                        backend=assessment.backend,
+                        reason="coverage requirements not met",
+                        support=assessment.support,
+                    )
+                )
+            continue
         if not _guarantee_acceptable(assessment.guarantee_type, acceptable_guarantees):
             rejected.append(
                 BackendRejection(
@@ -289,7 +315,12 @@ def select_primary_with_optional_corroboration(
     eligible_sorted = sorted(eligible, key=lambda item: (-item.score, item.backend))
     primary_candidates = [item for item in eligible_sorted if item.support == "supported"]
     if not primary_candidates and config.accept_partial_primary:
-        primary_candidates = list(eligible_sorted)
+        primary_candidates = [
+            item
+            for item in eligible_sorted
+            if item.support == "partial"
+            and not any("incomplete coverage" in reason for reason in item.reasons)
+        ]
 
     if primary_candidates:
         primary = primary_candidates[0]
@@ -482,13 +513,16 @@ def _manifest_assessment(
             prefer_deterministic=budget.prefer_deterministic,
         )
 
+    material_requirements_met = domain_match and kind_match
+    coverage_requirements_met = support == "supported" and material_requirements_met
+
     return BackendCapabilityAssessment(
         backend=tool_name,
         support=support,
         score=score,
         guarantee_type=guarantee,
-        material_requirements_met=True,
-        coverage_requirements_met=True,
+        material_requirements_met=material_requirements_met,
+        coverage_requirements_met=coverage_requirements_met,
         native_available=False,
         estimated_wall_time_seconds=cost * 30,
         estimated_memory_mb=256,
