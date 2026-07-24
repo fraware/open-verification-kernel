@@ -24,12 +24,15 @@ from ovk.core.bundle import content_digest
 from ovk.core.execution_models import (
     BackendEnvironmentFingerprint,
     BackendObligation,
+    CachedBackendExecution,
+    ExecutionAttempt,
     NormalizedBackendResult,
     RoutingDecision,
     VerificationObligation,
 )
 
-CACHE_SCHEMA_VERSION = "ovk.cache.v2"
+CACHE_SCHEMA_VERSION = "ovk.cache.v3"
+CACHE_SCHEMA_VERSION_V2 = "ovk.cache.v2"
 DEFAULT_CACHE_DIR = Path(".verification/cache")
 DEFAULT_TTL_SECONDS = 86400
 
@@ -262,18 +265,37 @@ class HardenedResultCache:
     def put_backend_result(
         self,
         components: dict[str, Any],
-        result: NormalizedBackendResult,
+        result: CachedBackendExecution,
         *,
         meta: dict[str, Any] | None = None,
     ) -> str:
+        if not isinstance(result, CachedBackendExecution):
+            raise TypeError("ovk.cache.v3 requires CachedBackendExecution; v2 result-only entries are invalid")
         return self.put(components, result.model_dump(mode="json"), meta=meta)
 
     def get_backend_result(self, components: dict[str, Any]) -> NormalizedBackendResult | None:
+        cached = self.get_cached_execution(components)
+        return None if cached is None else cached.normalized_result
+
+    def get_cached_execution(self, components: dict[str, Any]) -> CachedBackendExecution | None:
+        """Return a provenance-preserving v3 cache hit, or None.
+
+        Explicitly invalidates v2 (result-only) entries.
+        """
         entry = self.get(components)
         if entry is None:
             return None
+        payload = entry.payload
+        schema = payload.get("schema_version")
+        if schema == CACHE_SCHEMA_VERSION_V2 or schema != CACHE_SCHEMA_VERSION:
+            # Invalidate non-v3 entries so provenance cannot be reconstructed incorrectly.
+            namespace = str(components.get("namespace") or NAMESPACE_BACKEND_RESULTS)
+            key_digest = digest_key_components(components)
+            path = self.namespace_dir(namespace) / f"{key_digest}.json"
+            path.unlink(missing_ok=True)
+            return None
         try:
-            return NormalizedBackendResult.model_validate(entry.payload)
+            return CachedBackendExecution.model_validate(payload)
         except Exception:  # noqa: BLE001 - corrupt cache is a miss
             return None
 
@@ -366,13 +388,13 @@ class ControlPlaneResultCache:
     def bind_components(self, key: str, components: dict[str, Any]) -> None:
         self._last_components[key] = components
 
-    def get(self, key: str) -> NormalizedBackendResult | None:
+    def get(self, key: str) -> CachedBackendExecution | None:
         components = self._last_components.get(key)
         if components is None:
             return None
-        return self._cache.get_backend_result(components)
+        return self._cache.get_cached_execution(components)
 
-    def put(self, key: str, value: NormalizedBackendResult, *, meta: dict[str, Any]) -> None:
+    def put(self, key: str, value: CachedBackendExecution, *, meta: dict[str, Any]) -> None:
         components = self._last_components.get(key)
         if components is None:
             return
