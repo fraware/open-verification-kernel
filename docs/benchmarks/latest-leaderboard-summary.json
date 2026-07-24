@@ -49,10 +49,11 @@
     }
   },
   "timing_ms": {
-    "p50": 0.16830700000980414,
-    "p95": 25.278212000003464,
-    "max": 42.54315400000053
+    "p50": 0.12826100000040697,
+    "p95": 15.816610999998204,
+    "max": 34.02709299999884
   },
-  "verified_source_sha": "efb3c022b9d96ed6973503e669bdcda67f328feb",
-  "provenance_note": "Cite verified_source_sha (and its CI run) for health claims; do not treat a later [skip ci] badge commit as the verified source."
+  "benchmark_source_sha": "8926eab3381322a3e63757b4e95072d9179f6635",
+  "verified_source_sha": "8926eab3381322a3e63757b4e95072d9179f6635",
+  "provenance_note": "Cite benchmark_source_sha for FormalPR-Bench measurement identity. Cite verified_source_sha only when a complete required-workflow set was observed for that commit; do not treat a later [skip ci] badge commit as verified."
 }
