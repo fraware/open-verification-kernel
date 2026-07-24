@@ -93,3 +93,21 @@ def test_write_and_check_round_trip(tmp_path: Path) -> None:
     assert validate_matrix(matrix) == []
     loaded = json.loads(output.read_text(encoding="utf-8"))
     assert loaded["template_count"] == matrix["template_count"]
+
+
+def test_semantic_v2_statuses_from_profile_evidence() -> None:
+    repo = Path(__file__).resolve().parents[1]
+    matrix = build_conformance_matrix(repo)
+    assert set(matrix["conformance_statuses_v2"]) == {
+        "catalog_only",
+        "executable_advisory",
+        "source_profile_strict_eligible",
+        "externally_calibrated_strict",
+        "deprecated",
+    }
+    assert matrix["counts_by_status_v2"].get("externally_calibrated_strict", 0) == 0
+    assert matrix["counts_by_status_v2"].get("source_profile_strict_eligible", 0) >= 1
+    assert matrix["counts_by_status_v2"].get("executable_advisory", 0) >= 1
+    by_id = {row["intent_id"]: row for row in matrix["templates"]}
+    assert by_id["no-admin-route-bypass"]["conformance_status_v2"] == "source_profile_strict_eligible"
+    assert by_id["agent-cannot-disable-own-ci-gate"]["conformance_status_v2"] == "executable_advisory"

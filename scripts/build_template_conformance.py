@@ -49,7 +49,8 @@ def main() -> int:
     print(
         f"template conformance: {matrix['template_count']} templates -> {output}"
         f" (strict_eligible={matrix['counts_by_status'].get('strict_eligible', 0)},"
-        f" catalog_only={matrix['counts_by_status'].get('catalog_only', 0)})"
+        f" catalog_only={matrix['counts_by_status'].get('catalog_only', 0)},"
+        f" source_profile_strict_eligible={matrix.get('counts_by_status_v2', {}).get('source_profile_strict_eligible', 0)})"
     )
     if failures:
         for failure in failures:
