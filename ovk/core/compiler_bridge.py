@@ -33,7 +33,7 @@ from ovk.compilers.github_actions.ir import GitHubActionsIR
 from ovk.compilers.infrastructure import compile_kubernetes_objects, compile_terraform_plan
 from ovk.compilers.infrastructure.ir import InfrastructureIR
 from ovk.core.execution_models import AbstractionCoverage, MaterialReference
-from ovk.core.bundle import content_digest
+from ovk.core.materials import material_reference_from_payload
 
 
 def coverage_policy_from_dict(policy: dict[str, Any] | None) -> CoveragePolicy:
@@ -351,13 +351,11 @@ def material_refs_from_digest(
     source_revision: str | None,
     trusted: bool = False,
 ) -> MaterialReference:
-    digest = content_digest(payload)
-    return MaterialReference(
+    return material_reference_from_payload(
         material_id=material_id[:32],
-        kind=kind,  # type: ignore[arg-type]
+        kind=kind,
         uri=uri,
-        sha256=digest,
-        size_bytes=len(digest),
+        payload=payload,
         source_revision=source_revision,
         trusted=trusted,
     )

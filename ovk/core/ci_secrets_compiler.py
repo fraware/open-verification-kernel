@@ -14,11 +14,11 @@ from ovk.core.compiler_bridge import (
 )
 from ovk.core.execution_models import (
     AbstractionCoverage,
-    MaterialReference,
     VerificationObligation,
     compute_abstraction_digest,
     compute_obligation_id,
 )
+from ovk.core.materials import material_reference_from_payload
 from ovk.core.models import RiskSeverity, VerificationSubject
 
 COMPILER_ID = "ovk.ci_secrets.neutral.v1"
@@ -97,12 +97,11 @@ def compile_ci_secrets_obligation(
             )
         lane_input = data
         materials = [
-            MaterialReference(
+            material_reference_from_payload(
                 material_id="ci-secrets-input",
                 kind="diff",
                 uri="ovk-material:ci_secrets/input",
-                sha256=content_digest(data),
-                size_bytes=len(content_digest(data)),
+                payload=data,
                 source_revision=head_sha,
                 trusted=False,
             )
