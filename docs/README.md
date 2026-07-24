@@ -1,6 +1,6 @@
 # OVK Documentation
 
-Documentation for Open Verification Kernel **v1.2.0**.
+Documentation for Open Verification Kernel (**v1.3.0-rc.1 candidate**; signed tag remains `v1.2.1`).
 
 Use this index as the canonical entry point. Each guide covers one topic; cross-links replace duplicated content across files.
 
@@ -11,13 +11,15 @@ Use this index as the canonical entry point. Each guide covers one topic; cross-
 | **Adopting in CI** | [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md) → [INTEGRATION.md](INTEGRATION.md) → [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md) |
 | **Contributing code** | [CONTRIBUTING.md](CONTRIBUTING.md) → [ARCHITECTURE.md](ARCHITECTURE.md) → [ADAPTER_CONTRACT.md](ADAPTER_CONTRACT.md) |
 | **Maintainers** | [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md) → [RELEASE.md](RELEASE.md) → `ovk release-preflight` (release readiness checks) |
-| **Spec / security review** | [SYSTEM_SPEC.md](SYSTEM_SPEC.md) → [FORMAL_SPEC.md](FORMAL_SPEC.md) → [THREAT_MODEL.md](THREAT_MODEL.md) |
+| **Spec / security review** | [SYSTEM_SPEC.md](SYSTEM_SPEC.md) → [FORMAL_SPEC.md](FORMAL_SPEC.md) → [THREAT_MODEL.md](THREAT_MODEL.md) → [DEEP_AUDIT_2026-07-23_R2.md](DEEP_AUDIT_2026-07-23_R2.md) |
 
 ## Start here
 
 | Document | Purpose |
 |---|---|
 | [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md) | Adoption dashboard — can I pin strict mode today? |
+| [DEEP_AUDIT_2026-07-23_R2.md](DEEP_AUDIT_2026-07-23_R2.md) | Authoritative R2 deep audit (supersedes day-to-day VISION_AUDIT) |
+| [ENGINEERING_PROGRAM_2026-07-23_R2.md](ENGINEERING_PROGRAM_2026-07-23_R2.md) | R2 sprint/PR execution program |
 | [RELEASE_AUDIT.md](RELEASE_AUDIT.md) | Engineering audit responses and metric provenance |
 | [STATUS.md](STATUS.md) | Capabilities, CLI surface, and trust model |
 | [EXPERIMENTAL_PATHS.md](EXPERIMENTAL_PATHS.md) | Honest limits for non-strict compiler/backend paths |
@@ -35,6 +37,9 @@ Use this index as the canonical entry point. Each guide covers one topic; cross-
 | [EXTERNAL_VALIDATION.md](EXTERNAL_VALIDATION.md) | Weekly external validation matrix |
 | [CONSUMER_VALIDATION_CHECKLIST.md](CONSUMER_VALIDATION_CHECKLIST.md) | Immutable-pin consumer validation checklist (scaffolding) |
 | [FORMALPR_HOLDOUT_GOVERNANCE.md](FORMALPR_HOLDOUT_GOVERNANCE.md) | Private FormalPR-Holdout governance stub (no corpus) |
+| [HOLDOUT_LABEL_SEPARATION.md](HOLDOUT_LABEL_SEPARATION.md) | Sprint 8 label-separated prediction/eval checklist |
+| [SOURCE_PROFILE_HARDENING.md](SOURCE_PROFILE_HARDENING.md) | Sprint 6 source-profile hardening scaffolding |
+| [ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md) | Sprint 10 rc.1 / v1.3.0 publication gate |
 | [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md) | Advisory→strict rollout on external OSS repos |
 | [PILOT_CASE_STUDIES.md](PILOT_CASE_STUDIES.md) | In-repo pilot metrics and external pilot reporting |
 | [AGENT_REPAIR_LOOP.md](AGENT_REPAIR_LOOP.md) | Counterexample-to-repair workflow for MCP agents |
