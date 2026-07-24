@@ -2,6 +2,10 @@
 
 Consumes Service, Ingress, Gateway API, NetworkPolicy, RBAC, ServiceAccount,
 Secret refs, pod security, and admission metadata when present as objects.
+
+Profile ``infrastructure.kubernetes.controller_reachability_v1`` adds
+controller-aware edges from public Services to matching Deployment/StatefulSet/
+DaemonSet workloads via label selectors.
 """
 
 from __future__ import annotations
@@ -16,6 +20,9 @@ from ovk.compilers.infrastructure.exposure_graph import (
 from ovk.compilers.infrastructure.ir import ExposureEdge, InfraResourceIR, InfrastructureIR
 from ovk.compilers.infrastructure.reachability import evaluate_eligibility
 from ovk.compilers.infrastructure.sensitivity import normalize_sensitivity
+
+_SOURCE_PROFILE_ID = "infrastructure.kubernetes.controller_reachability_v1"
+_CONTROLLER_KINDS = frozenset({"Deployment", "StatefulSet", "DaemonSet", "ReplicaSet"})
 
 
 def _meta(obj: dict[str, Any]) -> dict[str, Any]:
@@ -140,6 +147,11 @@ def compile_kubernetes_objects(objects: list[dict[str, Any]] | dict[str, Any]) -
             )
         )
 
+    controller_edges = _controller_reachability_edges(objects_list, resources)
+    if controller_edges:
+        edges.extend(controller_edges)
+        warnings.append(f"compiled_with_source_profile:{_SOURCE_PROFILE_ID}")
+
     all_edges = build_edges(resources, edges)
     paths = concrete_public_paths(resources, all_edges)
     resources = apply_concrete_exposure(resources, paths)
@@ -152,3 +164,81 @@ def compile_kubernetes_objects(objects: list[dict[str, Any]] | dict[str, Any]) -
         warnings=warnings,
     )
     return evaluate_eligibility(ir)
+
+
+def _labels(obj: dict[str, Any]) -> dict[str, str]:
+    labels = _meta(obj).get("labels")
+    if not isinstance(labels, dict):
+        return {}
+    return {str(key): str(value) for key, value in labels.items()}
+
+
+def _selector_match(selector: dict[str, Any] | None, labels: dict[str, str]) -> bool:
+    if not isinstance(selector, dict) or not selector:
+        return False
+    match_labels = selector.get("matchLabels")
+    if isinstance(match_labels, dict):
+        return all(labels.get(str(key)) == str(value) for key, value in match_labels.items())
+    # Service selectors are flat maps.
+    return all(labels.get(str(key)) == str(value) for key, value in selector.items())
+
+
+def _controller_reachability_edges(
+    objects: list[Any],
+    resources: list[InfraResourceIR],
+) -> list[ExposureEdge]:
+    """Link public Services to controllers whose pod template labels match."""
+    resource_ids = {item.resource_id for item in resources}
+    services: list[tuple[str, dict[str, Any]]] = []
+    controllers: list[tuple[str, dict[str, Any]]] = []
+    for index, obj in enumerate(objects):
+        if not isinstance(obj, dict):
+            continue
+        kind = str(obj.get("kind") or "")
+        resource_id = _name(obj, index)
+        spec = obj.get("spec") if isinstance(obj.get("spec"), dict) else {}
+        if kind == "Service":
+            services.append((resource_id, spec if isinstance(spec, dict) else {}))
+        elif kind in _CONTROLLER_KINDS:
+            controllers.append((resource_id, obj))
+
+    edges: list[ExposureEdge] = []
+    for service_id, service_spec in services:
+        if service_id not in resource_ids:
+            continue
+        selector = service_spec.get("selector")
+        if not isinstance(selector, dict):
+            continue
+        for controller_id, controller in controllers:
+            template = (
+                controller.get("spec", {}).get("template")
+                if isinstance(controller.get("spec"), dict)
+                else None
+            )
+            labels = _labels(template) if isinstance(template, dict) else {}
+            if not _selector_match(selector, labels):
+                continue
+            # Ensure controller appears as a resource so paths can terminate.
+            if controller_id not in resource_ids:
+                resources.append(
+                    InfraResourceIR(
+                        resource_id=controller_id,
+                        resource_type=str(controller.get("kind") or "Controller"),
+                        kind="pod_security",
+                        sensitivity=_sensitivity(controller),
+                        attributes={
+                            "source_profile": _SOURCE_PROFILE_ID,
+                            "controller_kind": controller.get("kind"),
+                        },
+                    )
+                )
+                resource_ids.add(controller_id)
+            edges.append(
+                ExposureEdge(
+                    source=service_id,
+                    target=controller_id,
+                    kind="service_selector",
+                    evidence=f"compiled_with_source_profile:{_SOURCE_PROFILE_ID}",
+                )
+            )
+    return edges
