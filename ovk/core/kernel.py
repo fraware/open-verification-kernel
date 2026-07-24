@@ -22,6 +22,7 @@ from ovk.core.repo_memory import router_historical_priors
 from ovk.core.surface_routing import surface_backend_bonuses
 from ovk.core.result_cache import DEFAULT_CACHE_DIR
 from ovk.core.risk_ranker import rank_intents
+from ovk.core.routing_pipeline import AuthoritativeRoutingPlan, build_authoritative_routing_plan
 from ovk.core.router import VerificationBudget, route_intent
 from ovk.paths import resource_path
 
@@ -108,14 +109,6 @@ def execute_kernel(
         base_sha=base_sha,
     )
 
-    routing, routing_by_intent = _routing_for_plan(
-        plan,
-        context=ctx,
-        budget=budget,
-        template_dir=template_dir or resource_path("templates"),
-        adapter_dir=adapter_dir or resource_path("adapters"),
-    )
-
     compiler = ObligationCompilerRegistry.default()
     obligations = compiler.compile(
         plan,
@@ -127,6 +120,31 @@ def execute_kernel(
     )
 
     decision_options = bundle_decision_options(ctx.policy)
+    policy_dict = ctx.policy if isinstance(ctx.policy, dict) else None
+
+    authoritative_plan: AuthoritativeRoutingPlan | None = None
+    routing_by_intent: dict[str, Any] = {}
+    routing: list[dict[str, Any]] = []
+
+    if obligations:
+        authoritative_plan = build_authoritative_routing_plan(
+            obligations,
+            policy=policy_dict,
+            repo=ctx.repo,
+            head_sha=ctx.head_sha,
+            base_sha=ctx.base_sha,
+        )
+        routing_by_intent = authoritative_plan.legacy_routing_by_intent()
+        routing = authoritative_plan.routing_metadata_list()
+    else:
+        routing, routing_by_intent = _routing_for_plan(
+            plan,
+            context=ctx,
+            budget=budget,
+            template_dir=template_dir or resource_path("templates"),
+            adapter_dir=adapter_dir or resource_path("adapters"),
+        )
+
     if not obligations:
         bundle = make_bundle(
             [
@@ -150,7 +168,8 @@ def execute_kernel(
             cache_dir=cache_dir,
             use_cache=use_cache,
             parallel=parallel,
-            policy=ctx.policy if isinstance(ctx.policy, dict) else None,
+            policy=policy_dict,
+            evidence_schema_version="ovk.evidence.v3",
         )
         bundle = make_bundle(evidence_items, **decision_options)
 

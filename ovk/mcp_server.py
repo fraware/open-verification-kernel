@@ -190,12 +190,34 @@ def select_backends(
     intent_id: str,
     *,
     changed_files: list[str] | None = None,
+    lane: str | None = None,
+    lane_input: dict[str, Any] | None = None,
+    repo: str = "unknown/repo",
+    head_sha: str = "unknown",
+    base_sha: str | None = None,
+    policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Select backends for one intent using capability manifests and repo memory."""
+    """Select backends for one intent using the authoritative routing pipeline when possible."""
+    from ovk.core.lane_compiler import INTENT_TO_LANE
+    from ovk.core.router import route_intent, routing_decision_to_legacy_dict
+    from ovk.core.routing_pipeline import compile_typed_obligation, route_compiled_obligation
+
+    resolved_lane = lane or INTENT_TO_LANE.get(intent_id)
+    if resolved_lane and lane_input is not None:
+        obligation = compile_typed_obligation(
+            lane=resolved_lane,
+            data=lane_input,
+            repo=repo,
+            head_sha=head_sha,
+            base_sha=base_sha,
+            policy=policy,
+        )
+        decision = route_compiled_obligation(obligation, lane=resolved_lane, policy=policy)
+        return routing_decision_to_legacy_dict(decision, intent_id=intent_id)
+
     from ovk.core.capabilities import CapabilityRegistry
     from ovk.core.intent_registry import IntentRegistry
     from ovk.core.repo_memory import router_historical_priors
-    from ovk.core.router import route_intent
     from ovk.core.surface_routing import surface_backend_bonuses
 
     intents = IntentRegistry.from_directory(resource_path("templates"))
@@ -209,6 +231,7 @@ def select_backends(
         capabilities.all(),
         historical_priors=router_historical_priors(),
         surface_bonuses=bonuses,
+        policy=policy,
     )
 
 
