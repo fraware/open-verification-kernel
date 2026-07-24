@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 
 from ovk.adapters.authorization.deterministic_adapter import AuthorizationDeterministicAdapter
 from ovk.core.backend_control_plane import BackendControlPlane
@@ -18,13 +17,17 @@ from ovk.core.worker_runner import run_evaluator_in_worker
 def test_deterministic_adapter_requires_worker() -> None:
     adapter = AuthorizationDeterministicAdapter()
     obligation = adapter.compile(
-        __import__("ovk.core.authorization_compiler", fromlist=["compile_authorization_obligation"]).compile_authorization_obligation(
+        __import__(
+            "ovk.core.authorization_compiler", fromlist=["compile_authorization_obligation"]
+        ).compile_authorization_obligation(
             json.loads(Path("examples/auth_regression/input_admin_bypass.json").read_text(encoding="utf-8")),
             repo="r",
             head_sha="h",
         ),
         __import__("ovk.core.routing_pipeline", fromlist=["route_compiled_obligation"]).route_compiled_obligation(
-            __import__("ovk.core.authorization_compiler", fromlist=["compile_authorization_obligation"]).compile_authorization_obligation(
+            __import__(
+                "ovk.core.authorization_compiler", fromlist=["compile_authorization_obligation"]
+            ).compile_authorization_obligation(
                 json.loads(Path("examples/auth_regression/input_admin_bypass.json").read_text(encoding="utf-8")),
                 repo="r",
                 head_sha="h",

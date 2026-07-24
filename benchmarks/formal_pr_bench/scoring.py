@@ -113,9 +113,7 @@ def score_routing_case(case: dict[str, Any], *, elapsed_ms: float) -> DimensionS
 
 def score_quality_case(case: dict[str, Any], *, elapsed_ms: float) -> DimensionScore:
     """Score evidence honesty via the quality gate on a bundle fixture."""
-    bundle = EvidenceBundle.model_validate(
-        json.loads((ROOT / case["input_fixture"]).read_text(encoding="utf-8"))
-    )
+    bundle = EvidenceBundle.model_validate(json.loads((ROOT / case["input_fixture"]).read_text(encoding="utf-8")))
     report = build_evidence_quality_report(bundle)
     expected_pass = bool(case.get("expected_quality_passed", False))
     honest = report.passed == expected_pass
@@ -143,9 +141,7 @@ def score_repair_loop_case(case: dict[str, Any], *, elapsed_ms: float) -> Dimens
     recommendation = str(result.bundle.decision.get("merge_recommendation", "unknown"))
     merge_ok = recommendation == case["expected_merge_recommendation"]
     counterexamples = [
-        counterexample
-        for evidence in result.bundle.evidence
-        for counterexample in evidence.counterexamples
+        counterexample for evidence in result.bundle.evidence for counterexample in evidence.counterexamples
     ]
     hints = [repair_hint_for_counterexample(item) for item in counterexamples]
     expected_fix = case.get("expected_fix_class")
@@ -343,9 +339,7 @@ def aggregate_dimensions(scores: list[DimensionScore]) -> dict[str, Any]:
         "evidence_honesty": _rate([score.evidence_honest for score in scores]),
         "intent_recall": _rate([score.status_correct for score in scores if score.category == "intent_recall"]),
         "real_diff_recall": _rate([score.status_correct for score in scores if score.category == "real_diff"]),
-        "real_diff_intent_recall": _rate(
-            [score.status_correct for score in scores if score.category == "real_diff"]
-        ),
+        "real_diff_intent_recall": _rate([score.status_correct for score in scores if score.category == "real_diff"]),
         "by_category": {
             category: {
                 "cases_total": len(items),

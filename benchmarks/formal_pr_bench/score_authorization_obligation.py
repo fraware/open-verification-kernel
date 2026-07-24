@@ -32,8 +32,7 @@ def score_malformed_fixture(path: Path) -> bool:
     status_ok = evidence.backend_claims[0].status.value == "unknown"
     decision_ok = evidence.decision["merge_recommendation"] == "require_human_review"
     diagnostic_ok = any(
-        item.get("failure_mode") == "authorization_abstraction_invalid"
-        for item in evidence.counterexamples
+        item.get("failure_mode") == "authorization_abstraction_invalid" for item in evidence.counterexamples
     )
     return status_ok and decision_ok and diagnostic_ok
 

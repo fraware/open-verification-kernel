@@ -75,8 +75,7 @@ def compile_infrastructure_obligation(
             coverage=coverage,
             acceptable_guarantees=["exposure_graph_check"],
             required_capabilities=["infrastructure"],
-            policy_digest=policy_digest
-            or content_digest({"lane": "infrastructure", "policy": policy or {}}),
+            policy_digest=policy_digest or content_digest({"lane": "infrastructure", "policy": policy or {}}),
         )
         return provisional.model_copy(update={"obligation_id": compute_obligation_id(provisional)})
 

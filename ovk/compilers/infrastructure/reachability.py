@@ -27,7 +27,11 @@ def evaluate_eligibility(ir: InfrastructureIR) -> InfrastructureIR:
             reasons.append(f"{resource.resource_id} marked public without concrete path")
     # Sensitive + public without concrete path is always review.
     for resource in ir.resources:
-        if is_sensitive(resource.sensitivity) and resource.public_exposure and not _has_concrete(resource, ir.public_paths):
+        if (
+            is_sensitive(resource.sensitivity)
+            and resource.public_exposure
+            and not _has_concrete(resource, ir.public_paths)
+        ):
             reasons.append(f"sensitive resource {resource.resource_id} lacks concrete exposure path")
 
     eligibility: Eligibility = "strict" if not reasons and ir.resources else "review"
@@ -46,7 +50,5 @@ def sensitive_public_violations(ir: InfrastructureIR) -> list[InfraResourceIR]:
     return [
         resource
         for resource in ir.resources
-        if is_sensitive(resource.sensitivity)
-        and resource.public_exposure
-        and _has_concrete(resource, ir.public_paths)
+        if is_sensitive(resource.sensitivity) and resource.public_exposure and _has_concrete(resource, ir.public_paths)
     ]

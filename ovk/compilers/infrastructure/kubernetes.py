@@ -128,8 +128,7 @@ def compile_kubernetes_objects(objects: list[dict[str, Any]] | dict[str, Any]) -
                 attributes["pod_security_labels"] = {
                     key: value
                     for key, value in _meta(obj).get("labels", {}).items()
-                    if isinstance(_meta(obj).get("labels"), dict)
-                    and str(key).startswith("pod-security.kubernetes.io/")
+                    if isinstance(_meta(obj).get("labels"), dict) and str(key).startswith("pod-security.kubernetes.io/")
                 }
         else:
             unsupported.append(f"{resource_id}:unsupported_kind:{kind}")
@@ -210,11 +209,7 @@ def _controller_reachability_edges(
         if not isinstance(selector, dict):
             continue
         for controller_id, controller in controllers:
-            template = (
-                controller.get("spec", {}).get("template")
-                if isinstance(controller.get("spec"), dict)
-                else None
-            )
+            template = controller.get("spec", {}).get("template") if isinstance(controller.get("spec"), dict) else None
             labels = _labels(template) if isinstance(template, dict) else {}
             if not _selector_match(selector, labels):
                 continue

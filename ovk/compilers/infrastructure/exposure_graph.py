@@ -95,9 +95,7 @@ def apply_concrete_exposure(resources: list[InfraResourceIR], paths: list[Exposu
     updated: list[InfraResourceIR] = []
     for resource in resources:
         path_labels = [
-            " -> ".join(path.nodes)
-            for path in paths
-            if path.is_concrete and path.nodes[-1] == resource.resource_id
+            " -> ".join(path.nodes) for path in paths if path.is_concrete and path.nodes[-1] == resource.resource_id
         ]
         updated.append(
             resource.model_copy(

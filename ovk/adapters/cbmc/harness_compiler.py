@@ -74,10 +74,7 @@ def _generated_integer_overflow_harness(data: dict[str, Any]) -> str:
     expect_violation = bool(data.get("expect_violation", data.get("failed_assertions")))
     guard = ""
     if not expect_violation:
-        guard = (
-            f"  __CPROVER_assume(used <= {quota_limit});\n"
-            f"  __CPROVER_assume(delta <= {quota_limit} - used);\n"
-        )
+        guard = f"  __CPROVER_assume(used <= {quota_limit});\n  __CPROVER_assume(delta <= {quota_limit} - used);\n"
     return f"""#include <assert.h>
 #include <stdint.h>
 

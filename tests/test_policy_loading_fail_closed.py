@@ -15,9 +15,7 @@ def test_malformed_policy_yaml_is_rejected(tmp_path: Path) -> None:
 def test_schema_invalid_policy_is_rejected(tmp_path: Path) -> None:
     config = tmp_path / "config.yml"
     config.write_text(
-        "schema_version: ovk.config.v1\n"
-        "mode: strict\n"
-        "default_on_unknown: allow\n",
+        "schema_version: ovk.config.v1\nmode: strict\ndefault_on_unknown: allow\n",
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="failed schema validation"):

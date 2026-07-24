@@ -215,7 +215,10 @@ class TemplateConformanceRow:
                 enforcement_test_present=evidence.enforcement_test_present,
             ):
                 return "source_profile_strict_eligible"
-        if self.production_status in {"strict_eligible", "advisory", "experimental"} and not self.missing_executable_links:
+        if (
+            self.production_status in {"strict_eligible", "advisory", "experimental"}
+            and not self.missing_executable_links
+        ):
             return "executable_advisory"
         if self.production_status in {"advisory", "experimental"}:
             return "executable_advisory"
@@ -312,9 +315,7 @@ def classify_template(
     # Honest downgrade for native-named templates without executable catalog entry.
     if claimed and intent_id not in EXECUTABLE_CATALOG:
         status = _min_status(status, "catalog_only")
-        notes.append(
-            "downgraded unsupported public executable claim for backends: " + ", ".join(claimed)
-        )
+        notes.append("downgraded unsupported public executable claim for backends: " + ", ".join(claimed))
 
     if template.get("deprecated") is True:
         status = "deprecated"
@@ -328,13 +329,7 @@ def classify_template(
 
     relative = intent_path.relative_to(repo_root).as_posix() if intent_path.is_absolute() else intent_path.as_posix()
     evidence = template.get("acceptable_evidence") or []
-    evidence_kinds = sorted(
-        {
-            str(item.get("kind"))
-            for item in evidence
-            if isinstance(item, dict) and item.get("kind")
-        }
-    )
+    evidence_kinds = sorted({str(item.get("kind")) for item in evidence if isinstance(item, dict) and item.get("kind")})
     risk = template.get("risk") if isinstance(template.get("risk"), dict) else {}
     prop = template.get("property") if isinstance(template.get("property"), dict) else {}
     externally_calibrated = bool(template.get("externally_calibrated") is True)
@@ -391,9 +386,7 @@ def build_conformance_matrix(repo_root: Path, templates_dir: Path | None = None)
         "counts_by_status": dict(sorted(by_status.items())),
         "counts_by_status_v2": dict(sorted(by_status_v2.items())),
         "counts_by_domain": dict(sorted(by_domain.items())),
-        "source_profile_evidence": {
-            intent: item.as_dict() for intent, item in sorted(profile_evidence.items())
-        },
+        "source_profile_evidence": {intent: item.as_dict() for intent, item in sorted(profile_evidence.items())},
         "templates": [row.to_dict() for row in rows],
     }
     return payload
@@ -436,9 +429,7 @@ def validate_matrix(matrix: dict[str, Any]) -> list[str]:
                 )
         missing = row.get("missing_executable_links") or []
         if status in {"strict_eligible", "advisory"} and missing and status == "strict_eligible":
-            failures.append(
-                f"{row.get('intent_id')}: strict_eligible requires empty missing_executable_links"
-            )
+            failures.append(f"{row.get('intent_id')}: strict_eligible requires empty missing_executable_links")
         # catalog_only is mandatory when required links are incomplete and no
         # experimental/advisory catalog path was registered.
         if (

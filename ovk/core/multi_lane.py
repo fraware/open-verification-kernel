@@ -39,8 +39,7 @@ def _validate_lane_input(data: dict[str, Any], schema_name: str, *, lane: str) -
     report = validate_against_schema(data, schema)
     if not report.valid:
         issues = "; ".join(
-            f"{'/'.join(str(part) for part in issue.path) or '$'}: {issue.message}"
-            for issue in report.issues
+            f"{'/'.join(str(part) for part in issue.path) or '$'}: {issue.message}" for issue in report.issues
         )
         raise ValueError(f"{lane} input failed schema validation: {issues}")
 
@@ -138,8 +137,7 @@ def load_verification_manifest(path: Path, *, validate: bool = True) -> dict[str
         report = validate_against_schema(manifest, schema)
         if not report.valid:
             issues = "; ".join(
-                f"{'/'.join(str(part) for part in issue.path) or '$'}: {issue.message}"
-                for issue in report.issues
+                f"{'/'.join(str(part) for part in issue.path) or '$'}: {issue.message}" for issue in report.issues
             )
             raise ValueError(f"verification manifest failed schema validation: {issues}")
     return manifest
@@ -200,9 +198,7 @@ def _evaluate_manifest_entry(
         return None
     input_path = _resolve_manifest_file(manifest_root, str(input_value), field="input")
     policy_path = (
-        _resolve_manifest_file(manifest_root, str(entry["policy"]), field="policy")
-        if entry.get("policy")
-        else None
+        _resolve_manifest_file(manifest_root, str(entry["policy"]), field="policy") if entry.get("policy") else None
     )
     data = read_json_file(input_path)
     evidence = evaluate_lane(
@@ -220,9 +216,7 @@ def _evaluate_manifest_entry(
         "input_format": str(entry.get("input_format", "infra")),
         "policy": entry.get("policy"),
     }
-    return evidence.model_copy(
-        update={"evidence_id": f"{evidence.evidence_id}-{content_digest(identity)[:12]}"}
-    )
+    return evidence.model_copy(update={"evidence_id": f"{evidence.evidence_id}-{content_digest(identity)[:12]}"})
 
 
 def run_verification_manifest(

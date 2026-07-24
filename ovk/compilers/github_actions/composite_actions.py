@@ -31,9 +31,7 @@ def expand_composite_action(
     nodes: list[TrustNode] = [
         TrustNode(node_id=f"action:{action_path.as_posix()}", kind="composite_action", trust="unknown")
     ]
-    edges: list[TrustEdge] = [
-        TrustEdge(source=step_node_id, target=nodes[0].node_id, kind="uses_composite")
-    ]
+    edges: list[TrustEdge] = [TrustEdge(source=step_node_id, target=nodes[0].node_id, kind="uses_composite")]
     secrets: list[SecretUse] = []
     for index, step in enumerate(runs.get("steps") or []):
         if not isinstance(step, dict):

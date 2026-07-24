@@ -20,9 +20,7 @@ def test_admin_route_bypass_fixture_emits_counterexample() -> None:
     counterexamples = find_authorization_counterexamples(data)
     assert counterexamples
     assert counterexamples[0]["failure_mode"] == "admin_route_reachable_by_non_admin"
-    expected = json.loads(
-        Path("examples/z3_fail/admin_route_bypass.counterexample.json").read_text(encoding="utf-8")
-    )
+    expected = json.loads(Path("examples/z3_fail/admin_route_bypass.counterexample.json").read_text(encoding="utf-8"))
     assert counterexamples[0]["route"] == expected["route"]
     assert counterexamples[0]["user_role"] == expected["user_role"]
 
@@ -32,9 +30,7 @@ def test_privilege_escalation_fixture_emits_counterexample() -> None:
     counterexamples = find_privilege_escalation_counterexamples(data)
     assert counterexamples
     assert counterexamples[0]["failure_mode"] == "privilege_escalation"
-    expected = json.loads(
-        Path("examples/z3_fail/privilege_escalation.counterexample.json").read_text(encoding="utf-8")
-    )
+    expected = json.loads(Path("examples/z3_fail/privilege_escalation.counterexample.json").read_text(encoding="utf-8"))
     assert counterexamples[0]["principal"] == expected["principal"]
     assert counterexamples[0]["gained_role"] == expected["gained_role"]
 

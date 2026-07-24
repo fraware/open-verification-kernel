@@ -50,8 +50,7 @@ def find_ci_secrets_counterexamples(data: dict[str, Any]) -> list[dict[str, Any]
                     {
                         "summary": str(finding.get("summary") or kind),
                         "failure_mode": FAILURE_MODE,
-                        "workflow_id": ",".join(str(item) for item in finding.get("node_ids") or [])
-                        or "trust-flow",
+                        "workflow_id": ",".join(str(item) for item in finding.get("node_ids") or []) or "trust-flow",
                         "triggers": [],
                         "trust_context": trust_context,
                         "trust_finding_kind": kind,

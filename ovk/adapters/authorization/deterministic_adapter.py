@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -140,9 +139,7 @@ class AuthorizationDeterministicAdapter:
             environment_requirements={"native": False},
             expected_guarantee="deterministic_witness",
         )
-        return provisional.model_copy(
-            update={"backend_obligation_id": compute_backend_obligation_id(provisional)}
-        )
+        return provisional.model_copy(update={"backend_obligation_id": compute_backend_obligation_id(provisional)})
 
     def fingerprint(self, backend_obligation: BackendObligation) -> BackendEnvironmentFingerprint:
         return BackendEnvironmentFingerprint(

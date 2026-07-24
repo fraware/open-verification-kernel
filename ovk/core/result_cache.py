@@ -25,7 +25,6 @@ from ovk.core.execution_models import (
     BackendEnvironmentFingerprint,
     BackendObligation,
     CachedBackendExecution,
-    ExecutionAttempt,
     NormalizedBackendResult,
     RoutingDecision,
     VerificationObligation,

@@ -66,10 +66,7 @@ def _validate_policy_mapping(loaded: object, *, source: str) -> dict[str, Any]:
         for error in errors:
             location = "/".join(str(part) for part in error.path) or "$"
             formatted.append(f"{location}: {error.message}")
-        raise ValueError(
-            f"OVK verification policy from {source} failed schema validation: "
-            + "; ".join(formatted)
-        )
+        raise ValueError(f"OVK verification policy from {source} failed schema validation: " + "; ".join(formatted))
     return dict(loaded)
 
 
@@ -170,9 +167,7 @@ def budget_from_policy(policy: dict[str, Any]) -> VerificationBudget:
     denied = normalize_denied_backends(denied_raw)
     allowed_set = frozenset(allowed) if allowed is not None else None
     denied_set = frozenset(denied)
-    max_wall = float(
-        budget_section.get("max_wall_time_seconds", policy.get("max_wall_time_seconds", 30.0))
-    )
+    max_wall = float(budget_section.get("max_wall_time_seconds", policy.get("max_wall_time_seconds", 30.0)))
     max_memory = int(budget_section.get("max_memory_mb", policy.get("max_memory_mb", 512)))
     routing_section = policy.get("routing", {})
     prefer_deterministic = False

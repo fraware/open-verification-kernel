@@ -218,7 +218,9 @@ def probe_all_native_backends() -> list[NativeBackendSummary]:
             continue
         binary_present = any(item.binary_present for item in results)
         fixture_matches = all(item.runtime_status == item.oracle_status for item in results)
-        native_used = all(item.used_native_binary for item in results if item.binary_present) if binary_present else False
+        native_used = (
+            all(item.used_native_binary for item in results if item.binary_present) if binary_present else False
+        )
         if backend in TIER1_NATIVE_EXECUTION_BACKENDS and binary_present:
             native_used = all(item.used_native_binary for item in results)
         summaries.append(

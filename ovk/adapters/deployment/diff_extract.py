@@ -35,8 +35,7 @@ def _normalize_deployment_payload(states: list[dict]) -> dict:
     required_states = [str(state["name"]) for state in states if state.get("requires_approval")]
     production_states = [state_names[-1]] if state_names else ["production"]
     state_metadata = {
-        str(state["name"]): {"requires_approval": bool(state.get("requires_approval"))}
-        for state in states
+        str(state["name"]): {"requires_approval": bool(state.get("requires_approval"))} for state in states
     }
     return {
         "initial_state": state_names[0] if state_names else "draft",

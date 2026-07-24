@@ -51,9 +51,7 @@ def compile_workflow_trust(
 
     permissions = extract_permissions(workflow)
     secrets = extract_secrets(workflow)
-    write_token = has_write_token(permissions) or any(
-        references_github_token(item.expression) for item in secrets
-    )
+    write_token = has_write_token(permissions) or any(references_github_token(item.expression) for item in secrets)
 
     jobs = workflow.get("jobs") if isinstance(workflow.get("jobs"), dict) else {}
     for job_id, job in sorted(jobs.items()):
@@ -102,8 +100,10 @@ def compile_workflow_trust(
             step_node_id = f"job:{job_id}:step:{step_id}"
             run = str(step.get("run") or "")
             uses = str(step.get("uses") or "")
-            untrusted_code = untrusted_trigger or contains_untrusted_context(run) or contains_untrusted_context(
-                str(step.get("with") or "")
+            untrusted_code = (
+                untrusted_trigger
+                or contains_untrusted_context(run)
+                or contains_untrusted_context(str(step.get("with") or ""))
             )
             step_node = TrustNode(
                 node_id=step_node_id,
@@ -174,9 +174,7 @@ def compile_workflow_trust(
         # resolve_local_reusable already walked the graph with cycle prevention.
         for child in reusable:
             child_path = str(child.get("_ovk_path") or "reusable.yml")
-            nodes.append(
-                TrustNode(node_id=f"workflow:{child_path}", kind="reusable_workflow_doc", trust="unknown")
-            )
+            nodes.append(TrustNode(node_id=f"workflow:{child_path}", kind="reusable_workflow_doc", trust="unknown"))
             child_secrets = extract_secrets(child)
             child_permissions = extract_permissions(child)
             secrets.extend(child_secrets)

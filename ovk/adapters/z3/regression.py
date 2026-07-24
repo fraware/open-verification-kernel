@@ -26,5 +26,9 @@ def render_authorization_regression_suite(counterexamples: list[dict[str, Any]])
     tests = []
     for index, counterexample in enumerate(counterexamples):
         test_body = render_authorization_regression_test(counterexample)
-        tests.append(test_body.replace("test_non_admin_cannot_reach_admin_route", f"test_non_admin_cannot_reach_admin_route_{index}"))
+        tests.append(
+            test_body.replace(
+                "test_non_admin_cannot_reach_admin_route", f"test_non_admin_cannot_reach_admin_route_{index}"
+            )
+        )
     return "\n\n".join(tests) + "\n"

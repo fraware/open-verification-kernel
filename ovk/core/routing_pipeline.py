@@ -40,6 +40,7 @@ def intent_id_for_obligation(obligation: dict[str, Any]) -> str:
     lane = str(obligation["lane"])
     return str(obligation.get("intent_id") or LANE_TO_INTENT.get(lane, lane))
 
+
 RegistryBuilder = Callable[[], BackendRegistry]
 CompilerFn = Callable[..., VerificationObligation]
 
@@ -335,7 +336,5 @@ def require_routing_decision(
     if decision is not None:
         return decision
     if routing_enforced_for_lane(policy, lane):
-        raise RuntimeError(
-            f"enforced lane {lane!r} requires authoritative RoutingDecision for intent {intent_id!r}"
-        )
+        raise RuntimeError(f"enforced lane {lane!r} requires authoritative RoutingDecision for intent {intent_id!r}")
     raise RuntimeError(f"missing routing decision for intent {intent_id!r}")

@@ -117,9 +117,7 @@ def compile_terraform_plan(plan: dict[str, Any]) -> InfrastructureIR:
         nested = expand_planned_values_recursively(plan, warnings)
         if nested:
             existing = {
-                str(item.get("address"))
-                for item in resource_changes
-                if isinstance(item, dict) and item.get("address")
+                str(item.get("address")) for item in resource_changes if isinstance(item, dict) and item.get("address")
             }
             added = 0
             for item in nested:

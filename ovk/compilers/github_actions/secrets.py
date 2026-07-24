@@ -49,10 +49,7 @@ def _scan(value: Any, *, job_id: str | None, step_id: str | None) -> list[Secret
     if value is None:
         return []
     if isinstance(value, str):
-        return [
-            SecretUse(name=name, job_id=job_id, step_id=step_id, expression=value)
-            for name in secret_names(value)
-        ]
+        return [SecretUse(name=name, job_id=job_id, step_id=step_id, expression=value) for name in secret_names(value)]
     if isinstance(value, dict):
         found: list[SecretUse] = []
         for nested in value.values():

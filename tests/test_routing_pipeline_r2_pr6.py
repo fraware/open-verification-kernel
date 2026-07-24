@@ -75,9 +75,7 @@ def test_kernel_mcp_and_evidence_share_routing_id() -> None:
     )
     assert evidence_items[0].routing_id == expected_routing_id
     routing_artifacts = [
-        artifact
-        for artifact in evidence_items[0].generated_artifacts
-        if artifact.get("kind") == "backend_routing"
+        artifact for artifact in evidence_items[0].generated_artifacts if artifact.get("kind") == "backend_routing"
     ]
     assert routing_artifacts
     assert routing_artifacts[0]["routing_id"] == expected_routing_id
@@ -135,7 +133,6 @@ def test_kernel_uses_authoritative_routing_for_obligations() -> None:
     auth_routing = next(
         item
         for item in result.routing
-        if item.get("obligation_id") == auth_evidence.obligation_id
-        or item.get("intent_id") == "no-admin-route-bypass"
+        if item.get("obligation_id") == auth_evidence.obligation_id or item.get("intent_id") == "no-admin-route-bypass"
     )
     assert auth_routing["routing_id"] == auth_evidence.routing_id

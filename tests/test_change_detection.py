@@ -17,10 +17,12 @@ def test_infrastructure_change_selects_infra_intent() -> None:
 
 
 def test_detect_change_surfaces_groups_files() -> None:
-    surfaces = detect_change_surfaces([
-        ".github/workflows/verify.yml",
-        "src/middleware/auth.py",
-        "main.tf",
-    ])
+    surfaces = detect_change_surfaces(
+        [
+            ".github/workflows/verify.yml",
+            "src/middleware/auth.py",
+            "main.tf",
+        ]
+    )
     domains = {surface.domain for surface in surfaces}
     assert {"ci_cd", "authorization", "infrastructure"}.issubset(domains)

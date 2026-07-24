@@ -10,7 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 
 
-SELF_PROTECTION_REGO = r'''
+SELF_PROTECTION_REGO = (
+    r"""
 package ovk.self_protection
 
 after_has_gate(gate) {
@@ -38,7 +39,9 @@ violation[msg] {
   input.after.workflow_permissions.actions == "write"
   msg := "workflow actions permission escalated to write"
 }
-'''.strip() + "\n"
+""".strip()
+    + "\n"
+)
 
 
 def write_self_protection_rego(path: Path) -> None:

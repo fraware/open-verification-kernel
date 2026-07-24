@@ -43,7 +43,9 @@ def evaluate_lane_case(case: dict) -> tuple[str, str, str | None]:
     if intent == "agent-cannot-disable-own-ci-gate":
         from ovk.adapters.opa import evaluate_self_protection
 
-        evidence = evaluate_self_protection(json.loads(Path(fixture).read_text(encoding="utf-8")), repo="bench/repo", head_sha="seed")
+        evidence = evaluate_self_protection(
+            json.loads(Path(fixture).read_text(encoding="utf-8")), repo="bench/repo", head_sha="seed"
+        )
         payload = evidence.model_dump(mode="json")
     elif intent in INTENT_TO_LANE:
         payload = _evaluate_lane_fixture(INTENT_TO_LANE[intent], fixture)
@@ -109,10 +111,7 @@ def run_benchmark(
     cases, case_set = load_cases(expanded=expanded, include_extended=include_extended)
     capabilities = CapabilityRegistry.from_directory(ROOT / "adapters").all()
     lane_evaluator: Callable[[dict[str, Any]], tuple[str, str, str | None]] = evaluate_lane_case
-    scores = [
-        score_case(case, capabilities=capabilities, lane_evaluator=lane_evaluator)
-        for case in cases
-    ]
+    scores = [score_case(case, capabilities=capabilities, lane_evaluator=lane_evaluator) for case in cases]
     leaderboard = build_leaderboard(
         scores,
         benchmark_name="FormalPR-Bench",

@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import patch
 
 from ovk.adapters.authorization.z3_adapter import Z3NativeAuthorizationAdapter
 from ovk.adapters.self_protection.opa_adapter import OpaNativeSelfProtectionAdapter
-from ovk.core.execution_budget import LocalSubprocessWorker, WorkerResult
+from ovk.core.execution_budget import WorkerResult
 from ovk.core.execution_models import ExecutionBudget
 
 
@@ -60,7 +59,16 @@ def test_worker_timeout_enforced_for_z3_not_post_hoc() -> None:
     compiled = adapter.compile(obligation, routing)
 
     class SlowWorker:
-        def run(self, command, *, cwd, env=None, timeout_seconds=30.0, max_stdout_bytes=1_000_000, max_stderr_bytes=1_000_000):
+        def run(
+            self,
+            command,
+            *,
+            cwd,
+            env=None,
+            timeout_seconds=30.0,
+            max_stdout_bytes=1_000_000,
+            max_stderr_bytes=1_000_000,
+        ):
             return WorkerResult(
                 exit_code=None,
                 timed_out=True,

@@ -33,8 +33,22 @@ def test_cache_distinguishes_input_normalization_formats(monkeypatch, tmp_path: 
 
     monkeypatch.setattr(adapter_runtime, "evaluate_lane", fake_evaluate_lane)
     raw_input = {"resource_changes": []}
-    native = [{"lane": "infrastructure", "intent_id": "no-public-sensitive-resource", "input": raw_input, "input_format": "infra"}]
-    terraform = [{"lane": "infrastructure", "intent_id": "no-public-sensitive-resource", "input": raw_input, "input_format": "terraform"}]
+    native = [
+        {
+            "lane": "infrastructure",
+            "intent_id": "no-public-sensitive-resource",
+            "input": raw_input,
+            "input_format": "infra",
+        }
+    ]
+    terraform = [
+        {
+            "lane": "infrastructure",
+            "intent_id": "no-public-sensitive-resource",
+            "input": raw_input,
+            "input_format": "terraform",
+        }
+    ]
 
     adapter_runtime.execute_obligations(
         native,

@@ -12,7 +12,8 @@ def _section_kind(evidence: VerificationEvidence) -> str:
     artifacts = evidence.generated_artifacts or []
     kinds = {str(item.get("kind")) for item in artifacts if isinstance(item, dict)}
     if "incomplete_abstraction" in kinds or (
-        isinstance(evidence.coverage, dict) and evidence.coverage.get("status") in {"partial", "unknown"}
+        isinstance(evidence.coverage, dict)
+        and evidence.coverage.get("status") in {"partial", "unknown"}
         and recommendation == "require_human_review"
         and "incomplete" in str(evidence.decision.get("aggregation_reason", ""))
     ):
@@ -127,15 +128,14 @@ def render_evidence_markdown(evidence: VerificationEvidence) -> str:
                 if hint.get("line_hunk") is not None:
                     location += f", line {hint['line_hunk']}"
                 location += ")"
-            lines.append(
-                f"- `{hint['fix_class']}`: {hint['suggested_action']}{location}"
-            )
+            lines.append(f"- `{hint['fix_class']}`: {hint['suggested_action']}{location}")
 
     open_items = [
         item
         for item in (evidence.generated_artifacts or [])
         if isinstance(item, dict)
-        and item.get("kind") in {"backend_disagreement", "quality_error", "incomplete_abstraction", "aggregation_warning"}
+        and item.get("kind")
+        in {"backend_disagreement", "quality_error", "incomplete_abstraction", "aggregation_warning"}
     ]
     if open_items:
         lines.extend(["", "Open obligations:"])

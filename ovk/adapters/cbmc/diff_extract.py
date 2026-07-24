@@ -23,9 +23,7 @@ def _findings_from_c(content: str, *, intent_id: str) -> list[dict[str, str]]:
     findings: list[dict[str, str]] = []
     if intent_id == "cbmc-no-integer-overflow-quota" and re.search(r"\+\s*=|\+\+|quota|limit", content):
         findings.append({"kind": "integer_overflow", "summary": "quota or counter arithmetic changed in diff"})
-    if intent_id == "cbmc-no-unchecked-buffer-copy" and re.search(
-        r"\b(memcpy|strcpy|strncpy|memmove)\s*\(", content
-    ):
+    if intent_id == "cbmc-no-unchecked-buffer-copy" and re.search(r"\b(memcpy|strcpy|strncpy|memmove)\s*\(", content):
         findings.append({"kind": "unchecked_copy", "summary": "memory copy operation introduced or modified in diff"})
     if intent_id == "cbmc-no-use-after-free-auth-cache" and re.search(r"\bfree\s*\(", content):
         findings.append({"kind": "use_after_free", "summary": "free() call introduced or modified in diff"})

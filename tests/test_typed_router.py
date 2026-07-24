@@ -71,7 +71,12 @@ def _obligation(*, lane: str = "authorization") -> VerificationObligation:
         abstraction=abstraction,
         abstraction_digest=compute_abstraction_digest(abstraction),
         coverage=AbstractionCoverage(status="complete", confidence=1.0, extracted_elements=1),
-        acceptable_guarantees=["smt_refutation_search", "policy_evaluation", "workflow_secrets_boundary_check", "state_machine_safety"],
+        acceptable_guarantees=[
+            "smt_refutation_search",
+            "policy_evaluation",
+            "workflow_secrets_boundary_check",
+            "state_machine_safety",
+        ],
         required_capabilities=[],
         policy_digest="policy-digest",
     )

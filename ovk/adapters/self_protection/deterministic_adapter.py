@@ -2,14 +2,9 @@
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from typing import Any
 
-from ovk.adapters.opa.self_protection import (
-    find_self_protection_unknowns,
-    find_self_protection_violations,
-)
 from ovk.core.bundle import content_digest
 from ovk.core.execution_models import (
     BackendCapabilityAssessment,
@@ -27,7 +22,6 @@ from ovk.core.execution_models import (
     VerificationObligation,
     compute_backend_obligation_id,
     compute_payload_digest,
-    compute_raw_execution_digests,
 )
 from ovk.core.execution_budget import BackendWorker
 from ovk.core.models import VerificationStatus
@@ -109,11 +103,7 @@ class SelfProtectionDeterministicAdapter:
                 estimated_memory_mb=64,
                 reasons=["excluded by execution budget"],
             )
-        trusted_meta = all(
-            item.trusted
-            for item in obligation.materials
-            if item.kind == "branch_protection"
-        )
+        trusted_meta = all(item.trusted for item in obligation.materials if item.kind == "branch_protection")
         materials_ok = bool(obligation.materials)
         coverage_ok = obligation.coverage.status in {"complete", "partial", "unknown"}
         score = 0.8 if trusted_meta else 0.55
@@ -199,9 +189,7 @@ class SelfProtectionDeterministicAdapter:
             assumptions=["Deterministic self-protection evaluator."],
             limits=["OPA native execution is a separate backend."],
             counterexamples=list(raw.raw_result.get("counterexamples") or []),
-            generated_artifacts=[
-                {"kind": "backend_provenance", "backend": self.backend_id, "native_execution": False}
-            ],
+            generated_artifacts=[{"kind": "backend_provenance", "backend": self.backend_id, "native_execution": False}],
         )
 
     def explain(self, result: NormalizedBackendResult) -> HumanExplanation:

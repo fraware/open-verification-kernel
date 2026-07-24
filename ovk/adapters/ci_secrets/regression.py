@@ -23,7 +23,10 @@ def render_ci_secrets_regression_test(counterexample: dict[str, Any], index: int
 def render_ci_secrets_regression_suite(counterexamples: list[dict[str, Any]]) -> str:
     if not counterexamples:
         return "# No CI secrets counterexamples were available.\n"
-    return "\n\n".join(
-        render_ci_secrets_regression_test(counterexample, index)
-        for index, counterexample in enumerate(counterexamples)
-    ) + "\n"
+    return (
+        "\n\n".join(
+            render_ci_secrets_regression_test(counterexample, index)
+            for index, counterexample in enumerate(counterexamples)
+        )
+        + "\n"
+    )

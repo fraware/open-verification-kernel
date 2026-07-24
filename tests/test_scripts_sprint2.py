@@ -9,15 +9,7 @@ def test_normalize_required_checks_script(tmp_path: Path, monkeypatch) -> None:
     input_path = tmp_path / "branch_protection.json"
     output_path = tmp_path / "required_checks.json"
     input_path.write_text(
-        json.dumps(
-            {
-                "after_branch_protection": {
-                    "required_status_checks": {
-                        "contexts": ["unit-tests", "ovk-verify"]
-                    }
-                }
-            }
-        ),
+        json.dumps({"after_branch_protection": {"required_status_checks": {"contexts": ["unit-tests", "ovk-verify"]}}}),
         encoding="utf-8",
     )
     monkeypatch.setattr(

@@ -33,6 +33,5 @@ def _from_block(block: Any, *, job_id: str | None) -> list[PermissionGrant]:
     if not isinstance(block, dict):
         return []
     return [
-        PermissionGrant(scope=str(scope), level=str(level), job_id=job_id)
-        for scope, level in sorted(block.items())
+        PermissionGrant(scope=str(scope), level=str(level), job_id=job_id) for scope, level in sorted(block.items())
     ]

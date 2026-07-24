@@ -126,11 +126,7 @@ def explain_result(evidence_bundle: dict[str, Any]) -> dict[str, Any]:
     from ovk.core.counterexample_translator import repair_hint_for_counterexample
 
     bundle = EvidenceBundle.model_validate(evidence_bundle)
-    counterexamples = [
-        counterexample
-        for evidence in bundle.evidence
-        for counterexample in evidence.counterexamples
-    ]
+    counterexamples = [counterexample for evidence in bundle.evidence for counterexample in evidence.counterexamples]
     repair_hints = [repair_hint_for_counterexample(item) for item in counterexamples]
     return {
         "bundle_id": bundle.bundle_id,

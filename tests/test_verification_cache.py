@@ -46,7 +46,9 @@ def _budget() -> ExecutionBudget:
     )
 
 
-def _obligation(*, repo: str = "acme/api", head_sha: str = "abc", base_sha: str | None = "def") -> VerificationObligation:
+def _obligation(
+    *, repo: str = "acme/api", head_sha: str = "abc", base_sha: str | None = "def"
+) -> VerificationObligation:
     abstraction = {"kind": "test", "input": {"x": 1}}
     provisional = VerificationObligation(
         obligation_id="pending",

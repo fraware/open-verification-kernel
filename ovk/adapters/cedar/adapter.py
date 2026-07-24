@@ -58,7 +58,9 @@ class CedarAdapter(BaseExternalAdapter):
             "The decision is produced by the deterministic Cedar-shaped input oracle.",
         ]
         if binary_present:
-            assumptions.append("The Cedar CLI version probe passed; no policy evaluation was executed by the native tool.")
+            assumptions.append(
+                "The Cedar CLI version probe passed; no policy evaluation was executed by the native tool."
+            )
         else:
             assumptions.append("The Cedar CLI was unavailable; native policy evaluation was not attempted.")
 

@@ -121,9 +121,7 @@ def _check_smoke_quality_reports() -> list[str]:
                 make_bundle(
                     [
                         evaluate_ci_secrets_exposure(
-                            read_json_file(
-                                resource_path("examples", "ci_secrets", "input_secrets_safe.json")
-                            ),
+                            read_json_file(resource_path("examples", "ci_secrets", "input_secrets_safe.json")),
                             repo="smoke/repo",
                             head_sha="smoke-head",
                         )
@@ -189,13 +187,9 @@ def _check_pilot_program() -> list[str]:
     failures: list[str] = []
     for result in report["results"]:
         if not result["passed"]:
-            failures.append(
-                f"pilot manifest {result['name']} did not allow: {result['merge_recommendation']}"
-            )
+            failures.append(f"pilot manifest {result['name']} did not allow: {result['merge_recommendation']}")
     if report["manifests_passed"] != report["manifests_total"]:
-        failures.append(
-            f"pilot program passed {report['manifests_passed']}/{report['manifests_total']} manifests"
-        )
+        failures.append(f"pilot program passed {report['manifests_passed']}/{report['manifests_total']} manifests")
     return failures
 
 
@@ -271,9 +265,7 @@ def build_release_preflight_report() -> PreflightReport:
             check_from_failures("release_layout_schema_coverage", _check_release_layout_schema_coverage()),
             check_from_failures("adapter_capabilities", _check_adapter_capabilities()),
         ),
-        optional_checks=(
-            check_from_failures("pilot_metrics_dry_run", _check_pilot_metrics_dry_run()),
-        ),
+        optional_checks=(check_from_failures("pilot_metrics_dry_run", _check_pilot_metrics_dry_run()),),
     )
 
 

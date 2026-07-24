@@ -211,17 +211,14 @@ def write_generated_tests(
             return False
 
     if not (_under(cwd) or _under(verification_root) or _under(temp_root)):
-        raise ValueError(
-            f"refusing to write generated tests outside workspace or temp: {resolved}"
-        )
+        raise ValueError(f"refusing to write generated tests outside workspace or temp: {resolved}")
 
     resolved.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
     for index, artifact in enumerate(generate_regression_artifacts(bundle)):
-        failure_mode = "".join(
-            ch if ch.isalnum() or ch in {"_", "-"} else "_"
-            for ch in str(artifact["failure_mode"])
-        )[:80]
+        failure_mode = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in str(artifact["failure_mode"]))[
+            :80
+        ]
         json_path = resolved / f"regression_{index}_{failure_mode}.json"
         # Ensure no path traversal via failure_mode.
         if json_path.resolve().parent != resolved:

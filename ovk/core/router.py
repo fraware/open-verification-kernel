@@ -110,7 +110,9 @@ def routing_config_from_policy(policy: Mapping[str, Any] | None) -> RoutingConfi
         else "primary_with_optional_corroboration"
     )
     enforced_raw = section.get("enforced_lanes") or policy.get("enforced_lanes") or []
-    enforced = frozenset(str(item) for item in enforced_raw) if isinstance(enforced_raw, (list, tuple, set)) else frozenset()
+    enforced = (
+        frozenset(str(item) for item in enforced_raw) if isinstance(enforced_raw, (list, tuple, set)) else frozenset()
+    )
     return RoutingConfig(
         mode=mode,
         strategy=strategy,
@@ -318,8 +320,7 @@ def select_primary_with_optional_corroboration(
         primary_candidates = [
             item
             for item in eligible_sorted
-            if item.support == "partial"
-            and not any("incomplete coverage" in reason for reason in item.reasons)
+            if item.support == "partial" and not any("incomplete coverage" in reason for reason in item.reasons)
         ]
 
     if primary_candidates:
@@ -478,13 +479,7 @@ def _manifest_assessment(
         support: Literal["supported", "partial", "unsupported", "unavailable"] = "supported"
         # Explicit relevance from domain/kind match replaces the former constant 1.0 term.
         relevance = 1.0 if kind_match else 0.5
-        score = (
-            relevance
-            + guarantee_strength
-            + (0.15 * historical_success)
-            + surface_bonus
-            - cost
-        )
+        score = relevance + guarantee_strength + (0.15 * historical_success) + surface_bonus - cost
         reasons.append(f"supports domain {domain} and property kind {property_kind}")
     elif domain_match:
         support = "partial"

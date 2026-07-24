@@ -50,8 +50,7 @@ def test_bench_cli_writes_leaderboard(tmp_path: Path) -> None:
 def test_v1_readiness_checklist() -> None:
     metadata = release_metadata()
     backends = {
-        manifest.get("tool", {}).get("name")
-        for manifest in CapabilityRegistry.from_directory(Path("adapters")).all()
+        manifest.get("tool", {}).get("name") for manifest in CapabilityRegistry.from_directory(Path("adapters")).all()
     }
     required_backends = {"opa", "z3", "cedar", "tla+", "kani", "dafny", "verus", "lean", "cbmc", "alloy"}
     assert required_backends.issubset(backends)

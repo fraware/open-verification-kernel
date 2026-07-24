@@ -5,9 +5,7 @@ from ovk.core.adapter_runtime import execute_obligations
 
 
 def _auth_input() -> dict:
-    return json.loads(
-        Path("examples/auth_regression/input_admin_protected.json").read_text(encoding="utf-8")
-    )
+    return json.loads(Path("examples/auth_regression/input_admin_protected.json").read_text(encoding="utf-8"))
 
 
 def test_enforced_execution_does_not_reuse_legacy_flat_cache(tmp_path: Path) -> None:

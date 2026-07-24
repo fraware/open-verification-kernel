@@ -398,8 +398,7 @@ def register_cbmc_project(data: dict[str, Any]) -> tuple[CbmcProject, Abstractio
             confidence=0.4,
             extracted_elements=extracted,
             expected_elements=None,
-            warnings=list(project.warnings)
-            + ["CBMC materials registered without project-grounded strict eligibility"],
+            warnings=list(project.warnings) + ["CBMC materials registered without project-grounded strict eligibility"],
         )
         compiler_id = "ovk.cbmc.harness_or_cdb.v1"
     else:

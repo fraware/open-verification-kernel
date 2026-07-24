@@ -10,9 +10,7 @@ def _write_run(path: Path, status: str) -> None:
             {
                 "backend_outcomes": [{"backend": "z3", "status": status}],
                 "lanes": ["no-admin-route-bypass"],
-                "decision": {
-                    "merge_recommendation": "block" if status == "fail" else "require_human_review"
-                },
+                "decision": {"merge_recommendation": "block" if status == "fail" else "require_human_review"},
             }
         ),
         encoding="utf-8",

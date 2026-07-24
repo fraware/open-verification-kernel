@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from typing import Any
 
-from ovk.adapters.ci_secrets.exposure import find_ci_secrets_counterexamples
 from ovk.core.bundle import content_digest
 from ovk.core.execution_models import (
     BackendCapabilityAssessment,
@@ -24,7 +22,6 @@ from ovk.core.execution_models import (
     VerificationObligation,
     compute_backend_obligation_id,
     compute_payload_digest,
-    compute_raw_execution_digests,
 )
 from ovk.core.execution_budget import BackendWorker
 from ovk.core.models import VerificationStatus
@@ -193,9 +190,7 @@ class CiSecretsDeterministicAdapter:
             assumptions=["Deterministic CI secrets boundary evaluator."],
             limits=["Does not expand remote reusable workflows."],
             counterexamples=list(raw.raw_result.get("counterexamples") or []),
-            generated_artifacts=[
-                {"kind": "backend_provenance", "backend": self.backend_id, "native_execution": False}
-            ],
+            generated_artifacts=[{"kind": "backend_provenance", "backend": self.backend_id, "native_execution": False}],
         )
 
     def explain(self, result: NormalizedBackendResult) -> HumanExplanation:

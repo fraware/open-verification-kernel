@@ -76,9 +76,7 @@ def _walk_keys(value: Any, *, path: str = "$") -> list[tuple[str, str]]:
         for key, child in value.items():
             key_text = str(key)
             lowered = key_text.lower()
-            if key_text not in _ALLOWED_META_KEYS and any(
-                fragment in lowered for fragment in FORBIDDEN_KEY_FRAGMENTS
-            ):
+            if key_text not in _ALLOWED_META_KEYS and any(fragment in lowered for fragment in FORBIDDEN_KEY_FRAGMENTS):
                 findings.append((f"{path}.{key_text}", key_text))
             findings.extend(_walk_keys(child, path=f"{path}.{key_text}"))
     elif isinstance(value, list):

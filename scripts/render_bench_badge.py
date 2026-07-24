@@ -75,9 +75,7 @@ def render_summary(
         "cases_total": summary.get("cases_total", 0),
         "cases_passed": summary.get("cases_passed", 0),
         "pass_rate": (
-            summary.get("cases_passed", 0) / summary.get("cases_total", 1)
-            if summary.get("cases_total")
-            else 0.0
+            summary.get("cases_passed", 0) / summary.get("cases_total", 1) if summary.get("cases_total") else 0.0
         ),
         "merge_decision_accuracy": summary.get("merge_decision_accuracy"),
         "status_accuracy": summary.get("status_accuracy"),

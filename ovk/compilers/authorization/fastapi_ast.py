@@ -123,7 +123,9 @@ class FastApiAstAuthorizationCompiler:
 
             for node in tree.body:
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    roles = ["admin"] if looks_admin_protected(ast.get_source_segment(source, node) or node.name) else []
+                    roles = (
+                        ["admin"] if looks_admin_protected(ast.get_source_segment(source, node) or node.name) else []
+                    )
                     dependencies[node.name] = AuthDependency(
                         name=node.name,
                         kind="dependency",

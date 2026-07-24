@@ -242,9 +242,7 @@ class OpaNativeSelfProtectionAdapter:
         status = str(result.get("status", "unknown"))
         violations = result.get("violations") or []
         counterexamples = [
-            {"summary": str(item), "failure_mode": "opa_policy_violation"}
-            if not isinstance(item, dict)
-            else item
+            {"summary": str(item), "failure_mode": "opa_policy_violation"} if not isinstance(item, dict) else item
             for item in violations
         ]
         termination = "completed"
@@ -313,7 +311,9 @@ class OpaNativeSelfProtectionAdapter:
                 failure_mode=str(result.counterexamples[0].get("failure_mode", "opa_policy_violation")),
             )
         if result.status == VerificationStatus.PASS:
-            return HumanExplanation(summary="OPA reported no self-protection violations.", repair_hint="No repair required.")
+            return HumanExplanation(
+                summary="OPA reported no self-protection violations.", repair_hint="No repair required."
+            )
         return HumanExplanation(
             summary=f"OPA-native backend returned {result.status.value}.",
             repair_hint="Install opa or select an explicitly accepted fallback backend via policy.",

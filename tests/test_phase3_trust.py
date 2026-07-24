@@ -12,7 +12,9 @@ from ovk.core.sigstore_signing import sigstore_signing_enabled
 
 
 def test_adversarial_sha_mismatch_fails_quality_gate() -> None:
-    bundle = EvidenceBundle.model_validate(read_json_file(Path("examples/evidence_quality/adversarial_sha_mismatch.json")))
+    bundle = EvidenceBundle.model_validate(
+        read_json_file(Path("examples/evidence_quality/adversarial_sha_mismatch.json"))
+    )
     report = build_evidence_quality_report(bundle)
     assert report.passed is False
     messages = {issue.message for issue in report.issues}

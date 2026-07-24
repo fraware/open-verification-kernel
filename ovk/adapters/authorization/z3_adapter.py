@@ -2,14 +2,9 @@
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from typing import Any
 
-from ovk.adapters.z3.executor import run_authorization_obligation_with_z3
-from ovk.adapters.z3.obligation import build_authorization_obligation
-from ovk.adapters.z3.result import normalize_z3_authorization_result
-from ovk.adapters.z3.validation import validate_authorization_input
 from ovk.core.bundle import content_digest
 from ovk.core.execution_models import (
     BackendCapabilityAssessment,
@@ -27,7 +22,6 @@ from ovk.core.execution_models import (
     VerificationObligation,
     compute_backend_obligation_id,
     compute_payload_digest,
-    compute_raw_execution_digests,
 )
 from ovk.core.execution_budget import BackendWorker
 from ovk.core.models import VerificationStatus
@@ -162,9 +156,7 @@ class Z3NativeAuthorizationAdapter:
             environment_requirements={"native": True, "binary": "z3-solver"},
             expected_guarantee="smt_refutation_search",
         )
-        return provisional.model_copy(
-            update={"backend_obligation_id": compute_backend_obligation_id(provisional)}
-        )
+        return provisional.model_copy(update={"backend_obligation_id": compute_backend_obligation_id(provisional)})
 
     def fingerprint(self, backend_obligation: BackendObligation) -> BackendEnvironmentFingerprint:
         native = z3_available()

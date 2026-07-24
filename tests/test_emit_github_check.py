@@ -50,17 +50,20 @@ def test_emit_github_check_posts_check_run(tmp_path: Path, monkeypatch) -> None:
     response.__enter__ = MagicMock(return_value=response)
     response.__exit__ = MagicMock(return_value=False)
 
-    with patch("sys.argv", [
-        "emit_github_check.py",
-        "--evidence",
-        str(evidence),
-        "--markdown",
-        str(markdown),
-        "--repo",
-        "owner/repo",
-        "--head-sha",
-        "abc123",
-    ]):
+    with patch(
+        "sys.argv",
+        [
+            "emit_github_check.py",
+            "--evidence",
+            str(evidence),
+            "--markdown",
+            str(markdown),
+            "--repo",
+            "owner/repo",
+            "--head-sha",
+            "abc123",
+        ],
+    ):
         with patch("urllib.request.urlopen", return_value=response) as urlopen:
             assert main() == 0
             request = urlopen.call_args.args[0]
@@ -75,15 +78,18 @@ def test_emit_github_check_api_failure_returns_one(tmp_path: Path, monkeypatch) 
     _write_evidence(evidence)
     monkeypatch.setenv("GITHUB_TOKEN", "test-token")
 
-    with patch("sys.argv", [
-        "emit_github_check.py",
-        "--evidence",
-        str(evidence),
-        "--repo",
-        "owner/repo",
-        "--head-sha",
-        "abc123",
-    ]):
+    with patch(
+        "sys.argv",
+        [
+            "emit_github_check.py",
+            "--evidence",
+            str(evidence),
+            "--repo",
+            "owner/repo",
+            "--head-sha",
+            "abc123",
+        ],
+    ):
         with patch("scripts.emit_github_check._post_check_run", return_value=False):
             assert main() == 1
 

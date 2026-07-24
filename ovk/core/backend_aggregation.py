@@ -84,10 +84,7 @@ def evaluate_fallback_acceptance(
             return True, False, attempt.termination
         if policy.fallback_backends and selection.backend not in policy.fallback_backends:
             return True, False, attempt.termination
-        if (
-            policy.acceptable_fallback_guarantees
-            and result.guarantee_type not in policy.acceptable_fallback_guarantees
-        ):
+        if policy.acceptable_fallback_guarantees and result.guarantee_type not in policy.acceptable_fallback_guarantees:
             return True, False, attempt.termination
 
     if fallback_used:
@@ -172,10 +169,7 @@ def aggregate_fail_dominant_v1(
         return AggregationOutcome(
             status=VerificationStatus.UNKNOWN,
             merge_recommendation=MergeRecommendation.REQUIRE_HUMAN_REVIEW,
-            reason=(
-                "selected and executed backend sets differ; "
-                f"missing={missing}; unexpected={unexpected}"
-            ),
+            reason=(f"selected and executed backend sets differ; missing={missing}; unexpected={unexpected}"),
             quality_error=True,
         )
 
@@ -236,9 +230,7 @@ def aggregate_fail_dominant_v1(
     if any(item.status in non_pass for item in required_results):
         for item in optional_results:
             if item.status == VerificationStatus.PASS:
-                warnings.append(
-                    f"optional backend {item.backend} passed but cannot upgrade required unknown/error"
-                )
+                warnings.append(f"optional backend {item.backend} passed but cannot upgrade required unknown/error")
         return AggregationOutcome(
             status=VerificationStatus.UNKNOWN,
             merge_recommendation=MergeRecommendation.REQUIRE_HUMAN_REVIEW,
@@ -268,8 +260,7 @@ def aggregate_fail_dominant_v1(
                 status=VerificationStatus.UNKNOWN,
                 merge_recommendation=MergeRecommendation.REQUIRE_STRONGER_CHECK,
                 reason=(
-                    f"required result from {item.backend} uses guarantee "
-                    f"{item.guarantee_type!r} outside acceptable set"
+                    f"required result from {item.backend} uses guarantee {item.guarantee_type!r} outside acceptable set"
                 ),
                 fallback_used=fallback_used,
                 fallback_accepted=resolved_fallback_accepted,

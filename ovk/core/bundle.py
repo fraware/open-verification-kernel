@@ -22,9 +22,7 @@ def _validate_bundle_inputs(evidence: list[VerificationEvidence]) -> None:
     subject = evidence[0].subject
     for index, item in enumerate(evidence[1:], start=1):
         if item.subject != subject:
-            raise ValueError(
-                f"evidence subject mismatch at index {index}: expected {subject}, got {item.subject}"
-            )
+            raise ValueError(f"evidence subject mismatch at index {index}: expected {subject}, got {item.subject}")
     evidence_ids = [item.evidence_id for item in evidence]
     duplicate_ids = sorted({item for item in evidence_ids if evidence_ids.count(item) > 1})
     if duplicate_ids:

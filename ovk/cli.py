@@ -298,7 +298,9 @@ def release_bundle(
     base_sha: Optional[str] = typer.Option(None),
 ) -> None:
     """Write a complete verifiable release bundle for a lane."""
-    evidence = _evaluate_lane(lane, input_json, input_format=input_format, policy=policy, repo=repo, head_sha=head_sha, base_sha=base_sha)
+    evidence = _evaluate_lane(
+        lane, input_json, input_format=input_format, policy=policy, repo=repo, head_sha=head_sha, base_sha=base_sha
+    )
     bundle = make_bundle([evidence])
     write_release_bundle(bundle, ReleaseBundlePaths(root=output_dir))
     failures = verify_release_bundle(output_dir)
@@ -324,7 +326,9 @@ def _evaluate_lane(
         return evaluate_validated_authorization_path(data, repo=repo, head_sha=head_sha, base_sha=base_sha)
     if lane == "infrastructure":
         normalized = normalize_infra_input(data, input_format)
-        return evaluate_infra_exposure(normalized, repo=repo, head_sha=head_sha, base_sha=base_sha, policy=load_policy(policy))
+        return evaluate_infra_exposure(
+            normalized, repo=repo, head_sha=head_sha, base_sha=base_sha, policy=load_policy(policy)
+        )
     if lane == "self_protection":
         return evaluate_self_protection(data, repo=repo, head_sha=head_sha, base_sha=base_sha)
     if lane == "ci_secrets":
@@ -409,8 +413,12 @@ def auth_obligation(
     evidence_output: Path = typer.Option(Path("ovk-auth-evidence.json"), help="Evidence bundle output path."),
     markdown_output: Path = typer.Option(Path("ovk-auth-comment.md"), help="Markdown output path."),
     attestation_output: Path = typer.Option(Path("ovk-auth-attestation.json"), help="Attestation output path."),
-    manifest_output: Path = typer.Option(Path("ovk-auth-artifact-manifest.json"), help="Artifact manifest output path."),
-    quality_output: Path = typer.Option(Path("ovk-auth-evidence-quality.json"), help="Evidence quality report output path."),
+    manifest_output: Path = typer.Option(
+        Path("ovk-auth-artifact-manifest.json"), help="Artifact manifest output path."
+    ),
+    quality_output: Path = typer.Option(
+        Path("ovk-auth-evidence-quality.json"), help="Evidence quality report output path."
+    ),
     advisory: bool = typer.Option(False, help="Write outputs and exit 0."),
 ) -> None:
     """Run the validated authorization obligation path."""
@@ -439,8 +447,12 @@ def infra_exposure(
     evidence_output: Path = typer.Option(Path("ovk-infra-evidence.json"), help="Evidence bundle output path."),
     markdown_output: Path = typer.Option(Path("ovk-infra-comment.md"), help="Markdown output path."),
     attestation_output: Path = typer.Option(Path("ovk-infra-attestation.json"), help="Attestation output path."),
-    manifest_output: Path = typer.Option(Path("ovk-infra-artifact-manifest.json"), help="Artifact manifest output path."),
-    quality_output: Path = typer.Option(Path("ovk-infra-evidence-quality.json"), help="Evidence quality report output path."),
+    manifest_output: Path = typer.Option(
+        Path("ovk-infra-artifact-manifest.json"), help="Artifact manifest output path."
+    ),
+    quality_output: Path = typer.Option(
+        Path("ovk-infra-evidence-quality.json"), help="Evidence quality report output path."
+    ),
     advisory: bool = typer.Option(False, help="Write outputs and exit 0."),
 ) -> None:
     """Run the infrastructure exposure path."""
@@ -473,8 +485,12 @@ def ci_secrets(
     evidence_output: Path = typer.Option(Path("ovk-ci-secrets-evidence.json"), help="Evidence bundle output path."),
     markdown_output: Path = typer.Option(Path("ovk-ci-secrets-comment.md"), help="Markdown output path."),
     attestation_output: Path = typer.Option(Path("ovk-ci-secrets-attestation.json"), help="Attestation output path."),
-    manifest_output: Path = typer.Option(Path("ovk-ci-secrets-artifact-manifest.json"), help="Artifact manifest output path."),
-    quality_output: Path = typer.Option(Path("ovk-ci-secrets-evidence-quality.json"), help="Evidence quality report output path."),
+    manifest_output: Path = typer.Option(
+        Path("ovk-ci-secrets-artifact-manifest.json"), help="Artifact manifest output path."
+    ),
+    quality_output: Path = typer.Option(
+        Path("ovk-ci-secrets-evidence-quality.json"), help="Evidence quality report output path."
+    ),
     advisory: bool = typer.Option(False, help="Write outputs and exit 0."),
 ) -> None:
     """Run the CI secrets exposure path."""
@@ -500,12 +516,18 @@ def deployment_state(
     evidence_output: Path = typer.Option(Path("ovk-deployment-evidence.json"), help="Evidence bundle output path."),
     markdown_output: Path = typer.Option(Path("ovk-deployment-comment.md"), help="Markdown output path."),
     attestation_output: Path = typer.Option(Path("ovk-deployment-attestation.json"), help="Attestation output path."),
-    manifest_output: Path = typer.Option(Path("ovk-deployment-artifact-manifest.json"), help="Artifact manifest output path."),
-    quality_output: Path = typer.Option(Path("ovk-deployment-evidence-quality.json"), help="Evidence quality report output path."),
+    manifest_output: Path = typer.Option(
+        Path("ovk-deployment-artifact-manifest.json"), help="Artifact manifest output path."
+    ),
+    quality_output: Path = typer.Option(
+        Path("ovk-deployment-evidence-quality.json"), help="Evidence quality report output path."
+    ),
     advisory: bool = typer.Option(False, help="Write outputs and exit 0."),
 ) -> None:
     """Run the deployment approval state machine path."""
-    evidence = evaluate_approval_state_machine(read_json_file(input_json), repo=repo, head_sha=head_sha, base_sha=base_sha)
+    evidence = evaluate_approval_state_machine(
+        read_json_file(input_json), repo=repo, head_sha=head_sha, base_sha=base_sha
+    )
     _finish_lane(
         make_bundle([evidence]),
         label="deployment",
@@ -725,7 +747,9 @@ def run_cmd(
 @app.command("generate-test")
 def generate_test(
     evidence_bundle: Path = typer.Option(..., "--evidence", help="Evidence bundle JSON."),
-    output_dir: Path = typer.Option(Path(".verification/generated_tests"), help="Regression artifact output directory."),
+    output_dir: Path = typer.Option(
+        Path(".verification/generated_tests"), help="Regression artifact output directory."
+    ),
 ) -> None:
     """Generate regression artifacts from bundle counterexamples."""
     bundle = EvidenceBundle.model_validate(read_json_file(evidence_bundle))
@@ -740,11 +764,7 @@ def repair_suggest(
 ) -> None:
     """Emit machine-readable repair hints from bundle counterexamples."""
     bundle = EvidenceBundle.model_validate(read_json_file(evidence_bundle))
-    counterexamples = [
-        counterexample
-        for evidence in bundle.evidence
-        for counterexample in evidence.counterexamples
-    ]
+    counterexamples = [counterexample for evidence in bundle.evidence for counterexample in evidence.counterexamples]
     if not counterexamples:
         typer.echo(json.dumps({"repair_hints": [], "blocked": bundle.decision.get("merge_recommendation") == "block"}))
         return

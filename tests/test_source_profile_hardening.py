@@ -27,13 +27,7 @@ def test_fastapi_ast_detects_admin_bypass() -> None:
         "def users():\n"
         "    return []\n"
     )
-    head = (
-        "from fastapi import FastAPI\n"
-        "app = FastAPI()\n"
-        "@app.get('/admin/users')\n"
-        "def users():\n"
-        "    return []\n"
-    )
+    head = "from fastapi import FastAPI\napp = FastAPI()\n@app.get('/admin/users')\ndef users():\n    return []\n"
     materials = materials_from_pair(path="app.py", base_source=base, head_source=head)
     ir = FastApiAstAuthorizationCompiler().compile(materials)
     assert any("authorization.fastapi.ast_v1" in note for note in ir.warnings)
@@ -42,12 +36,7 @@ def test_fastapi_ast_detects_admin_bypass() -> None:
 
 def test_fastapi_ast_marks_dynamic_path_unsupported() -> None:
     source = (
-        "from fastapi import FastAPI\n"
-        "app = FastAPI()\n"
-        "path = '/x'\n"
-        "@app.get(path)\n"
-        "def handler():\n"
-        "    return {}\n"
+        "from fastapi import FastAPI\napp = FastAPI()\npath = '/x'\n@app.get(path)\ndef handler():\n    return {}\n"
     )
     materials = materials_from_pair(path="app.py", base_source=source, head_source=source)
     ir = FastApiAstAuthorizationCompiler().compile(materials)
@@ -113,21 +102,13 @@ def test_kubernetes_controller_selector_edge() -> None:
 def test_profile_provers_and_bindings() -> None:
     repo = Path(__file__).resolve().parents[1]
     assert compiler_binding_for("authorization.fastapi.ast_v1")
-    fastapi = prove_fastapi_ast_profile(
-        repo, enforcement_test="tests/test_authorization_enforcement.py"
-    )
+    fastapi = prove_fastapi_ast_profile(repo, enforcement_test="tests/test_authorization_enforcement.py")
     assert fastapi.as_dict()["strict_eligible"] is True
-    tf = prove_terraform_recursive_profile(
-        repo, enforcement_test="tests/test_remaining_lane_enforcement.py"
-    )
+    tf = prove_terraform_recursive_profile(repo, enforcement_test="tests/test_remaining_lane_enforcement.py")
     assert tf.as_dict()["strict_eligible"] is True
-    k8s = prove_k8s_controller_profile(
-        repo, enforcement_test="tests/test_remaining_lane_enforcement.py"
-    )
+    k8s = prove_k8s_controller_profile(repo, enforcement_test="tests/test_remaining_lane_enforcement.py")
     assert k8s.as_dict()["strict_eligible"] is True
-    actions = prove_actions_permissions_flow(
-        repo, enforcement_test="tests/test_remaining_lane_enforcement.py"
-    )
+    actions = prove_actions_permissions_flow(repo, enforcement_test="tests/test_remaining_lane_enforcement.py")
     assert actions.as_dict()["strict_eligible"] is True
 
 

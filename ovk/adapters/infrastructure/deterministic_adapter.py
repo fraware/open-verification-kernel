@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from typing import Any
 
-from ovk.adapters.infra.exposure import find_exposure_counterexamples
-from ovk.adapters.infra.validation import validate_infra_input
 from ovk.core.bundle import content_digest
 from ovk.core.execution_models import (
     BackendCapabilityAssessment,
@@ -25,7 +22,6 @@ from ovk.core.execution_models import (
     VerificationObligation,
     compute_backend_obligation_id,
     compute_payload_digest,
-    compute_raw_execution_digests,
 )
 from ovk.core.execution_budget import BackendWorker
 from ovk.core.models import VerificationStatus
@@ -194,9 +190,7 @@ class InfrastructureDeterministicAdapter:
             assumptions=["Deterministic infrastructure exposure evaluator."],
             limits=["Does not claim Terraform plan or Kubernetes API execution."],
             counterexamples=list(raw.raw_result.get("counterexamples") or []),
-            generated_artifacts=[
-                {"kind": "backend_provenance", "backend": self.backend_id, "native_execution": False}
-            ],
+            generated_artifacts=[{"kind": "backend_provenance", "backend": self.backend_id, "native_execution": False}],
         )
 
     def explain(self, result: NormalizedBackendResult) -> HumanExplanation:

@@ -76,7 +76,9 @@ class ExpressAuthorizationCompiler:
 
         for path, source in sorted(files.items()):
             for match in _IMPORT.finditer(source):
-                name = match.group("named") or match.group("default") or match.group("imnamed") or match.group("imdefault")
+                name = (
+                    match.group("named") or match.group("default") or match.group("imnamed") or match.group("imdefault")
+                )
                 mod = match.group("mod") or match.group("immod")
                 if not name:
                     continue

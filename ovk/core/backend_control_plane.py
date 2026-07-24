@@ -19,7 +19,6 @@ from typing import Any, Protocol
 
 from ovk.core.backend_aggregation import aggregate_results
 from ovk.core.backend_registry import BackendRegistry, BackendRegistryError
-from ovk.core.bundle import content_digest
 from ovk.core.execution_budget import BackendWorker, LocalSubprocessWorker
 from ovk.core.execution_models import (
     BackendEnvironmentFingerprint,
@@ -318,14 +317,12 @@ class BackendControlPlane:
             adapter = registry.require(selection_backend)
             if adapter.backend_id != selection_backend:
                 raise BackendRegistryError(
-                    f"adapter identity mismatch: expected {selection_backend}, "
-                    f"got {adapter.backend_id}"
+                    f"adapter identity mismatch: expected {selection_backend}, got {adapter.backend_id}"
                 )
             compiled = adapter.compile(obligation, routing)
             if compiled.backend != selection_backend:
                 raise BackendRegistryError(
-                    f"compiled backend {compiled.backend!r} does not match selection "
-                    f"{selection_backend!r}"
+                    f"compiled backend {compiled.backend!r} does not match selection {selection_backend!r}"
                 )
             if compiled.expected_guarantee != expected_guarantee and expected_guarantee:
                 message = (
@@ -379,9 +376,7 @@ class BackendControlPlane:
                 if cached is not None:
                     # Replay stored provenance; never re-infer native_execution.
                     stored_attempt = cached.attempt
-                    result = cached.normalized_result.model_copy(
-                        update={"attempt_id": stored_attempt.attempt_id}
-                    )
+                    result = cached.normalized_result.model_copy(update={"attempt_id": stored_attempt.attempt_id})
                     return stored_attempt, result, compiled
 
             raw = self._run_adapter(adapter, compiled, budget)
@@ -414,9 +409,7 @@ class BackendControlPlane:
         except Exception as exc:  # noqa: BLE001 - isolate failures at backend boundary
             raw = _error_raw(
                 backend=selection_backend,
-                backend_obligation_id=(
-                    compiled.backend_obligation_id if compiled is not None else "uncompiled"
-                ),
+                backend_obligation_id=(compiled.backend_obligation_id if compiled is not None else "uncompiled"),
                 stage="execute",
                 exc=exc,
                 started_at=started_at,
@@ -439,7 +432,6 @@ class BackendControlPlane:
                 generated_artifacts=[],
             )
             return attempt, result, compiled
-
 
     def _run_adapter(self, adapter: Any, compiled: BackendObligation, budget: ExecutionBudget) -> RawBackendExecution:
         """Invoke adapter.run, threading the worker when the adapter accepts it."""

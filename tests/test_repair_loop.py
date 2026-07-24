@@ -14,9 +14,7 @@ def test_ci_secrets_repair_loop_failing_diff_blocks() -> None:
     result = run_check(diff_text=diff_text, repo="test/repo", head_sha="fail", use_cache=False)
     assert result.bundle.decision.get("merge_recommendation") == "block"
     counterexamples = [
-        counterexample
-        for evidence in result.bundle.evidence
-        for counterexample in evidence.counterexamples
+        counterexample for evidence in result.bundle.evidence for counterexample in evidence.counterexamples
     ]
     assert counterexamples
 

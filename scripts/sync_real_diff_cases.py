@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 """Generate benchmarks/formal_pr_bench/real_diff_cases.json from manifest."""
+
 from __future__ import annotations
 
 import json

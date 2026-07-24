@@ -72,7 +72,6 @@ def require_schema_valid(
     if report.valid:
         return
     issues = "; ".join(
-        f"{'/'.join(str(part) for part in issue.path) or '$'}: {issue.message}"
-        for issue in report.issues
+        f"{'/'.join(str(part) for part in issue.path) or '$'}: {issue.message}" for issue in report.issues
     )
     raise ValueError(f"{context} failed schema validation: {issues}")

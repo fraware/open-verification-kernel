@@ -6,9 +6,7 @@ from typing import Any
 
 from ovk.core.router import RoutingConfig, routing_config_from_policy
 
-VALID_DEFAULT_ON_UNKNOWN = frozenset(
-    {"require_human_review", "block", "allow_with_warning"}
-)
+VALID_DEFAULT_ON_UNKNOWN = frozenset({"require_human_review", "block", "allow_with_warning"})
 
 
 def resolve_default_on_unknown(policy: dict[str, Any] | None) -> str:

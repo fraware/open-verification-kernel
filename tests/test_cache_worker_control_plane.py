@@ -78,12 +78,8 @@ def test_control_plane_cache_hit_and_subject_mismatch(tmp_path: Path) -> None:
 def test_policy_digest_mismatch_does_not_reuse_cache(tmp_path: Path) -> None:
     data = json.loads(Path("examples/auth_regression/input_admin_protected.json").read_text(encoding="utf-8"))
     registry = build_authorization_registry()
-    obligation_a = compile_authorization_obligation(
-        data, repo="r", head_sha="h", policy_digest="policy-a"
-    )
-    obligation_b = compile_authorization_obligation(
-        data, repo="r", head_sha="h", policy_digest="policy-b"
-    )
+    obligation_a = compile_authorization_obligation(data, repo="r", head_sha="h", policy_digest="policy-a")
+    obligation_b = compile_authorization_obligation(data, repo="r", head_sha="h", policy_digest="policy-b")
     assert obligation_a.policy_digest != obligation_b.policy_digest
     budget = _budget()
     cache = ControlPlaneResultCache(HardenedResultCache(tmp_path))

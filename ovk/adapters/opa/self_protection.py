@@ -133,7 +133,9 @@ def find_self_protection_violations(data: dict[str, Any]) -> list[SelfProtection
     permissions_after = _phase(data, "after").get("workflow_permissions", {})
     permissions_before = _phase(data, "before").get("workflow_permissions", {})
     if isinstance(permissions_after, dict):
-        before_actions = str(permissions_before.get("actions", "read")) if isinstance(permissions_before, dict) else "read"
+        before_actions = (
+            str(permissions_before.get("actions", "read")) if isinstance(permissions_before, dict) else "read"
+        )
         after_actions = str(permissions_after.get("actions", "read"))
         if before_actions != "write" and after_actions == "write":
             violations.append(

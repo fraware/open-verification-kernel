@@ -6,9 +6,7 @@ from ovk.core.self_protection_input import SelfProtectionMetadata, build_self_pr
 
 
 def test_missing_required_check_metadata_returns_unknown() -> None:
-    data = json.loads(
-        Path("examples/no_agent_self_approval/input_missing_metadata.json").read_text(encoding="utf-8")
-    )
+    data = json.loads(Path("examples/no_agent_self_approval/input_missing_metadata.json").read_text(encoding="utf-8"))
     evidence = evaluate_self_protection(data, repo="example/repo", head_sha="abc")
     assert evidence.backend_claims[0].status.value == "unknown"
     assert evidence.decision["merge_recommendation"] == "require_human_review"

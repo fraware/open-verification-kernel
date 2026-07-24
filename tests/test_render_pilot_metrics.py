@@ -100,8 +100,26 @@ def test_render_merge_preserves_registry_on_rerender(tmp_path: Path) -> None:
 
 def test_merge_external_pilots_registry_wins_on_conflict() -> None:
     merged = merge_external_pilots(
-        [{"repository": "org/repo", "status": "advisory", "check_types": ["ci_secrets"], "strict_enabled": False, "ovk_version_pin": "1.2.0", "prs_evaluated": 5}],
-        [{"repository": "org/repo", "status": "recruiting", "check_types": ["ci_secrets"], "strict_enabled": False, "ovk_version_pin": "1.2.0", "prs_evaluated": 1}],
+        [
+            {
+                "repository": "org/repo",
+                "status": "advisory",
+                "check_types": ["ci_secrets"],
+                "strict_enabled": False,
+                "ovk_version_pin": "1.2.0",
+                "prs_evaluated": 5,
+            }
+        ],
+        [
+            {
+                "repository": "org/repo",
+                "status": "recruiting",
+                "check_types": ["ci_secrets"],
+                "strict_enabled": False,
+                "ovk_version_pin": "1.2.0",
+                "prs_evaluated": 1,
+            }
+        ],
     )
     assert len(merged) == 1
     assert merged[0]["status"] == "advisory"

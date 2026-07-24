@@ -186,9 +186,7 @@ class LaneEvaluatorAdapter:
             },
             expected_guarantee=self.guarantee_type,
         )
-        return provisional.model_copy(
-            update={"backend_obligation_id": compute_backend_obligation_id(provisional)}
-        )
+        return provisional.model_copy(update={"backend_obligation_id": compute_backend_obligation_id(provisional)})
 
     def fingerprint(self, backend_obligation: BackendObligation) -> BackendEnvironmentFingerprint:
         env_payload = {

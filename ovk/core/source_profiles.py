@@ -68,12 +68,7 @@ def source_profile_strict_eligible(
     enforcement_test_present: bool,
 ) -> bool:
     """Return True when a template may claim source_profile_strict_eligible."""
-    return (
-        is_known_source_profile(profile_id)
-        and materials_trusted
-        and coverage_complete
-        and enforcement_test_present
-    )
+    return is_known_source_profile(profile_id) and materials_trusted and coverage_complete and enforcement_test_present
 
 
 def profiles_from_policy(policy: dict[str, Any] | None, *, lane: str) -> list[str]:

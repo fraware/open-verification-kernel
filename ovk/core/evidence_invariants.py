@@ -312,7 +312,11 @@ def _check_control_plane_invariants(bundle: EvidenceBundle) -> list[EvidenceInva
                         )
                     )
 
-        if evidence.aggregation_policy and evidence.decision.get("aggregation_reason") is None and evidence.routing_enforced:
+        if (
+            evidence.aggregation_policy
+            and evidence.decision.get("aggregation_reason") is None
+            and evidence.routing_enforced
+        ):
             # aggregation_reason is optional on legacy decision dicts; required for enforced v2.
             if "aggregation_reason" not in evidence.decision:
                 issues.append(
