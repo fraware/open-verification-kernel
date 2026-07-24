@@ -117,8 +117,9 @@ _SECRET_ENV_DENYLIST = (
 class LocalSubprocessWorker:
     """Local subprocess worker with timeout, cwd bound, and env allowlist.
 
-    Secret-bearing environment variables are never inherited. The parent
-    environment is otherwise preserved so native toolchains keep working in CI.
+    Child processes inherit only configured safe parent variables, plus any
+    explicit non-secret additions supplied by the caller. Secret-bearing
+    names are always stripped. Non-positive wall-time budgets are rejected.
     """
 
     allowed_env_keys: frozenset[str] = field(
@@ -152,6 +153,16 @@ class LocalSubprocessWorker:
         max_stdout_bytes: int = 1_000_000,
         max_stderr_bytes: int = 1_000_000,
     ) -> WorkerResult:
+        if timeout_seconds <= 0:
+            return WorkerResult(
+                exit_code=None,
+                timed_out=False,
+                stdout="",
+                stderr=f"non-positive wall-time budget rejected: {timeout_seconds}",
+                cwd=str(cwd.resolve()) if cwd else None,
+                command=tuple(command),
+            )
+
         cwd_resolved = cwd.resolve()
         if self.bound_roots:
             if not any(_is_relative_to(cwd_resolved, root.resolve()) for root in self.bound_roots):
@@ -171,7 +182,7 @@ class LocalSubprocessWorker:
                 cwd=str(cwd_resolved),
                 env=child_env,
                 capture_output=True,
-                timeout=timeout_seconds if timeout_seconds > 0 else None,
+                timeout=timeout_seconds,
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
@@ -202,19 +213,17 @@ class LocalSubprocessWorker:
         )
 
     def _build_env(self, extra: Mapping[str, str] | None) -> dict[str, str]:
-        """Build a child environment.
+        """Build a child environment from the configured allowlist only.
 
-        Default behavior inherits the parent environment except for known
-        secret-bearing keys. Callers that need a tighter sandbox can pass
-        ``extra`` with only the keys they need after constructing a worker
-        whose ``allowed_env_keys`` is interpreted as an optional soft guide
-        for documentation; secrets are always stripped.
+        Parent variables are inherited only when their names appear in
+        ``allowed_env_keys``. Explicit ``extra`` keys are merged unless they
+        match the secret denylist. Secret-bearing names are always removed.
         """
-        baseline = {
-            key: value
-            for key, value in os.environ.items()
-            if key.upper() not in _SECRET_ENV_DENYLIST
-        }
+        allow = {key.upper() for key in self.allowed_env_keys}
+        baseline: dict[str, str] = {}
+        for key, value in os.environ.items():
+            if key.upper() in allow and key.upper() not in _SECRET_ENV_DENYLIST:
+                baseline[key] = value
         if extra:
             for key, value in extra.items():
                 if key.upper() in _SECRET_ENV_DENYLIST:
@@ -222,8 +231,11 @@ class LocalSubprocessWorker:
                 baseline[key] = value
         for denied in _SECRET_ENV_DENYLIST:
             baseline.pop(denied, None)
-            # Also drop common case variants.
             baseline.pop(denied.lower(), None)
+            # Drop any case variant that might have been injected.
+            for existing in list(baseline):
+                if existing.upper() == denied.upper():
+                    baseline.pop(existing, None)
         return baseline
 
 
