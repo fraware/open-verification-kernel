@@ -73,3 +73,27 @@ def test_shadow_and_bridge_material_sizes_bind_payload() -> None:
     )
     assert bridged.size_bytes == len(canonical_material_bytes(data))
     assert bridged.size_bytes != len(bridged.sha256)
+
+def test_ci_secrets_legacy_material_size_binds_input_payload() -> None:
+    data = {
+        "trust_context": "untrusted_fork_pr",
+        "workflows": [
+            {
+                "workflow_id": "ci",
+                "triggers": ["pull_request"],
+                "secrets_used": [],
+                "runs_untrusted_code": False,
+            }
+        ],
+    }
+    obligation = compile_ci_secrets_obligation(
+        data,
+        repo="example/repo",
+        head_sha="head",
+        base_sha="base",
+    )
+    assert len(obligation.materials) == 1
+    reference = obligation.materials[0]
+    assert reference.size_bytes == len(canonical_material_bytes(data))
+    assert reference.size_bytes != len(reference.sha256)
+

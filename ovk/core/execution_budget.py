@@ -98,18 +98,28 @@ class BackendWorker(Protocol):
     ) -> WorkerResult: ...
 
 
-# Environment variable names that must never be inherited into backend workers.
-_SECRET_ENV_DENYLIST = (
-    "AWS_SECRET_ACCESS_KEY",
-    "AWS_SESSION_TOKEN",
-    "AZURE_CLIENT_SECRET",
-    "GITHUB_TOKEN",
-    "GH_TOKEN",
-    "NPM_TOKEN",
-    "OPENAI_API_KEY",
-    "OVK_SIGNING_KEY",
-    "PRIVATE_KEY",
-    "SSH_AUTH_SOCK",
+# Environment variable names that must never be passed, even when a caller
+# supplies them explicitly. The worker otherwise starts from a minimal
+# allowlisted parent environment and accepts explicit non-secret additions.
+_SECRET_ENV_DENYLIST = frozenset(
+    {
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AZURE_CLIENT_ID",
+        "AZURE_CLIENT_SECRET",
+        "AZURE_TENANT_ID",
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "HOLDOUT_DOWNLOAD_TOKEN",
+        "NPM_TOKEN",
+        "OPENAI_API_KEY",
+        "OVK_SIGNING_KEY",
+        "PRIVATE_KEY",
+        "PYPI_API_TOKEN",
+        "SSH_AUTH_SOCK",
+    }
 )
 
 
@@ -119,7 +129,8 @@ class LocalSubprocessWorker:
 
     Child processes inherit only configured safe parent variables, plus any
     explicit non-secret additions supplied by the caller. Secret-bearing
-    names are always stripped. Non-positive wall-time budgets are rejected.
+    names are always stripped from inherited and explicit environments.
+    Non-positive wall-time budgets are rejected without starting a process.
     """
 
     allowed_env_keys: frozenset[str] = field(
@@ -138,6 +149,9 @@ class LocalSubprocessWorker:
                 "PYTHONPATH",
                 "VIRTUAL_ENV",
                 "LD_LIBRARY_PATH",
+                "DYLD_LIBRARY_PATH",
+                "SSL_CERT_FILE",
+                "SSL_CERT_DIR",
             }
         )
     )
@@ -153,16 +167,6 @@ class LocalSubprocessWorker:
         max_stdout_bytes: int = 1_000_000,
         max_stderr_bytes: int = 1_000_000,
     ) -> WorkerResult:
-        if timeout_seconds <= 0:
-            return WorkerResult(
-                exit_code=None,
-                timed_out=False,
-                stdout="",
-                stderr=f"non-positive wall-time budget rejected: {timeout_seconds}",
-                cwd=str(cwd.resolve()) if cwd else None,
-                command=tuple(command),
-            )
-
         cwd_resolved = cwd.resolve()
         if self.bound_roots:
             if not any(_is_relative_to(cwd_resolved, root.resolve()) for root in self.bound_roots):
@@ -174,6 +178,16 @@ class LocalSubprocessWorker:
                     cwd=str(cwd_resolved),
                     command=tuple(command),
                 )
+
+        if timeout_seconds <= 0:
+            return WorkerResult(
+                exit_code=None,
+                timed_out=True,
+                stdout="",
+                stderr="execution budget permits no backend wall time",
+                cwd=str(cwd_resolved),
+                command=tuple(command),
+            )
 
         child_env = self._build_env(env)
         try:

@@ -2,8 +2,9 @@ name: FormalPR-Holdout eval
 
 # Optional gated job. Does not run on ordinary push/PR CI.
 # Requires repository secret HOLDOUT_DOWNLOAD_TOKEN with read access to
-# fraware/FormalPR-Holdout private release assets.
-# Requires repository variable HOLDOUT_ASSET_SHA256 (immutable asset digest).
+# fraware/FormalPR-Holdout private release assets. The independently recorded
+# asset SHA-256 is required so a mutable/replaced release asset cannot execute.
+# Prefer workflow input asset_sha256; otherwise repository variable HOLDOUT_ASSET_SHA256.
 on:
   workflow_dispatch:
     inputs:
