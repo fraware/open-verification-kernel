@@ -164,3 +164,20 @@ This directory becomes machine-readable memory for future agents.
 OVK is backend-neutral, but it is not semantics-neutral.
 
 A policy evaluation, bounded model check, SMT satisfiability query, TLA+ trace, Dafny proof, Verus proof, Lean theorem, and runtime monitor are different guarantee classes. OVK records those distinctions in every capability manifest and evidence object.
+
+## Verifier-assurance mode (opt-in)
+
+Distinct from ordinary `ovk check` / MCP / Action. Requires a resolved [PCS pin](PCS_PIN.md); missing pin or unknown schema versions fail closed for assurance paths only.
+
+```text
+ovk verifier describe | snapshot-config | run | replay | mutate | validate-evidence
+        ↓
+ConfigurationSnapshot → VerifierProfile.v1 (PCS)
+        ↓
+run_assurance → VerifierInvocationRecord.v1 + VerificationResult.v1 + evidence/
+        ↓
+replay → VerifierReplayReport.v1 (immutable; no production overwrite)
+mutate → VerifierMutationManifest.v1 (production_prohibition always true)
+```
+
+Assurance-capable backends live under `ovk/adapters/assurance/` and register only for the verifier registry (not ordinary lane routing). Ordinary `ovk.cache.v3` hits are never labeled as assurance replay. See [assurance/GUIDE.md](assurance/GUIDE.md) and [adr/0001-verifier-assurance-architecture.md](adr/0001-verifier-assurance-architecture.md).

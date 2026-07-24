@@ -59,3 +59,19 @@ OVK focuses on agentic engineering risk. The first threat model covers AI coding
 - Adapter manifests with assumptions and limits.
 - Adversarial regression tests for self-disable and timeout cases.
 - Optional in-toto-compatible evidence predicate.
+
+## Verifier-assurance (opt-in) threats
+
+Assurance mode (`ovk verifier …`) adds PCS-bound profiles, invocation records, and evidence packs. Additional threats and controls:
+
+| Threat | Description | Required response |
+|---|---|---|
+| Fabricated native pass | Adapter claims assurance without a real checker | Forbid stubs; missing checker → typed indeterminate |
+| Guarantee laundering | Normalization upgrades observational/empirical to formal | Clamp guarantee class; conformance test |
+| Secret leakage in profiles | Env/config secrets exported in snapshots | Redact before serialize; adversarial tests |
+| Replay forgery | Claim matched replay under drift or missing deps | Fail closed; stochastic cannot claim matched |
+| Production profile overwrite | Mutation silently replaces production profile | Always `production_prohibition`; path refuse |
+| Hidden-label leakage | Holdout/adjudication labels enter verifier inputs or packs | Post-freeze import only; refuse label keys |
+| Mode confusion | Treat ordinary cache replay as assurance replay | Separate artifacts and docs (ADR 0001) |
+
+See [assurance/GUIDE.md](assurance/GUIDE.md) and [adr/0001-verifier-assurance-architecture.md](adr/0001-verifier-assurance-architecture.md).

@@ -1,6 +1,6 @@
 # Backend Execution Guide
 
-OVK exposes a common evidence contract across ten formal-methods backends. Their execution depth is not uniform. This document is the authoritative statement of what each backend actually executes in v1.2.0 RC.
+OVK exposes a common evidence contract across ten formal-methods backends. Their execution depth is not uniform. This document is the authoritative statement of what each backend actually executes in the current `1.2.1` package line (ordinary mode). Assurance-capable backends are listed separately below and are opt-in via `ovk verifier`.
 
 ## Execution maturity
 
@@ -14,10 +14,25 @@ OVK exposes a common evidence contract across ten formal-methods backends. Their
 | `kani` | Deterministic Rust-harness contract evaluator | No | Native Kani execution is not implemented |
 | `dafny` | Deterministic proof-obligation contract evaluator | No | Native Dafny verification is not implemented |
 | `verus` | Deterministic verified-Rust contract evaluator | No | Native Verus verification is not implemented |
-| `lean` | Deterministic theorem-obligation contract evaluator | No | Native Lean checking is not implemented |
+| `lean` | Deterministic theorem-obligation contract evaluator | No | Native Lean checking is not implemented; ordinary adapter is **not** assurance_capable |
 | `alloy` | Deterministic relational-model contract evaluator | No | Native Alloy analysis is not implemented |
 
 A binary-presence or version probe is never labeled as native verification. Evidence artifacts record `used_native_binary`, the guarantee type, assumptions, and limits.
+
+### Assurance-capable backends (opt-in `ovk verifier`)
+
+These are separate from ordinary lane routing. See [assurance/GUIDE.md](assurance/GUIDE.md).
+
+| `backend_id` | Real checker | Guarantee class | Notes |
+|---|---|---|---|
+| `auth-state-predicate` | Exact predicate engine over declared state | observational | VA-06 |
+| `pytest-suite` | `python -m pytest` + junit | runtime_observed | VA-07 |
+| `opa-policy` | `opa eval` | certificate_checked | VA-08; missing opa → indeterminate |
+| `lean-pfcore` | `lean` / optional lake | formally_checked | VA-09; ordinary Lean fallback stays non-assurance |
+| `sql-state-diff` | SQLite digest diff | observational | VA-10 |
+| `model-judge` | Judge client (CI contract fake) | empirically_measured | VA-11; stochastic; no guarantee upgrade |
+
+Cedar is never assurance_capable in this programme.
 
 ## CI tiers
 
@@ -51,7 +66,7 @@ TLA+, Kani, Dafny, Verus, Lean, and Alloy remain non-blocking integration surfac
 
 Capability manifests live under `adapters/*/capability.json` and are packaged with the wheel. They support intent/backend ranking and MCP capability discovery.
 
-In v1.2.0 RC, router output is advisory metadata. Core lane obligations still execute their lane evaluator, and the selected generic backend does not yet control compilation or execution. Evidence records `routing_enforced: false` until the backend-selection control plane is implemented.
+Lane routing may be **enforced** when `.verification/config.yml` enables it for a lane (`routing_enforced: true` on evidence). The default product path remains shadow/legacy-authoritative until adopters opt into enforced lane policy — see [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md) and [POLICY.md](POLICY.md). Router metadata alone is never a substitute for recorded guarantee type, assumptions, and limits.
 
 ## Entry points
 

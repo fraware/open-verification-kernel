@@ -41,3 +41,20 @@ JSON schemas for OVK objects. See also [ARTIFACTS.md](ARTIFACTS.md).
 | [external.pilots.registry.schema.json](../schemas/external.pilots.registry.schema.json) | ovk.external_pilots_registry.v1 | `docs/benchmarks/external-pilots-registry.json` |
 
 Generated evidence bundles are validated at write time using the canonical Pydantic `EvidenceBundle` model and cross-checked against [verification.bundle.schema.json](../schemas/verification.bundle.schema.json) in CI. Release bundles are additionally checked with `ovk validate-outputs`. Adapter `capability.json` files are validated in CI and `ovk release-preflight` via `scripts/validate_capabilities.py`.
+
+## Portable PCS verifier-assurance schemas (not forked here)
+
+OVK does **not** vendor PCS VA schemas under `schemas/`. Those types are owned by `pcs-core` and resolved through the pin documented in [PCS_PIN.md](PCS_PIN.md) / `ovk.assurance.pin`.
+
+| PCS artifact | Consumed by OVK | Typical pack / CLI filename |
+|---|---|---|
+| `VerifierProfile.v1` | `ovk verifier snapshot-config` / run | `verifier_profile.pcs.json` |
+| `VerificationResult.v1` | `ovk verifier run` / validate-evidence | `verification_result.pcs.json` |
+| `VerifierInvocationRecord.v1` | run / validate-evidence / replay | `invocation.json` (PCS body) |
+| `VerifierReplayReport.v1` | `ovk verifier replay` | `replay_report.pcs.json` |
+| `VerifierMutationManifest.v1` | `ovk verifier mutate` | `*.mutation.json` beside mutated profile |
+| Opaque `invocation_ref` | On `VerificationResult.v1` | `invocation_id` + `invocation_digest` only |
+
+Pack layout extras (`compiled_obligation.json`, `raw/`, `normalized/`, `provenance/`) are OVK-local sidecars; they are not PCS schema types. Digests and required PCS artifact types are enforced by `ovk.assurance.pin.verify_pin_digests()` against [PCS_PIN.md](PCS_PIN.md).
+
+`verification.capability.schema.json` may include **optional** assurance sections; missing sections mean ordinary-only. See [assurance/GUIDE.md](assurance/GUIDE.md).

@@ -122,3 +122,17 @@ Adapters must not:
 - generate evidence not bound to input digests;
 - allow an agent-authored PR to alter adapter trust settings without human review;
 - execute arbitrary untrusted commands outside the adapter sandbox.
+
+## Ordinary vs assurance adapters
+
+Ordinary adapters participate in `ovk check` / MCP / Action routing and emit OVK evidence bundles. Assurance-capable adapters are opt-in (`ovk verifier …`), advertise validated assurance sections in their capability manifests, and export PCS-bound profiles/results via a pinned `pcs-core` revision.
+
+Assurance-capable adapters must additionally:
+
+- fail closed on missing checkers (typed indeterminate, never a fabricated native pass);
+- refuse to upgrade guarantee class during normalization;
+- redact secrets before configuration snapshot / profile export;
+- keep mutation from overwriting production profiles;
+- never label ordinary `ovk.cache.v3` hits as assurance replay.
+
+Cedar and ordinary Lean `deterministic_fallback` are not assurance-capable. See [assurance/GUIDE.md](assurance/GUIDE.md), [assurance/ADAPTER_INVENTORY.md](assurance/ADAPTER_INVENTORY.md), and [PCS_PIN.md](PCS_PIN.md).

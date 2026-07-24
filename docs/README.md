@@ -10,6 +10,7 @@ Use this index as the canonical entry point. Each guide covers one topic; cross-
 |---|---|
 | **Adopting in CI** | [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md) → [INTEGRATION.md](INTEGRATION.md) → [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md) |
 | **Contributing code** | [CONTRIBUTING.md](CONTRIBUTING.md) → [ARCHITECTURE.md](ARCHITECTURE.md) → [ADAPTER_CONTRACT.md](ADAPTER_CONTRACT.md) |
+| **Verifier-assurance** | [assurance/GUIDE.md](assurance/GUIDE.md) → [PCS_PIN.md](PCS_PIN.md) → [adr/0001-verifier-assurance-architecture.md](adr/0001-verifier-assurance-architecture.md) |
 | **Maintainers** | [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md) → [RELEASE.md](RELEASE.md) → `ovk release-preflight` (release readiness checks) |
 | **Spec / security review** | [SYSTEM_SPEC.md](SYSTEM_SPEC.md) → [FORMAL_SPEC.md](FORMAL_SPEC.md) → [THREAT_MODEL.md](THREAT_MODEL.md) → [DEEP_AUDIT_2026-07-23_R2.md](DEEP_AUDIT_2026-07-23_R2.md) |
 
@@ -52,9 +53,22 @@ Use this index as the canonical entry point. Each guide covers one topic; cross-
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System architecture and runner flows |
 | [SYSTEM_SPEC.md](SYSTEM_SPEC.md) | System specification |
 | [FORMAL_SPEC.md](FORMAL_SPEC.md) | Formal properties and security rules |
-| [THREAT_MODEL.md](THREAT_MODEL.md) | Threat model |
-| [ADAPTER_CONTRACT.md](ADAPTER_CONTRACT.md) | Backend adapter contract |
+| [THREAT_MODEL.md](THREAT_MODEL.md) | Threat model (includes assurance threats) |
+| [ADAPTER_CONTRACT.md](ADAPTER_CONTRACT.md) | Backend adapter contract (ordinary + assurance rules) |
 | [ROADMAP.md](ROADMAP.md) | Release history and planned work |
+
+## Verifier-assurance (opt-in)
+
+Ordinary `ovk check` / MCP / Action are unchanged. Assurance is a separate mode gated on a pcs-core pin.
+
+| Document | Purpose |
+|---|---|
+| [assurance/GUIDE.md](assurance/GUIDE.md) | Install, backends, CLI, non-claims (VA-01…14) |
+| [assurance/ADAPTER_INVENTORY.md](assurance/ADAPTER_INVENTORY.md) | Ordinary vs assurance adapters and evidence models |
+| [adr/0001-verifier-assurance-architecture.md](adr/0001-verifier-assurance-architecture.md) | Ownership, PCS gate, compatibility freeze |
+| [PCS_PIN.md](PCS_PIN.md) | Development pin vs published pin; schema digests |
+| [baseline/OVK-VA-00-baseline.md](baseline/OVK-VA-00-baseline.md) | Programme-start baseline (+ progress addendum) |
+| [CHANGELOG_VERIFIER_ASSURANCE.md](CHANGELOG_VERIFIER_ASSURANCE.md) | Programme changelog |
 
 ## Reference
 
@@ -69,6 +83,7 @@ Use this index as the canonical entry point. Each guide covers one topic; cross-
 
 | Document | Purpose |
 |---|---|
+| [RELEASE_NOTES_v1.2.1.md](RELEASE_NOTES_v1.2.1.md) | v1.2.1 changelog |
 | [RELEASE_NOTES_v1.2.0.md](RELEASE_NOTES_v1.2.0.md) | v1.2.0 changelog |
 | [RELEASE_NOTES_v1.1.0.md](RELEASE_NOTES_v1.1.0.md) | v1.1.0 changelog |
 | [RELEASE_NOTES_v1.0.0.md](RELEASE_NOTES_v1.0.0.md) | v1.0.0 changelog |
@@ -85,6 +100,9 @@ docs/
   INTEGRATION.md            # install and GitHub Actions
   LANES.md, BACKENDS.md, …  # reference and operations guides
   ARCHITECTURE.md, …        # design and specification
+  adr/                      # architecture decision records
+  assurance/                # verifier-assurance inventory and guides
+  baseline/                 # programme baseline records
   benchmarks/               # committed leaderboard and adoption JSON
   templates/                # external pilot manifest template
 ```

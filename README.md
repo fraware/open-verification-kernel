@@ -140,6 +140,9 @@ Copy a full consumer example: [`examples/github_workflows/external_consumer.yml`
 | **Agent server** (`ovk-mcp`) | Let coding agents run checks from their tool loop (`pip install '.[mcp]'`) |
 | **Templates** ([`templates/`](templates/)) | Reusable rules for common risks (100 included) |
 | **Benchmark** (`ovk bench`) | Measure regression on agent-style PR diffs |
+| **Assurance** (`ovk verifier …`) | Opt-in reproducible verifier runs with PCS-bound evidence packs ([docs/assurance/GUIDE.md](docs/assurance/GUIDE.md)) |
+
+Ordinary PR checks (`ovk check` / Action / MCP) stay the default. Assurance mode does not replace them and requires a resolved [pcs-core pin](docs/PCS_PIN.md).
 
 Agent repair walkthrough: [docs/AGENT_REPAIR_LOOP.md](docs/AGENT_REPAIR_LOOP.md)
 
@@ -184,6 +187,8 @@ Questions, ideas, or a first PR — you are welcome. See [docs/ARCHITECTURE.md](
 | Install locally or wire up CI | [INTEGRATION.md](docs/INTEGRATION.md) |
 | Tune strictness and checker selection | [POLICY.md](docs/POLICY.md) |
 | Understand checkers and fallbacks | [BACKENDS.md](docs/BACKENDS.md) |
+| Use opt-in verifier-assurance mode | [assurance/GUIDE.md](docs/assurance/GUIDE.md) |
+| See the PCS pin / merge gate | [PCS_PIN.md](docs/PCS_PIN.md) |
 | Run or extend the benchmark | [BENCHMARK.md](docs/BENCHMARK.md) |
 | Roll out on an external OSS repo | [EXTERNAL_PILOT_PLAYBOOK.md](docs/EXTERNAL_PILOT_PLAYBOOK.md) |
 | See current capabilities | [STATUS.md](docs/STATUS.md) |
@@ -197,12 +202,12 @@ Full index: [docs/README.md](docs/README.md)
 ## Repository layout
 
 ```
-schemas/      Shared JSON schemas for configs and evidence
-ovk/          Python package — CLI, routing, adapters
+schemas/      Shared JSON schemas for configs and evidence (OVK-owned; no PCS VA forks)
+ovk/          Python package — CLI, routing, adapters, optional assurance/
 templates/    100 ready-made property templates
-examples/     Passing and failing scenarios you can run today
+examples/     Passing and failing scenarios; examples/assurance/ for PCS packs
 benchmarks/   FormalPR-Bench cases and real PR diff corpus
-docs/         Guides, specs, and release notes
+docs/         Guides, specs, ADRs, and release notes
 ```
 
 ---
