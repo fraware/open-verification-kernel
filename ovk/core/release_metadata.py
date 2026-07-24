@@ -34,6 +34,12 @@ SUPPORTED_COMMANDS = [
     "ovk template apply",
     "ovk bench",
     "ovk pilot",
+    "ovk verifier describe",
+    "ovk verifier snapshot-config",
+    "ovk verifier run",
+    "ovk verifier validate-evidence",
+    "ovk verifier replay",
+    "ovk verifier mutate",
 ]
 
 

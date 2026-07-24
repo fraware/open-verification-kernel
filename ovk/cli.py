@@ -54,6 +54,10 @@ app = typer.Typer(help="Open Verification Kernel CLI")
 template_app = typer.Typer(help="Verification intent template commands")
 app.add_typer(template_app, name="template")
 
+from ovk.assurance.cli import verifier_app
+
+app.add_typer(verifier_app, name="verifier")
+
 
 def _finish_lane(
     bundle: EvidenceBundle,
