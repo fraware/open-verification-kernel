@@ -45,3 +45,21 @@ ovk/package_data/
 .vscode/
 *.swp
 *~
+
+# Local verifier-assurance / baseline scratch (never ship)
+.ovk-va00-*/
+.ovk-va00-*.txt
+.ovk-assurance-*/
+.ovk-va-*/
+.ovk-check-*/
+evidence-pack-*/
+tmp-assurance-*/
+**/evidence-pack-*/
+**/tmp-assurance-*/
+
+# Editor / local backup debris
+*.bak
+*.bak_*
+*.bak_check
+docs/**/*.bak*
+
