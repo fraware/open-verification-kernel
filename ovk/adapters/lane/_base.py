@@ -249,11 +249,6 @@ class LaneEvaluatorAdapter:
 
         finished_at = _utc_now_iso()
         duration_ms = (time.perf_counter() - started) * 1000.0
-        # Soft budget recording only; hard isolation arrives with the control plane.
-        if duration_ms > budget.per_backend_wall_time_seconds * 1000.0 and termination == "completed":
-            termination = "timeout"
-            raw_result["status"] = "unknown"
-            raw_result["timeout"] = True
 
         raw = RawBackendExecution(
             backend=self.backend_id,

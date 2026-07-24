@@ -30,6 +30,7 @@ from ovk.core.execution_models import (
     compute_payload_digest,
     compute_raw_execution_digests,
 )
+from ovk.core.execution_budget import BackendWorker
 from ovk.core.models import VerificationStatus
 
 
@@ -173,7 +174,8 @@ class OpaNativeSelfProtectionAdapter:
         self,
         backend_obligation: BackendObligation,
         budget: ExecutionBudget,
-        worker=None,
+        *,
+        worker: BackendWorker | None = None,
     ) -> RawBackendExecution:
         started = time.perf_counter()
         started_at = _utc_now_iso()
@@ -186,6 +188,24 @@ class OpaNativeSelfProtectionAdapter:
                 native_execution=False,
                 exit_code=1,
                 raw_result={"status": "unknown", "reason": "budget timeout", "counterexamples": []},
+                started_at=started_at,
+                finished_at=_utc_now_iso(),
+                duration_ms=(time.perf_counter() - started) * 1000.0,
+            )
+            return raw.model_copy(update=compute_raw_execution_digests(raw))
+
+        if worker is None:
+            raw = RawBackendExecution(
+                backend=self.backend_id,
+                backend_obligation_id=backend_obligation.backend_obligation_id,
+                termination="tool_error",
+                native_execution=False,
+                exit_code=1,
+                raw_result={
+                    "status": "error",
+                    "reason": "authoritative OPA adapter requires BackendWorker",
+                    "counterexamples": [],
+                },
                 started_at=started_at,
                 finished_at=_utc_now_iso(),
                 duration_ms=(time.perf_counter() - started) * 1000.0,
