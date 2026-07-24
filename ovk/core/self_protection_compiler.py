@@ -17,6 +17,29 @@ from ovk.core.models import RiskSeverity, VerificationSubject
 COMPILER_ID = "ovk.self_protection.neutral.v1"
 COMPILER_VERSION = "0.1.0"
 
+TRUSTED_METADATA_PROVENANCE_KINDS: frozenset[str] = frozenset(
+    {
+        "protected_base_workflow",
+        "signed_service",
+        "maintainer_supplied",
+    }
+)
+
+
+def resolve_metadata_trusted(policy: dict[str, Any] | None) -> bool:
+    """Return True only when policy supplies explicit trusted provenance."""
+    if not isinstance(policy, dict):
+        return False
+    trust = policy.get("trust")
+    if not isinstance(trust, dict):
+        return False
+    if not bool(trust.get("metadata_trusted")):
+        return False
+    provenance = trust.get("provenance_kind") or trust.get("provenance")
+    if provenance not in TRUSTED_METADATA_PROVENANCE_KINDS:
+        return False
+    return True
+
 
 def _phase(data: dict[str, Any], name: str) -> dict[str, Any]:
     value = data.get(name, {})
@@ -30,12 +53,13 @@ def compile_self_protection_obligation(
     head_sha: str,
     base_sha: str | None = None,
     policy_digest: str | None = None,
-    metadata_trusted: bool = True,
+    metadata_trusted: bool = False,
 ) -> VerificationObligation:
     """Compile a self-protection obligation with base/head metadata materials.
 
     When ``metadata_trusted`` is True, before/after required-check materials are
     marked trusted. Untrusted metadata cannot authorize allow under enforcement.
+    Trust requires explicit policy provenance via ``resolve_metadata_trusted``.
     """
     before = _phase(data, "before")
     after = _phase(data, "after")
