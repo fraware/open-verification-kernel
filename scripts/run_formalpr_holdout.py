@@ -3,13 +3,22 @@
 
 Fail-closed: never prints protected labels or case ids. Ordinary OVK CI should
 not invoke this without HOLDOUT_DOWNLOAD_TOKEN (or a pre-fetched artifact).
+
+Supply-chain requirements:
+- immutable SHA-256 of the release asset must be supplied and verified;
+- archive extraction is path-safe (no links, devices, FIFOs, or traversal);
+- evaluate.py runs with an isolated env that excludes GitHub/holdout tokens;
+- aggregate output is schema-validated and leakage-guarded.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
+import stat
 import subprocess
 import sys
 import tarfile
@@ -17,6 +26,7 @@ import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 
 FORBIDDEN_SUBSTRINGS = (
@@ -34,12 +44,33 @@ FORBIDDEN_SUBSTRINGS = (
     "syn-unknown-surface-01",
 )
 
+_TOKEN_ENV_KEYS = frozenset(
+    {
+        "HOLDOUT_DOWNLOAD_TOKEN",
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+        "ACTIONS_RUNTIME_TOKEN",
+    }
+)
+
+_SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+
+_REQUIRED_AGGREGATE_KEYS = (
+    "schema_version",
+    "benchmark",
+    "holdout_release_tag",
+    "ovk_commit_sha",
+    "cases_scored",
+    "lanes",
+    "leakage_guard",
+)
+
 
 def _fail(msg: str) -> None:
     raise SystemExit(f"fail-closed: {msg}")
 
 
-def assert_aggregate_safe(payload: dict) -> None:
+def assert_aggregate_safe(payload: dict[str, Any]) -> None:
     text = json.dumps(payload)
     for token in FORBIDDEN_SUBSTRINGS:
         if token in text:
@@ -53,6 +84,37 @@ def assert_aggregate_safe(payload: dict) -> None:
     # Refuse single pass-rate collapse as the only metric surface.
     if set(payload.keys()) <= {"pass_rate", "schema_version", "benchmark"}:
         _fail("refusing pass-rate-only payload")
+
+
+def validate_aggregate_schema(payload: dict[str, Any]) -> None:
+    """Fail-closed structural validation for holdout aggregate metrics."""
+    for key in _REQUIRED_AGGREGATE_KEYS:
+        if key not in payload:
+            _fail(f"aggregate missing required key {key!r}")
+    if payload.get("schema_version") != "formalpr_holdout.aggregate_metrics.v1":
+        _fail("unexpected aggregate schema_version")
+    if payload.get("benchmark") != "FormalPR-Holdout":
+        _fail("unexpected aggregate benchmark")
+    lanes = payload.get("lanes")
+    if not isinstance(lanes, dict) or not lanes:
+        _fail("aggregate lanes must be a non-empty object")
+    for lane, metrics in lanes.items():
+        if not isinstance(metrics, dict):
+            _fail(f"lane {lane!r} metrics must be an object")
+        for key in (
+            "precision",
+            "recall",
+            "false_positive_rate",
+            "missed_detection_rate",
+            "unknown_rate",
+            "coverage_completeness",
+            "counterexample_correctness",
+            "selected_backend_execution_correctness",
+            "runtime_ms",
+        ):
+            if key not in metrics:
+                _fail(f"missing {key} in lane {lane}")
+    assert_aggregate_safe(payload)
 
 
 def download_release_asset(
@@ -92,18 +154,90 @@ def download_release_asset(
     return dest
 
 
+def verify_asset_sha256(path: Path, expected_sha256: str) -> str:
+    if not _SHA256_RE.match(expected_sha256):
+        _fail("asset SHA-256 must be a 64-character hex digest")
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if digest.lower() != expected_sha256.lower():
+        _fail("asset SHA-256 mismatch")
+    return digest
+
+
+def _is_unsafe_tar_member(member: tarfile.TarInfo) -> str | None:
+    name = member.name.replace("\\", "/")
+    if name.startswith("/") or name.startswith("..") or "/../" in f"/{name}/":
+        return f"unsafe path {member.name!r}"
+    if member.issym() or member.islnk():
+        return f"link member forbidden: {member.name!r}"
+    if member.isdev() or member.isfifo() or member.ischr() or member.isblk():
+        return f"special file forbidden: {member.name!r}"
+    # Reject unusual types beyond regular files and directories.
+    if not (member.isfile() or member.isdir()):
+        return f"unsupported member type: {member.name!r}"
+    return None
+
+
 def extract_tarball(tarball: Path, dest: Path) -> Path:
+    """Path-safe extraction: no links/devices/FIFOs/traversal; no filter=data reliance."""
     dest.mkdir(parents=True, exist_ok=True)
+    dest_resolved = dest.resolve()
     with tarfile.open(tarball, "r:gz") as tar:
-        # Python 3.12+ supports filter=; keep compatible call.
-        try:
-            tar.extractall(dest, filter="data")
-        except TypeError:
-            tar.extractall(dest)
+        for member in tar.getmembers():
+            reason = _is_unsafe_tar_member(member)
+            if reason:
+                _fail(reason)
+            target = (dest / member.name).resolve()
+            if not str(target).startswith(str(dest_resolved) + os.sep) and target != dest_resolved:
+                _fail(f"path traversal forbidden: {member.name!r}")
+            if member.isdir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            extracted = tar.extractfile(member)
+            if extracted is None:
+                _fail(f"cannot extract member {member.name!r}")
+            with extracted, open(target, "wb") as out:
+                out.write(extracted.read())
+            # Ensure we did not create a link somehow.
+            if target.is_symlink() or not target.is_file():
+                _fail(f"extracted path is not a regular file: {member.name!r}")
+            mode = target.stat().st_mode
+            if stat.S_ISLNK(mode) or stat.S_ISCHR(mode) or stat.S_ISBLK(mode) or stat.S_ISFIFO(mode):
+                _fail(f"special file after extract: {member.name!r}")
     roots = [p for p in dest.iterdir() if p.is_dir()]
     if len(roots) != 1:
         _fail(f"expected one release root, found {len(roots)}")
     return roots[0]
+
+
+def _isolated_eval_env() -> dict[str, str]:
+    """Build an evaluator environment without download/GitHub tokens."""
+    allow = {
+        "PATH",
+        "PATHEXT",
+        "SYSTEMROOT",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "HOME",
+        "USERPROFILE",
+        "LANG",
+        "LC_ALL",
+        "PYTHONPATH",
+        "VIRTUAL_ENV",
+        "PYTHONNOUSERSITE",
+        "PYTHONUTF8",
+        "PYTHONIOENCODING",
+    }
+    env = {k: v for k, v in os.environ.items() if k.upper() in allow}
+    env["PYTHONNOUSERSITE"] = "1"
+    for key in list(env):
+        if key.upper() in _TOKEN_ENV_KEYS:
+            env.pop(key, None)
+    # Explicitly ensure tokens are absent even if allowlist was widened later.
+    for denied in _TOKEN_ENV_KEYS:
+        env.pop(denied, None)
+    return env
 
 
 def run_harness(
@@ -114,7 +248,7 @@ def run_harness(
     ovk_sha: str,
     verified_sha: str | None,
     output: Path,
-) -> dict:
+) -> dict[str, Any]:
     evaluate = release_root / "harness" / "evaluate.py"
     if not evaluate.is_file():
         _fail("release artifact missing harness/evaluate.py")
@@ -148,12 +282,19 @@ def run_harness(
     if verified_sha:
         cmd.extend(["--verified-source-sha", verified_sha])
     # Do not pass --print-aggregates; we load the file and re-sanitize.
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_isolated_eval_env(),
+        cwd=str(release_root),
+    )
     if proc.returncode != 0:
         # Avoid echoing stderr if it might contain paths with case ids — redact.
         _fail(f"evaluate.py exited {proc.returncode}")
     payload = json.loads(output.read_text(encoding="utf-8"))
-    assert_aggregate_safe(payload)
+    validate_aggregate_schema(payload)
     return payload
 
 
@@ -171,6 +312,11 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         help="Use a pre-downloaded tarball instead of GitHub API download",
+    )
+    parser.add_argument(
+        "--asset-sha256",
+        required=True,
+        help="Immutable SHA-256 hex digest of the release asset (required)",
     )
     parser.add_argument("--predictions", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -205,7 +351,13 @@ def main(argv: list[str] | None = None) -> int:
                 dest=tmp_path / asset_name,
                 token=token,
             )
+        verify_asset_sha256(tarball, args.asset_sha256)
         release_root = extract_tarball(tarball, tmp_path / "extract")
+        # Predictions must be label-free before the evaluator sees them.
+        pred_payload = json.loads(args.predictions.read_text(encoding="utf-8"))
+        from scripts.digest_holdout_predictions import assert_predictions_label_free
+
+        assert_predictions_label_free(pred_payload)
         payload = run_harness(
             release_root=release_root,
             predictions=args.predictions,
@@ -223,7 +375,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(summary)
     if args.print_aggregates:
-        assert_aggregate_safe(payload)
+        validate_aggregate_schema(payload)
         print(json.dumps(payload, indent=2))
     return 0
 
