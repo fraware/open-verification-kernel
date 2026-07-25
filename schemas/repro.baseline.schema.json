@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/repro.baseline.schema.json",
+  "title": "OVK Reproducible Baseline Record",
+  "description": "Machine-readable record of a multi-command local/CI repro baseline (OVK-01).",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "python_version",
+    "os",
+    "platform",
+    "network_access",
+    "started_at",
+    "completed_at",
+    "elapsed_seconds",
+    "checker_availability",
+    "skipped_tests",
+    "commands",
+    "artifacts"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "ovk.repro_baseline.v1"
+    },
+    "python_version": { "type": "string", "minLength": 1 },
+    "os": { "type": "string", "minLength": 1 },
+    "platform": { "type": "string", "minLength": 1 },
+    "runner": { "type": "string" },
+    "network_access": { "type": "boolean" },
+    "started_at": { "type": "string", "minLength": 1 },
+    "completed_at": { "type": "string", "minLength": 1 },
+    "elapsed_seconds": { "type": "number", "minimum": 0 },
+    "ovk_version": { "type": "string" },
+    "git_sha": { "type": ["string", "null"] },
+    "checker_availability": {
+      "type": "object",
+      "description": "Optional checker availability derived from ovk doctor.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["available", "message"],
+        "properties": {
+          "available": { "type": "boolean" },
+          "message": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "skipped_tests": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "commands": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["argv", "exit_code", "elapsed_seconds"],
+        "properties": {
+          "argv": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1
+          },
+          "exit_code": { "type": "integer" },
+          "elapsed_seconds": { "type": "number", "minimum": 0 },
+          "stdout_path": { "type": ["string", "null"] },
+          "stderr_path": { "type": ["string", "null"] }
+        },
+        "additionalProperties": true
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "bytes": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": true
+      }
+    },
+    "passed": { "type": "boolean" },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": true
+}
