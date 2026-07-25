@@ -20,6 +20,9 @@ def test_release_preflight_report_is_serializable() -> None:
         "pilot_program",
         "release_layout_schema_coverage",
         "adapter_capabilities",
+        "rc_dod",
+        "rc_install",
+        "tcb_doc",
     }
     optional_names = {check["name"] for check in payload.get("optional_checks", [])}
     assert optional_names == {"pilot_metrics_dry_run"}
