@@ -1,0 +1,8 @@
+{
+  "malformed": true,
+  "author_type": "ai_agent",
+  "agent": "codex",
+  "task": "malformed",
+  "states": "not-a-list",
+  "transitions": []
+}

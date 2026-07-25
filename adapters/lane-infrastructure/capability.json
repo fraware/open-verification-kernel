@@ -1,0 +1,48 @@
+{
+  "capability_id": "lane-infrastructure-v1",
+  "checker_id": "lane-infrastructure",
+  "version": "0.1.0",
+  "implementation": "ovk-adapter-lane-infrastructure",
+  "input_contract": "Infrastructure exposure graph / resource abstraction JSON.",
+  "output_contract": "ovk.evidence via infrastructure lane evaluator",
+  "claim_class": "deterministic_witness",
+  "tool": {
+    "name": "lane-infrastructure",
+    "adapter": "ovk-adapter-lane-infrastructure",
+    "adapter_version": "0.1.0"
+  },
+  "backend_class": "static_analyzer",
+  "supported_domains": [
+    "infrastructure"
+  ],
+  "supported_property_kinds": [
+    "data_boundary",
+    "forbidden_configuration",
+    "safety"
+  ],
+  "guarantee": {
+    "type": "deterministic_witness",
+    "meaning_of_pass": "No sensitive resource is publicly exposed in the abstraction.",
+    "meaning_of_fail": "A sensitive resource has a public exposure path.",
+    "meaning_of_unknown": "The infrastructure abstraction was missing or malformed."
+  },
+  "assumptions": [
+    "Resource sensitivity and exposure edges faithfully represent planned state."
+  ],
+  "trusted_components": [
+    "infrastructure lane evaluator"
+  ],
+  "limits": [
+    "Does not execute Terraform/Kubernetes; evaluates the supplied abstraction only."
+  ],
+  "failure_semantics": "Malformed abstractions map to unknown; evaluator errors map to error.",
+  "timeout_semantics": "unknown",
+  "unsupported_semantics": "Does not prove runtime cloud configurations beyond the abstraction.",
+  "determinism_status": "deterministic",
+  "release_status": "experimental",
+  "owner": "ovk-maintainers",
+  "native_execution": false,
+  "conformance": {
+    "suite": "conformance/manifest.json"
+  }
+}

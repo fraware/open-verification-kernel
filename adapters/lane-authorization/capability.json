@@ -1,0 +1,49 @@
+{
+  "capability_id": "lane-authorization-v1",
+  "checker_id": "lane-authorization",
+  "version": "0.1.0",
+  "implementation": "ovk-adapter-lane-authorization",
+  "input_contract": "Authorization route/role abstraction JSON.",
+  "output_contract": "ovk.evidence via authorization lane evaluator",
+  "claim_class": "smt_refutation_search",
+  "tool": {
+    "name": "lane-authorization",
+    "adapter": "ovk-adapter-lane-authorization",
+    "adapter_version": "0.1.0"
+  },
+  "backend_class": "smt_solver",
+  "supported_domains": [
+    "authorization"
+  ],
+  "supported_property_kinds": [
+    "access_control",
+    "safety",
+    "invariant"
+  ],
+  "guarantee": {
+    "type": "smt_refutation_search",
+    "meaning_of_pass": "No unauthorized reachability counterexample was found.",
+    "meaning_of_fail": "An unauthorized role can reach a protected route.",
+    "meaning_of_unknown": "Encoding incomplete, solver unknown, or binary unavailable."
+  },
+  "assumptions": [
+    "Route and role abstractions faithfully represent the change under review."
+  ],
+  "trusted_components": [
+    "authorization lane evaluator",
+    "optional Z3 solver"
+  ],
+  "limits": [
+    "Native Z3 availability is optional; deterministic fallback is weaker."
+  ],
+  "failure_semantics": "Validation failures and solver errors map to unknown/error.",
+  "timeout_semantics": "unknown",
+  "unsupported_semantics": "Does not reconstruct frameworks beyond the supplied route abstraction.",
+  "determinism_status": "tool_dependent",
+  "release_status": "experimental",
+  "owner": "ovk-maintainers",
+  "native_execution": false,
+  "conformance": {
+    "suite": "conformance/manifest.json"
+  }
+}

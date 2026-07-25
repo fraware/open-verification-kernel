@@ -36,6 +36,7 @@ from ovk.core.execution_models import (
     validate_material_uri,
 )
 from ovk.core.models import (
+    DecisionState,
     MergeRecommendation,
     RiskSeverity,
     SourceRange,
@@ -237,9 +238,12 @@ def _execution_record() -> ObligationExecutionRecord:
         attempts=[attempt],
         results=[_result(attempt.attempt_id)],
         aggregate_status=VerificationStatus.PASS,
+        decision_state=DecisionState.ALLOW,
+        original_decision_state=DecisionState.ALLOW,
         merge_recommendation=MergeRecommendation.ALLOW,
         aggregation_reason="single required backend passed",
         open_obligations=[],
+        controlling_finding_ids=[],
     )
 
 

@@ -4,11 +4,19 @@ from __future__ import annotations
 
 from typing import Any
 
+from ovk.adapters.wave2_oracle import classify_conformance_flags
+
 
 def evaluate_kani_input(data: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
     """Evaluate Rust harness input with a conservative safety oracle."""
-    if data.get("malformed"):
-        return "unknown", [{"summary": "Malformed Rust harness input.", "failure_mode": "malformed_input"}]
+    early = classify_conformance_flags(data)
+    if early is not None:
+        status, counterexamples = early
+        if data.get("malformed"):
+            counterexamples = [
+                {"summary": "Malformed Rust harness input.", "failure_mode": "malformed_input"}
+            ]
+        return status, counterexamples
 
     violations = [str(item) for item in data.get("violations", [])]
     unsafe_ops = data.get("unsafe_operations", [])
