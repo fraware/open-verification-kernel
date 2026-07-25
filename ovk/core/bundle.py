@@ -68,3 +68,17 @@ def make_bundle(
         evidence=evidence,
         decision=decision,
     )
+
+
+def compute_evidence_digest(evidence: VerificationEvidence | dict) -> str:
+    """Compute the integrity digest for one evidence record (see evidence_integrity)."""
+    from ovk.core.evidence_integrity import compute_evidence_digest as _compute
+
+    return _compute(evidence)
+
+
+def verify_evidence_digest(evidence: VerificationEvidence | dict) -> bool:
+    """Verify the integrity digest for one evidence record (see evidence_integrity)."""
+    from ovk.core.evidence_integrity import verify_evidence_digest as _verify
+
+    return _verify(evidence)

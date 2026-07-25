@@ -14,7 +14,7 @@ from ovk.core.execution_models import ObligationExecutionRecord
 
 from ovk.core.materials import material_set_digest_for_obligation
 
-from ovk.core.models import BackendClaim, MergeRecommendation, VerificationEvidence, VerificationStatus
+from ovk.core.models import BackendClaim, DecisionState, MergeRecommendation, VerificationEvidence, VerificationStatus
 
 
 def execution_record_to_evidence(
@@ -118,7 +118,15 @@ def execution_record_to_evidence(
             }
         )
 
+    from ovk.core.decision import merge_recommendation_to_decision_state
+    from ovk.core.models import DecisionState
+
     recommendation = record.merge_recommendation
+    decision_state = getattr(record, "decision_state", None)
+    if decision_state is None:
+        decision_state = merge_recommendation_to_decision_state(recommendation)
+    original_decision_state = getattr(record, "original_decision_state", None) or decision_state
+    controlling_finding_ids = list(getattr(record, "controlling_finding_ids", ()) or ())
 
     aggregation_reason = record.aggregation_reason
 
@@ -129,8 +137,12 @@ def execution_record_to_evidence(
     if allow_ok is None:
         allow_ok = strict_allow_permitted(obligation.coverage, policy)
 
-    if recommendation == MergeRecommendation.ALLOW and not allow_ok:
+    if (
+        recommendation == MergeRecommendation.ALLOW or decision_state == DecisionState.ALLOW
+    ) and not allow_ok:
         recommendation = MergeRecommendation.REQUIRE_HUMAN_REVIEW
+        decision_state = DecisionState.NEEDS_REVIEW
+        original_decision_state = DecisionState.NEEDS_REVIEW
 
         aggregation_reason = f"{aggregation_reason}; incomplete abstraction cannot allow under strict coverage"
 
@@ -142,9 +154,25 @@ def execution_record_to_evidence(
             }
         )
 
+    if recommendation == MergeRecommendation.ALLOW:
+        decision_state = DecisionState.ALLOW
+    elif decision_state == DecisionState.ALLOW and recommendation != MergeRecommendation.ALLOW:
+        # Prefer explicit non-allow legacy recommendation when present.
+        decision_state = merge_recommendation_to_decision_state(recommendation)
+
     decision = {
+        "decision_state": decision_state.value
+        if hasattr(decision_state, "value")
+        else str(decision_state),
+        "original_decision_state": (
+            original_decision_state.value
+            if hasattr(original_decision_state, "value")
+            else str(original_decision_state)
+        ),
         "merge_recommendation": recommendation.value,
-        "human_review_required": recommendation.value != "allow",
+        "human_review_required": decision_state != DecisionState.ALLOW
+        and recommendation.value != "allow",
+        "controlling_finding_ids": controlling_finding_ids,
         "aggregation_reason": aggregation_reason,
         "routing_enforced": routing_enforced,
         "fallback_used": record.fallback_used,
@@ -161,7 +189,7 @@ def execution_record_to_evidence(
         }
     )[:24]
 
-    return VerificationEvidence(
+    evidence = VerificationEvidence(
         evidence_id=f"ev-{evidence_id}",
         schema_version=schema_version,
         subject={key: value for key, value in obligation.subject.model_dump(mode="json").items() if value is not None},
@@ -193,3 +221,10 @@ def execution_record_to_evidence(
         aggregation_policy=routing.aggregation_policy,
         routing_enforced=routing_enforced,
     )
+    if schema_version.endswith(".v3"):
+        from ovk.core.evidence_integrity import seal_evidence
+
+        # Seal the control-plane projection; callers that further mutate evidence
+        # (e.g. adapter_runtime metadata attachment) must reseal afterward.
+        return seal_evidence(evidence, policy_digest=obligation.policy_digest)
+    return evidence

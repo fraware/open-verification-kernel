@@ -192,17 +192,20 @@ def check_evidence_bundle_invariants(bundle: EvidenceBundle) -> list[EvidenceInv
                     )
 
     bundle_recommendation = _decision_value(bundle.decision, "merge_recommendation")
-    if bundle_recommendation is None:
+    bundle_decision_state = _decision_value(bundle.decision, "decision_state")
+    if bundle_recommendation is None and bundle_decision_state is None:
         issues.append(
             EvidenceInvariantIssue(
-                path="decision.merge_recommendation",
-                message="bundle decision must include merge_recommendation",
+                path="decision.decision_state",
+                message="bundle decision must include decision_state or merge_recommendation",
             )
         )
-    if any(issue.severity == "error" for issue in issues) and bundle_recommendation == "allow":
+    if any(issue.severity == "error" for issue in issues) and (
+        bundle_recommendation == "allow" or bundle_decision_state == "allow"
+    ):
         issues.append(
             EvidenceInvariantIssue(
-                path="decision.merge_recommendation",
+                path="decision.decision_state",
                 message="bundle with invariant errors must not recommend allow",
             )
         )
@@ -222,6 +225,7 @@ def check_evidence_bundle_invariants(bundle: EvidenceBundle) -> list[EvidenceInv
             )
 
     issues.extend(_check_control_plane_invariants(bundle))
+    issues.extend(_check_integrity_invariants(bundle))
     return issues
 
 
@@ -440,5 +444,151 @@ def _check_control_plane_invariants(bundle: EvidenceBundle) -> list[EvidenceInva
                     message="enforced evidence must include routing_id for attestation binding (OVK-INV-020)",
                 )
             )
+
+    return issues
+
+
+def _check_integrity_invariants(bundle: EvidenceBundle) -> list[EvidenceInvariantIssue]:
+    """Evaluate OVK-INV-023 through OVK-INV-030 for evidence integrity envelopes."""
+    from ovk.core.evidence_integrity import (
+        detect_path_redaction_collisions,
+        finding_id_duplicates,
+        integrity_envelope_complete,
+        integrity_fields_present,
+        is_supported_schema_version,
+        missing_integrity_fields,
+        recompute_input_digest,
+        verify_evidence_digest,
+        verify_evidence_signature,
+    )
+
+    issues: list[EvidenceInvariantIssue] = []
+    for index, evidence in enumerate(bundle.evidence):
+        path = f"evidence[{index}]"
+        schema = str(evidence.schema_version)
+
+        if not is_supported_schema_version(schema):
+            issues.append(
+                EvidenceInvariantIssue(
+                    path=f"{path}.schema_version",
+                    message=f"unsupported evidence schema_version {schema!r} (OVK-INV-029)",
+                )
+            )
+            continue
+
+        is_v3 = schema.endswith(".v3")
+        present = integrity_fields_present(evidence)
+        sealed = evidence.evidence_digest is not None
+        partial = bool(present) and not integrity_envelope_complete(evidence)
+
+        if is_v3 and not sealed:
+            issues.append(
+                EvidenceInvariantIssue(
+                    path=f"{path}.evidence_digest",
+                    message="evidence v3 must include a sealed evidence_digest (OVK-INV-023)",
+                )
+            )
+
+        if partial:
+            missing = ", ".join(missing_integrity_fields(evidence))
+            issues.append(
+                EvidenceInvariantIssue(
+                    path=f"{path}",
+                    message=(
+                        "partially written integrity envelope; missing required fields: "
+                        f"{missing} (OVK-INV-028)"
+                    ),
+                )
+            )
+
+        if sealed or (is_v3 and present):
+            if not evidence.checker_version:
+                issues.append(
+                    EvidenceInvariantIssue(
+                        path=f"{path}.checker_version",
+                        message="integrity envelope requires checker_version (OVK-INV-025)",
+                    )
+                )
+            if evidence.input_digest:
+                expected_input = recompute_input_digest(evidence)
+                if evidence.input_digest != expected_input:
+                    issues.append(
+                        EvidenceInvariantIssue(
+                            path=f"{path}.input_digest",
+                            message=(
+                                "input_digest does not match recomputed material/input digest "
+                                "(tampered input) (OVK-INV-024)"
+                            ),
+                        )
+                    )
+            if evidence.evidence_digest and not verify_evidence_digest(evidence):
+                issues.append(
+                    EvidenceInvariantIssue(
+                        path=f"{path}.evidence_digest",
+                        message=(
+                            "evidence_digest does not match canonical payload "
+                            "(tampered checker output or fields) (OVK-INV-026)"
+                        ),
+                    )
+                )
+            if evidence.signature is not None and not verify_evidence_signature(evidence):
+                issues.append(
+                    EvidenceInvariantIssue(
+                        path=f"{path}.signature",
+                        message="evidence signature verification failed (OVK-INV-026)",
+                    )
+                )
+
+        dupes = finding_id_duplicates(evidence)
+        if dupes:
+            issues.append(
+                EvidenceInvariantIssue(
+                    path=f"{path}.decision.controlling_finding_ids",
+                    message=f"duplicated finding IDs: {', '.join(dupes)} (OVK-INV-027)",
+                )
+            )
+
+        file_digests = evidence.relevant_file_digests or []
+        if file_digests:
+            # Collision: same redacted path with distinct content digests.
+            by_path: dict[str, set[str]] = {}
+            for item in file_digests:
+                if not isinstance(item, dict):
+                    continue
+                display = str(item.get("path") or "")
+                digest = str(item.get("sha256") or "")
+                if display and digest:
+                    by_path.setdefault(display, set()).add(digest)
+            ambiguous = {p: digests for p, digests in by_path.items() if len(digests) > 1}
+            if ambiguous:
+                issues.append(
+                    EvidenceInvariantIssue(
+                        path=f"{path}.relevant_file_digests",
+                        message=(
+                            "path-redaction collisions in relevant_file_digests "
+                            f"{sorted(ambiguous)} (OVK-INV-030)"
+                        ),
+                    )
+                )
+            # Also reject when distinct raw material paths redact identically.
+            material_paths: list[str] = []
+            for material in evidence.materials or []:
+                if not isinstance(material, dict):
+                    continue
+                for key in ("path", "source_path"):
+                    value = material.get(key)
+                    if isinstance(value, str) and value.strip():
+                        material_paths.append(value)
+            collisions = detect_path_redaction_collisions(material_paths)
+            if collisions:
+                issues.append(
+                    EvidenceInvariantIssue(
+                        path=f"{path}.relevant_file_digests",
+                        message=(
+                            "path-redaction collisions among material paths "
+                            f"{collisions} (OVK-INV-030)"
+                        ),
+                    )
+                )
 
     return issues
