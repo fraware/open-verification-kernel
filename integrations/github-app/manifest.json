@@ -1,0 +1,26 @@
+{
+  "name": "OVK Verification (Private Alpha)",
+  "url": "https://github.com/fraware/open-verification-kernel",
+  "hook_attributes": {
+    "url": "https://ovk-github-app.example.invalid/webhook",
+    "active": true
+  },
+  "redirect_url": "https://github.com/fraware/open-verification-kernel/blob/main/integrations/github-app/README.md",
+  "callback_urls": [],
+  "setup_url": "https://github.com/fraware/open-verification-kernel/blob/main/integrations/github-app/README.md",
+  "description": "Private-alpha Open Verification Kernel GitHub App. Not listed on the Marketplace. The composite Action remains the public integration path.",
+  "public": false,
+  "default_events": [
+    "check_run",
+    "check_suite",
+    "installation",
+    "pull_request",
+    "push"
+  ],
+  "default_permissions": {
+    "checks": "write",
+    "contents": "read",
+    "pull_requests": "read",
+    "metadata": "read"
+  }
+}

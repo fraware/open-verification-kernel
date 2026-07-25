@@ -1,6 +1,7 @@
 # OVK Integration Guide
 
 Check [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md) before pinning a version or switching to strict mode.
+Reviewer TCB inventory: [TRUSTED_COMPUTING_BASE.md](TRUSTED_COMPUTING_BASE.md).
 
 Install and run Open Verification Kernel locally or in GitHub Actions.
 
@@ -12,17 +13,18 @@ Verification routing configuration for `.verification/config.yml`: [POLICY.md](P
 pip install -e '.[dev]'
 ovk init
 ovk release-preflight
+python scripts/verify_rc_install.py   # Action SHA pins + package metadata
 ```
 
-PyPI release (after maintainers publish `v1.2.0`; see [RELEASE.md](RELEASE.md)):
+PyPI release (after maintainers publish an attributable tag; see [RELEASE.md](RELEASE.md)):
 
 ```bash
-pip install open-verification-kernel==1.2.0
+pip install open-verification-kernel==1.3.0-rc.1
 # optional solvers
-pip install "open-verification-kernel[solvers]==1.2.0"
+pip install "open-verification-kernel[solvers]==1.3.0-rc.1"
 ```
 
-Until the wheel is on PyPI, use `pip install -e '.[dev]'` from a checkout or pin the GitHub Action at `@v1.2.0` with `OVK_PACKAGE_VERSION` once published.
+Until the wheel is on PyPI, use `pip install -e '.[dev]'` from a checkout or pin the GitHub Action at `@v1.3.0-rc.1` (after the tag exists) with matching `OVK_PACKAGE_VERSION`. Signed production consumers may still use `@v1.2.1` until the RC is attributable.
 
 Optional Z3: `pip install -e '.[solvers]'`
 
@@ -46,7 +48,9 @@ ovk ci --metadata examples/no_agent_self_approval/metadata_gate_preserved.json -
 
 ## GitHub Action
 
-The composite Action in `action.yml` supports advisory and strict modes.
+The composite Action in `action.yml` supports advisory and strict modes. It is the **public** integration path.
+
+A **private-alpha** GitHub App (not Marketplace) lives under [`integrations/github-app/`](../integrations/github-app/README.md) with webhook HMAC, replay protection, installation isolation, and retention policy. Prefer the Action unless you are operating that alpha.
 
 ### Modes
 
@@ -55,7 +59,16 @@ The composite Action in `action.yml` supports advisory and strict modes.
 | `mode: advisory` | Writes artifacts; always exits 0 |
 | `mode: strict` | Exits nonzero on `block` or `require_human_review` |
 
-### Permissions
+### Permissions matrix
+
+Least-privilege defaults for the composite Action. Grant only what the enabled inputs require.
+
+| Capability | `permissions:` key | Required when | Without it |
+|---|---|---|---|
+| Read checkout / event payload | `contents: read` | Always (workflow checkout) | Job cannot see the PR diff |
+| Publish check run **Open Verification Kernel** | `checks: write` | `emit-check: true` | Emit skips or fails; in `strict` mode the job fails |
+| Post / update PR comment | `pull-requests: write` | `post-comment: true` | Comment step no-ops (exit 0) |
+| Read branch protection / required checks | `contents: read` (+ token that can read protection) | Auto `collect_branch_metadata.py` | Metadata missing → high-risk workflow changes stay `needs_review` / `require_human_review` |
 
 Copy-paste block for consumer workflows:
 
@@ -72,7 +85,11 @@ permissions:
 | `emit-check: true` | `checks: write` |
 | `collect_branch_metadata.py` (auto) | `GITHUB_TOKEN` with repository metadata read |
 
-Fork PRs from outside contributors cannot post comments; keep `post-comment: false` on fork workflows.
+**Fork PRs:** outside contributors receive a read-only `GITHUB_TOKEN` for `pull_request` from forks. Keep `post-comment: false` and treat `emit-check` as best-effort on fork workflows (`examples/github_workflows/pilot_fork_adopter.yml`). Missing `checks: write` must never be treated as verification success.
+
+**Check-run integrity:** emission fails closed when the evidence `subject.head_sha` does not match the commit being annotated (stale SHA). Updates are idempotent via stable `external_id` `ovk:{repo}:{head_sha}` so reruns and concurrent jobs update one check run per head SHA.
+
+**Third-party action pins:** `action.yml` and `.github/workflows/publish.yml` pin `actions/*` (and other release third-parties) to immutable commit SHAs. CI enforces this with `python scripts/pin_action_shas.py`.
 
 ### Single check type (self-protection)
 
@@ -167,6 +184,8 @@ Downstream example:
 |---|---|
 | `advisory` | Job continues; `check_emitted` is `false` |
 | `strict` | Job fails when check run cannot be emitted |
+
+Stale evidence (bundle `subject.head_sha` ≠ emit `--head-sha`) always fails emission with exit code 1, including dry-run validation before any API call.
 
 GitHub check conclusion mapping:
 
