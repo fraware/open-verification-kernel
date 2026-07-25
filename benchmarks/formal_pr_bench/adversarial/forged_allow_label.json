@@ -1,0 +1,10 @@
+{
+  "schema_version": "formal_pr_bench.adversarial.v1",
+  "adversarial_id": "forged_allow_label",
+  "description": "Case metadata claims allow while pointing at a known-failing auth bypass fixture.",
+  "input_fixture": "examples/auth_regression/input_admin_bypass.json",
+  "claimed_expected_merge_recommendation": "allow",
+  "actual_expected_merge_recommendation": "block",
+  "intended_trap": "Trusting attacker-supplied expected labels without fixture evaluation.",
+  "not_held_out": true
+}

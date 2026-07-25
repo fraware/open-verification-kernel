@@ -1,0 +1,14 @@
+{
+  "schema_version": "formal_pr_bench.case_provenance.v1",
+  "case_id": "auth_bypass",
+  "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json",
+  "author": "fraware",
+  "date": "2026-07-25",
+  "derivation": "seed_fixture",
+  "partition": "train",
+  "template_dev": true,
+  "fixture": "examples/auth_regression/input_admin_bypass.json",
+  "category": "lane",
+  "license": "Apache-2.0",
+  "notes": "Case used during property-template development; forbidden from held-out scoring."
+}

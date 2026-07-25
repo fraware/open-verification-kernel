@@ -202,6 +202,34 @@
       "expected_lanes": [],
       "expected_intents": [],
       "expected_merge_recommendation": "require_human_review"
+    },
+    {
+      "case_id": "rd_cbmc_use_after_free_auth_cache",
+      "category": "real_diff",
+      "input_fixture": "benchmarks/real_diffs/cbmc_use_after_free_auth_cache.diff",
+      "expected_lanes": [
+        "backend"
+      ],
+      "expected_intents": [
+        "cbmc-no-use-after-free-auth-cache",
+        "cbmc-buffer-bounds",
+        "cbmc-no-unchecked-buffer-copy"
+      ],
+      "expected_merge_recommendation": "block"
+    },
+    {
+      "case_id": "rd_cbmc_integer_overflow_quota",
+      "category": "real_diff",
+      "input_fixture": "benchmarks/real_diffs/cbmc_integer_overflow_quota.diff",
+      "expected_lanes": [
+        "backend"
+      ],
+      "expected_intents": [
+        "cbmc-no-integer-overflow-quota",
+        "cbmc-buffer-bounds",
+        "cbmc-no-unchecked-buffer-copy"
+      ],
+      "expected_merge_recommendation": "block"
     }
   ]
 }

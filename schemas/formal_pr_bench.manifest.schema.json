@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/formal_pr_bench.manifest.schema.json",
+  "title": "FormalPR-Bench Version Manifest",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "benchmark_version",
+    "case_count",
+    "partitions",
+    "partition_digests",
+    "corpus_digest"
+  ],
+  "properties": {
+    "schema_version": { "const": "formal_pr_bench.manifest.v1" },
+    "benchmark_version": { "type": "string", "minLength": 1 },
+    "case_count": { "type": "integer", "minimum": 1 },
+    "partitions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 4
+    },
+    "partition_digests": {
+      "type": "object",
+      "required": ["train", "development", "test", "held_out"],
+      "properties": {
+        "train": { "type": "string", "minLength": 64, "maxLength": 64 },
+        "development": { "type": "string", "minLength": 64, "maxLength": 64 },
+        "test": { "type": "string", "minLength": 64, "maxLength": 64 },
+        "held_out": { "type": "string", "minLength": 64, "maxLength": 64 }
+      },
+      "additionalProperties": false
+    },
+    "corpus_digest": { "type": "string", "minLength": 64, "maxLength": 64 },
+    "licenses_digest": { "type": "string" },
+    "duplication_report_digest": { "type": "string" },
+    "artifact_layout": { "type": "object", "additionalProperties": true },
+    "real_diff_case_count": { "type": "integer", "minimum": 0 },
+    "mutation_files": { "type": "array", "items": { "type": "string" } },
+    "adversarial_files": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

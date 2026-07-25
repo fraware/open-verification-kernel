@@ -1,0 +1,14 @@
+{
+  "schema_version": "formal_pr_bench.case_provenance.v1",
+  "case_id": "rd_auth_admin_route_guarded",
+  "source": "benchmarks/formal_pr_bench/real_diff_cases.json",
+  "author": "fraware",
+  "date": "2026-07-25",
+  "derivation": "sanitized_real_diff",
+  "partition": "test",
+  "template_dev": false,
+  "fixture": "benchmarks/real_diffs/auth_admin_route_guarded.diff",
+  "category": "real_diff",
+  "license": "Apache-2.0",
+  "notes": "Evaluation/regression case; cite benchmark_version + partition when publishing scores."
+}

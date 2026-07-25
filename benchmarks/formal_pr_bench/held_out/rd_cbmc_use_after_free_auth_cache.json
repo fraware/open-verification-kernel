@@ -1,0 +1,19 @@
+{
+  "schema_version": "formal_pr_bench.held_out.v1",
+  "case_id": "rd_cbmc_use_after_free_auth_cache",
+  "forbidden_from_template_dev_scoring": true,
+  "case": {
+    "case_id": "rd_cbmc_use_after_free_auth_cache",
+    "category": "real_diff",
+    "input_fixture": "benchmarks/real_diffs/cbmc_use_after_free_auth_cache.diff",
+    "expected_lanes": [
+      "backend"
+    ],
+    "expected_intents": [
+      "cbmc-no-use-after-free-auth-cache",
+      "cbmc-buffer-bounds",
+      "cbmc-no-unchecked-buffer-copy"
+    ],
+    "expected_merge_recommendation": "block"
+  }
+}

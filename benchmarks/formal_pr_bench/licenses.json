@@ -1,0 +1,669 @@
+{
+  "schema_version": "formal_pr_bench.licenses.v1",
+  "benchmark_version": "v1",
+  "corpus_license": "Apache-2.0",
+  "corpus_license_file": "LICENSE",
+  "default_case_license": "Apache-2.0",
+  "cases": {
+    "adversarial_forged_allow": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/extended_cases.json"
+    },
+    "adversarial_sha_mismatch": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/extended_cases.json"
+    },
+    "alloy_fail": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "alloy_fail_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "alloy_pass": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "alloy_pass_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "auth_bypass": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "auth_bypass_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "auth_bypass_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "auth_malformed": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "auth_malformed_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "auth_malformed_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "auth_preserved": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "auth_preserved_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "auth_preserved_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cbmc_fail": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cbmc_fail_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cbmc_native_buffer_bounds_pass": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cbmc_native_buffer_bounds_pass_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cbmc_native_integer_overflow_pass": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cbmc_native_integer_overflow_pass_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cbmc_native_uaf_pass": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cbmc_native_uaf_pass_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cbmc_native_unchecked_copy_pass": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cbmc_native_unchecked_copy_pass_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cbmc_pass": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cbmc_pass_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cedar_fail": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cedar_fail_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cedar_fail_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cedar_malformed": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cedar_malformed_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cedar_malformed_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cedar_pass": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cedar_pass_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cedar_pass_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cedar_unknown": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cedar_unknown_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "cedar_unknown_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "ci_secrets_exposed": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "ci_secrets_exposed_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "ci_secrets_exposed_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "ci_secrets_safe": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "ci_secrets_safe_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "ci_secrets_safe_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "control_metadata_missing": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "control_metadata_missing_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "control_metadata_missing_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "control_preserved": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "control_preserved_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "control_preserved_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "control_removed": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "control_removed_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "control_removed_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "dafny_fail": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "dafny_fail_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "dafny_pass": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "dafny_pass_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "deployment_skipped_approval": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "deployment_skipped_approval_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "deployment_skipped_approval_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "deployment_valid_path": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "deployment_valid_path_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "deployment_valid_path_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "infra_private_sensitive": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "infra_private_sensitive_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "infra_private_sensitive_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "infra_public_sensitive": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "infra_public_sensitive_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "infra_public_sensitive_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "kani_fail": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "kani_fail_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "kani_fail_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "kani_malformed": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "kani_malformed_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "kani_malformed_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "kani_pass": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "kani_pass_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "kani_pass_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "kani_unknown": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "kani_unknown_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "kani_unknown_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "lean_fail": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "lean_fail_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "lean_pass": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "lean_pass_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "multi_surface_combined_pr": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/extended_cases.json"
+    },
+    "rd_auth_admin_route_guarded": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/real_diff_cases.json"
+    },
+    "rd_auth_admin_route_unguarded": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/real_diff_cases.json"
+    },
+    "rd_auth_route_partial_hunk": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/real_diff_cases.json"
+    },
+    "rd_cbmc_integer_overflow_quota": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/real_diff_cases.json"
+    },
+    "rd_cbmc_use_after_free_auth_cache": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/real_diff_cases.json"
+    },
+    "rd_ci_secrets_pr_preview": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/real_diff_cases.json"
+    },
+    "rd_ci_secrets_workflow_dispatch_safe": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/real_diff_cases.json"
+    },
+    "rd_deployment_direct_skip": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/real_diff_cases.json"
+    },
+    "rd_deployment_valid_chain": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/real_diff_cases.json"
+    },
+    "rd_docs_only_change": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/real_diff_cases.json"
+    },
+    "rd_infra_iam_wildcard_admin": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/real_diff_cases.json"
+    },
+    "rd_infra_k8s_loadbalancer": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/real_diff_cases.json"
+    },
+    "rd_infra_private_bucket": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/real_diff_cases.json"
+    },
+    "rd_infra_rds_public_partial_hunk": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/real_diff_cases.json"
+    },
+    "rd_infra_s3_public_acl": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/real_diff_cases.json"
+    },
+    "rd_multi_surface_combined": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/real_diff_cases.json"
+    },
+    "rd_self_protection_workflow_touch": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/real_diff_cases.json"
+    },
+    "rd_workflow_secrets_partial_hunk": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/real_diff_cases.json"
+    },
+    "recall_ci_secrets_workflow_diff": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/extended_cases.json"
+    },
+    "recall_infra_terraform_diff": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/extended_cases.json"
+    },
+    "recall_multi_surface_combined": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/extended_cases.json"
+    },
+    "repair_loop_auth_bypass": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/extended_cases.json"
+    },
+    "repair_loop_ci_secrets": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/extended_cases.json"
+    },
+    "repair_loop_deployment_skip": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/extended_cases.json"
+    },
+    "repair_loop_infra_exposure": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/extended_cases.json"
+    },
+    "route_alloy_model": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/extended_cases.json"
+    },
+    "route_cedar_iam": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/extended_cases.json"
+    },
+    "route_dafny_proof": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/extended_cases.json"
+    },
+    "route_kani_rust": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/extended_cases.json"
+    },
+    "tla_fail": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "tla_fail_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "tla_fail_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "tla_malformed": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "tla_malformed_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "tla_malformed_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "tla_pass": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "tla_pass_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "tla_pass_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "tla_unknown": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "tla_unknown_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "tla_unknown_variant_2": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "verus_fail": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "verus_fail_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "verus_pass": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    },
+    "verus_pass_variant_1": {
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2026 fraware",
+      "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json"
+    }
+  }
+}

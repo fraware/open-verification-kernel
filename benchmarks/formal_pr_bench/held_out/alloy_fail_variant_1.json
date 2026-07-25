@@ -1,0 +1,14 @@
+{
+  "schema_version": "formal_pr_bench.held_out.v1",
+  "case_id": "alloy_fail_variant_1",
+  "forbidden_from_template_dev_scoring": true,
+  "case": {
+    "case_id": "alloy_fail_variant_1",
+    "input_fixture": "examples/backends/alloy_fail.json",
+    "expected_intent": "alloy-model-check",
+    "expected_backend_class": "model_checker",
+    "expected_status": "fail",
+    "expected_merge_recommendation": "block",
+    "expected_counterexample_class": "alloy_counterexample_found"
+  }
+}
