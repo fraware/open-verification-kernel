@@ -122,6 +122,8 @@ See `examples/github_workflows/pilot_fork_adopter.yml` and the full example in S
 
 Weekly in-repo pilot workflow: `.github/workflows/pilot-dogfood.yml` with `scripts/collect_pilot_metrics.py`.
 
+Published advisory reports (maintained consumers + infra profile): [pilots/README.md](pilots/README.md).
+
 ## Support artifacts
 
 - Repair loop walkthrough: [AGENT_REPAIR_LOOP.md](AGENT_REPAIR_LOOP.md)

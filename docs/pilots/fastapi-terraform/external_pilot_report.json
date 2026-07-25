@@ -1,0 +1,50 @@
+{
+  "schema_version": "ovk.external_pilot_report.v1",
+  "repository": "fraware/ovk-consumer-fastapi-terraform",
+  "repository_url": "https://github.com/fraware/ovk-consumer-fastapi-terraform",
+  "consumer_kind": "maintained_consumer",
+  "stack": "Python FastAPI + Terraform",
+  "check_types": [
+    "ci_secrets",
+    "infrastructure"
+  ],
+  "advisory_start": "2026-07-11",
+  "advisory_end": "2026-07-25",
+  "prs_evaluated": 2,
+  "prs_blocked": 1,
+  "false_positives": 0,
+  "false_negatives": 0,
+  "unknowns": 0,
+  "false_positive_rate": 0.0,
+  "median_check_latency_ms": 95.62,
+  "strict_enabled": false,
+  "strict_mode_recommendation": "remain_advisory",
+  "ovk_version_pin": "1.2.1",
+  "workflow_path": ".github/workflows/ovk-advisory-pr.yml",
+  "evidence_url": "docs/pilots/fastapi-terraform/pilot-report.json",
+  "measurement_basis": "fixture_and_dogfood",
+  "complete_workflow_reproduction": true,
+  "notes": "Maintained consumer (fraware/ovk-consumer-fastapi-terraform), not true independent external OSS. Complete advisory workflow reproduction on fixture diffs + manifests. Measured-from-fixture/dogfood. Strict remain_advisory. See docs/pilots/fastapi-terraform/REPORT.md.",
+  "check_case_results": [
+    {
+      "case": "advisory_passing",
+      "expected": "allow",
+      "merge_recommendation": "allow",
+      "elapsed_ms": 100.65,
+      "intents": [
+        "agent-cannot-disable-own-ci-gate",
+        "no-secrets-in-untrusted-context"
+      ]
+    },
+    {
+      "case": "advisory_failing",
+      "expected": "block",
+      "merge_recommendation": "block",
+      "elapsed_ms": 90.58,
+      "intents": [
+        "agent-cannot-disable-own-ci-gate",
+        "no-secrets-in-untrusted-context"
+      ]
+    }
+  ]
+}

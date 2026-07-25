@@ -1,0 +1,28 @@
+{
+  "schema_version": "ovk.pilot_report.v1",
+  "pilot_dir": "docs/pilots/express-actions",
+  "manifests_total": 2,
+  "manifests_passed": 2,
+  "results": [
+    {
+      "manifest": "examples/pilot_repos/express_actions_consumer.json",
+      "name": "pilot-express-actions-consumer",
+      "description": "Maintained JS/TS consumer profile: CI secrets + self-protection (Express + GitHub Actions).",
+      "lane_count": 2,
+      "evidence_count": 2,
+      "merge_recommendation": "allow",
+      "elapsed_ms": 6.101499999203952,
+      "passed": true
+    },
+    {
+      "manifest": "examples/pilot_repos/external_oss_ci_secrets.json",
+      "name": "external-oss-ci-secrets-pilot",
+      "description": "External OSS pilot manifest: CI secrets lane only. Copy to .verification/ci_secrets_pilot.json in your fork.",
+      "lane_count": 1,
+      "evidence_count": 1,
+      "merge_recommendation": "allow",
+      "elapsed_ms": 4.04049999997369,
+      "passed": true
+    }
+  ]
+}

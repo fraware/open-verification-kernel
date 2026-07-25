@@ -1,0 +1,17 @@
+{
+  "schema_version": "ovk.verification_manifest.v1",
+  "name": "pilot-infra-terraform-k8s",
+  "description": "Infrastructure-heavy pilot: infrastructure exposure + CI secrets (Terraform/K8s consumer profile).",
+  "lanes": [
+    {
+      "lane": "infrastructure",
+      "input": "../infrastructure_exposure/input_private_sensitive_resource.json",
+      "input_format": "infra"
+    },
+    {
+      "lane": "ci_secrets",
+      "input": "../ci_secrets/input_secrets_safe.json",
+      "input_format": "infra"
+    }
+  ]
+}

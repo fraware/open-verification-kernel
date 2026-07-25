@@ -1,0 +1,18 @@
+{
+  "schema_version": "ovk.pilot_report.v1",
+  "pilot_dir": "docs/pilots/infra-terraform-k8s",
+  "manifests_total": 1,
+  "manifests_passed": 1,
+  "results": [
+    {
+      "manifest": "examples/pilot_repos/infra_terraform_k8s.json",
+      "name": "pilot-infra-terraform-k8s",
+      "description": "Infrastructure-heavy pilot: infrastructure exposure + CI secrets (Terraform/K8s consumer profile).",
+      "lane_count": 2,
+      "evidence_count": 2,
+      "merge_recommendation": "allow",
+      "elapsed_ms": 4.408300002978649,
+      "passed": true
+    }
+  ]
+}

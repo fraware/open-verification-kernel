@@ -1,0 +1,31 @@
+{
+  "cases": [
+    {
+      "case": "infra_passing",
+      "expected": "allow",
+      "merge_recommendation": "allow",
+      "elapsed_ms": 46.139,
+      "intents": [
+        "no-public-sensitive-resource"
+      ]
+    },
+    {
+      "case": "infra_failing",
+      "expected": "block",
+      "merge_recommendation": "block",
+      "elapsed_ms": 44.99,
+      "intents": [
+        "no-public-sensitive-resource"
+      ]
+    },
+    {
+      "case": "infra_public_s3",
+      "expected": "block",
+      "merge_recommendation": "block",
+      "elapsed_ms": 46.143,
+      "intents": [
+        "no-public-sensitive-resource"
+      ]
+    }
+  ]
+}
