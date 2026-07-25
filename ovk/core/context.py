@@ -95,8 +95,21 @@ def load_verification_policy(config_path: Path = Path(POLICY_REPOSITORY_PATH)) -
 
 
 def _policy_changed(changed_files: list[str], config_path: Path) -> bool:
-    normalized_target = config_path.as_posix().lstrip("./")
-    return any(str(path).replace("\\", "/").lstrip("./") == normalized_target for path in changed_files)
+    """Return True when the PR changes the verification policy file.
+
+    ``config_path`` may be absolute (tests / custom roots). Changed-file lists from
+    GitHub are repository-relative (``'.verification/config.yml'``), so match on the
+    canonical repository path as well as the absolute path.
+    """
+    absolute_target = config_path.as_posix().lstrip("./")
+    relative_target = POLICY_REPOSITORY_PATH.lstrip("./")
+    for path in changed_files:
+        normalized = str(path).replace("\\", "/").lstrip("./")
+        if normalized in {absolute_target, relative_target}:
+            return True
+        if normalized.endswith("/" + relative_target):
+            return True
+    return False
 
 
 def load_trusted_verification_policy(

@@ -6,7 +6,7 @@ from ovk.core.kernel import execute_kernel
 from ovk.core.policy_config import bundle_decision_options, resolve_default_on_unknown
 from ovk.core.bundle import make_bundle
 from ovk.core.decision import decide
-from ovk.core.models import MergeRecommendation
+from ovk.core.models import DecisionState
 
 
 def test_resolve_default_on_unknown_falls_back_on_invalid() -> None:
@@ -25,7 +25,8 @@ def test_decide_unknown_blocks_when_configured() -> None:
     )
     bundle = make_bundle([evidence], default_on_unknown="block")
     assert bundle.decision["merge_recommendation"] == "block"
-    assert decide(bundle, default_on_unknown="block") == MergeRecommendation.BLOCK
+    assert bundle.decision["decision_state"] == "block"
+    assert decide(bundle, default_on_unknown="block") == DecisionState.BLOCK
 
 
 def test_kernel_honors_default_on_unknown_block() -> None:
