@@ -2,10 +2,62 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://openverification.dev/schemas/verification.capability.schema.json",
   "title": "Verification Capability Manifest",
+  "description": "Normative capability / claim registry entry for OVK checkers and adapters (OVK-02).",
   "type": "object",
-  "required": ["capability_id", "tool", "backend_class", "supported_domains", "supported_property_kinds", "guarantee"],
+  "required": [
+    "capability_id",
+    "tool",
+    "backend_class",
+    "supported_domains",
+    "supported_property_kinds",
+    "guarantee",
+    "checker_id",
+    "version",
+    "implementation",
+    "input_contract",
+    "output_contract",
+    "claim_class",
+    "assumptions",
+    "trusted_components",
+    "failure_semantics",
+    "timeout_semantics",
+    "unsupported_semantics",
+    "determinism_status",
+    "release_status",
+    "owner"
+  ],
   "properties": {
     "capability_id": { "type": "string", "minLength": 1 },
+    "checker_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable public checker identifier used in evidence and routing."
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Capability / claim contract version for this checker entry."
+    },
+    "implementation": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Adapter or module that implements the checker."
+    },
+    "input_contract": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What inputs the checker accepts and how they must be prepared."
+    },
+    "output_contract": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Normalized output / evidence shape produced by the checker."
+    },
+    "claim_class": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Class of claim established on pass (maps from guarantee.type)."
+    },
     "tool": {
       "type": "object",
       "required": ["name", "adapter", "adapter_version"],
@@ -19,7 +71,16 @@
     },
     "backend_class": {
       "type": "string",
-      "enum": ["policy_engine", "smt_solver", "model_checker", "bounded_model_checker", "proof_assistant", "static_analyzer", "runtime_monitor", "custom"]
+      "enum": [
+        "policy_engine",
+        "smt_solver",
+        "model_checker",
+        "bounded_model_checker",
+        "proof_assistant",
+        "static_analyzer",
+        "runtime_monitor",
+        "custom"
+      ]
     },
     "input_languages": { "type": "array", "items": { "type": "string" } },
     "supported_domains": { "type": "array", "items": { "type": "string" } },
@@ -36,10 +97,65 @@
       "additionalProperties": true
     },
     "assumptions": { "type": "array", "items": { "type": "string" } },
+    "trusted_components": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Components that must be trusted for the claim to hold."
+    },
     "limits": { "type": "array", "items": { "type": "string" } },
+    "failure_semantics": {
+      "type": "string",
+      "minLength": 1,
+      "description": "How tool/adapter failure is mapped into OVK claim status."
+    },
+    "timeout_semantics": {
+      "type": "string",
+      "enum": ["unknown", "error", "fail"],
+      "description": "Claim status used when the checker times out."
+    },
+    "unsupported_semantics": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What remains outside the claim / how unsupported inputs are reported."
+    },
+    "determinism_status": {
+      "type": "string",
+      "enum": ["deterministic", "tool_dependent", "non_deterministic", "unknown"]
+    },
+    "release_status": {
+      "type": "string",
+      "enum": ["stable", "preview", "experimental", "disabled"],
+      "description": "Public adoption honesty status. stable requires full conformance (OVK-PR4)."
+    },
+    "owner": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Maintainer or team responsible for this checker entry."
+    },
     "result_format": { "type": "string" },
     "counterexample_format": { "type": "string" },
-    "timeout_behavior": { "type": "string", "enum": ["unknown", "error", "fail"] }
+    "timeout_behavior": {
+      "type": "string",
+      "enum": ["unknown", "error", "fail"],
+      "description": "Deprecated alias of timeout_semantics; retained for older readers."
+    },
+    "native_execution": {
+      "type": "boolean",
+      "description": "True when a native binary/solver path can determine evidence."
+    },
+    "conformance": {
+      "type": "object",
+      "description": "Pointer to the seven-item adapter conformance suite (OVK-PR4 / OVK-05).",
+      "properties": {
+        "suite": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Path to conformance/manifest.json relative to the adapter directory."
+        }
+      },
+      "required": ["suite"],
+      "additionalProperties": true
+    }
   },
   "additionalProperties": true
 }

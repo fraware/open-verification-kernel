@@ -1,0 +1,31 @@
+{
+  "schema_version": "ovk.template_capability_bridge.v1",
+  "description": "Bridge template-conformance statuses onto the normative release_status + claim_class vocabulary. Does not invent a second status system.",
+  "conformance_status_v2_to_release_status": {
+    "deprecated": "disabled",
+    "catalog_only": "experimental",
+    "executable_advisory": "preview",
+    "source_profile_strict_eligible": "preview",
+    "externally_calibrated_strict": "preview"
+  },
+  "production_status_to_release_status": {
+    "deprecated": "disabled",
+    "catalog_only": "experimental",
+    "experimental": "experimental",
+    "advisory": "preview",
+    "strict_eligible": "preview"
+  },
+  "default_claim_class_by_property_kind": {
+    "access_control": "authorization_invariant",
+    "forbidden_configuration": "configuration_invariant",
+    "safety": "safety_invariant",
+    "invariant": "state_invariant",
+    "liveness": "liveness_property",
+    "data_boundary": "data_boundary_invariant"
+  },
+  "notes": [
+    "stable is reserved until OVK-PR4 adapter conformance gates exist.",
+    "source_profile_strict_eligible and externally_calibrated_strict map to preview, not stable.",
+    "Template registry entries are generated from docs/benchmarks/template-conformance.json via scripts/build_template_registry.py."
+  ]
+}

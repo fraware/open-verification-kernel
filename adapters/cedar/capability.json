@@ -1,19 +1,58 @@
 {
   "capability_id": "cedar-policy-v1",
-  "tool": {"name": "cedar", "adapter": "ovk-adapter-cedar", "adapter_version": "0.1.0"},
+  "checker_id": "cedar",
+  "version": "0.1.0",
+  "implementation": "ovk-adapter-cedar",
+  "input_contract": "Cedar-shaped JSON authorization input; CLI version probe only until native policy eval ships.",
+  "output_contract": "ovk.result.v1 with policy_violation counterexamples (deterministic evaluator today)",
+  "claim_class": "policy_evaluation",
+  "tool": {
+    "name": "cedar",
+    "adapter": "ovk-adapter-cedar",
+    "adapter_version": "0.1.0"
+  },
   "backend_class": "policy_engine",
-  "input_languages": ["cedar", "json"],
-  "supported_domains": ["authorization", "infrastructure", "agent_authority"],
-  "supported_property_kinds": ["access_control", "forbidden_configuration", "safety"],
+  "input_languages": [
+    "cedar",
+    "json"
+  ],
+  "supported_domains": [
+    "authorization",
+    "infrastructure",
+    "agent_authority"
+  ],
+  "supported_property_kinds": [
+    "access_control",
+    "forbidden_configuration",
+    "safety"
+  ],
   "guarantee": {
     "type": "policy_evaluation",
     "meaning_of_pass": "Cedar policy permits only authorized actions.",
     "meaning_of_fail": "Cedar policy reports a forbidden authorization.",
     "meaning_of_unknown": "Cedar binary unavailable or input incomplete."
   },
-  "assumptions": ["Authorization abstraction matches repository routes."],
-  "limits": ["Does not verify runtime middleware behavior."],
+  "assumptions": [
+    "Authorization abstraction matches repository routes."
+  ],
+  "trusted_components": [
+    "deterministic Cedar-shaped evaluator",
+    "optional cedar CLI for version probe"
+  ],
+  "limits": [
+    "Does not verify runtime middleware behavior."
+  ],
+  "failure_semantics": "Missing binary or incomplete input maps to unknown; evaluator errors map to error.",
+  "timeout_semantics": "unknown",
+  "timeout_behavior": "unknown",
+  "unsupported_semantics": "Native Cedar policy evaluation is not implemented; does not verify runtime middleware behavior.",
+  "determinism_status": "deterministic",
+  "release_status": "experimental",
+  "owner": "ovk-maintainers",
+  "native_execution": false,
   "result_format": "ovk.result.v1",
   "counterexample_format": "policy_violation",
-  "timeout_behavior": "unknown"
+  "conformance": {
+    "suite": "conformance/manifest.json"
+  }
 }

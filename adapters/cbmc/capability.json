@@ -1,19 +1,57 @@
 {
   "capability_id": "cbmc-c-v1",
-  "tool": {"name": "cbmc", "adapter": "ovk-adapter-cbmc", "adapter_version": "0.1.0"},
+  "checker_id": "cbmc",
+  "version": "0.1.0",
+  "implementation": "ovk-adapter-cbmc",
+  "input_contract": "C/GOTO harness (explicit or OVK template-generated) with stated loop/memory bounds.",
+  "output_contract": "ovk.result.v1 with trace counterexamples",
+  "claim_class": "bounded_model_check",
+  "tool": {
+    "name": "cbmc",
+    "adapter": "ovk-adapter-cbmc",
+    "adapter_version": "0.1.0"
+  },
   "backend_class": "model_checker",
-  "input_languages": ["c", "goto"],
-  "supported_domains": ["data_boundary", "infrastructure"],
-  "supported_property_kinds": ["safety", "invariant"],
+  "input_languages": [
+    "c",
+    "goto"
+  ],
+  "supported_domains": [
+    "data_boundary",
+    "infrastructure"
+  ],
+  "supported_property_kinds": [
+    "safety",
+    "invariant"
+  ],
   "guarantee": {
     "type": "bounded_model_check",
     "meaning_of_pass": "CBMC found no violation within bounds.",
     "meaning_of_fail": "CBMC reported a reachable bug.",
     "meaning_of_unknown": "CBMC unavailable or harness incomplete."
   },
-  "assumptions": ["Harness bounds loops and memory."],
-  "limits": ["Bounded verification only."],
+  "assumptions": [
+    "Harness bounds loops and memory."
+  ],
+  "trusted_components": [
+    "cbmc binary",
+    "harness generator or supplied harness",
+    "bound configuration"
+  ],
+  "limits": [
+    "Bounded verification only."
+  ],
+  "failure_semantics": "CBMC execution error maps to error; missing harness maps to unknown.",
+  "timeout_semantics": "unknown",
+  "timeout_behavior": "unknown",
+  "unsupported_semantics": "Bounded verification only; does not prove unbounded properties of project source unless compiled into the harness.",
+  "determinism_status": "tool_dependent",
+  "release_status": "preview",
+  "owner": "ovk-maintainers",
+  "native_execution": true,
   "result_format": "ovk.result.v1",
   "counterexample_format": "trace",
-  "timeout_behavior": "unknown"
+  "conformance": {
+    "suite": "conformance/manifest.json"
+  }
 }
