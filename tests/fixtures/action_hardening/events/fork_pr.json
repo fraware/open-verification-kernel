@@ -1,0 +1,29 @@
+{
+  "action": "opened",
+  "repository": {
+    "full_name": "acme/consumer-app"
+  },
+  "sender": {
+    "login": "external-contributor",
+    "type": "User"
+  },
+  "pull_request": {
+    "number": 42,
+    "head": {
+      "sha": "forkheadsha0000000000000000000000000001",
+      "ref": "feature/untrusted",
+      "repo": {
+        "full_name": "external-contributor/consumer-app",
+        "fork": true
+      }
+    },
+    "base": {
+      "sha": "basecommitsha000000000000000000000000001",
+      "ref": "main",
+      "repo": {
+        "full_name": "acme/consumer-app",
+        "fork": false
+      }
+    }
+  }
+}

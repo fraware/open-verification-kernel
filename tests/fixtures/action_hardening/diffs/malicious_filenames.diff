@@ -1,0 +1,29 @@
+diff --git a/docs/../../etc/passwd b/docs/../../etc/passwd
+new file mode 100644
+index 0000000..aaaaaaa
+--- /dev/null
++++ b/docs/../../etc/passwd
+@@ -0,0 +1,2 @@
++root:x:0:0:root:/root:/bin/bash
++
+diff --git a/safe/file with spaces.txt b/safe/file with spaces.txt
+new file mode 100644
+index 0000000..bbbbbbb
+--- /dev/null
++++ b/safe/file with spaces.txt
+@@ -0,0 +1 @@
++ok
+diff --git "a/weird/\nnewline.txt" "b/weird/\nnewline.txt"
+new file mode 100644
+index 0000000..ccccccc
+--- /dev/null
++++ "b/weird/\nnewline.txt"
+@@ -0,0 +1 @@
++control
+diff --git a/normal/readme.md b/normal/readme.md
+new file mode 100644
+index 0000000..ddddddd
+--- /dev/null
++++ b/normal/readme.md
+@@ -0,0 +1 @@
++# docs only

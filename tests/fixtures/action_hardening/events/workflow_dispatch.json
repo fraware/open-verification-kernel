@@ -1,0 +1,16 @@
+{
+  "action": "workflow_dispatch",
+  "repository": {
+    "full_name": "acme/consumer-app"
+  },
+  "sender": {
+    "login": "maintainer",
+    "type": "User"
+  },
+  "inputs": {
+    "mode": "advisory"
+  },
+  "ref": "refs/heads/main",
+  "after": "dispatchsha00000000000000000000000000001",
+  "before": "prevsha0000000000000000000000000000002"
+}

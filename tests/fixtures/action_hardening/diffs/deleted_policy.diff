@@ -1,0 +1,12 @@
+diff --git a/.verification/config.yml b/.verification/config.yml
+deleted file mode 100644
+index abcdef0..0000000
+--- a/.verification/config.yml
++++ /dev/null
+@@ -1,8 +0,0 @@
+-schema_version: ovk.config.v1
+-mode: advisory
+-routing:
+-  budget: 5
+-unknown_handling:
+-  default_on_unknown: require_human_review

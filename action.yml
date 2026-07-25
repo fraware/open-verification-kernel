@@ -67,11 +67,14 @@ inputs:
     default: ovk-release-bundle
 
 outputs:
+  decision_state:
+    description: Normative DecisionState lattice member (allow, block, needs_review, unknown, error, skipped)
+    value: ${{ steps.set-outputs.outputs.decision_state }}
   recommendation:
-    description: Merge recommendation from the evidence bundle (allow, block, require_human_review, etc.)
+    description: Deprecated merge_recommendation alias (allow, block, require_human_review, etc.)
     value: ${{ steps.set-outputs.outputs.recommendation }}
   exit_code:
-    description: Process exit code implied by the recommendation (0 allow, 1 block, 2 require_human_review)
+    description: Process exit code implied by decision_state (0 allow, 1 block, 2 needs_review/unknown/error/skipped)
     value: ${{ steps.set-outputs.outputs.exit_code }}
   check_emitted:
     description: Whether a GitHub check run was successfully emitted
@@ -81,7 +84,7 @@ runs:
   using: composite
   steps:
     - name: Cache pip packages
-      uses: actions/cache@v4
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         path: ~/.cache/pip
         key: ovk-pip-${{ runner.os }}-${{ hashFiles('**/pyproject.toml') }}
@@ -365,22 +368,53 @@ runs:
             evidence_path = configured if configured.exists() else Path("ovk-evidence.json")
 
         recommendation = ""
+        decision_state = ""
         exit_code = "2"
         if evidence_path.exists():
             bundle = json.loads(evidence_path.read_text(encoding="utf-8"))
-            recommendation = str(bundle.get("decision", {}).get("merge_recommendation", ""))
+            decision = bundle.get("decision", {}) or {}
+            decision_state = str(decision.get("decision_state", "") or "")
+            recommendation = str(decision.get("merge_recommendation", "") or "")
+            if not decision_state and recommendation:
+                alias = {
+                    "allow": "allow",
+                    "block": "block",
+                    "require_human_review": "needs_review",
+                    "allow_with_warning": "needs_review",
+                    "require_stronger_check": "needs_review",
+                    "needs_review": "needs_review",
+                    "unknown": "unknown",
+                    "error": "error",
+                    "skipped": "skipped",
+                }
+                decision_state = alias.get(recommendation, "needs_review")
+            if not recommendation and decision_state:
+                alias = {
+                    "allow": "allow",
+                    "block": "block",
+                    "needs_review": "require_human_review",
+                    "unknown": "require_human_review",
+                    "error": "require_human_review",
+                    "skipped": "require_human_review",
+                }
+                recommendation = alias.get(decision_state, "require_human_review")
             exit_codes = {
                 "allow": 0,
-                "allow_with_warning": 0,
                 "block": 1,
+                "needs_review": 2,
+                "unknown": 2,
+                "error": 2,
+                "skipped": 2,
+                "allow_with_warning": 0,
                 "require_human_review": 2,
                 "require_stronger_check": 2,
             }
-            exit_code = str(exit_codes.get(recommendation, 2))
+            exit_code = str(exit_codes.get(decision_state or recommendation, 2))
 
         check_emitted = "true" if Path(".ovk-check-emitted").exists() else "false"
         github_output = os.environ["GITHUB_OUTPUT"]
         with open(github_output, "a", encoding="utf-8") as handle:
+            handle.write(f"decision_state={decision_state}\n")
             handle.write(f"recommendation={recommendation}\n")
             handle.write(f"exit_code={exit_code}\n")
             handle.write(f"check_emitted={check_emitted}\n")
@@ -405,7 +439,7 @@ runs:
         exit 2
     - name: Upload OVK artifacts
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
         name: ovk-evidence-artifacts-${{ github.job }}
         path: |
