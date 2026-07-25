@@ -4,9 +4,9 @@ Maintainer guide for shipping Open Verification Kernel. Current readiness: [CURR
 
 ## Current release candidate
 
-Package version: `1.2.1`.
+Package version: `1.3.0-rc.1`.
 
-Release judgment: **release candidate**. The five bounded evidence lanes, artifact chain, CLI, MCP surface, and composite Action are implemented. Backend routing remains advisory, external tagged-consumer validation remains pending, and the current source commit must pass all gates below before publication.
+Release judgment: **in-repo release candidate** for attributable tag `v1.3.0-rc.1`. The five bounded evidence lanes, artifact chain, CLI, MCP surface, composite Action (SHA-pinned third parties), capability registry, decision lattice, evidence integrity, conformance matrix, FormalPR-Bench provenance, App alpha, pilots, and TCB doc are implemented. Live workflow IDs, signed tag/Sigstore, and consumer remotes on the RC pin remain maintainer gates — see [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md) and [ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md).
 
 ## Known limitations
 
@@ -29,6 +29,9 @@ ruff check ovk tests benchmarks scripts
 python scripts/check_release_metadata.py
 python scripts/validate_templates.py
 python scripts/validate_capabilities.py
+python scripts/render_tcb_doc.py --check
+python scripts/verify_rc_dod.py
+python scripts/verify_rc_install.py
 ovk release-preflight
 ovk bench --expanded --leaderboard .verification/formal-pr-bench-leaderboard.json
 ovk pilot
@@ -53,25 +56,26 @@ The Publish workflow rejects a GitHub release whose tag does not equal `ovk.__ve
 
 Before tagging:
 
-- [ ] `pyproject.toml`, `ovk.__version__`, and `ovk/core/release_metadata.py` agree;
+- [ ] `pyproject.toml`, `ovk.__version__`, and `ovk/core/release_metadata.py` agree on `1.3.0-rc.1`;
 - [ ] `SUPPORTED_COMMANDS` matches the Typer command surface;
 - [ ] consumer examples reference the intended immutable release tag or commit;
 - [ ] release notes describe actual backend execution semantics from [BACKENDS.md](BACKENDS.md);
 - [ ] package classifier remains Beta until the production gate in the vision audit is met;
-- [ ] benchmark and adoption summaries are regenerated from the release source.
+- [ ] benchmark and adoption summaries are regenerated from the release source;
+- [ ] [TRUSTED_COMPUTING_BASE.md](TRUSTED_COMPUTING_BASE.md) is fresh (`python scripts/render_tcb_doc.py --check`).
 
 Tag and create the release only after the source gates are attributable:
 
 ```bash
-git tag -s v1.2.1 <VERIFIED_SOURCE_SHA>
-git push origin v1.2.1
-gh release create v1.2.1 \
+git tag -s v1.3.0-rc.1 <VERIFIED_SOURCE_SHA>
+git push origin v1.3.0-rc.1
+gh release create v1.3.0-rc.1 \
   --verify-tag \
-  --title "OVK v1.2.1" \
-  --notes-file docs/RELEASE_NOTES_v1.2.1.md
+  --title "OVK v1.3.0-rc.1" \
+  --notes-file docs/RELEASE_NOTES_v1.3.0-rc.1.md
 ```
 
-Note: `v1.2.0` already exists as an immutable tag on an earlier commit without the protected Publish Sigstore path. Do not move that tag.
+Note: `v1.2.1` and earlier tags remain immutable historical releases. Do not move those tags. Do not re-attribute their Sigstore evidence to this RC.
 
 ## Package publication
 
@@ -127,12 +131,18 @@ https://token.actions.githubusercontent.com
 https://github.com/fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/vX.Y.Z
 ```
 
-Example for v1.2.1:
+Example for **v1.3.0-rc.1** (after the attributable tag exists):
 
 ```bash
 export OVK_SIGSTORE_SIGNING=1
-export OVK_COSIGN_IDENTITY='https://github.com/fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/v1.2.1'
+export OVK_COSIGN_IDENTITY='https://github.com/fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/v1.3.0-rc.1'
 export OVK_COSIGN_ISSUER='https://token.actions.githubusercontent.com'
+```
+
+Historical example for signed `v1.2.1` (do not re-attribute to this RC):
+
+```bash
+export OVK_COSIGN_IDENTITY='https://github.com/fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/v1.2.1'
 ```
 
 Consumer verification of a retained bundle:
@@ -140,7 +150,7 @@ Consumer verification of a retained bundle:
 ```bash
 cosign verify-blob \
   --bundle path/to/artifact.cosign.bundle.json \
-  --certificate-identity "https://github.com/fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/v1.2.1" \
+  --certificate-identity "https://github.com/fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/v1.3.0-rc.1" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   path/to/artifact.whl
 ```

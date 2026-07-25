@@ -20,8 +20,8 @@ permissions:
   checks: write
 
 env:
-  # After rc.1 cut: "1.3.0rc1". Until then keep "1.2.1".
-  OVK_PACKAGE_VERSION: "1.3.0rc1"
+  # Package version must match ovk.__version__ / tag without leading v.
+  OVK_PACKAGE_VERSION: "1.3.0-rc.1"
   OVK_ACTION_REF: "v1.3.0-rc.1"
 
 jobs:
