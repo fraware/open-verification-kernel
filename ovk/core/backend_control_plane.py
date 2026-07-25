@@ -290,12 +290,15 @@ class BackendControlPlane:
             attempts=attempts,
             results=results,
             aggregate_status=outcome.status,
+            decision_state=outcome.decision_state,
+            original_decision_state=outcome.original_decision_state,
             merge_recommendation=outcome.merge_recommendation,
             aggregation_reason=outcome.reason,
             open_obligations=open_obligations,
             fallback_used=outcome.fallback_used,
             fallback_accepted=outcome.fallback_accepted,
             fallback_cause=outcome.fallback_cause,
+            controlling_finding_ids=list(outcome.controlling_finding_ids),
         )
 
     def _execute_one(

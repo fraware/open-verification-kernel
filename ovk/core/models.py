@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field
 
 
 class VerificationStatus(str, Enum):
+    """Checker claim status (not the merge decision lattice)."""
+
     PASS = "pass"
     FAIL = "fail"
     UNKNOWN = "unknown"
@@ -20,12 +22,46 @@ class VerificationStatus(str, Enum):
     SKIPPED = "skipped"
 
 
+class DecisionState(str, Enum):
+    """Normative merge decision lattice (OVK-03).
+
+    Checker claim statuses remain ``VerificationStatus``. Legacy
+    ``MergeRecommendation`` values map onto this lattice via aliases;
+    ``allow_with_warning`` is not a lattice member.
+    """
+
+    ALLOW = "allow"
+    BLOCK = "block"
+    NEEDS_REVIEW = "needs_review"
+    UNKNOWN = "unknown"
+    ERROR = "error"
+    SKIPPED = "skipped"
+
+
 class MergeRecommendation(str, Enum):
+    """Deprecated alias vocabulary for ``DecisionState``.
+
+    Prefer ``DecisionState``. Mapping:
+    ``require_human_review`` ↔ ``needs_review``;
+    ``allow_with_warning`` / ``require_stronger_check`` are legacy emission
+    aliases only (not lattice members).
+    """
+
     ALLOW = "allow"
     BLOCK = "block"
     REQUIRE_HUMAN_REVIEW = "require_human_review"
     ALLOW_WITH_WARNING = "allow_with_warning"
     REQUIRE_STRONGER_CHECK = "require_stronger_check"
+
+
+class FindingContribution(BaseModel):
+    """Per-finding contribution to an aggregated decision."""
+
+    finding_id: str
+    claim_status: VerificationStatus
+    required: bool = True
+    contribution: Literal["controlling", "supporting", "non_controlling", "warning"]
+    detail: str | None = None
 
 
 class RiskSeverity(str, Enum):
@@ -79,6 +115,8 @@ class BackendClaim(BaseModel):
     limits: list[str] = Field(default_factory=list)
     tool_version: str | None = None
     adapter_version: str | None = None
+    # When present on evidence claims, drives required vs optional lattice rules.
+    required: bool = True
 
 
 class VerificationEvidence(BaseModel):
@@ -106,6 +144,22 @@ class VerificationEvidence(BaseModel):
     execution_attempts: list[dict[str, Any]] | None = None
     aggregation_policy: str | None = None
     routing_enforced: bool = False
+    # Integrity envelope helper fields (OVK-04 / ovk.evidence.v3).
+    ovk_version: str | None = None
+    checker_id: str | None = None
+    checker_version: str | None = None
+    input_digest: str | None = None
+    relevant_file_digests: list[dict[str, Any]] | None = None
+    configuration_digest: str | None = None
+    policy_digest: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    assumptions: list[str] | None = None
+    unknowns: list[str] | None = None
+    stderr: str | None = None
+    exit_status: int | None = None
+    evidence_digest: str | None = None
+    signature: dict[str, Any] | None = None
 
 
 class EvidenceBundle(BaseModel):
@@ -118,6 +172,16 @@ class EvidenceBundle(BaseModel):
 
 
 Decision = Literal[
+    "allow",
+    "block",
+    "needs_review",
+    "unknown",
+    "error",
+    "skipped",
+]
+
+# Deprecated literal union retained for older call sites.
+LegacyMergeDecision = Literal[
     "allow",
     "block",
     "require_human_review",
