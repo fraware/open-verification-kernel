@@ -180,11 +180,12 @@ class LocalSubprocessWorker:
                 )
 
         if timeout_seconds <= 0:
+            # Reject before spawn: not a wall-clock timeout of a running process.
             return WorkerResult(
                 exit_code=None,
-                timed_out=True,
+                timed_out=False,
                 stdout="",
-                stderr="execution budget permits no backend wall time",
+                stderr=f"non-positive wall-time budget rejected: {timeout_seconds}",
                 cwd=str(cwd_resolved),
                 command=tuple(command),
             )
