@@ -49,6 +49,20 @@ jobs:
         run: python scripts/validate_templates.py
       - name: Validate adapter capabilities
         run: python scripts/validate_capabilities.py
+      - name: Validate adapter conformance
+        run: python scripts/validate_adapter_conformance.py
+      - name: Check capability tables are fresh
+        run: python scripts/render_capability_tables.py --check
+      - name: Check TCB document is fresh
+        run: python scripts/render_tcb_doc.py --check
+      - name: Verify RC DoD (in-repo)
+        run: python scripts/verify_rc_dod.py
+      - name: Verify RC install surface (Action SHA pins + metadata)
+        run: python scripts/verify_rc_install.py
+      - name: Check template claim registry is fresh
+        run: python scripts/build_template_registry.py --check
+      - name: Require SHA-pinned third-party actions in Action/release paths
+        run: python scripts/pin_action_shas.py
       - name: Score all benchmark cases
         run: python benchmarks/formal_pr_bench/score_all_lanes.py
       - name: Score expanded benchmark and publish leaderboard
