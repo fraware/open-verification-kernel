@@ -1,0 +1,26 @@
+{
+  "adapter_id": "dafny",
+  "kind": "formal_backend",
+  "schema_version": "ovk.adapter_conformance.v1",
+  "fixtures": {
+    "pass": {
+      "path": "examples/backends/dafny_pass.json"
+    },
+    "fail": {
+      "path": "examples/backends/dafny_fail.json"
+    },
+    "malformed": {
+      "path": "examples/backends/dafny_malformed.json"
+    },
+    "timeout": {
+      "path": "examples/backends/dafny_timeout.json"
+    },
+    "unavailable": {
+      "path": "examples/backends/dafny_unavailable.json"
+    }
+  },
+  "docs": {
+    "pass_establishes": "CLAIMS.md#pass-establishes",
+    "outside_claim": "CLAIMS.md#outside-the-claim"
+  }
+}

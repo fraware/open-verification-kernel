@@ -1,0 +1,26 @@
+{
+  "adapter_id": "tla+",
+  "kind": "formal_backend",
+  "schema_version": "ovk.adapter_conformance.v1",
+  "fixtures": {
+    "pass": {
+      "path": "examples/backends/tla_pass.json"
+    },
+    "fail": {
+      "path": "examples/backends/tla_fail.json"
+    },
+    "malformed": {
+      "path": "examples/backends/tla_malformed.json"
+    },
+    "timeout": {
+      "path": "examples/backends/tla_timeout.json"
+    },
+    "unavailable": {
+      "path": "examples/backends/tla_unavailable.json"
+    }
+  },
+  "docs": {
+    "pass_establishes": "CLAIMS.md#pass-establishes",
+    "outside_claim": "CLAIMS.md#outside-the-claim"
+  }
+}

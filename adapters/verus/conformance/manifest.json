@@ -1,0 +1,26 @@
+{
+  "adapter_id": "verus",
+  "kind": "formal_backend",
+  "schema_version": "ovk.adapter_conformance.v1",
+  "fixtures": {
+    "pass": {
+      "path": "examples/backends/verus_pass.json"
+    },
+    "fail": {
+      "path": "examples/backends/verus_fail.json"
+    },
+    "malformed": {
+      "path": "examples/backends/verus_malformed.json"
+    },
+    "timeout": {
+      "path": "examples/backends/verus_timeout.json"
+    },
+    "unavailable": {
+      "path": "examples/backends/verus_unavailable.json"
+    }
+  },
+  "docs": {
+    "pass_establishes": "CLAIMS.md#pass-establishes",
+    "outside_claim": "CLAIMS.md#outside-the-claim"
+  }
+}

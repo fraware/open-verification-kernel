@@ -1,0 +1,26 @@
+{
+  "adapter_id": "kani",
+  "kind": "formal_backend",
+  "schema_version": "ovk.adapter_conformance.v1",
+  "fixtures": {
+    "pass": {
+      "path": "examples/backends/kani_pass.json"
+    },
+    "fail": {
+      "path": "examples/backends/kani_fail.json"
+    },
+    "malformed": {
+      "path": "examples/backends/kani_malformed.json"
+    },
+    "timeout": {
+      "path": "examples/backends/kani_timeout.json"
+    },
+    "unavailable": {
+      "path": "examples/backends/kani_unavailable.json"
+    }
+  },
+  "docs": {
+    "pass_establishes": "CLAIMS.md#pass-establishes",
+    "outside_claim": "CLAIMS.md#outside-the-claim"
+  }
+}
