@@ -15,6 +15,12 @@ from ovk.core.models import EvidenceBundle
 from ovk.core.router import route_intent
 from ovk.core.surface_routing import surface_backend_bonuses
 
+from benchmarks.formal_pr_bench.provenance_kit import (
+    BENCHMARK_VERSION,
+    assert_no_template_dev_contamination,
+    require_published_score_identity,
+)
+
 
 ROOT = Path(__file__).resolve().parents[2]
 LEADERBOARD_SCHEMA = "formal_pr_bench.leaderboard.v1"
@@ -356,14 +362,24 @@ def build_leaderboard(
     *,
     benchmark_name: str,
     case_set: str,
+    partition: str = "all",
+    benchmark_version: str = BENCHMARK_VERSION,
 ) -> dict[str, Any]:
-    """Build a publishable leaderboard JSON artifact."""
+    """Build a publishable leaderboard JSON artifact.
+
+    Published scores always cite ``benchmark_version`` and ``partition``.
+    Scoring the ``held_out`` partition rejects template-dev contamination.
+    """
+    case_ids = [score.case_id for score in scores]
+    assert_no_template_dev_contamination(scored_case_ids=case_ids, partition=partition)
     timings = sorted(score.elapsed_ms for score in scores)
     p50_index = max(0, len(timings) // 2 - 1)
     p95_index = max(0, int(len(timings) * 0.95) - 1)
-    return {
+    leaderboard = {
         "schema_version": LEADERBOARD_SCHEMA,
         "benchmark": benchmark_name,
+        "benchmark_version": benchmark_version,
+        "partition": partition,
         "case_set": case_set,
         "generated_at_unix_ms": int(time.time() * 1000),
         "summary": aggregate_dimensions(scores),
@@ -374,3 +390,5 @@ def build_leaderboard(
         },
         "cases": [asdict(score) for score in scores],
     }
+    require_published_score_identity(leaderboard)
+    return leaderboard

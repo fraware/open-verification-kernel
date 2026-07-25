@@ -1,8 +1,8 @@
 {
   "schema_version": "formal_pr_bench.summary.v1",
   "generated_from": "formal_pr_bench.leaderboard.v1",
-  "cases_total": 130,
-  "cases_passed": 130,
+  "cases_total": 132,
+  "cases_passed": 132,
   "pass_rate": 1.0,
   "merge_decision_accuracy": 1.0,
   "status_accuracy": 1.0,
@@ -33,8 +33,8 @@
       "pass_rate": 1.0
     },
     "real_diff": {
-      "cases_total": 16,
-      "cases_passed": 16,
+      "cases_total": 18,
+      "cases_passed": 18,
       "pass_rate": 1.0
     },
     "repair_loop": {

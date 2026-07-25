@@ -427,6 +427,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    # Public FormalPR-Bench held_out must stay disjoint from template-dev cases.
+    # Private FormalPR-Holdout evaluation is separate, but contamination of the
+    # in-repo held_out partition still fails closed here.
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from benchmarks.formal_pr_bench.provenance_kit import (
+        ProvenanceError,
+        assert_no_template_dev_contamination,
+        verify_manifest_digests,
+    )
+
+    try:
+        assert_no_template_dev_contamination()
+        verify_manifest_digests()
+    except ProvenanceError as exc:
+        _fail(str(exc))
+
     token = os.environ.get("HOLDOUT_DOWNLOAD_TOKEN") or os.environ.get("GITHUB_TOKEN")
     asset_name = args.asset_name or f"FormalPR-Holdout-{args.tag}.tar.gz"
     expected_digest = args.asset_sha256 or os.environ.get("HOLDOUT_ASSET_SHA256")

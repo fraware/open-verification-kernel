@@ -39,6 +39,8 @@ Runner: `scripts/run_formalpr_holdout.py` (requires immutable `--asset-sha256`).
 
 Label-separated prediction/eval flow (Sprint 8): [HOLDOUT_LABEL_SEPARATION.md](HOLDOUT_LABEL_SEPARATION.md).
 
+Public FormalPR-Bench also maintains an in-repo `held_out` partition with provenance and a version manifest (`benchmarks/formal_pr_bench/manifest.v1.json`). Cases used during property-template development (`template_dev_cases.json`) cannot be counted as that held-out evaluation. See [BENCHMARK.md](BENCHMARK.md).
+
 ## What this is not
 
 - Not a claim of production generalization measurement

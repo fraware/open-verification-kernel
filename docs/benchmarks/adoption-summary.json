@@ -1,10 +1,10 @@
 {
   "schema_version": "ovk.adoption_summary.v1",
-  "ovk_version": "1.2.0",
-  "updated_at": "2026-06-10T23:38:24Z",
+  "ovk_version": "1.2.1",
+  "updated_at": "2026-07-25T17:11:57Z",
   "formal_pr_bench": {
-    "cases_total": 130,
-    "cases_passed": 130,
+    "cases_total": 132,
+    "cases_passed": 132,
     "pass_rate": 1.0,
     "intent_recall": 1.0,
     "by_category": {
@@ -29,8 +29,8 @@
         "pass_rate": 1.0
       },
       "real_diff": {
-        "cases_total": 16,
-        "cases_passed": 16,
+        "cases_total": 18,
+        "cases_passed": 18,
         "pass_rate": 1.0
       },
       "repair_loop": {
@@ -45,27 +45,87 @@
       }
     },
     "timing_ms": {
-      "p50": 0.12271200000668614,
-      "p95": 12.90817699999991,
-      "max": 25.407987999997772
+      "p50": 0.12826100000040697,
+      "p95": 15.816610999998204,
+      "max": 34.02709299999884
     }
   },
   "real_diff_recall": 1.0,
   "pilot_dogfood": {
     "source": "local",
-    "last_run": "2026-06-10T23:38:24Z",
-    "manifests_passed": 5,
-    "manifests_total": 5,
-    "median_elapsed_ms": 113.28040000012152,
+    "last_run": "2026-07-25T17:11:57Z",
+    "manifests_passed": 8,
+    "manifests_total": 8,
+    "median_elapsed_ms": 4.71550000111165,
     "false_positive_rate": 0.0,
     "external_manifest": "examples/pilot_repos/external_oss_ci_secrets.json",
     "weekly_schedule": "0 7 * * 1",
     "workflow": ".github/workflows/pilot-dogfood.yml",
-    "ovk_version_pin": "1.2.0"
+    "ovk_version_pin": "1.2.1"
   },
   "external_pilots": [
     {
-      "repository": "TBD \u2014 recruiting first OSS adopter",
+      "repository": "fraware/ovk-consumer-fastapi-terraform",
+      "status": "advisory",
+      "check_types": [
+        "ci_secrets",
+        "infrastructure"
+      ],
+      "advisory_start": "2026-07-11",
+      "advisory_end": "2026-07-25",
+      "prs_evaluated": 2,
+      "prs_blocked": 1,
+      "false_positives": 0,
+      "false_positive_rate": 0.0,
+      "median_check_latency_ms": 95.62,
+      "strict_enabled": false,
+      "ovk_version_pin": "1.2.1",
+      "workflow_path": ".github/workflows/ovk-advisory-pr.yml",
+      "evidence_url": "docs/pilots/fastapi-terraform/pilot-report.json",
+      "notes": "Maintained consumer (fraware/ovk-consumer-fastapi-terraform), not true independent external OSS. Complete advisory workflow reproduction on fixture diffs + manifests. Measured-from-fixture/dogfood. Strict remain_advisory. See docs/pilots/fastapi-terraform/REPORT.md."
+    },
+    {
+      "repository": "fraware/ovk-consumer-express-actions",
+      "status": "advisory",
+      "check_types": [
+        "ci_secrets",
+        "self_protection"
+      ],
+      "advisory_start": "2026-07-11",
+      "advisory_end": "2026-07-25",
+      "prs_evaluated": 2,
+      "prs_blocked": 1,
+      "false_positives": 0,
+      "false_positive_rate": 0.0,
+      "median_check_latency_ms": 81.71,
+      "strict_enabled": false,
+      "ovk_version_pin": "1.2.1",
+      "workflow_path": ".github/workflows/ovk-advisory-pr.yml",
+      "evidence_url": "docs/pilots/express-actions/pilot-report.json",
+      "notes": "Maintained consumer (fraware/ovk-consumer-express-actions), not true independent external OSS. Complete advisory workflow reproduction on fixture diffs + manifests. Measured-from-fixture/dogfood. Strict remain_advisory. See docs/pilots/express-actions/REPORT.md."
+    },
+    {
+      "repository": "in-repo/ovk-pilot-infra-terraform-k8s",
+      "status": "advisory",
+      "check_types": [
+        "infrastructure",
+        "ci_secrets"
+      ],
+      "advisory_start": "2026-07-11",
+      "advisory_end": "2026-07-25",
+      "prs_evaluated": 3,
+      "prs_blocked": 2,
+      "false_positives": 0,
+      "false_positive_rate": 0.0,
+      "median_check_latency_ms": 46.14,
+      "strict_enabled": false,
+      "ovk_version_pin": "1.2.1",
+      "workflow_path": "docs/pilots/infra-terraform-k8s/profile/ovk-pilot.workflow.yml",
+      "evidence_url": "docs/pilots/infra-terraform-k8s/pilot-report.json",
+      "notes": "In-repo maintained infrastructure pilot profile (no live remote). Advisory metrics published from Terraform/K8s-oriented fixtures. Not true external OSS. Strict remain_advisory. See docs/pilots/infra-terraform-k8s/REPORT.md."
+    },
+    {
+      "repository": "TBD - recruiting first true external OSS adopter",
       "status": "recruiting",
       "check_types": [
         "ci_secrets"
@@ -78,9 +138,9 @@
       "false_positive_rate": null,
       "median_check_latency_ms": null,
       "strict_enabled": false,
-      "ovk_version_pin": "1.2.0",
+      "ovk_version_pin": "1.2.1",
       "workflow_path": ".github/workflows/ovk-pilot.yml",
-      "notes": "Placeholder row until the first external OSS repo completes advisory rollout. See docs/EXTERNAL_PILOT_PLAYBOOK.md and docs/templates/pilot_manifest_ci_secrets.template.json."
+      "notes": "Placeholder for a true independent external OSS adopter. Maintained-consumer and in-repo profile pilots are published under docs/pilots/; they do not satisfy this recruiting row."
     }
   ]
 }
