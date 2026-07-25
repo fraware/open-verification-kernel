@@ -43,6 +43,7 @@ def test_result_cache_is_bound_to_repository_subject(monkeypatch, tmp_path: Path
         head_sha="head-one",
         cache_dir=tmp_path,
         parallel=False,
+        policy={"routing": {"mode": "legacy"}},
     )
     second = adapter_runtime.execute_obligations(
         obligations,
@@ -51,6 +52,7 @@ def test_result_cache_is_bound_to_repository_subject(monkeypatch, tmp_path: Path
         head_sha="head-two",
         cache_dir=tmp_path,
         parallel=False,
+        policy={"routing": {"mode": "legacy"}},
     )
     repeated = adapter_runtime.execute_obligations(
         obligations,
@@ -59,6 +61,7 @@ def test_result_cache_is_bound_to_repository_subject(monkeypatch, tmp_path: Path
         head_sha="head-two",
         cache_dir=tmp_path,
         parallel=False,
+        policy={"routing": {"mode": "legacy"}},
     )
 
     assert first[0].subject == {"repo": "one/repo", "head_sha": "head-one"}

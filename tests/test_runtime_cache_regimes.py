@@ -46,7 +46,7 @@ def test_enforced_execution_does_not_reuse_legacy_flat_cache(tmp_path: Path) -> 
         },
     )[0]
     assert enforced.routing_enforced is True
-    assert enforced.schema_version == "ovk.evidence.v2"
+    assert enforced.schema_version == "ovk.evidence.v3"
     assert enforced.selected_backends == ["authorization-deterministic"]
 
 
