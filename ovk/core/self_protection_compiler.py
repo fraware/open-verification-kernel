@@ -12,33 +12,41 @@ from ovk.core.execution_models import (
     compute_obligation_id,
 )
 from ovk.core.materials import material_reference_from_payload
+from ovk.core.metadata_provenance import (
+    acquisition_is_trusted,
+    allowed_provenance_kinds_from_policy,
+    parse_acquisition_record,
+)
 from ovk.core.models import RiskSeverity, VerificationSubject
 
 COMPILER_ID = "ovk.self_protection.neutral.v1"
-COMPILER_VERSION = "0.1.0"
-
-TRUSTED_METADATA_PROVENANCE_KINDS: frozenset[str] = frozenset(
-    {
-        "protected_base_workflow",
-        "signed_service",
-        "maintainer_supplied",
-    }
-)
+COMPILER_VERSION = "0.2.0"
 
 
-def resolve_metadata_trusted(policy: dict[str, Any] | None) -> bool:
-    """Return True only when policy supplies explicit trusted provenance."""
-    if not isinstance(policy, dict):
+def resolve_metadata_trusted(
+    policy: dict[str, Any] | None,
+    *,
+    data: dict[str, Any] | None = None,
+    repo: str | None = None,
+    head_sha: str | None = None,
+    base_sha: str | None = None,
+) -> bool:
+    """Return trust only for a digest-bound acquisition record.
+
+    Historical ``trust.metadata_trusted`` and ``trust.provenance_kind`` fields no
+    longer authorize trust by themselves. Policy may restrict which provenance
+    kinds are accepted, but the assertion must come from the acquired material.
+    """
+    if not isinstance(data, dict) or not repo or not head_sha:
         return False
-    trust = policy.get("trust")
-    if not isinstance(trust, dict):
-        return False
-    if not bool(trust.get("metadata_trusted")):
-        return False
-    provenance = trust.get("provenance_kind") or trust.get("provenance")
-    if provenance not in TRUSTED_METADATA_PROVENANCE_KINDS:
-        return False
-    return True
+    trusted, _reasons, _record = acquisition_is_trusted(
+        data,
+        repo=repo,
+        head_sha=head_sha,
+        base_sha=base_sha,
+        allowed_provenance_kinds=allowed_provenance_kinds_from_policy(policy),
+    )
+    return trusted
 
 
 def _phase(data: dict[str, Any], name: str) -> dict[str, Any]:
@@ -55,12 +63,7 @@ def compile_self_protection_obligation(
     policy_digest: str | None = None,
     metadata_trusted: bool = False,
 ) -> VerificationObligation:
-    """Compile a self-protection obligation with base/head metadata materials.
-
-    When ``metadata_trusted`` is True, before/after required-check materials are
-    marked trusted. Untrusted metadata cannot authorize allow under enforcement.
-    Trust requires explicit policy provenance via ``resolve_metadata_trusted``.
-    """
+    """Compile gate-preservation semantics over bound before/after metadata."""
     before = _phase(data, "before")
     after = _phase(data, "after")
     has_before = isinstance(before.get("required_checks"), list)
@@ -70,6 +73,9 @@ def compile_self_protection_obligation(
         warnings.append("before.required_checks metadata missing")
     if not has_after:
         warnings.append("after.required_checks metadata missing")
+    if not metadata_trusted:
+        warnings.append("branch-protection metadata lacks trusted digest-bound acquisition provenance")
+
     if has_before and has_after:
         coverage = AbstractionCoverage(
             status="complete",
@@ -112,6 +118,8 @@ def compile_self_protection_obligation(
             source_revision=head_sha,
             trusted=metadata_trusted and has_after,
         ),
+        # The complete input binds the acquisition record itself into the
+        # material set, preventing provenance substitution after collection.
         material_reference_from_payload(
             material_id="self-protection-input",
             kind="diff",
@@ -121,10 +129,12 @@ def compile_self_protection_obligation(
             trusted=False,
         ),
     ]
+    acquisition = parse_acquisition_record(data)
     abstraction = {
         "kind": "self_protection_gate_preservation",
         "input": data,
         "metadata_trusted": metadata_trusted,
+        "metadata_acquisition": acquisition.model_dump(mode="json") if acquisition else None,
         "base_sha": base_sha,
         "head_sha": head_sha,
     }
