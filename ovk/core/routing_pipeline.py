@@ -80,7 +80,13 @@ def _compile_self_protection(
         repo=repo,
         head_sha=head_sha,
         base_sha=base_sha,
-        metadata_trusted=resolve_metadata_trusted(policy),
+        metadata_trusted=resolve_metadata_trusted(
+            policy,
+            data=data,
+            repo=repo,
+            head_sha=head_sha,
+            base_sha=base_sha,
+        ),
     )
 
 
@@ -215,8 +221,6 @@ def build_authoritative_routing_plan(
     for item in obligations:
         lane = str(item["lane"])
         if lane not in _LANE_COMPILERS or lane not in _LANE_REGISTRY:
-            # Catalog/experimental lanes without a typed production compiler are
-            # not promoted into the authoritative control plane.
             continue
         intent_id = intent_id_for_obligation(item)
         if intent_id in typed:
@@ -240,7 +244,6 @@ def coerce_routing_decision(
     *,
     intent_id: str,
 ) -> RoutingDecision | None:
-    """Parse compatibility routing without granting it authority."""
     if routing is None:
         return None
     if isinstance(routing, RoutingDecision):
@@ -249,9 +252,6 @@ def coerce_routing_decision(
     try:
         return RoutingDecision.model_validate(payload)
     except Exception:
-        # Some historical callers omitted obligation_id from the legacy dict.
-        # This fallback is parse compatibility only; canonical equality is still
-        # required by ``ensure_authoritative_routing`` below.
         if not payload.get("routing_id"):
             return None
         payload.setdefault("obligation_id", intent_id)
@@ -267,7 +267,6 @@ def _assert_matches_canonical(
     *,
     intent_id: str,
 ) -> None:
-    """Reject caller routing unless it is exactly the canonical route identity."""
     if provided.obligation_id != canonical.obligation_id:
         raise RuntimeError(
             f"caller routing obligation mismatch for {intent_id!r}: "
@@ -280,8 +279,6 @@ def _assert_matches_canonical(
             f"caller routing is stale or non-canonical for {intent_id!r}: "
             f"{provided.routing_id} != {canonical.routing_id}"
         )
-    # Compare the complete typed payload as a defense against a forged object
-    # that reuses a routing_id while changing selected backends or guarantees.
     if provided.model_dump(mode="json") != canonical.model_dump(mode="json"):
         raise RuntimeError(
             f"caller routing payload does not match canonical route for {intent_id!r}"
@@ -297,12 +294,7 @@ def ensure_authoritative_routing(
     head_sha: str,
     base_sha: str | None = None,
 ) -> AuthoritativeRoutingPlan:
-    """Build canonical routes once; compatibility routes may only attest equality.
-
-    This function intentionally never merges a caller-supplied route into the
-    authoritative plan. It computes the route from the typed obligation and, if
-    the caller supplied routing metadata, requires byte-semantic equality.
-    """
+    """Build canonical routes; compatibility routes may only attest equality."""
     plan = build_authoritative_routing_plan(
         obligations,
         policy=policy,
