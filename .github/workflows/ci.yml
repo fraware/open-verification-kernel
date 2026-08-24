@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
   unit:
@@ -68,7 +68,7 @@ jobs:
       - name: Score expanded benchmark and publish leaderboard
         run: |
           ovk bench --expanded --leaderboard .verification/formal-pr-bench-leaderboard.json
-          python scripts/render_bench_badge.py --verified-source-sha "${GITHUB_SHA}" --dry-run
+          python scripts/render_bench_badge.py --benchmark-source-sha "${GITHUB_SHA}" --dry-run
       - name: Pilot program
         run: ovk pilot
       - name: Exercise ovk check on multi-surface PR
