@@ -2,7 +2,23 @@ from ovk.core.decision import decide, decide_merge_recommendation, decide_with_r
 from ovk.core.models import DecisionState, EvidenceBundle, MergeRecommendation
 
 
-def make_bundle(status: str) -> EvidenceBundle:
+def make_bundle(
+    status: str,
+    *,
+    evidence_recommendation: str | None = None,
+    evidence_decision_state: str | None = None,
+) -> EvidenceBundle:
+    if evidence_recommendation is None:
+        evidence_recommendation = {
+            "pass": "allow",
+            "fail": "block",
+            "unknown": "require_human_review",
+            "error": "require_human_review",
+            "skipped": "require_human_review",
+        }.get(status, "require_human_review")
+    decision = {"merge_recommendation": evidence_recommendation}
+    if evidence_decision_state is not None:
+        decision["decision_state"] = evidence_decision_state
     return EvidenceBundle.model_validate(
         {
             "bundle_id": "bundle-test",
@@ -21,7 +37,7 @@ def make_bundle(status: str) -> EvidenceBundle:
                             "status": status,
                         }
                     ],
-                    "decision": {"merge_recommendation": "require_human_review"},
+                    "decision": decision,
                 }
             ],
             "decision": {"merge_recommendation": "require_human_review"},
@@ -50,8 +66,41 @@ def test_unknown_legacy_allow_with_warning_never_allows_in_strict() -> None:
     ) == MergeRecommendation.REQUIRE_HUMAN_REVIEW
 
 
-def test_pass_allows() -> None:
-    assert decide(make_bundle("pass"), enforce=True) == DecisionState.ALLOW
+def test_pass_allows_when_evidence_authorizes_allow() -> None:
+    assert decide(make_bundle("pass", evidence_recommendation="allow"), enforce=True) == DecisionState.ALLOW
+
+
+def test_pass_claim_cannot_promote_evidence_review() -> None:
+    bundle = make_bundle("pass", evidence_recommendation="require_human_review")
+    assert decide(bundle, enforce=True) == DecisionState.NEEDS_REVIEW
+    payload = decide_with_reason(bundle, enforce=True)
+    assert payload["merge_recommendation"] == "require_human_review"
+    assert "evidence:ev-test:decision" in payload["controlling_finding_ids"]
+
+
+def test_pass_claim_cannot_promote_require_stronger_check() -> None:
+    bundle = make_bundle("pass", evidence_recommendation="require_stronger_check")
+    assert decide(bundle, enforce=True) == DecisionState.NEEDS_REVIEW
+    assert decide_merge_recommendation(bundle, enforce=True) == MergeRecommendation.REQUIRE_STRONGER_CHECK
+
+
+def test_pass_claim_cannot_promote_evidence_block() -> None:
+    bundle = make_bundle("pass", evidence_recommendation="block")
+    assert decide(bundle, enforce=True) == DecisionState.BLOCK
+
+
+def test_normative_decision_state_takes_precedence_over_legacy_alias() -> None:
+    bundle = make_bundle(
+        "pass",
+        evidence_recommendation="allow",
+        evidence_decision_state="needs_review",
+    )
+    assert decide(bundle, enforce=True) == DecisionState.NEEDS_REVIEW
+
+
+def test_claim_failure_remains_more_restrictive_than_evidence_allow() -> None:
+    bundle = make_bundle("fail", evidence_recommendation="allow")
+    assert decide(bundle, enforce=True) == DecisionState.BLOCK
 
 
 def test_decide_with_reason_emits_decision_state() -> None:
