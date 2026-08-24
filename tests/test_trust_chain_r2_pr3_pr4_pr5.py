@@ -291,7 +291,7 @@ def test_metadata_trusted_defaults_false() -> None:
     assert all(not item.trusted for item in branch_materials)
 
 
-def test_resolve_metadata_trusted_requires_provenance_kind() -> None:
+def test_policy_only_provenance_cannot_authorize_metadata_trust() -> None:
     assert resolve_metadata_trusted(None) is False
     assert resolve_metadata_trusted({}) is False
     assert resolve_metadata_trusted({"trust": {"metadata_trusted": True}}) is False
@@ -304,7 +304,7 @@ def test_resolve_metadata_trusted_requires_provenance_kind() -> None:
                 }
             }
         )
-        is True
+        is False
     )
 
 
