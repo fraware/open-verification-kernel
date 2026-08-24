@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from ovk.core.bundle import content_digest
@@ -21,6 +22,7 @@ from ovk.core.models import RiskSeverity, VerificationSubject
 
 COMPILER_ID = "ovk.self_protection.neutral.v1"
 COMPILER_VERSION = "0.2.0"
+METADATA_VERIFY_KEY_ENV = "OVK_METADATA_VERIFY_KEY"
 
 
 def resolve_metadata_trusted(
@@ -30,20 +32,24 @@ def resolve_metadata_trusted(
     repo: str | None = None,
     head_sha: str | None = None,
     base_sha: str | None = None,
+    verification_key: str | None = None,
 ) -> bool:
-    """Return trust only for a digest-bound acquisition record.
+    """Return trust only for authenticated, digest-bound acquisition provenance.
 
     Historical ``trust.metadata_trusted`` and ``trust.provenance_kind`` fields no
-    longer authorize trust by themselves. Policy may restrict which provenance
-    kinds are accepted, but the assertion must come from the acquired material.
+    longer authorize trust. The verifier key is read from the dedicated
+    ``OVK_METADATA_VERIFY_KEY`` environment variable unless supplied explicitly
+    by a caller such as a test or protected service.
     """
     if not isinstance(data, dict) or not repo or not head_sha:
         return False
+    key = verification_key if verification_key is not None else os.environ.get(METADATA_VERIFY_KEY_ENV)
     trusted, _reasons, _record = acquisition_is_trusted(
         data,
         repo=repo,
         head_sha=head_sha,
         base_sha=base_sha,
+        verification_key=key,
         allowed_provenance_kinds=allowed_provenance_kinds_from_policy(policy),
     )
     return trusted
@@ -74,7 +80,7 @@ def compile_self_protection_obligation(
     if not has_after:
         warnings.append("after.required_checks metadata missing")
     if not metadata_trusted:
-        warnings.append("branch-protection metadata lacks trusted digest-bound acquisition provenance")
+        warnings.append("branch-protection metadata lacks authenticated digest-bound acquisition provenance")
 
     if has_before and has_after:
         coverage = AbstractionCoverage(
@@ -118,7 +124,7 @@ def compile_self_protection_obligation(
             source_revision=head_sha,
             trusted=metadata_trusted and has_after,
         ),
-        # The complete input binds the acquisition record itself into the
+        # The complete input binds the acquisition record and signature into the
         # material set, preventing provenance substitution after collection.
         material_reference_from_payload(
             material_id="self-protection-input",
