@@ -1,7 +1,10 @@
-"""Typed acquisition provenance for security-critical repository metadata."""
+"""Typed and authenticated acquisition provenance for critical repository metadata."""
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -9,9 +12,16 @@ from pydantic import BaseModel, Field
 from ovk.core.bundle import content_digest
 
 PROVENANCE_SCHEMA_VERSION = "ovk.metadata_acquisition.v1"
+SIGNATURE_ALGORITHM = "hmac-sha256"
 TRUSTED_PROVENANCE_KINDS: frozenset[str] = frozenset(
     {"protected_base_workflow", "signed_service", "maintainer_supplied"}
 )
+
+
+class AcquisitionSignature(BaseModel):
+    algorithm: Literal["hmac-sha256"] = SIGNATURE_ALGORITHM
+    key_id: str
+    digest: str
 
 
 class MetadataAcquisitionRecord(BaseModel):
@@ -30,11 +40,11 @@ class MetadataAcquisitionRecord(BaseModel):
     authentication_method: str
     provenance_kind: str
     source_endpoint: str | None = None
+    signature: AcquisitionSignature | None = None
     extensions: dict[str, Any] = Field(default_factory=dict)
 
 
 def branch_metadata_payload(data: dict[str, Any]) -> dict[str, Any]:
-    """Return exactly the bytes-of-meaning whose acquisition provenance is bound."""
     before = data.get("before") if isinstance(data.get("before"), dict) else {}
     after = data.get("after") if isinstance(data.get("after"), dict) else {}
     return {"before": before, "after": after}
@@ -42,6 +52,53 @@ def branch_metadata_payload(data: dict[str, Any]) -> dict[str, Any]:
 
 def expected_branch_metadata_digest(data: dict[str, Any]) -> str:
     return content_digest(branch_metadata_payload(data))
+
+
+def _unsigned_record_payload(record: MetadataAcquisitionRecord | dict[str, Any]) -> dict[str, Any]:
+    payload = record.model_dump(mode="json") if isinstance(record, MetadataAcquisitionRecord) else dict(record)
+    payload.pop("signature", None)
+    return payload
+
+
+def _canonical_bytes(payload: dict[str, Any]) -> bytes:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+def sign_acquisition_record(
+    record: MetadataAcquisitionRecord | dict[str, Any],
+    *,
+    key: str,
+    key_id: str = "ovk-metadata-v1",
+) -> MetadataAcquisitionRecord:
+    """Authenticate an acquisition record using a protected collector key."""
+    if not key:
+        raise ValueError("metadata signing key must be non-empty")
+    unsigned = _unsigned_record_payload(record)
+    digest = hmac.new(key.encode("utf-8"), _canonical_bytes(unsigned), hashlib.sha256).hexdigest()
+    unsigned["signature"] = {
+        "algorithm": SIGNATURE_ALGORITHM,
+        "key_id": key_id,
+        "digest": digest,
+    }
+    return MetadataAcquisitionRecord.model_validate(unsigned)
+
+
+def verify_acquisition_signature(
+    record: MetadataAcquisitionRecord,
+    *,
+    key: str | None,
+) -> bool:
+    if not key or record.signature is None:
+        return False
+    if record.signature.algorithm != SIGNATURE_ALGORITHM:
+        return False
+    unsigned = _unsigned_record_payload(record)
+    expected = hmac.new(
+        key.encode("utf-8"),
+        _canonical_bytes(unsigned),
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(expected, record.signature.digest)
 
 
 def parse_acquisition_record(data: dict[str, Any]) -> MetadataAcquisitionRecord | None:
@@ -60,15 +117,10 @@ def acquisition_is_trusted(
     repo: str,
     head_sha: str,
     base_sha: str | None,
+    verification_key: str | None,
     allowed_provenance_kinds: set[str] | frozenset[str] | None = None,
 ) -> tuple[bool, list[str], MetadataAcquisitionRecord | None]:
-    """Validate a metadata acquisition record against the actual material.
-
-    Trust is impossible from a policy boolean alone. The record must be typed,
-    digest-bound to the supplied before/after metadata, scoped to the repository
-    and revisions being verified, and use a provenance kind explicitly accepted
-    by the trust policy.
-    """
+    """Validate provenance, content binding and authentication against material."""
     record = parse_acquisition_record(data)
     reasons: list[str] = []
     if record is None:
@@ -85,15 +137,14 @@ def acquisition_is_trusted(
         reasons.append(f"head revision mismatch: {record.head_sha} != {head_sha}")
     if base_sha is not None and record.base_sha != base_sha:
         reasons.append(f"base revision mismatch: {record.base_sha} != {base_sha}")
-    expected_digest = expected_branch_metadata_digest(data)
-    if record.payload_digest != expected_digest:
+    if record.payload_digest != expected_branch_metadata_digest(data):
         reasons.append("metadata payload digest mismatch")
     if not record.collector_id.strip() or not record.collector_version.strip():
         reasons.append("collector identity incomplete")
     if not record.authentication_method.strip():
         reasons.append("authentication method missing")
-    if record.source_type != "branch_protection":
-        reasons.append("unexpected metadata source type")
+    if not verify_acquisition_signature(record, key=verification_key):
+        reasons.append("metadata acquisition signature missing or invalid")
 
     return not reasons, reasons, record
 
