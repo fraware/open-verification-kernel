@@ -54,6 +54,5 @@
     "max": 34.02709299999884
   },
   "benchmark_source_sha": "8926eab3381322a3e63757b4e95072d9179f6635",
-  "verified_source_sha": "8926eab3381322a3e63757b4e95072d9179f6635",
-  "provenance_note": "Cite benchmark_source_sha for FormalPR-Bench measurement identity. Cite verified_source_sha only when a complete required-workflow set was observed for that commit; do not treat a later [skip ci] badge commit as verified."
+  "provenance_note": "benchmark_source_sha identifies the source revision measured by FormalPR-Bench. verified_source_sha is intentionally absent until a complete required release-workflow and external validation ledger is observed for one exact source revision."
 }
