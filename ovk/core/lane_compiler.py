@@ -13,6 +13,7 @@ from ovk.core.diff_iac import infra_inputs_from_diff
 from ovk.core.diff_parser import is_unified_diff
 from ovk.core.multi_lane import normalize_lane_name
 from ovk.core.planner import plan_from_changed_files, plan_from_diff_text
+from ovk.core.self_protection_input import build_from_json_like as build_self_protection_input
 from ovk.core.sprint1_runner import build_metadata_from_inputs
 
 
@@ -46,16 +47,28 @@ def compile_lane_inputs_from_plan(
     if "self_protection" in lanes_needed:
         meta = dict(metadata or {})
         if github_event_path or check_metadata_path:
-            meta = build_metadata_from_inputs(
+            loaded = build_metadata_from_inputs(
                 metadata_path=None,
                 changed_files_path=None,
                 check_metadata_path=check_metadata_path,
                 github_event_path=github_event_path,
             )
+            # Explicit caller/context metadata may carry acquisition provenance;
+            # loaded GitHub/check metadata supplies normalized check sets.
+            acquisition = meta.get("_ovk_acquisition")
+            meta = {**meta, **loaded}
+            if isinstance(acquisition, dict):
+                meta["_ovk_acquisition"] = acquisition
             meta.setdefault("changed_files", plan.get("changed_files", []))
         elif not meta.get("changed_files"):
             meta["changed_files"] = plan.get("changed_files", [])
-        jobs.append({"lane": "self_protection", "data": meta, "input_format": "infra"})
+        jobs.append(
+            {
+                "lane": "self_protection",
+                "data": build_self_protection_input(meta),
+                "input_format": "infra",
+            }
+        )
 
     if diff_text and is_unified_diff(diff_text):
         if "ci_secrets" in lanes_needed:
@@ -115,7 +128,6 @@ def build_plan_from_inputs(
     changed_files: list[str] | None = None,
     diff_text: str | None = None,
 ) -> dict[str, Any]:
-    """Build a planner payload from changed paths or diff text."""
     if diff_text and is_unified_diff(diff_text):
         return plan_from_diff_text(diff_text)
     return plan_from_changed_files(changed_files or [])
