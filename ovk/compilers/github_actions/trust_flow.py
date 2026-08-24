@@ -5,14 +5,16 @@ protected environment, or privileged capability is a finding.
 
 Token authority is evaluated per job. Workflow-level and job-level permission
 blocks are not unioned across principals, and merely referencing GITHUB_TOKEN
-does not imply that the token has write authority.
+does not imply that the token has write authority. Environment protection is
+an acquired control-plane fact and cannot be asserted by the workflow document
+being analyzed.
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Collection
 
 from ovk.compilers.github_actions.composite_actions import expand_composite_action
 from ovk.compilers.github_actions.expressions import (
@@ -42,8 +44,14 @@ def compile_workflow_trust(
     workflow: dict[str, Any],
     *,
     repo_root: Path | None = None,
+    protected_environments: Collection[str] | None = None,
 ) -> GitHubActionsIR:
-    """Compile one workflow document into a trust-flow IR."""
+    """Compile one workflow document into a trust-flow IR.
+
+    ``protected_environments`` must come from a separately trusted acquisition
+    path (for example GitHub environment-protection metadata). The workflow
+    payload itself is never allowed to self-assert this fact.
+    """
     path = str(workflow.get("_ovk_path") or "workflow.yml")
     nodes: list[TrustNode] = [TrustNode(node_id=f"workflow:{path}", kind="workflow", trust="unknown")]
     edges: list[TrustEdge] = []
@@ -58,10 +66,9 @@ def compile_workflow_trust(
         nodes[0].trust = "untrusted"
         nodes[0].labels.extend(sorted(triggers))
 
-    # Keep the declaration inventory in the IR, but never use this global list
-    # to decide one job's effective authority.
     permissions = extract_permissions(workflow)
     secrets = extract_secrets(workflow)
+    protected_environment_names = frozenset(str(item) for item in (protected_environments or ()))
 
     jobs = workflow.get("jobs") if isinstance(workflow.get("jobs"), dict) else {}
     for job_id, job in sorted(jobs.items()):
@@ -76,9 +83,7 @@ def compile_workflow_trust(
             triggers=triggers,
         )
         if permission_source == "default" and write_token_source == "repository_default_unresolved":
-            warnings.append(
-                f"job:{job_id}:default_token_permissions_repository_dependent"
-            )
+            warnings.append(f"job:{job_id}:default_token_permissions_repository_dependent")
 
         job_node = TrustNode(
             node_id=f"job:{job_id}",
@@ -93,7 +98,8 @@ def compile_workflow_trust(
         edges.append(TrustEdge(source=nodes[0].node_id, target=job_node.node_id, kind="contains_job"))
 
         environment = job.get("environment")
-        protected_env = _environment_is_protected(workflow, environment)
+        environment_name = _environment_name(environment)
+        protected_env = bool(environment_name and environment_name in protected_environment_names)
         if environment is not None:
             job_node.labels.append("environment_declared")
         if protected_env:
@@ -180,7 +186,7 @@ def compile_workflow_trust(
                         kind="untrusted_code_with_protected_env",
                         summary=f"untrusted step {step_id} runs in a verified protected environment",
                         node_ids=[step_node_id],
-                        evidence={"environment": _environment_name(environment)},
+                        evidence={"environment": environment_name},
                     )
                 )
             if untrusted_code and (privileged or references_protected_env(run)):
@@ -247,24 +253,6 @@ def _environment_name(environment: Any) -> str | None:
     if isinstance(environment, dict) and environment.get("name") is not None:
         return str(environment.get("name"))
     return None
-
-
-def _environment_is_protected(workflow: dict[str, Any], environment: Any) -> bool:
-    """Return protection only from acquired environment metadata, never syntax alone.
-
-    ``jobs.<id>.environment`` merely selects an environment; it does not prove
-    that required reviewers, wait timers or other protection rules exist. A
-    source collector may provide ``_ovk_protected_environments`` as a list of
-    environment names after trusted acquisition. Absence of that metadata is
-    deliberately non-authorizing.
-    """
-    name = _environment_name(environment)
-    if not name:
-        return False
-    raw = workflow.get("_ovk_protected_environments")
-    if not isinstance(raw, list):
-        return False
-    return name in {str(item) for item in raw}
 
 
 def _triggers(on: Any) -> set[str]:
