@@ -15,12 +15,12 @@ def _service(namespace: str) -> dict:
     }
 
 
-def _deployment(namespace: str) -> dict:
+def _deployment(namespace: str, name: str = "workload") -> dict:
     return {
         "apiVersion": "apps/v1",
         "kind": "Deployment",
         "metadata": {
-            "name": "api",
+            "name": name,
             "namespace": namespace,
             "annotations": {"ovk.io/sensitivity": "confidential"},
         },
@@ -54,16 +54,16 @@ def test_matching_labels_in_same_namespace_create_reachability() -> None:
     edges = _selector_edges(ir)
     assert len(edges) == 1
     assert edges[0].source == "public/api"
-    assert edges[0].target == "public/api"
+    assert edges[0].target == "public/workload"
 
 
 def test_same_label_in_two_namespaces_only_links_same_namespace_controller() -> None:
     ir = compile_kubernetes_objects([
         _service("public"),
-        _deployment("public"),
-        _deployment("private"),
+        _deployment("public", "public-workload"),
+        _deployment("private", "private-workload"),
     ])
     edges = _selector_edges(ir)
     assert len(edges) == 1
     assert edges[0].source == "public/api"
-    assert edges[0].target == "public/api"
+    assert edges[0].target == "public/public-workload"
