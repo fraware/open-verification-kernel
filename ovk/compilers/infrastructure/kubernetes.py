@@ -5,7 +5,9 @@ Secret refs, pod security, and admission metadata when present as objects.
 
 Profile ``infrastructure.kubernetes.controller_reachability_v1`` adds
 controller-aware edges from public Services to matching Deployment/StatefulSet/
-DaemonSet workloads via label selectors.
+DaemonSet workloads via label selectors. Service selectors are namespace-scoped:
+a Service must never acquire a controller edge solely because matching pod labels
+exist in another namespace.
 """
 
 from __future__ import annotations
@@ -30,11 +32,14 @@ def _meta(obj: dict[str, Any]) -> dict[str, Any]:
     return meta if isinstance(meta, dict) else {}
 
 
+def _namespace(obj: dict[str, Any]) -> str:
+    return str(_meta(obj).get("namespace") or "default")
+
+
 def _name(obj: dict[str, Any], index: int) -> str:
     meta = _meta(obj)
     name = meta.get("name") or f"resource-{index}"
-    namespace = meta.get("namespace") or "default"
-    return f"{namespace}/{name}"
+    return f"{_namespace(obj)}/{name}"
 
 
 def _annotations(obj: dict[str, Any]) -> dict[str, Any]:
@@ -75,7 +80,11 @@ def compile_kubernetes_objects(objects: list[dict[str, Any]] | dict[str, Any]) -
         paths: list[str] = []
         public = False
         resource_kind = "kubernetes"
-        attributes: dict[str, Any] = {"apiVersion": obj.get("apiVersion"), "kind": kind}
+        attributes: dict[str, Any] = {
+            "apiVersion": obj.get("apiVersion"),
+            "kind": kind,
+            "namespace": _namespace(obj),
+        }
 
         if kind == "Service":
             resource_kind = "service"
@@ -95,7 +104,7 @@ def compile_kubernetes_objects(objects: list[dict[str, Any]] | dict[str, Any]) -
                 if isinstance(http_paths, list) and http_paths:
                     svc = http_paths[0].get("backend", {}).get("service", {})
                     if isinstance(svc, dict) and svc.get("name"):
-                        backend = f"{_meta(obj).get('namespace', 'default')}/{svc['name']}"
+                        backend = f"{_namespace(obj)}/{svc['name']}"
                         break
             if backend:
                 edges.append(
@@ -124,7 +133,6 @@ def compile_kubernetes_objects(objects: list[dict[str, Any]] | dict[str, Any]) -
             if isinstance(pod_spec, dict):
                 attributes["serviceAccountName"] = pod_spec.get("serviceAccountName")
                 attributes["securityContext"] = pod_spec.get("securityContext")
-                # Admission / PSA metadata.
                 attributes["pod_security_labels"] = {
                     key: value
                     for key, value in _meta(obj).get("labels", {}).items()
@@ -178,7 +186,6 @@ def _selector_match(selector: dict[str, Any] | None, labels: dict[str, str]) -> 
     match_labels = selector.get("matchLabels")
     if isinstance(match_labels, dict):
         return all(labels.get(str(key)) == str(value) for key, value in match_labels.items())
-    # Service selectors are flat maps.
     return all(labels.get(str(key)) == str(value) for key, value in selector.items())
 
 
@@ -186,34 +193,38 @@ def _controller_reachability_edges(
     objects: list[Any],
     resources: list[InfraResourceIR],
 ) -> list[ExposureEdge]:
-    """Link public Services to controllers whose pod template labels match."""
+    """Link Services only to same-namespace controllers with matching pod labels."""
     resource_ids = {item.resource_id for item in resources}
-    services: list[tuple[str, dict[str, Any]]] = []
-    controllers: list[tuple[str, dict[str, Any]]] = []
+    services: list[tuple[str, str, dict[str, Any]]] = []
+    controllers: list[tuple[str, str, dict[str, Any]]] = []
     for index, obj in enumerate(objects):
         if not isinstance(obj, dict):
             continue
         kind = str(obj.get("kind") or "")
         resource_id = _name(obj, index)
+        namespace = _namespace(obj)
         spec = obj.get("spec") if isinstance(obj.get("spec"), dict) else {}
         if kind == "Service":
-            services.append((resource_id, spec if isinstance(spec, dict) else {}))
+            services.append((resource_id, namespace, spec if isinstance(spec, dict) else {}))
         elif kind in _CONTROLLER_KINDS:
-            controllers.append((resource_id, obj))
+            controllers.append((resource_id, namespace, obj))
 
     edges: list[ExposureEdge] = []
-    for service_id, service_spec in services:
+    for service_id, service_namespace, service_spec in services:
         if service_id not in resource_ids:
             continue
         selector = service_spec.get("selector")
         if not isinstance(selector, dict):
             continue
-        for controller_id, controller in controllers:
+        for controller_id, controller_namespace, controller in controllers:
+            # Kubernetes Service selectors are namespace-scoped. A matching label
+            # set in another namespace is not a reachable backend for this Service.
+            if controller_namespace != service_namespace:
+                continue
             template = controller.get("spec", {}).get("template") if isinstance(controller.get("spec"), dict) else None
             labels = _labels(template) if isinstance(template, dict) else {}
             if not _selector_match(selector, labels):
                 continue
-            # Ensure controller appears as a resource so paths can terminate.
             if controller_id not in resource_ids:
                 resources.append(
                     InfraResourceIR(
@@ -224,6 +235,7 @@ def _controller_reachability_edges(
                         attributes={
                             "source_profile": _SOURCE_PROFILE_ID,
                             "controller_kind": controller.get("kind"),
+                            "namespace": controller_namespace,
                         },
                     )
                 )
