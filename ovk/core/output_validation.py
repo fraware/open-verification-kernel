@@ -1,4 +1,4 @@
-"""Schema validation for generated OVK artifacts."""
+"""Schema and semantic validation for generated OVK artifacts."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from ovk.core.evidence_verifier import verify_bundle_semantics
 from ovk.core.models import EvidenceBundle
 from ovk.core.schema_validation import ValidationIssue, ValidationReport, validate_against_schema
 from ovk.paths import ovk_data_root
@@ -69,17 +70,37 @@ def missing_release_layout_schema_coverage(layout: dict[str, Any]) -> list[str]:
 
 def _issues_from_pydantic(error: ValidationError) -> list[ValidationIssue]:
     return [
-        ValidationIssue(path=[str(part) for part in issue["loc"]], message=issue["msg"]) for issue in error.errors()
+        ValidationIssue(path=[str(part) for part in issue["loc"]], message=issue["msg"])
+        for issue in error.errors()
     ]
 
 
 def validate_evidence_bundle(instance: dict[str, Any]) -> ValidationReport:
-    """Validate an evidence bundle using the canonical Pydantic model."""
+    """Validate a bundle structurally and independently recompute its semantics."""
     try:
         EvidenceBundle.model_validate(instance)
     except ValidationError as error:
         return ValidationReport(valid=False, issues=_issues_from_pydantic(error))
-    return ValidationReport(valid=True, issues=[])
+
+    issues: list[ValidationIssue] = []
+    if str(instance.get("schema_version")) == "ovk.bundle.v3":
+        schema_path = SCHEMA_ROOT / "verification.bundle.v3.schema.json"
+        if not schema_path.exists():
+            issues.append(
+                ValidationIssue(path=["schema_version"], message="bundle v3 schema is missing")
+            )
+        else:
+            schema_report = validate_against_schema(
+                instance, json.loads(schema_path.read_text(encoding="utf-8"))
+            )
+            issues.extend(schema_report.issues)
+
+    semantic = verify_bundle_semantics(instance)
+    issues.extend(
+        ValidationIssue(path=[part for part in item.path.split(".") if part], message=item.message)
+        for item in semantic.issues
+    )
+    return ValidationReport(valid=not issues, issues=issues)
 
 
 def validate_generated_json(instance: dict[str, Any], kind: str) -> ValidationReport:
