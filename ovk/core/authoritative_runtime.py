@@ -14,6 +14,7 @@ from typing import Any
 
 from ovk.core.adapter_runtime import _evaluate_obligation
 from ovk.core.execution_models import RoutingDecision, VerificationObligation
+from ovk.core.fallback_rules import strict_fallback_rules_from_policy
 from ovk.core.routing_pipeline import (
     AuthoritativeRoutingPlan,
     LANE_TO_INTENT,
@@ -23,18 +24,6 @@ from ovk.core.routing_pipeline import (
 
 class AuthoritativePlanError(RuntimeError):
     """Raised when a supplied authoritative routing plan is internally invalid."""
-
-
-def _expected_subject(
-    *,
-    repo: str,
-    head_sha: str,
-    base_sha: str | None,
-) -> dict[str, str]:
-    payload = {"repo": repo, "head_sha": head_sha}
-    if base_sha is not None:
-        payload["base_sha"] = base_sha
-    return payload
 
 
 def _validate_subject(
@@ -70,9 +59,7 @@ def _validate_route(
             f"{routing.obligation_id} != {obligation.obligation_id}"
         )
     if routing.policy_digest != obligation.policy_digest:
-        raise AuthoritativePlanError(
-            f"routing policy_digest mismatch for {intent_id!r}"
-        )
+        raise AuthoritativePlanError(f"routing policy_digest mismatch for {intent_id!r}")
     if not routing.routing_id:
         raise AuthoritativePlanError(f"missing routing_id for {intent_id!r}")
 
@@ -112,12 +99,7 @@ def validate_authoritative_plan(
     head_sha: str,
     base_sha: str | None = None,
 ) -> None:
-    """Validate that *plan* is the exact typed plan for the supplied obligations.
-
-    Experimental/catalog lanes without a typed production compiler are ignored,
-    matching ``build_authoritative_routing_plan``. For all five production lanes,
-    missing, stale or structurally forged routing fails closed.
-    """
+    """Validate the exact typed plan for the supplied production obligations."""
     expected_intents: set[str] = set()
     for item in obligations:
         lane = str(item.get("lane", ""))
@@ -157,6 +139,35 @@ def validate_authoritative_plan(
         )
 
 
+def _validate_authoritative_fallback(
+    plan: AuthoritativeRoutingPlan,
+    *,
+    policy: dict[str, Any] | None,
+) -> None:
+    """Fail closed until exact cross-backend fallback is fully evidence-bound.
+
+    The explicit rule format is parsed now so malformed/unsafe future policy is
+    rejected early. The current executor does not yet bind primary failure and
+    fallback attempt into one verifiable tuple, so neither the deprecated broad
+    flag nor an explicit rule can silently enable fallback in enforced mode.
+    """
+    try:
+        rules = strict_fallback_rules_from_policy(policy)
+    except ValueError as exc:
+        raise AuthoritativePlanError(str(exc)) from exc
+
+    if any(route.fallback_policy.allow_fallback for route in plan.routing_by_intent.values()):
+        raise AuthoritativePlanError(
+            "legacy broad allow_fallback is forbidden in authoritative execution; "
+            "fallback requires an exact evidence-bound rule"
+        )
+    if rules:
+        raise AuthoritativePlanError(
+            "explicit fallback_rules are valid but cross-backend fallback execution "
+            "is not yet evidence-bound; authoritative execution fails closed"
+        )
+
+
 def execute_authoritative_plan(
     obligations: list[dict[str, Any]],
     plan: AuthoritativeRoutingPlan,
@@ -180,6 +191,7 @@ def execute_authoritative_plan(
         head_sha=head_sha,
         base_sha=base_sha,
     )
+    _validate_authoritative_fallback(plan, policy=policy)
 
     kwargs = {
         "routing_plan": plan,
@@ -193,10 +205,7 @@ def execute_authoritative_plan(
     }
     if parallel and len(obligations) > 1:
         with ThreadPoolExecutor(max_workers=min(len(obligations), 5)) as pool:
-            futures = [
-                pool.submit(_evaluate_obligation, obligation, **kwargs)
-                for obligation in obligations
-            ]
+            futures = [pool.submit(_evaluate_obligation, obligation, **kwargs) for obligation in obligations]
             return [future.result() for future in futures]
 
     return [_evaluate_obligation(obligation, **kwargs) for obligation in obligations]
