@@ -4,6 +4,11 @@ Production obligations are compiled before routing and routed exactly once. A
 caller may present a compatibility routing object, but it can only be used as an
 assertion that must match the freshly computed canonical route; it is never an
 alternate routing authority.
+
+Authoritative routing IDs deliberately bind the externally observable routing
+decision (requested/eligible/selected/rejected sets, budget, fallback and policy)
+rather than transient internal capability-assessment objects. This makes the
+route identity independently recomputable from emitted evidence.
 """
 
 from __future__ import annotations
@@ -22,10 +27,16 @@ from ovk.core.ci_secrets_compiler import compile_ci_secrets_obligation
 from ovk.core.coverage_contract import CoverageContractRegistry
 from ovk.core.deployment_compiler import compile_deployment_obligation
 from ovk.core.execution_budget import execution_budget_from_policy
-from ovk.core.execution_models import ExecutionContext, RoutingDecision, VerificationObligation
+from ovk.core.execution_models import (
+    ExecutionContext,
+    RoutingDecision,
+    VerificationObligation,
+    compute_routing_id,
+)
 from ovk.core.infrastructure_compiler import compile_infrastructure_obligation
 from ovk.core.policy_config import routing_enforced_for_lane
 from ovk.core.router import (
+    ROUTER_VERSION,
     RoutingConfig,
     route_obligation,
     routing_config_from_policy,
@@ -167,6 +178,23 @@ def compile_typed_obligation(
     )
 
 
+def _externally_recomputable_routing_id(decision: RoutingDecision) -> str:
+    """Recompute authoritative routing identity from the emitted decision only."""
+    return compute_routing_id(
+        obligation_id=decision.obligation_id,
+        requested=list(decision.requested),
+        eligible=list(decision.eligible),
+        selected=list(decision.selected),
+        rejected=list(decision.rejected),
+        aggregation_policy=decision.aggregation_policy,
+        fallback_policy=decision.fallback_policy,
+        budget=decision.budget,
+        policy_digest=decision.policy_digest,
+        router_version=ROUTER_VERSION,
+        assessments=None,
+    )
+
+
 def route_compiled_obligation(
     obligation: VerificationObligation,
     *,
@@ -198,12 +226,15 @@ def route_compiled_obligation(
         accept_partial_primary=routing_config.accept_partial_primary,
         enforced_lanes=frozenset({lane}) if enforced else routing_config.enforced_lanes,
     )
-    return route_obligation(
+    routed = route_obligation(
         obligation,
         registry,  # type: ignore[arg-type] -- registry view implements required surface
         context=context,
         config=config,
         policy=policy,
+    )
+    return routed.model_copy(
+        update={"routing_id": _externally_recomputable_routing_id(routed)}
     )
 
 
