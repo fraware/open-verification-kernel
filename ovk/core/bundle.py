@@ -29,6 +29,15 @@ def _validate_bundle_inputs(evidence: list[VerificationEvidence]) -> None:
         raise ValueError(f"evidence bundle contains duplicate evidence_id values: {', '.join(duplicate_ids)}")
 
 
+def _bundle_schema_version(evidence: list[VerificationEvidence]) -> str:
+    versions = [str(item.schema_version) for item in evidence]
+    if versions and all(version.startswith("ovk.evidence.v3") for version in versions):
+        return "ovk.bundle.v3"
+    if versions and all(version.endswith(".v2") for version in versions):
+        return "ovk.bundle.v2"
+    return "ovk.bundle.v1"
+
+
 def make_bundle(
     evidence: list[VerificationEvidence],
     *,
@@ -43,11 +52,7 @@ def make_bundle(
     subject = evidence[0].subject
     evidence_payload = [item.model_dump(mode="json") for item in evidence]
     fingerprint = content_digest({"subject": subject, "evidence": evidence_payload})[:16]
-    schema_version = (
-        "ovk.bundle.v2"
-        if evidence and all(str(item.schema_version).endswith(".v2") for item in evidence)
-        else "ovk.bundle.v1"
-    )
+    schema_version = _bundle_schema_version(evidence)
 
     provisional = EvidenceBundle(
         bundle_id=f"bundle-{fingerprint}",
