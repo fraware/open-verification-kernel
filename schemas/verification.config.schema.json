@@ -65,7 +65,42 @@
           "default": 2
         },
         "prefer_deterministic": { "type": "boolean", "default": false },
-        "allow_fallback": { "type": "boolean", "default": false },
+        "allow_fallback": {
+          "type": "boolean",
+          "default": false,
+          "description": "Deprecated broad compatibility flag. Authoritative/enforced execution must not use this flag as fallback authorization; use exact fallback_rules once executor support is enabled."
+        },
+        "fallback_rules": {
+          "type": "array",
+          "description": "Exact fallback authorization tuples. Presence does not by itself enable enforced cross-backend fallback; the executor must support and validate the full tuple.",
+          "items": {
+            "type": "object",
+            "required": [
+              "primary_backend",
+              "primary_guarantee",
+              "fallback_backend",
+              "fallback_guarantee",
+              "allowed_causes"
+            ],
+            "properties": {
+              "primary_backend": { "type": "string", "minLength": 1 },
+              "primary_guarantee": { "type": "string", "minLength": 1 },
+              "fallback_backend": { "type": "string", "minLength": 1 },
+              "fallback_guarantee": { "type": "string", "minLength": 1 },
+              "allowed_causes": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "enum": ["tool_unavailable", "timeout", "resource_exhausted", "tool_error", "invalid_output"]
+                }
+              },
+              "requires_independent_attempt": { "type": "boolean", "default": true }
+            },
+            "additionalProperties": false
+          }
+        },
         "accept_partial_primary": { "type": "boolean", "default": false },
         "enforced_lanes": {
           "type": "array",
