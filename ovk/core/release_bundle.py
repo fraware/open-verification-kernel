@@ -16,6 +16,7 @@ from ovk.core.json_io import read_json_file, write_json_file
 from ovk.core.models import EvidenceBundle
 from ovk.core.output_validation import validate_generated_json, validate_output_directory
 from ovk.core.provenance import build_provenance_statement
+from ovk.core.provenance_binding import verify_provenance_binding
 from ovk.core.release_layout import ReleaseArtifact, missing_required_artifacts
 from ovk.core.run_outputs import StandardOutputPaths, write_standard_run_outputs
 from ovk.core.sigstore_signing import verify_cosign_bundle
@@ -159,6 +160,16 @@ def verify_release_bundle(root: Path, layout: dict[str, Any] | None = None) -> l
             for issue in semantic.issues:
                 failures.append(f"evidence semantics: {issue.path}: {issue.message}")
 
+    provenance_path = root / "ovk-provenance.json"
+    if provenance_path.exists() and parsed_bundle is not None:
+        try:
+            provenance = read_json_file(provenance_path)
+        except Exception as exc:  # noqa: BLE001
+            failures.append(f"provenance parsing failed: {type(exc).__name__}: {exc}")
+        else:
+            for issue in verify_provenance_binding(parsed_bundle, provenance):
+                failures.append(f"provenance binding: {issue.path}: {issue.message}")
+
     manifest_path = root / "ovk-artifact-manifest.json"
     if not manifest_path.exists():
         return failures
@@ -203,9 +214,9 @@ def verify_release_bundle(root: Path, layout: dict[str, Any] | None = None) -> l
         if parsed_bundle is not None:
             statement = envelope.get("statement", {})
             for issue in verify_bundle_statement_binding(parsed_bundle, statement):
-                failures.append(f"attestation binding: {issue.message}")
+                failures.append(f"attestation binding: {issue.path}: {issue.message}")
             for issue in verify_envelope_manifest_binding(envelope, manifest_sha256=sha256_file(manifest_path)):
-                failures.append(f"envelope binding: {issue.message}")
+                failures.append(f"envelope binding: {issue.path}: {issue.message}")
 
     return failures
 
