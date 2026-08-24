@@ -1,16 +1,17 @@
-"""Merge decision lattice and aggregation for OVK evidence bundles.
+"""Merge decision lattice and conservative bundle aggregation.
 
-Normative lattice (``DecisionState``):
-    allow | block | needs_review | unknown | error | skipped
+The checker-status lattice and the authorization decision lattice are related but
+not interchangeable. A backend can correctly return ``pass`` while an evidence
+producer still requires review because coverage is incomplete, source material
+is untrusted, a weaker guarantee was used, or another semantic precondition was
+not discharged.
 
-Hard rules:
-- ``error`` never promotes to ``allow`` (strict and advisory)
-- ``unknown`` never becomes ``allow`` in strict mode; advisory preserves ``unknown``
-- Required ``skipped`` never silently allows in strict mode (``skipped`` or ``block``)
-- Advisory preserves the honest lattice state via ``original_decision_state``
-- Decisions list ``controlling_finding_ids`` and per-finding contributions
+Consequently bundle aggregation obeys a monotonicity invariant:
 
-``merge_recommendation`` remains a deprecated alias of ``decision_state``.
+    a bundle MUST NOT be more permissive than any authoritative evidence item.
+
+``merge_recommendation`` is retained as a compatibility alias for
+``DecisionState``. New code should reason about ``DecisionState`` directly.
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ from ovk.core.models import (
 
 Mode = Literal["strict", "advisory"]
 
-# Claim severity for aggregation (higher = more severe / more controlling).
+# Claim severity for backend-result aggregation. Higher is more controlling.
 _CLAIM_SEVERITY: dict[VerificationStatus, int] = {
     VerificationStatus.PASS: 0,
     VerificationStatus.SKIPPED: 1,
@@ -37,6 +38,9 @@ _CLAIM_SEVERITY: dict[VerificationStatus, int] = {
     VerificationStatus.FAIL: 4,
 }
 
+# Authorization severity. Higher values are never less restrictive than lower
+# values. NEEDS_REVIEW is deliberately distinct from UNKNOWN/ERROR/SKIPPED even
+# though all prevent an allow decision.
 _DECISION_SEVERITY: dict[DecisionState, int] = {
     DecisionState.ALLOW: 0,
     DecisionState.NEEDS_REVIEW: 1,
@@ -46,7 +50,6 @@ _DECISION_SEVERITY: dict[DecisionState, int] = {
     DecisionState.BLOCK: 5,
 }
 
-# Legacy merge_recommendation ↔ DecisionState
 _STATE_TO_LEGACY: dict[DecisionState, MergeRecommendation] = {
     DecisionState.ALLOW: MergeRecommendation.ALLOW,
     DecisionState.BLOCK: MergeRecommendation.BLOCK,
@@ -64,7 +67,7 @@ _LEGACY_TO_STATE: dict[str, DecisionState] = {
     "unknown": DecisionState.UNKNOWN,
     "error": DecisionState.ERROR,
     "skipped": DecisionState.SKIPPED,
-    # Legacy aliases — not lattice members; map carefully (never to allow).
+    # Compatibility aliases are intentionally never interpreted as allow.
     "allow_with_warning": DecisionState.NEEDS_REVIEW,
     "require_stronger_check": DecisionState.NEEDS_REVIEW,
 }
@@ -73,14 +76,15 @@ _UNKNOWN_POLICY_ALIASES = {
     "require_human_review": "needs_review",
     "needs_review": "needs_review",
     "block": "block",
-    # Legacy: must not promote unknown → allow under the lattice.
+    # Historical policy value. Under the lattice an unknown may not become an
+    # allow decision simply because an older config said allow_with_warning.
     "allow_with_warning": "needs_review",
 }
 
 
 @dataclass(frozen=True)
 class ClaimFinding:
-    """One checker claim participating in lattice aggregation."""
+    """One checker claim participating in checker-level aggregation."""
 
     finding_id: str
     status: VerificationStatus
@@ -89,7 +93,7 @@ class ClaimFinding:
 
 @dataclass(frozen=True)
 class DecisionOutcome:
-    """Full aggregated decision with attribution and legacy alias."""
+    """Aggregated authorization decision plus attribution."""
 
     decision_state: DecisionState
     original_decision_state: DecisionState
@@ -99,11 +103,9 @@ class DecisionOutcome:
     finding_contributions: tuple[FindingContribution, ...] = ()
     mode: Mode = "strict"
     warnings: tuple[str, ...] = ()
-    # When stronger-check semantics apply, keep the specialized legacy alias.
     legacy_merge_override: MergeRecommendation | None = None
 
     def to_decision_dict(self) -> dict[str, Any]:
-        """Serialize for evidence / bundle ``decision`` objects."""
         recommendation = self.legacy_merge_override or self.merge_recommendation
         return {
             "decision_state": self.decision_state.value,
@@ -119,58 +121,56 @@ class DecisionOutcome:
 
 
 def decision_state_to_merge_recommendation(state: DecisionState) -> MergeRecommendation:
-    """Map a lattice state to the deprecated merge_recommendation alias."""
+    """Map a lattice state to the legacy recommendation vocabulary."""
     return _STATE_TO_LEGACY[state]
 
 
-def merge_recommendation_to_decision_state(value: str | MergeRecommendation | DecisionState) -> DecisionState:
-    """Map a legacy or lattice string onto ``DecisionState``."""
+def merge_recommendation_to_decision_state(
+    value: str | MergeRecommendation | DecisionState,
+) -> DecisionState:
+    """Map a legacy or lattice value onto ``DecisionState`` fail-closed."""
     if isinstance(value, DecisionState):
         return value
-    if isinstance(value, MergeRecommendation):
-        raw = value.value
-    else:
-        raw = str(value).strip()
-    if raw in _LEGACY_TO_STATE:
-        return _LEGACY_TO_STATE[raw]
-    return DecisionState.NEEDS_REVIEW
+    raw = value.value if isinstance(value, MergeRecommendation) else str(value).strip()
+    return _LEGACY_TO_STATE.get(raw, DecisionState.NEEDS_REVIEW)
 
 
 def normalize_unknown_policy(default_on_unknown: str) -> Literal["needs_review", "block"]:
-    """Normalize unknown policy; never yields allow."""
+    """Normalize unknown policy; the result can never authorize allow."""
     normalized = _UNKNOWN_POLICY_ALIASES.get(str(default_on_unknown).strip(), "needs_review")
-    if normalized == "block":
-        return "block"
-    return "needs_review"
+    return "block" if normalized == "block" else "needs_review"
 
 
 def normalize_required_skip_policy(
     default_on_required_skip: str,
 ) -> Literal["skipped", "block"]:
-    """Normalize required-skip policy; never yields allow."""
-    value = str(default_on_required_skip).strip().lower()
-    if value == "block":
-        return "block"
-    return "skipped"
+    """Normalize required-skip policy; the result can never authorize allow."""
+    return "block" if str(default_on_required_skip).strip().lower() == "block" else "skipped"
 
 
 def evidence_has_status(bundle: EvidenceBundle, status: VerificationStatus) -> bool:
-    """Return true if any backend claim in the bundle has the given status."""
-    return any(claim.status == status for evidence in bundle.evidence for claim in evidence.backend_claims)
+    return any(
+        claim.status == status
+        for evidence in bundle.evidence
+        for claim in evidence.backend_claims
+    )
 
 
 def evidence_has_unknown_like(bundle: EvidenceBundle) -> bool:
-    """Unknown-like outcomes must never be treated as pass in enforce mode."""
     unknown_like = {
         VerificationStatus.UNKNOWN,
         VerificationStatus.ERROR,
         VerificationStatus.SKIPPED,
     }
-    return any(claim.status in unknown_like for evidence in bundle.evidence for claim in evidence.backend_claims)
+    return any(
+        claim.status in unknown_like
+        for evidence in bundle.evidence
+        for claim in evidence.backend_claims
+    )
 
 
 def findings_from_bundle(bundle: EvidenceBundle) -> list[ClaimFinding]:
-    """Derive claim findings from an evidence bundle (all claims required by default)."""
+    """Derive checker findings without conflating evidence-level decisions."""
     findings: list[ClaimFinding] = []
     for evidence in bundle.evidence:
         for claim in evidence.backend_claims:
@@ -213,23 +213,21 @@ def _apply_strict_policy(
     default_on_unknown: str,
     default_on_required_skip: str,
 ) -> DecisionState:
-    """Apply strict-mode policy overlays without ever promoting to allow."""
-    if original == DecisionState.ALLOW:
-        return DecisionState.ALLOW
-    if original == DecisionState.BLOCK:
-        return DecisionState.BLOCK
-    if original == DecisionState.ERROR:
-        return DecisionState.ERROR
+    """Apply strict-mode policy overlays without ever promoting authority."""
+    if original in {DecisionState.ALLOW, DecisionState.BLOCK, DecisionState.ERROR}:
+        return original
     if original == DecisionState.UNKNOWN:
-        policy = normalize_unknown_policy(default_on_unknown)
-        if policy == "block":
-            return DecisionState.BLOCK
-        return DecisionState.NEEDS_REVIEW
+        return (
+            DecisionState.BLOCK
+            if normalize_unknown_policy(default_on_unknown) == "block"
+            else DecisionState.NEEDS_REVIEW
+        )
     if original == DecisionState.SKIPPED:
-        skip_policy = normalize_required_skip_policy(default_on_required_skip)
-        if skip_policy == "block":
-            return DecisionState.BLOCK
-        return DecisionState.SKIPPED
+        return (
+            DecisionState.BLOCK
+            if normalize_required_skip_policy(default_on_required_skip) == "block"
+            else DecisionState.SKIPPED
+        )
     return original
 
 
@@ -242,7 +240,9 @@ def _contributions_for(
     rows: list[FindingContribution] = []
     for finding in findings:
         if finding.finding_id in controlling_ids:
-            contribution: Literal["controlling", "supporting", "non_controlling", "warning"] = "controlling"
+            contribution: Literal[
+                "controlling", "supporting", "non_controlling", "warning"
+            ] = "controlling"
         elif finding.finding_id in warning_ids:
             contribution = "warning"
         elif finding.status == VerificationStatus.PASS:
@@ -268,11 +268,7 @@ def aggregate_decision(
     default_on_required_skip: str = "skipped",
     legacy_merge_override: MergeRecommendation | None = None,
 ) -> DecisionOutcome:
-    """Aggregate claim findings into a ``DecisionState`` with attribution.
-
-    Exhaustive fail-closed rules for required claims; optional claims may warn
-    or upgrade fail→block but cannot upgrade a required non-pass to allow.
-    """
+    """Aggregate checker findings using fail-dominant required semantics."""
     enforce = mode == "strict"
     required = [item for item in findings if item.required]
     optional = [item for item in findings if not item.required]
@@ -289,19 +285,16 @@ def aggregate_decision(
             legacy_merge_override=legacy_merge_override,
         )
 
-    # Optional fail upgrades aggregate to block (fail-dominant).
     optional_fails = [item for item in optional if item.status == VerificationStatus.FAIL]
     required_fails = [item for item in required if item.status == VerificationStatus.FAIL]
     if optional_fails or required_fails:
         controllers = optional_fails + required_fails
         controlling_ids = {item.finding_id for item in controllers}
-        original = DecisionState.BLOCK
-        # Advisory preserves original (block); never rewrite to allow.
-        decision_state = original
+        state = DecisionState.BLOCK
         return DecisionOutcome(
-            decision_state=decision_state,
-            original_decision_state=original,
-            merge_recommendation=decision_state_to_merge_recommendation(decision_state),
+            decision_state=state,
+            original_decision_state=state,
+            merge_recommendation=decision_state_to_merge_recommendation(state),
             reason="one or more verification claims failed",
             controlling_finding_ids=tuple(sorted(controlling_ids)),
             finding_contributions=_contributions_for(
@@ -316,7 +309,6 @@ def aggregate_decision(
         worst = _worst_status(item.status for item in required_non_pass)
         assert worst is not None
         controllers = [item for item in required_non_pass if item.status == worst]
-        # Include all findings at the controlling severity tier.
         controlling_ids = {item.finding_id for item in controllers}
         original = _base_state_from_status(worst)
 
@@ -326,32 +318,30 @@ def aggregate_decision(
                     f"optional finding {item.finding_id} passed but cannot upgrade required {worst.value}"
                 )
 
-        if enforce:
-            decision_state = _apply_strict_policy(
+        state = (
+            _apply_strict_policy(
                 original,
                 default_on_unknown=default_on_unknown,
                 default_on_required_skip=default_on_required_skip,
             )
-        else:
-            # Advisory: preserve original lattice state (never invent allow).
-            decision_state = original
-
-        if decision_state == DecisionState.ALLOW:
-            # Hard invariant — unreachable by construction; keep fail-closed.
-            decision_state = DecisionState.NEEDS_REVIEW
+            if enforce
+            else original
+        )
+        if state == DecisionState.ALLOW:  # defensive, unreachable by construction
+            state = DecisionState.NEEDS_REVIEW
 
         reason = {
             DecisionState.ERROR: "one or more required verification claims returned error",
             DecisionState.UNKNOWN: "one or more required verification claims returned unknown",
             DecisionState.SKIPPED: "one or more required verification claims were skipped",
             DecisionState.BLOCK: "required verification outcome blocks merge under policy",
-            DecisionState.NEEDS_REVIEW: "one or more required verification claims need human review",
-        }.get(decision_state, "required verification claims did not all pass")
+            DecisionState.NEEDS_REVIEW: "one or more required verification claims need review",
+        }.get(state, "required verification claims did not all pass")
 
         return DecisionOutcome(
-            decision_state=decision_state,
+            decision_state=state,
             original_decision_state=original,
-            merge_recommendation=decision_state_to_merge_recommendation(decision_state),
+            merge_recommendation=decision_state_to_merge_recommendation(state),
             reason=reason,
             controlling_finding_ids=tuple(sorted(controlling_ids)),
             finding_contributions=_contributions_for(
@@ -362,9 +352,7 @@ def aggregate_decision(
             legacy_merge_override=legacy_merge_override,
         )
 
-    # All required pass (or no required findings).
     if not required:
-        # No required selection — conservative review (never silent allow).
         state = DecisionState.NEEDS_REVIEW
         return DecisionOutcome(
             decision_state=state,
@@ -398,20 +386,135 @@ def aggregate_decision(
     )
 
 
+def _raw_evidence_decision(evidence: Any) -> tuple[DecisionState, MergeRecommendation | None]:
+    """Read one evidence-level authorization decision conservatively.
+
+    ``decision_state`` is normative when present. Legacy evidence is mapped from
+    ``merge_recommendation``. Missing or unrecognized authorization state is a
+    review requirement, never an implicit allow.
+    """
+    decision = evidence.decision if isinstance(getattr(evidence, "decision", None), dict) else {}
+    if decision.get("decision_state") is not None:
+        state = merge_recommendation_to_decision_state(str(decision["decision_state"]))
+    elif decision.get("merge_recommendation") is not None:
+        state = merge_recommendation_to_decision_state(str(decision["merge_recommendation"]))
+    else:
+        state = DecisionState.NEEDS_REVIEW
+
+    legacy: MergeRecommendation | None = None
+    raw_legacy = str(decision.get("merge_recommendation", "")).strip()
+    if raw_legacy == MergeRecommendation.REQUIRE_STRONGER_CHECK.value:
+        legacy = MergeRecommendation.REQUIRE_STRONGER_CHECK
+    return state, legacy
+
+
+def _evidence_floor_state(
+    raw: DecisionState,
+    *,
+    mode: Mode,
+    default_on_unknown: str,
+    default_on_required_skip: str,
+) -> DecisionState:
+    if mode == "advisory":
+        return raw
+    return _apply_strict_policy(
+        raw,
+        default_on_unknown=default_on_unknown,
+        default_on_required_skip=default_on_required_skip,
+    )
+
+
+def aggregate_bundle_decision(
+    bundle: EvidenceBundle,
+    *,
+    enforce: bool = True,
+    default_on_unknown: str = "require_human_review",
+    default_on_required_skip: str = "skipped",
+) -> DecisionOutcome:
+    """Aggregate checker results and enforce evidence-decision monotonicity.
+
+    Evidence-level decisions encode semantic qualifications that checker status
+    alone cannot express (coverage, material trust, guarantee strength, fallback
+    acceptance, etc.). They therefore form an authorization floor. A downstream
+    bundle may become *more* restrictive, but never more permissive.
+    """
+    mode: Mode = "strict" if enforce else "advisory"
+    claim_outcome = aggregate_decision(
+        findings_from_bundle(bundle),
+        mode=mode,
+        default_on_unknown=default_on_unknown,
+        default_on_required_skip=default_on_required_skip,
+    )
+
+    restrictions: list[tuple[str, DecisionState, DecisionState, MergeRecommendation | None]] = []
+    for evidence in bundle.evidence:
+        raw, legacy = _raw_evidence_decision(evidence)
+        effective = _evidence_floor_state(
+            raw,
+            mode=mode,
+            default_on_unknown=default_on_unknown,
+            default_on_required_skip=default_on_required_skip,
+        )
+        restrictions.append((evidence.evidence_id, raw, effective, legacy))
+
+    if not restrictions:
+        return claim_outcome
+
+    worst_effective_rank = max(_DECISION_SEVERITY[item[2]] for item in restrictions)
+    claim_rank = _DECISION_SEVERITY[claim_outcome.decision_state]
+    if claim_rank >= worst_effective_rank:
+        return claim_outcome
+
+    controlling = [
+        item for item in restrictions if _DECISION_SEVERITY[item[2]] == worst_effective_rank
+    ]
+    effective_state = controlling[0][2]
+    worst_raw = max(
+        [claim_outcome.original_decision_state, *[item[1] for item in controlling]],
+        key=lambda state: _DECISION_SEVERITY[state],
+    )
+    evidence_ids = tuple(sorted(f"evidence:{item[0]}:decision" for item in controlling))
+    controlling_ids = tuple(sorted(set(claim_outcome.controlling_finding_ids) | set(evidence_ids)))
+
+    legacy_override = None
+    if effective_state == DecisionState.NEEDS_REVIEW and any(
+        item[3] == MergeRecommendation.REQUIRE_STRONGER_CHECK for item in controlling
+    ):
+        legacy_override = MergeRecommendation.REQUIRE_STRONGER_CHECK
+
+    reason = (
+        "evidence-level authorization restriction controls bundle decision; "
+        "backend claim status cannot promote a stricter evidence decision"
+    )
+    warnings = tuple(claim_outcome.warnings) + tuple(
+        f"{item[0]} requires {item[2].value}" for item in controlling
+    )
+    return DecisionOutcome(
+        decision_state=effective_state,
+        original_decision_state=worst_raw,
+        merge_recommendation=decision_state_to_merge_recommendation(effective_state),
+        reason=reason,
+        controlling_finding_ids=controlling_ids,
+        finding_contributions=claim_outcome.finding_contributions,
+        mode=mode,
+        warnings=warnings,
+        legacy_merge_override=legacy_override,
+    )
+
+
 def decide(
     bundle: EvidenceBundle,
     enforce: bool = True,
     default_on_unknown: str = "require_human_review",
     default_on_required_skip: str = "skipped",
 ) -> DecisionState:
-    """Compute the normative ``DecisionState`` for an evidence bundle."""
-    outcome = aggregate_decision(
-        findings_from_bundle(bundle),
-        mode="strict" if enforce else "advisory",
+    """Compute the normative bundle decision with monotonic evidence floors."""
+    return aggregate_bundle_decision(
+        bundle,
+        enforce=enforce,
         default_on_unknown=default_on_unknown,
         default_on_required_skip=default_on_required_skip,
-    )
-    return outcome.decision_state
+    ).decision_state
 
 
 def decide_with_reason(
@@ -420,27 +523,25 @@ def decide_with_reason(
     default_on_unknown: str = "require_human_review",
     default_on_required_skip: str = "skipped",
 ) -> dict[str, Any]:
-    """Return decision lattice fields and deprecated merge_recommendation alias."""
-    outcome = aggregate_decision(
-        findings_from_bundle(bundle),
-        mode="strict" if enforce else "advisory",
+    """Return the normative decision plus compatibility aliases."""
+    return aggregate_bundle_decision(
+        bundle,
+        enforce=enforce,
         default_on_unknown=default_on_unknown,
         default_on_required_skip=default_on_required_skip,
-    )
-    return outcome.to_decision_dict()
+    ).to_decision_dict()
 
 
-# Back-compat helpers used by older tests / call sites.
 def decide_merge_recommendation(
     bundle: EvidenceBundle,
     enforce: bool = True,
     default_on_unknown: str = "require_human_review",
     default_on_required_skip: str = "skipped",
 ) -> MergeRecommendation:
-    """Deprecated: return the legacy merge_recommendation alias for a bundle."""
-    outcome = aggregate_decision(
-        findings_from_bundle(bundle),
-        mode="strict" if enforce else "advisory",
+    """Deprecated compatibility helper for legacy callers."""
+    outcome = aggregate_bundle_decision(
+        bundle,
+        enforce=enforce,
         default_on_unknown=default_on_unknown,
         default_on_required_skip=default_on_required_skip,
     )
