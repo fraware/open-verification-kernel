@@ -1,6 +1,6 @@
 {
   "author_type": "ai_agent",
-  "agent": "codex",
+  "agent": "automation-agent",
   "task": "Add export endpoint for admin analytics with middleware preserved.",
   "routes": [
     {
