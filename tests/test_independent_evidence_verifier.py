@@ -135,8 +135,10 @@ def test_tampered_attempt_identity_is_rejected() -> None:
         row for row in evidence["generated_artifacts"]
         if row.get("kind") == "control_plane_trace" and row.get("schema_version") == "ovk.control_plane_trace.v2"
     )
-    trace["execution_attempts"][0]["termination"] = "tool_error"
-    evidence["execution_attempts"][0]["termination"] = "tool_error"
+    original = str(trace["execution_attempts"][0]["termination"])
+    mutated = "timeout" if original != "timeout" else "completed"
+    trace["execution_attempts"][0]["termination"] = mutated
+    evidence["execution_attempts"][0]["termination"] = mutated
     _refresh_evidence_digest_and_bundle_id(tampered)
     report = verify_bundle_semantics(tampered)
     assert not report.valid
