@@ -23,6 +23,7 @@ from ovk.core.source_profile_maturity import (
     qualification_from_dict,
     qualification_from_local_profile_evidence,
 )
+from ovk.core.support_contracts import support_contract_version
 
 REQUIRED_ROW_FIELDS = legacy.REQUIRED_ROW_FIELDS
 REQUIRED_EXECUTABLE_LINKS = legacy.REQUIRED_EXECUTABLE_LINKS
@@ -80,13 +81,22 @@ def _sanitize_local_evidence(payload: dict[str, Any] | None) -> dict[str, Any] |
     return sanitized
 
 
-def _qualification_for_row(row: dict[str, Any]) -> SourceProfileQualification | None:
+def _qualification_for_row(row: dict[str, Any], *, repo_root: Path | None = None) -> SourceProfileQualification | None:
     profile_id = row.get("source_profile_id")
     evidence = row.get("source_profile_evidence")
     if not profile_id or not isinstance(evidence, dict):
         return None
+    # Prefer machine qualification from the WP-05 artifact (corpus counts derived from
+    # named evidence entries). Local profile evidence alone never invents corpus counts
+    # and therefore cannot exceed source_profile_candidate.
+    if repo_root is not None:
+        from ovk.core.source_profile_qualification import qualification_from_artifact
+
+        artifact = qualification_from_artifact(repo_root, profile_id=str(profile_id))
+        if artifact is not None:
+            return artifact
     links = row.get("executable_links") if isinstance(row.get("executable_links"), dict) else {}
-    return qualification_from_local_profile_evidence(
+    qualification = qualification_from_local_profile_evidence(
         profile_id=str(profile_id),
         materials_trusted=bool(evidence.get("materials_trusted")),
         coverage_complete=bool(evidence.get("coverage_complete")),
@@ -94,6 +104,13 @@ def _qualification_for_row(row: dict[str, Any]) -> SourceProfileQualification | 
         executable_path_complete=not bool(row.get("missing_executable_links")),
         compiler_binding_present=bool(links.get("neutral_compiler")),
     )
+    # Attach machine support-contract version when present; never invent corpus counts here.
+    version = support_contract_version(str(profile_id), repo_root=repo_root)
+    if version:
+        return SourceProfileQualification(
+            **{**qualification.__dict__, "support_contract_version": version}
+        )
+    return qualification
 
 
 def _qualification_payload(qualification: SourceProfileQualification) -> dict[str, Any]:
@@ -104,7 +121,7 @@ def _qualification_payload(qualification: SourceProfileQualification) -> dict[st
     return payload
 
 
-def _project_row(row: dict[str, Any]) -> dict[str, Any]:
+def _project_row(row: dict[str, Any], *, repo_root: Path | None = None) -> dict[str, Any]:
     projected = json.loads(json.dumps(row))
     sanitized = _sanitize_local_evidence(projected.get("source_profile_evidence"))
     if sanitized is None:
@@ -121,7 +138,7 @@ def _project_row(row: dict[str, Any]) -> dict[str, Any]:
             for note in notes
         ]
 
-    qualification = _qualification_for_row(row)
+    qualification = _qualification_for_row(row, repo_root=repo_root)
     status = classify_source_profile_maturity(
         qualification,
         executable=_executable(row),
@@ -141,7 +158,7 @@ def _project_row(row: dict[str, Any]) -> dict[str, Any]:
 def build_conformance_matrix(repo_root: Path, templates_dir: Path | None = None) -> dict[str, Any]:
     """Build the normative v3 matrix from legacy catalog/link evidence."""
     raw = legacy.build_conformance_matrix(repo_root, templates_dir=templates_dir)
-    rows = [_project_row(row) for row in raw.get("templates") or [] if isinstance(row, dict)]
+    rows = [_project_row(row, repo_root=repo_root) for row in raw.get("templates") or [] if isinstance(row, dict)]
 
     top_evidence: dict[str, Any] = {}
     for intent_id, payload in sorted((raw.get("source_profile_evidence") or {}).items()):
