@@ -1,8 +1,8 @@
-"""Execute bounded source-profile proofs for template conformance v2.
+"""Execute bounded local source-profile proofs for conformance evidence.
 
-Statuses such as ``source_profile_strict_eligible`` must derive from executed
-semantic evidence (compiler runs on fixtures), not mere file presence.
-``externally_calibrated_strict`` is never granted by local generation alone.
+These proofs establish candidate evidence only. They exercise compiler behavior
+on controlled fixtures, but they do not satisfy the full strict qualification
+contract and therefore never emit a strict-eligibility assertion.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from ovk.compilers.infrastructure.terraform_plan import compile_terraform_plan
 from ovk.core.source_profiles import (
     KNOWN_SOURCE_PROFILES,
     is_known_source_profile,
-    source_profile_strict_eligible,
+    source_profile_candidate_evidence_complete,
 )
 
 
@@ -39,12 +39,14 @@ class ProfileSemanticEvidence:
             "materials_trusted": self.materials_trusted,
             "coverage_complete": self.coverage_complete,
             "enforcement_test_present": self.enforcement_test_present,
-            "strict_eligible": source_profile_strict_eligible(
+            "candidate_evidence_complete": source_profile_candidate_evidence_complete(
                 profile_id=self.profile_id,
                 materials_trusted=self.materials_trusted,
                 coverage_complete=self.coverage_complete,
                 enforcement_test_present=self.enforcement_test_present,
             ),
+            "evidence_scope": "local_profile_regression",
+            "maturity_effect": "candidate_only",
             "notes": list(self.notes),
         }
 
@@ -74,7 +76,7 @@ def prove_fastapi_ast_profile(repo_root: Path, *, enforcement_test: str | None) 
     ]
     return ProfileSemanticEvidence(
         profile_id=profile_id,
-        materials_trusted=True,  # fixture materials authored for this proof
+        materials_trusted=True,
         coverage_complete=coverage_complete and profile_ok and not ir.unsupported_constructs,
         enforcement_test_present=_enforcement_present(repo_root, enforcement_test),
         notes=tuple(notes),
@@ -197,31 +199,16 @@ def prove_actions_permissions_flow(repo_root: Path, *, enforcement_test: str | N
 
 
 def prove_deployment_trusted_profile(repo_root: Path, *, enforcement_test: str | None) -> ProfileSemanticEvidence:
-    """Deployment strictness only when an explicit trusted profile marker is present."""
+    """Deployment remains candidate-only until authenticated acquisition is wired."""
     profile_id = "deployment.trusted_profile_v1"
-    # Without an explicit trusted profile material, coverage is incomplete by design.
     trusted_marker = repo_root / "examples" / "deployment_state" / "trusted_profile.v1.json"
-    materials_trusted = trusted_marker.is_file()
-    coverage_complete = False
-    notes = ["requires explicit trusted_profile material for strictness"]
-    if materials_trusted:
-        try:
-            from ovk.core.json_io import read_json_file
-
-            payload = read_json_file(trusted_marker)
-            coverage_complete = (
-                isinstance(payload, dict)
-                and payload.get("source_profile") == profile_id
-                and payload.get("trusted") is True
-            )
-            notes = [f"trusted_marker={trusted_marker.as_posix()}"]
-        except (OSError, ValueError) as exc:
-            notes = [f"trusted_marker_unreadable:{exc}"]
-            materials_trusted = False
+    notes = ["authenticated deployment acquisition required for strictness"]
+    if trusted_marker.is_file():
+        notes.append(f"fixture_present={trusted_marker.as_posix()}")
     return ProfileSemanticEvidence(
         profile_id=profile_id,
-        materials_trusted=materials_trusted,
-        coverage_complete=coverage_complete,
+        materials_trusted=False,
+        coverage_complete=False,
         enforcement_test_present=_enforcement_present(repo_root, enforcement_test),
         notes=tuple(notes),
     )
@@ -241,7 +228,7 @@ def collect_source_profile_evidence(
     *,
     catalog_by_intent: dict[str, dict[str, Any]],
 ) -> dict[str, ProfileSemanticEvidence]:
-    """Run profile proofs for intents that declare a source_profile_id."""
+    """Run local profile proofs for intents that declare a source profile."""
     evidence: dict[str, ProfileSemanticEvidence] = {}
     for intent_id, entry in catalog_by_intent.items():
         profile_id = entry.get("source_profile_id")
@@ -254,7 +241,7 @@ def collect_source_profile_evidence(
                 materials_trusted=False,
                 coverage_complete=False,
                 enforcement_test_present=False,
-                notes=("no prover registered for profile",),
+                notes=("no local prover registered for profile",),
             )
             continue
         links = entry.get("links") or {}
@@ -267,7 +254,9 @@ def collect_source_profile_evidence(
 
 def evidence_payload(evidence: dict[str, ProfileSemanticEvidence]) -> dict[str, Any]:
     return {
-        "schema_version": "ovk.source_profile_evidence.v1",
+        "schema_version": "ovk.source_profile_evidence.v2",
+        "evidence_scope": "local_profile_regression",
+        "maturity_effect": "candidate_only",
         "known_profiles": sorted(KNOWN_SOURCE_PROFILES),
         "intents": {intent: item.as_dict() for intent, item in sorted(evidence.items())},
     }
