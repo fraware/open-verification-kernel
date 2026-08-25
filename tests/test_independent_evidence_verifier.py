@@ -157,8 +157,13 @@ def test_tampered_evidence_decision_is_rejected_after_digest_reseal() -> None:
     payload = _bundle_dict()
     tampered = copy.deepcopy(payload)
     evidence = tampered["evidence"][0]
-    evidence["decision"]["decision_state"] = "allow"
-    evidence["decision"]["merge_recommendation"] = "allow"
+    original_state = evidence["decision"]["decision_state"]
+    if original_state == "allow":
+        evidence["decision"]["decision_state"] = "block"
+        evidence["decision"]["merge_recommendation"] = "block"
+    else:
+        evidence["decision"]["decision_state"] = "allow"
+        evidence["decision"]["merge_recommendation"] = "allow"
     _refresh_evidence_digest_and_bundle_id(tampered)
     report = verify_bundle_semantics(tampered)
     assert not report.valid
