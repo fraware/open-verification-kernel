@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ovk.compilers.authorization import CoveragePolicy, strict_allow_permitted
 from ovk.core.backend_registry import BackendRegistry
 from ovk.core.execution_models import (
     BackendCapabilityAssessment,
@@ -34,6 +35,7 @@ def qualify_coverage(
     assessment: BackendCapabilityAssessment,
     *,
     enforced: bool,
+    coverage_policy: CoveragePolicy | None = None,
 ) -> CoverageQualification:
     """Separate executable coverage from strict authorization coverage."""
     executable = bool(
@@ -41,8 +43,8 @@ def qualify_coverage(
         and assessment.support not in {"unsupported", "unavailable"}
     )
     adapter_accepts = bool(assessment.coverage_requirements_met)
-    complete = obligation.coverage.status == "complete"
-    unsupported = bool(obligation.coverage.unsupported_constructs)
+    policy = coverage_policy or CoveragePolicy()
+    strict_coverage_ok = strict_allow_permitted(obligation.coverage, policy)
 
     if not executable:
         return CoverageQualification(
@@ -53,38 +55,48 @@ def qualify_coverage(
             reason="backend cannot execute the supplied materials",
         )
 
-    if enforced and (not complete or unsupported):
+    if enforced and not strict_coverage_ok:
         details = [f"coverage={obligation.coverage.status}"]
-        if unsupported:
+        if obligation.coverage.unsupported_constructs:
             details.append("unsupported_constructs_present")
         return CoverageQualification(
             can_execute=True,
             can_produce_advisory_evidence=True,
             can_be_required_primary=False,
             can_support_strict_allow=False,
-            reason="; ".join(details) + "; incomplete coverage cannot authorize strict primary",
+            reason="; ".join(details) + "; coverage policy does not authorize strict primary",
         )
 
-    primary = adapter_accepts and (complete if enforced else True)
+    primary = adapter_accepts and (strict_coverage_ok if enforced else True)
+    if primary and obligation.coverage.status == "complete":
+        reason = "complete coverage satisfies strict primary contract"
+    elif primary and enforced:
+        reason = "explicit obligation-bound policy accepts partial coverage for strict primary"
+    else:
+        reason = "coverage is executable but not sufficient for strict allow"
+
     return CoverageQualification(
         can_execute=True,
         can_produce_advisory_evidence=True,
         can_be_required_primary=primary,
-        can_support_strict_allow=primary and complete and not unsupported,
-        reason=(
-            "complete coverage satisfies strict primary contract"
-            if primary and complete
-            else "coverage is executable but not sufficient for strict allow"
-        ),
+        can_support_strict_allow=primary and strict_coverage_ok,
+        reason=reason,
     )
 
 
 class CoverageContractRegistry:
     """Registry view that applies router-level coverage authorization semantics."""
 
-    def __init__(self, registry: BackendRegistry, *, enforced: bool) -> None:
+    def __init__(
+        self,
+        registry: BackendRegistry,
+        *,
+        enforced: bool,
+        coverage_policy: CoveragePolicy | None = None,
+    ) -> None:
         self._registry = registry
         self._enforced = enforced
+        self._coverage_policy = coverage_policy or CoveragePolicy()
 
     def backend_ids(self):
         return self._registry.backend_ids()
@@ -101,6 +113,7 @@ class CoverageContractRegistry:
                 obligation,
                 assessment,
                 enforced=self._enforced,
+                coverage_policy=self._coverage_policy,
             )
             reasons = list(assessment.reasons)
             reasons.append(f"coverage_contract:{coverage.reason}")

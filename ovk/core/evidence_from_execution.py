@@ -6,6 +6,7 @@ from typing import Any
 
 from ovk.compilers.authorization import CoveragePolicy, strict_allow_permitted
 from ovk.core.bundle import content_digest
+from ovk.core.coverage_policy_binding import coverage_policy_from_obligation, coverage_policy_payload
 from ovk.core.execution_models import ObligationExecutionRecord
 from ovk.core.materials import material_set_digest_for_obligation
 from ovk.core.models import BackendClaim, DecisionState, MergeRecommendation, VerificationEvidence, VerificationStatus
@@ -31,6 +32,12 @@ def execution_record_to_evidence(
     """
     obligation = record.obligation
     routing = record.routing
+    bound_coverage_policy = coverage_policy_from_obligation(obligation)
+    if coverage_policy is not None and coverage_policy_payload(coverage_policy) != coverage_policy_payload(
+        bound_coverage_policy
+    ):
+        raise ValueError("coverage policy override does not match obligation-bound policy")
+    policy = bound_coverage_policy
 
     counterexamples: list[dict[str, Any]] = []
     for result in record.results:
@@ -94,6 +101,7 @@ def execution_record_to_evidence(
             "compiler_version": obligation.compiler_version,
         },
         "coverage": obligation.coverage.model_dump(mode="json"),
+        "coverage_policy": coverage_policy_payload(policy),
         "material_set_digest": material_set_digest,
         "policy_digest": obligation.policy_digest,
         "routing_id": routing.routing_id,
@@ -153,9 +161,9 @@ def execution_record_to_evidence(
     controlling_finding_ids = list(getattr(record, "controlling_finding_ids", ()) or ())
     aggregation_reason = record.aggregation_reason
 
-    policy = coverage_policy or CoveragePolicy()
-    # Strict authorization is derived from measured coverage only. A compiler
-    # abstraction field is not permitted to self-assert strict-allow eligibility.
+    # Strict authorization is derived from measured coverage plus the exact
+    # policy bound into the typed obligation. No unbound caller override may
+    # promote incomplete evidence.
     allow_ok = strict_allow_permitted(obligation.coverage, policy)
 
     if (

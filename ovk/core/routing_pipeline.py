@@ -25,6 +25,7 @@ from ovk.core.authorization_compiler import compile_authorization_obligation
 from ovk.core.backend_registry import BackendRegistry
 from ovk.core.ci_secrets_compiler import compile_ci_secrets_obligation
 from ovk.core.coverage_contract import CoverageContractRegistry
+from ovk.core.coverage_policy_binding import coverage_policy_from_obligation
 from ovk.core.deployment_compiler import compile_deployment_obligation
 from ovk.core.execution_budget import execution_budget_from_policy
 from ovk.core.execution_models import (
@@ -209,7 +210,12 @@ def route_compiled_obligation(
     routing_config = routing_config_from_policy(policy)
     budget = execution_budget_from_policy(policy)
     enforced = routing_enforced_for_lane(policy, lane)
-    registry = CoverageContractRegistry(raw_registry, enforced=enforced)
+    coverage_policy = coverage_policy_from_obligation(obligation)
+    registry = CoverageContractRegistry(
+        raw_registry,
+        enforced=enforced,
+        coverage_policy=coverage_policy,
+    )
     context = ExecutionContext(
         subject=obligation.subject,
         budget=budget,

@@ -23,6 +23,7 @@ from pydantic import ValidationError
 from ovk.compilers.authorization import CoveragePolicy, strict_allow_permitted
 from ovk.core.backend_aggregation import aggregate_results
 from ovk.core.bundle import content_digest
+from ovk.core.coverage_policy_binding import coverage_policy_from_obligation, coverage_policy_payload
 from ovk.core.decision import decide_with_reason
 from ovk.core.evidence_integrity import verify_evidence_digest
 from ovk.core.execution_models import (
@@ -45,6 +46,7 @@ from ovk.core.models import (
     EvidenceBundle,
     MergeRecommendation,
     VerificationEvidence,
+    VerificationStatus,
 )
 from ovk.core.router import ROUTER_VERSION
 
@@ -98,7 +100,7 @@ def _expected_claims(
     required = {item.backend: bool(item.required) for item in routing.selected}
     adapters = {item.backend: item.adapter_version for item in backend_obligations}
     attempt_by_backend = {item.backend: item for item in attempts}
-    return [
+    claims = [
         BackendClaim(
             backend=result.backend,
             guarantee_type=result.guarantee_type,
@@ -111,6 +113,18 @@ def _expected_claims(
         )
         for result in sorted(results, key=lambda row: row.backend)
     ]
+    if claims:
+        return claims
+    return [
+        BackendClaim(
+            backend="none",
+            guarantee_type="none",
+            status=VerificationStatus.UNKNOWN,
+            assumptions=["No backend produced a claim."],
+            limits=["Absence of backend evidence cannot allow."],
+            required=True,
+        )
+    ]
 
 
 def _expected_evidence_decision(
@@ -120,6 +134,7 @@ def _expected_evidence_decision(
     attempts: list[ExecutionAttempt],
     results: list[NormalizedBackendResult],
     routing_enforced: bool,
+    coverage_policy: CoveragePolicy,
 ) -> tuple[str, str]:
     outcome = aggregate_results(
         obligation_id=obligation.obligation_id,
@@ -134,10 +149,10 @@ def _expected_evidence_decision(
     recommendation = outcome.merge_recommendation
 
     # The evidence projection applies semantic authorization floors after backend
-    # aggregation. Recompute those floors from typed material, never from the
-    # stored evidence decision.
+    # aggregation. Recompute those floors from typed material and the exact
+    # obligation-bound policy, never from the stored evidence decision.
     if state == DecisionState.ALLOW and not strict_allow_permitted(
-        obligation.coverage, CoveragePolicy()
+        obligation.coverage, coverage_policy
     ):
         state = DecisionState.NEEDS_REVIEW
         recommendation = MergeRecommendation.REQUIRE_HUMAN_REVIEW
@@ -202,6 +217,24 @@ def verify_evidence_semantics(
     except (ValidationError, TypeError) as exc:
         _issue(issues, f"{path}.generated_artifacts.control_plane_trace", f"typed trace is invalid: {exc}")
         return SemanticVerificationReport(valid=False, issues=tuple(issues))
+
+    try:
+        bound_coverage_policy = coverage_policy_from_obligation(obligation)
+    except (TypeError, ValueError) as exc:
+        _issue(
+            issues,
+            f"{path}.generated_artifacts.control_plane_trace.obligation.abstraction.coverage_policy",
+            f"obligation-bound coverage policy is invalid: {exc}",
+        )
+        bound_coverage_policy = CoveragePolicy()
+    else:
+        trace_coverage_policy = trace.get("coverage_policy")
+        if trace_coverage_policy is not None and trace_coverage_policy != coverage_policy_payload(bound_coverage_policy):
+            _issue(
+                issues,
+                f"{path}.generated_artifacts.control_plane_trace.coverage_policy",
+                "trace coverage_policy does not match obligation-bound coverage policy",
+            )
 
     expected_obligation_id = compute_obligation_id(obligation)
     if obligation.obligation_id != expected_obligation_id:
@@ -334,6 +367,7 @@ def verify_evidence_semantics(
             attempts=attempts,
             results=results,
             routing_enforced=bool(item.routing_enforced),
+            coverage_policy=bound_coverage_policy,
         )
     except (TypeError, ValueError) as exc:
         _issue(
