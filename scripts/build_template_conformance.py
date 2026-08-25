@@ -31,7 +31,7 @@ def main() -> int:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Exit non-zero when the matrix fails gate validation",
+        help="Exit non-zero when the matrix fails gate validation or committed bytes are stale",
     )
     parser.add_argument(
         "--print-domain-counts",
@@ -42,7 +42,10 @@ def main() -> int:
     repo_root = args.repo_root.resolve()
     output = (args.output or (repo_root / "docs" / "benchmarks" / "template-conformance.json")).resolve()
 
-    matrix = write_conformance_matrix(repo_root, output)
+    # Freshness: rebuild into memory first, then compare or write.
+    from ovk.core.template_conformance_v3 import build_conformance_matrix
+
+    matrix = build_conformance_matrix(repo_root)
     failures = validate_matrix(matrix)
     if args.print_domain_counts:
         sys.stdout.write(domain_counts_markdown(matrix))
@@ -57,13 +60,31 @@ def main() -> int:
             print(failure, file=sys.stderr)
         return 1
     if args.check:
+        if not output.is_file():
+            print(f"committed conformance artifact missing: {output}", file=sys.stderr)
+            return 1
         on_disk = json.loads(output.read_text(encoding="utf-8"))
         disk_failures = validate_matrix(on_disk)
         if disk_failures:
             for failure in disk_failures:
                 print(failure, file=sys.stderr)
             return 1
-        print("template conformance v3 gate passed")
+        expected_text = json.dumps(matrix, indent=2, sort_keys=True) + "\n"
+        actual_text = output.read_text(encoding="utf-8")
+        if actual_text != expected_text:
+            print(
+                "template-conformance.json is stale vs exact-head generation; "
+                "run: python scripts/build_template_conformance.py",
+                file=sys.stderr,
+            )
+            return 1
+        if on_disk.get("maturity_contract", {}).get("normative_status_field") != "conformance_status_v3":
+            print("maturity_contract must declare conformance_status_v3 as normative", file=sys.stderr)
+            return 1
+        print("template conformance v3 freshness gate passed")
+        return 0
+
+    write_conformance_matrix(repo_root, output)
     return 0
 
 

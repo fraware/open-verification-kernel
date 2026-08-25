@@ -6,7 +6,7 @@ a second status system.
 
 | File | Role |
 |---|---|
-| `bridge.json` | Maps `conformance_status_v2` / `production_status` → `release_status` |
+| `bridge.json` | Maps `conformance_status_v3` → `release_status` (normative maturity field) |
 | `entries.json` | Generated per-template claim registry entries |
 
 Regenerate:

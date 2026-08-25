@@ -31,17 +31,13 @@ def _claim_class(bridge: dict[str, Any], property_kind: str, claimed_backends: l
 
 
 def _release_status(bridge: dict[str, Any], row: dict[str, Any]) -> str:
+    """Map release_status from conformance_status_v3 only (never production_status)."""
     v3 = str(row.get("conformance_status_v3") or "")
     v3_map = bridge.get("conformance_status_v3_to_release_status") or {}
     if v3 in v3_map:
         return str(v3_map[v3])
-    v2 = str(row.get("conformance_status_v2") or "")
-    v2_map = bridge.get("conformance_status_v2_to_release_status") or {}
-    if v2 in v2_map:
-        return str(v2_map[v2])
-    prod = str(row.get("production_status") or "catalog_only")
-    prod_map = bridge.get("production_status_to_release_status") or {}
-    return str(prod_map.get(prod, "experimental"))
+    # Conservative fallback when v3 is somehow absent: experimental, not legacy production_status.
+    return "experimental"
 
 
 def build_entries(
@@ -114,7 +110,6 @@ def build_entries(
             "native_execution": False,
             "template_conformance_status_v3": status_v3,
             "template_conformance_status_v2": status_v2,
-            "production_status": row.get("production_status"),
             "claimed_backends": claimed_backends,
         }
         qualification = row.get("source_profile_qualification")
