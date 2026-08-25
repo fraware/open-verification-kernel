@@ -76,9 +76,9 @@ def build_claim_registry(repo_root: Path) -> dict[str, Any]:
 def build_project_status(repo_root: Path, *, candidate_sha: str | None = None) -> dict[str, Any]:
     """Generate machine status source for docs/badges."""
     if candidate_sha is None:
-        head = repo_root / ".git" / "HEAD"
+        # Prefer an explicit caller-provided candidate. Unknown is conservative
+        # when generating outside a repository-aware release workflow.
         candidate_sha = "unknown"
-        # Prefer explicit env-less placeholder; callers should pass GITHUB_SHA.
     contracts = load_all_support_contracts(repo_root=repo_root)
     qualification_path = repo_root / ".verification" / "source-profile-qualification.json"
     qualification = {}
@@ -150,7 +150,6 @@ def write_project_status_and_claims(
     (out_dir / "project-status.json").write_text(
         json.dumps(status, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    # Human status page generated from machine status (do not hand-author maturity).
     status_md = repo_root / "docs" / "STATUS.md"
     lines = [
         "# OVK Status",

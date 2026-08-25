@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-
-import pytest
 
 from scripts.digest_holdout_predictions import (
     assert_predictions_label_free,
@@ -26,7 +23,6 @@ def test_build_predictions_are_label_free_and_candidate_only(tmp_path: Path) -> 
     assert "verified_source_sha" not in payload
     assert payload["label_free"] is True
     assert len(payload["cases"]) >= 1
-    # Real predictor path: synthetic cases must not all be placeholder unknown.
     preds = {item["prediction"] for item in payload["cases"]}
     assert preds != {"unknown"}
     assert all(item.get("predictor") == "ovk.holdout.labels_free.v1" for item in payload["cases"])
@@ -36,7 +32,7 @@ def test_holdout_eval_workflow_omits_verified_source_sha() -> None:
     text = (REPO / ".github" / "workflows" / "holdout-eval.yml").read_text(encoding="utf-8")
     assert "--verified-source-sha" not in text
     assert "candidate_source_sha" in text
-    assert "verified_source_sha" in text  # mentioned as forbidden in comments/asserts
+    assert "verified_source_sha" in text
 
 
 def test_holdout_predict_workflow_exists() -> None:
@@ -44,7 +40,7 @@ def test_holdout_predict_workflow_exists() -> None:
     assert path.is_file()
     text = path.read_text(encoding="utf-8")
     assert "HOLDOUT_DOWNLOAD_TOKEN" in text
-    assert "verified_source_sha" in text  # refused
+    assert "verified_source_sha" in text
     assert "candidate-source-sha" in text
 
 
