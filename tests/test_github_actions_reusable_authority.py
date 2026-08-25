@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from textwrap import dedent
 
 from ovk.compilers.github_actions.trust_flow import compile_workflow_trust
 
@@ -10,7 +11,7 @@ from ovk.compilers.github_actions.trust_flow import compile_workflow_trust
 def _write_workflow(root: Path, name: str, text: str) -> None:
     workflow_dir = root / ".github" / "workflows"
     workflow_dir.mkdir(parents=True, exist_ok=True)
-    (workflow_dir / name).write_text(text.strip() + "\n", encoding="utf-8")
+    (workflow_dir / name).write_text(dedent(text).strip() + "\n", encoding="utf-8")
 
 
 def _parent(*, permissions: dict[str, str] | None, job: dict) -> dict:
