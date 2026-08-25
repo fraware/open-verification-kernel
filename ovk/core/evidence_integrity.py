@@ -367,11 +367,25 @@ def resolve_checker_identity(
     *,
     registry: Any | None = None,
 ) -> tuple[str, str | None]:
-    """Resolve checker_id and checker_version from registry and/or claims."""
+    """Resolve the versioned producer identity from backend or compiler evidence."""
     payload = _evidence_as_dict(evidence)
     claims = payload.get("backend_claims") or []
     primary = claims[0] if claims and isinstance(claims[0], dict) else {}
-    checker_id = str(primary.get("backend") or payload.get("checker_id") or "unknown")
+    primary_backend = str(primary.get("backend") or "")
+
+    # ``backend=none`` is a synthetic conservative claim emitted only when no
+    # backend produced a result. Do not invent a tool/adapter version for that
+    # sentinel. The bound compiler is the versioned component that produced the
+    # obligation and zero-result evidence projection, so use its exact identity.
+    if primary_backend == "none" and not primary.get("adapter_version") and not primary.get("tool_version"):
+        compiler = payload.get("compiler")
+        if isinstance(compiler, dict):
+            compiler_id = str(compiler.get("compiler_id") or "")
+            compiler_version = str(compiler.get("compiler_version") or "")
+            if compiler_id and compiler_version:
+                return compiler_id, compiler_version
+
+    checker_id = str(primary_backend or payload.get("checker_id") or "unknown")
     checker_version: str | None = None
     if registry is not None:
         manifest = None
