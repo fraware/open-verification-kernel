@@ -16,8 +16,10 @@ __all__ = [
     "BudgetBoundWorker",
     "ExecutionBudget",
     "LocalSubprocessWorker",
+    "SandboxedBackendWorker",
     "WorkerResult",
     "execution_budget_from_policy",
+    "production_backend_worker",
 ]
 
 
@@ -75,6 +77,9 @@ class WorkerResult:
     command: tuple[str, ...] = ()
     isolation_profile: str = "local-subprocess.v1"
     enforced_controls: tuple[str, ...] = ()
+    tool_digest: str | None = None
+    worker_image_digest: str | None = None
+    termination_category: str = "completed"
 
 
 class BackendWorker(Protocol):
@@ -107,6 +112,7 @@ _SECRET_ENV_DENYLIST = frozenset(
         "OVK_SIGNING_KEY",
         "OVK_METADATA_VERIFY_KEY",
         "OVK_METADATA_SIGNING_KEY",
+        "OVK_METADATA_SIGNING_PRIVATE_KEY",
         "PRIVATE_KEY",
         "PYPI_API_TOKEN",
         "SSH_AUTH_SOCK",
@@ -194,51 +200,45 @@ class LocalSubprocessWorker:
     ) -> WorkerResult:
         extra = dict(env or {})
         controls = ["timeout", "environment_allowlist", "output_caps"]
+        python_worker = _is_python_ovk_worker(command)
         preexec = _memory_preexec(budget.max_memory_mb)
+        unenforceable: list[str] = []
         if preexec is not None:
             controls.append("memory_limit")
         elif budget.max_memory_mb:
+            unenforceable.append("memory_limit")
+        if not budget.allow_network and not python_worker:
+            unenforceable.append("network_denied")
+        if not budget.allow_repository_write and not python_worker:
+            unenforceable.append("filesystem_writes_denied")
+        if unenforceable and not (python_worker and set(unenforceable) <= {"memory_limit"}):
+            reasons: list[str] = []
+            if "network_denied" in unenforceable:
+                reasons.append("network denial requested but cannot be enforced for external native command")
+            if "filesystem_writes_denied" in unenforceable:
+                reasons.append("repository write denial requested but cannot be enforced for external native command")
+            if "memory_limit" in unenforceable:
+                reasons.append("requested memory limit cannot be enforced by local worker on this platform")
             return WorkerResult(
                 exit_code=None,
                 timed_out=False,
                 stdout="",
-                stderr="requested memory limit cannot be enforced by local worker on this platform",
+                stderr="; ".join(reasons),
                 cwd=str(cwd.resolve()),
                 command=tuple(command),
                 isolation_profile="local-subprocess.v2",
                 enforced_controls=tuple(controls),
+                termination_category="isolation_unenforceable",
             )
-
-        python_worker = _is_python_ovk_worker(command)
+        if unenforceable:
+            # Python worker: memory RLIMIT may be unavailable. Do not claim it.
+            preexec = None
+        extra["PYTHONDONTWRITEBYTECODE"] = "1"
         if not budget.allow_network:
-            if not python_worker:
-                return WorkerResult(
-                    exit_code=None,
-                    timed_out=False,
-                    stdout="",
-                    stderr="network denial requested but cannot be enforced for external native command",
-                    cwd=str(cwd.resolve()),
-                    command=tuple(command),
-                    isolation_profile="local-subprocess.v2",
-                    enforced_controls=tuple(controls),
-                )
             extra["OVK_WORKER_DENY_NETWORK"] = "1"
             controls.append("network_denied")
         if not budget.allow_repository_write:
-            if not python_worker:
-                return WorkerResult(
-                    exit_code=None,
-                    timed_out=False,
-                    stdout="",
-                    stderr="repository write denial requested but cannot be enforced for external native command",
-                    cwd=str(cwd.resolve()),
-                    command=tuple(command),
-                    isolation_profile="local-subprocess.v2",
-                    enforced_controls=tuple(controls),
-                )
             extra["OVK_WORKER_DENY_WRITES"] = "1"
-            # The payload file was written by the parent before the worker starts;
-            # evaluator execution itself is read-only.
             controls.append("filesystem_writes_denied")
 
         return self._run_internal(
@@ -305,6 +305,7 @@ class LocalSubprocessWorker:
                 cwd=str(cwd_resolved), command=tuple(command),
                 isolation_profile=isolation_profile,
                 enforced_controls=enforced_controls,
+                termination_category="timeout",
             )
 
         stdout, stdout_truncated = _truncate(completed.stdout or b"", max_stdout_bytes)
@@ -389,3 +390,13 @@ def _is_relative_to(path: Path, root: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def __getattr__(name: str):
+    if name in {"SandboxedBackendWorker", "production_backend_worker"}:
+        from ovk.core.sandbox_worker import SandboxedBackendWorker, production_backend_worker
+
+        globals()["SandboxedBackendWorker"] = SandboxedBackendWorker
+        globals()["production_backend_worker"] = production_backend_worker
+        return globals()[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

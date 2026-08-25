@@ -61,9 +61,9 @@ def main(argv: list[str] | None = None) -> int:
     # Read the parent-created immutable input before write-denial is installed;
     # read access remains permitted afterwards as well.
     payload = json.loads(Path(args.payload_file).read_text(encoding="utf-8"))
-    _install_isolation_audit_hook()
-
     from ovk.core.deterministic_evaluators import evaluate_deterministic
+
+    _install_isolation_audit_hook()
 
     result = evaluate_deterministic(args.evaluator_id, payload)
     sys.stdout.write(json.dumps(result, sort_keys=True, separators=(",", ":")))

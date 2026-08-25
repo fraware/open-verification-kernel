@@ -469,6 +469,7 @@ class RawBackendExecution(BaseModel):
     tool_version: str | None = None
     tool_digest: str | None = None
     worker_image_digest: str | None = None
+    envelope_produced: bool = False
 
 
 class ExecutionAttempt(BaseModel):
