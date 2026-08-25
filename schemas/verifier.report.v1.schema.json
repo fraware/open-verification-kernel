@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/verifier.report.v1.schema.json",
+  "title": "OVK Independent Evidence Verifier Report v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "verifier_version",
+    "valid",
+    "target",
+    "checks",
+    "issues",
+    "tcb_modules"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "ovk.verifier.report.v1"
+    },
+    "verifier_version": { "type": "string", "minLength": 1 },
+    "valid": { "type": "boolean" },
+    "target": {
+      "type": "object",
+      "required": ["kind", "path"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["bundle", "evidence", "directory"]
+        },
+        "path": { "type": "string" },
+        "schema_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "checks": {
+      "type": "object",
+      "required": ["schema", "semantic_trace", "digests", "bundle_decision", "manifest", "attestation"],
+      "properties": {
+        "schema": { "type": "boolean" },
+        "semantic_trace": { "type": "boolean" },
+        "digests": { "type": "boolean" },
+        "bundle_decision": { "type": "boolean" },
+        "manifest": { "type": "boolean" },
+        "attestation": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "message"],
+        "properties": {
+          "path": { "type": "string" },
+          "message": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "tcb_modules": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}
