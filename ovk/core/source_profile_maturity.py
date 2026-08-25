@@ -1,18 +1,8 @@
 """Source-profile maturity contract for Template Conformance v3.
 
-Local synthetic compiler demonstrations are useful development evidence, but
-they are not calibration and cannot establish strict enforcement maturity. This
-module separates five states:
-
-* catalog_only
-* executable_advisory
-* source_profile_candidate
-* source_profile_strict_eligible
-* externally_calibrated_strict
-
-``externally_calibrated_strict`` is intentionally impossible to derive from an
-intent/template boolean. It requires a separately verified immutable external
-calibration artifact supplied by a verifier boundary.
+Local compiler demonstrations and registry declarations are candidate evidence,
+not strict qualification. Strict maturity additionally requires an attested
+execution corpus whose observations are bound to the candidate revision.
 """
 
 from __future__ import annotations
@@ -34,12 +24,7 @@ SourceProfileMaturity = Literal[
 
 @dataclass(frozen=True)
 class SourceProfileQualification:
-    """Evidence obligations required to promote a source profile.
-
-    Counts are explicit so a single positive/negative fixture cannot masquerade
-    as a corpus. The initial threshold is intentionally small but non-trivial;
-    profile-specific policy may raise it later.
-    """
+    """Evidence obligations required to promote a bounded source profile."""
 
     profile_id: str | None
     executable_path_complete: bool = False
@@ -47,6 +32,10 @@ class SourceProfileQualification:
     enforcement_test_present: bool = False
     materials_trusted: bool = False
     measured_coverage_complete: bool = False
+
+    # True only when the corpus counts below were derived from successful,
+    # candidate-bound execution observations rather than declaration metadata.
+    execution_attested: bool = False
 
     support_contract_version: str | None = None
     positive_cases: int = 0
@@ -61,9 +50,6 @@ class SourceProfileQualification:
     installed_package_cases: int = 0
     action_cases: int = 0
 
-    # A minimum of three positive and three negative cases prevents the current
-    # one-fixture proof from qualifying as a strict corpus while remaining
-    # achievable for an initial bounded profile.
     min_positive_cases: int = 3
     min_negative_cases: int = 3
 
@@ -79,7 +65,7 @@ class SourceProfileQualification:
 
     def strict_ready(self) -> bool:
         """Return True only when every strict evidence obligation is satisfied."""
-        if not self.candidate_ready():
+        if not self.candidate_ready() or not self.execution_attested:
             return False
         if not self.support_contract_version or not self.support_contract_version.strip():
             return False
@@ -103,6 +89,8 @@ class SourceProfileQualification:
         missing: list[str] = []
         if not self.candidate_ready():
             missing.append("candidate_requirements")
+        if not self.execution_attested:
+            missing.append("candidate_bound_execution_attestation")
         if not self.support_contract_version:
             missing.append("versioned_support_contract")
         if self.positive_cases < self.min_positive_cases:
@@ -126,12 +114,7 @@ class SourceProfileQualification:
 
 @dataclass(frozen=True)
 class VerifiedExternalCalibration:
-    """Result of a separate external-calibration verifier.
-
-    Callers must not construct this from template metadata. ``verified`` means
-    the calibration artifact's immutable digest, producer identity and expected
-    profile binding were checked by the external-calibration verification path.
-    """
+    """Result of a separate immutable external-calibration verifier."""
 
     profile_id: str
     artifact_sha256: str
@@ -158,7 +141,6 @@ def classify_source_profile_maturity(
     deprecated: bool = False,
     external_calibration: VerifiedExternalCalibration | None = None,
 ) -> SourceProfileMaturity:
-    """Classify a profile without accepting self-declared maturity assertions."""
     if deprecated:
         return "deprecated"
     if qualification is None:
@@ -181,13 +163,7 @@ def qualification_from_local_profile_evidence(
     executable_path_complete: bool,
     compiler_binding_present: bool,
 ) -> SourceProfileQualification:
-    """Convert existing local proof evidence into v3 maturity evidence.
-
-    Critically, this function populates *only* candidate-level fields. It never
-    invents corpus, timeout, package, Action or external-calibration evidence.
-    Thus the current synthetic source-profile prover can at most produce
-    ``source_profile_candidate``.
-    """
+    """Convert local proof evidence into candidate-only maturity evidence."""
     return SourceProfileQualification(
         profile_id=profile_id,
         executable_path_complete=executable_path_complete,
@@ -195,12 +171,10 @@ def qualification_from_local_profile_evidence(
         enforcement_test_present=enforcement_test_present,
         materials_trusted=materials_trusted,
         measured_coverage_complete=coverage_complete,
+        execution_attested=False,
     )
 
 
 def qualification_from_dict(payload: dict[str, Any]) -> SourceProfileQualification:
-    """Parse machine-produced qualification evidence; unknown keys are ignored."""
     allowed = SourceProfileQualification.__dataclass_fields__
-    return SourceProfileQualification(
-        **{key: value for key, value in payload.items() if key in allowed}
-    )
+    return SourceProfileQualification(**{key: value for key, value in payload.items() if key in allowed})
