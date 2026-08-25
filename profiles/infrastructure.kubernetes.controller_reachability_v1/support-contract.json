@@ -1,25 +1,27 @@
 {
   "schema_version": "ovk.support_contract.v1",
   "profile_id": "infrastructure.kubernetes.controller_reachability_v1",
-  "contract_version": "1.0.0",
+  "contract_version": "1.1.0",
   "lane": "infrastructure",
-  "proposition": "Public reachability for Kubernetes workloads is computed from namespace-aware Service selectors, Gateway API parent/backend refs, and NetworkPolicy constraints; RBAC is a separate graph.",
-  "guarantee_type": "bounded_infrastructure_exposure",
+  "proposition": "Within the supported object subset, OVK computes namespace-scoped Service-to-controller selector edges and syntactic Ingress/Gateway/HTTPRoute reference edges; unsupported controller publicness, cross-namespace authorization, or network-policy semantics force review.",
+  "guarantee_type": "bounded_infrastructure_exposure_candidate",
   "compiler_binding": "ovk.compilers.infrastructure.kubernetes:compile_kubernetes_objects",
   "supported_constructs": [
     "Service",
-    "Ingress_with_trusted_class_material",
-    "Gateway",
-    "HTTPRoute",
-    "ReferenceGrant",
-    "NetworkPolicy",
     "Deployment_StatefulSet_DaemonSet",
-    "Role_ClusterRole_bindings",
+    "namespace_scoped_service_selectors",
+    "Ingress_reference_extraction",
+    "Gateway_reference_extraction",
+    "HTTPRoute_reference_extraction",
+    "NetworkPolicy_syntax_capture",
+    "Role_ClusterRole_bindings_as_separate_graph",
     "Secret_env_volume_refs"
   ],
   "excluded_constructs": [
-    "untrusted_ingress_class_publicness",
-    "cross_namespace_selector_without_grant",
+    "ingress_class_name_as_proof_of_public_reachability",
+    "gateway_class_name_as_proof_of_public_reachability",
+    "cross_namespace_backend_authorization_until_ReferenceGrant_is_enforced",
+    "NetworkPolicy_as_reachability_constraint_until_policy_semantics_are_enforced",
     "arbitrary_CRDs_without_plugin"
   ],
   "required_materials": [
@@ -29,7 +31,9 @@
     "complete_requires": [
       "namespace_scoped_service_edges",
       "no_unsupported_kinds_in_strict_set",
-      "network_policy_applied_or_review"
+      "no_unresolved_controller_publicness",
+      "no_unresolved_cross_namespace_authorization",
+      "no_unapplied_network_policy_semantics"
     ],
     "unsupported_forces": "review"
   },
@@ -38,6 +42,8 @@
     "gateway_api": ">=0.8"
   },
   "notes": [
-    "CRDs remain unsupported unless a versioned plugin exists."
+    "Current Gateway, Ingress, ReferenceGrant, and NetworkPolicy parsing is useful candidate evidence but not yet a complete network-semantics proof.",
+    "CRDs remain unsupported unless a versioned plugin exists.",
+    "This profile cannot be strict-eligible without candidate-bound executed qualification evidence."
   ]
 }
