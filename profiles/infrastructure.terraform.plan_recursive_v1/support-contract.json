@@ -1,10 +1,10 @@
 {
   "schema_version": "ovk.support_contract.v1",
   "profile_id": "infrastructure.terraform.plan_recursive_v1",
-  "contract_version": "1.0.0",
+  "contract_version": "1.1.0",
   "lane": "infrastructure",
-  "proposition": "Public exposure claims for Terraform resources are derived only from concrete plan fields and bounded provider path profiles; after_unknown/sensitive exposure forces review.",
-  "guarantee_type": "bounded_infrastructure_exposure",
+  "proposition": "For supported terraform show JSON inputs, OVK derives exposure only from concrete plan fields and bounded provider-family patterns; unknown or sensitive exposure-relevant values force review.",
+  "guarantee_type": "bounded_infrastructure_exposure_candidate",
   "compiler_binding": "ovk.compilers.infrastructure.terraform_plan:compile_terraform_plan",
   "supported_constructs": [
     "resource_changes",
@@ -12,12 +12,14 @@
     "after_unknown",
     "sensitive_values",
     "count_for_each_addresses",
-    "aws_azure_gcp_family_paths"
+    "bounded_aws_azure_gcp_exposure_patterns"
   ],
   "excluded_constructs": [
     "generic_public_true_without_path",
     "untrusted_cloud_credential_plan_generation",
-    "missing_provider_lockfile_for_strict"
+    "unverified_terraform_or_plan_format_version",
+    "missing_or_unverified_provider_lock_identity",
+    "provider_resource_semantics_outside_bounded_patterns"
   ],
   "required_materials": [
     "terraform_show_json_plan",
@@ -27,7 +29,8 @@
     "complete_requires": [
       "resource_changes_or_recursive_planned_values",
       "no_unknown_exposure_as_private",
-      "concrete_provider_path_or_review"
+      "concrete_provider_path_or_review",
+      "applicability_preconditions_verified_before_strict_promotion"
     ],
     "unsupported_forces": "review"
   },
@@ -36,6 +39,8 @@
     "plan_format": "1.2"
   },
   "notes": [
-    "Plans must be sandbox-generated or attested; never run untrusted PR Terraform with cloud credentials."
+    "The compiler currently records version/provider metadata when present but strict applicability is not established until those prerequisites are machine-verified and candidate-bound.",
+    "Plans must be sandbox-generated or attested; never run untrusted PR Terraform with cloud credentials.",
+    "This profile cannot be strict-eligible without candidate-bound executed qualification evidence."
   ]
 }
