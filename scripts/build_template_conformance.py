@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Build docs/benchmarks/template-conformance.json from the template library."""
+"""Build the normative Template Conformance v3 machine artifact."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ovk.core.template_conformance import (  # noqa: E402
+from ovk.core.template_conformance_v3 import (  # noqa: E402
     domain_counts_markdown,
     validate_matrix,
     write_conformance_matrix,
@@ -20,7 +20,7 @@ from ovk.core.template_conformance import (  # noqa: E402
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build OVK template conformance matrix")
+    parser = argparse.ArgumentParser(description="Build OVK Template Conformance v3 matrix")
     parser.add_argument("--repo-root", type=Path, default=ROOT)
     parser.add_argument(
         "--output",
@@ -47,24 +47,23 @@ def main() -> int:
     if args.print_domain_counts:
         sys.stdout.write(domain_counts_markdown(matrix))
     print(
-        f"template conformance: {matrix['template_count']} templates -> {output}"
-        f" (strict_eligible={matrix['counts_by_status'].get('strict_eligible', 0)},"
-        f" catalog_only={matrix['counts_by_status'].get('catalog_only', 0)},"
-        f" source_profile_strict_eligible={matrix.get('counts_by_status_v2', {}).get('source_profile_strict_eligible', 0)})"
+        f"template conformance v3: {matrix['template_count']} templates -> {output}"
+        f" (candidate={matrix.get('counts_by_status_v3', {}).get('source_profile_candidate', 0)},"
+        f" strict={matrix.get('counts_by_status_v3', {}).get('source_profile_strict_eligible', 0)},"
+        f" catalog_only={matrix.get('counts_by_status_v3', {}).get('catalog_only', 0)})"
     )
     if failures:
         for failure in failures:
             print(failure, file=sys.stderr)
         return 1
     if args.check:
-        # Re-read to ensure on-disk artifact validates.
         on_disk = json.loads(output.read_text(encoding="utf-8"))
         disk_failures = validate_matrix(on_disk)
         if disk_failures:
             for failure in disk_failures:
                 print(failure, file=sys.stderr)
             return 1
-        print("template conformance gate passed")
+        print("template conformance v3 gate passed")
     return 0
 
 

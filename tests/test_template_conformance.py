@@ -1,11 +1,11 @@
-"""Tests for template conformance builder and gate logic."""
+"""Tests for Template Conformance v3 builder and gate logic."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from ovk.core.template_conformance import (
+from ovk.core.template_conformance_v3 import (
     REQUIRED_ROW_FIELDS,
     build_conformance_matrix,
     classify_template,
@@ -20,11 +20,12 @@ def test_build_matrix_covers_all_templates() -> None:
     matrix = build_conformance_matrix(repo)
     on_disk = len(list((repo / "templates").rglob("*.intent.json")))
     assert matrix["template_count"] == on_disk == 100
-    assert matrix["schema_version"] == "ovk.template_conformance.v1"
+    assert matrix["schema_version"] == "ovk.template_conformance.v3"
+    assert matrix["maturity_contract"]["normative_status_field"] == "conformance_status_v3"
     assert set(matrix["required_row_fields"]) == set(REQUIRED_ROW_FIELDS)
 
 
-def test_strict_eligible_lanes_have_complete_links() -> None:
+def test_legacy_strict_eligible_lanes_have_complete_links() -> None:
     repo = Path(__file__).resolve().parents[1]
     matrix = build_conformance_matrix(repo)
     strict = [row for row in matrix["templates"] if row["production_status"] == "strict_eligible"]
@@ -50,9 +51,12 @@ def test_native_named_without_executable_path_is_catalog_only() -> None:
     assert any("downgraded" in note for note in row.notes)
 
 
-def test_validate_matrix_rejects_strict_with_missing_links() -> None:
+def test_validate_matrix_rejects_legacy_strict_with_missing_links() -> None:
     matrix = {
-        "schema_version": "ovk.template_conformance.v1",
+        "schema_version": "ovk.template_conformance.v3",
+        "maturity_contract": {"normative_status_field": "conformance_status_v3"},
+        "counts_by_status_v3": {"executable_advisory": 1},
+        "counts_by_status_v2": {"executable_advisory": 1},
         "templates": [
             {
                 "intent_id": "fake",
@@ -60,6 +64,8 @@ def test_validate_matrix_rejects_strict_with_missing_links() -> None:
                 "domain": "authorization",
                 "version": "0.1.0",
                 "production_status": "strict_eligible",
+                "conformance_status_v3": "executable_advisory",
+                "conformance_status_v2": "executable_advisory",
                 "risk_severity": "high",
                 "property_kind": "access_control",
                 "acceptable_evidence_kinds": [],
@@ -72,7 +78,7 @@ def test_validate_matrix_rejects_strict_with_missing_links() -> None:
         ],
     }
     failures = validate_matrix(matrix)
-    assert any("strict_eligible" in item for item in failures)
+    assert any("legacy strict_eligible requires empty" in item for item in failures)
 
 
 def test_domain_counts_derived_from_matrix() -> None:
@@ -93,21 +99,49 @@ def test_write_and_check_round_trip(tmp_path: Path) -> None:
     assert validate_matrix(matrix) == []
     loaded = json.loads(output.read_text(encoding="utf-8"))
     assert loaded["template_count"] == matrix["template_count"]
+    assert loaded["schema_version"] == "ovk.template_conformance.v3"
 
 
-def test_semantic_v2_statuses_from_profile_evidence() -> None:
+def test_v3_local_profile_evidence_stops_at_candidate() -> None:
     repo = Path(__file__).resolve().parents[1]
     matrix = build_conformance_matrix(repo)
-    assert set(matrix["conformance_statuses_v2"]) == {
+    assert set(matrix["conformance_statuses_v3"]) == {
         "catalog_only",
         "executable_advisory",
+        "source_profile_candidate",
         "source_profile_strict_eligible",
         "externally_calibrated_strict",
         "deprecated",
     }
-    assert matrix["counts_by_status_v2"].get("externally_calibrated_strict", 0) == 0
-    assert matrix["counts_by_status_v2"].get("source_profile_strict_eligible", 0) >= 1
-    assert matrix["counts_by_status_v2"].get("executable_advisory", 0) >= 1
+    assert matrix["counts_by_status_v3"].get("externally_calibrated_strict", 0) == 0
+    assert matrix["counts_by_status_v3"].get("source_profile_strict_eligible", 0) == 0
+    assert matrix["counts_by_status_v3"].get("source_profile_candidate", 0) >= 1
+    assert matrix["counts_by_status_v3"].get("executable_advisory", 0) >= 1
+
     by_id = {row["intent_id"]: row for row in matrix["templates"]}
-    assert by_id["no-admin-route-bypass"]["conformance_status_v2"] == "source_profile_strict_eligible"
-    assert by_id["agent-cannot-disable-own-ci-gate"]["conformance_status_v2"] == "executable_advisory"
+    authorization = by_id["no-admin-route-bypass"]
+    assert authorization["conformance_status_v3"] == "source_profile_candidate"
+    assert authorization["conformance_status_v2"] == "executable_advisory"
+    assert authorization["source_profile_qualification"]["candidate_ready"] is True
+    assert authorization["source_profile_qualification"]["strict_ready"] is False
+    assert "positive_corpus" in authorization["source_profile_qualification"]["unmet_strict_obligations"]
+    assert "strict_eligible" not in authorization["source_profile_evidence"]
+    assert authorization["source_profile_evidence"]["maturity_effect"] == "candidate_only"
+
+    self_protection = by_id["agent-cannot-disable-own-ci-gate"]
+    assert self_protection["conformance_status_v3"] == "executable_advisory"
+
+
+def test_v3_validation_rejects_local_strict_self_assertion() -> None:
+    repo = Path(__file__).resolve().parents[1]
+    matrix = build_conformance_matrix(repo)
+    by_id = {row["intent_id"]: row for row in matrix["templates"]}
+    row = by_id["no-admin-route-bypass"]
+    row["conformance_status_v3"] = "source_profile_strict_eligible"
+    row["conformance_status_v2"] = "source_profile_strict_eligible"
+    matrix["counts_by_status_v3"]["source_profile_candidate"] -= 1
+    matrix["counts_by_status_v3"]["source_profile_strict_eligible"] = 1
+    matrix["counts_by_status_v2"]["executable_advisory"] -= 1
+    matrix["counts_by_status_v2"]["source_profile_strict_eligible"] = 1
+    failures = validate_matrix(matrix)
+    assert any("requires complete machine strict qualification" in item for item in failures)
