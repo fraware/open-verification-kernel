@@ -24,7 +24,7 @@ on:
     branches: [main]
 
 env:
-  OVK_PACKAGE_VERSION: "1.2.0"
+  OVK_PACKAGE_VERSION: "1.2.1"
 
 jobs:
   ovk-advisory:
@@ -41,14 +41,14 @@ jobs:
           git fetch origin "${{ github.base_ref }}"
           git diff "origin/${{ github.base_ref }}...HEAD" > ovk-pr.diff
       - name: OVK advisory check
-        uses: fraware/open-verification-kernel@v1.2.0
+        uses: fraware/open-verification-kernel@v1.2.1
         with:
           mode: advisory
           use-check: "true"
           changed-files: ovk-pr.diff
           post-comment: "false"
       - name: OVK advisory verify (CI secrets check)
-        uses: fraware/open-verification-kernel@v1.2.0
+        uses: fraware/open-verification-kernel@v1.2.1
         with:
           mode: advisory
           verification-manifest: .verification/ci_secrets_pilot.json
@@ -91,7 +91,7 @@ Optional self-report JSON: copy [external_pilot_report.template.json](templates/
 When false positives stay below 5%:
 
 ```yaml
-- uses: fraware/open-verification-kernel@v1.2.0
+- uses: fraware/open-verification-kernel@v1.2.1
   with:
     mode: strict
     use-check: "true"

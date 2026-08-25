@@ -1,6 +1,8 @@
 # FormalPR-Bench
 
-FormalPR-Bench is OVK's regression suite. It scores whether checks return the right recommendation, pick the right backend, produce useful repair hints, and handle realistic PR diffs.
+FormalPR-Bench is OVK's **internal regression suite**. It scores whether checks return the right recommendation, pick the right backend, produce useful repair hints, and handle realistic PR diffs on a frozen corpus.
+
+It is **not** an independent accuracy estimate and must not be cited as external calibration. Published bench artifacts use `benchmark_source_sha` / `benchmark_version`. They must **not** mint `verified_source_sha` (that field is release-ledger only).
 
 ## Public artifacts
 

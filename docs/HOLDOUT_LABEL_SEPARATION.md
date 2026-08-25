@@ -30,7 +30,7 @@ Template-development cases listed in `benchmarks/formal_pr_bench/template_dev_ca
 - [ ] `HOLDOUT_ASSET_SHA256` (or workflow input) set for immutable asset verify
 - [ ] Eval job runs with tokens unset; aggregates schema-validated
 - [ ] Published metrics cite `ovk_commit_sha` / `benchmark_source_sha` and do not embed case ids
-- [ ] Do not set `verified_source_sha` on holdout aggregates unless the full required-workflow set was observed
+- [ ] Do not set `verified_source_sha` on holdout aggregates (release-ledger only; cite `benchmark_source_sha` / `ovk_commit_sha` instead)
 
 ## Blocked outside this repo
 

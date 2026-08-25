@@ -3,6 +3,7 @@
 Scaffolding and live pointers for independent consumer repositories validating OVK.
 Completing this checklist for one repo does **not** satisfy the multi-repo production
 exit criterion (30 human-adjudicated PRs per independent consumer).
+In-repo weekly external-validation / pilot dogfood does **not** substitute for these remotes.
 
 ## Live independent consumers
 

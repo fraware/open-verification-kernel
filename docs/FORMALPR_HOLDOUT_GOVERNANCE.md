@@ -21,7 +21,7 @@ Protected labels live only in private release assets (and gitignored local
 
 1. **Access control** — Maintainers with need-to-know only; no public mirrors of protected cases/labels.
 2. **No label leakage** — Holdout labels, expected recommendations, and adjudication notes must not appear in public issues, PRs, docs, or ordinary OVK CI logs.
-3. **Immutable pins** — Evaluations pin `holdout_release_tag` and an immutable OVK commit (`ovk_commit_sha` / `verified_source_sha`). Never claim a score from a mutable working tree alone.
+3. **Immutable pins** — Evaluations pin `holdout_release_tag` and an immutable OVK commit (`ovk_commit_sha`, plus `benchmark_source_sha` for score provenance). Do **not** mint `verified_source_sha` from holdout alone; that field is release-ledger authorized. Never claim a score from a mutable working tree alone.
 4. **Metrics** — Per-lane precision, recall, false-positive rate, missed-detection rate, unknown rate, invalid-input rate, abstention appropriateness, coverage completeness, counterexample correctness, selected-backend execution correctness, median/tail runtime, and aggregate reviewer time. Do **not** collapse to one pass-rate.
 5. **Separation** — Annotators vs implementers (see holdout `CODEOWNERS` and docs). Holdout cases must not be copied into FormalPR-Bench, `examples/`, or public fixtures.
 6. **Disagreements** — Recorded in the holdout repo; only aggregate counts may be published.

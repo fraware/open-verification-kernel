@@ -1,6 +1,8 @@
 # OVK Pilot Case Studies
 
-Measured outcomes from example configurations in `examples/pilot_repos/`. Metrics use `ovk check` and `ovk verify` in advisory mode. Current pin: **v1.2.0**.
+Measured outcomes from example configurations in `examples/pilot_repos/`. Metrics use `ovk check` and `ovk verify` in advisory mode.
+
+**Honesty:** in-repo pilot dogfood is **not** independent consumer validation and does not authorize `verified_source_sha` or `externally_calibrated_strict`. Live signed pin for external remotes remains `v1.2.1` until `v1.3.0-rc.1` is attributable.
 
 ## In-repo reference pilot
 
@@ -10,7 +12,7 @@ Simulates how an external repo would consume OVK before community pilots land.
 
 **Manifest:** `examples/pilot_repos/external_oss_ci_secrets.json`
 
-**Consumer path:** local Action (`./`) with `OVK_PACKAGE_VERSION: "1.2.0"` to mirror adopters pinning `@v1.2.0`.
+**Consumer path:** local Action (`./`) with package version matching the workflow under test. Prefer mirroring `@v1.2.1` for live signed pins; bump only after an attributable RC tag.
 
 | Metric | Target | Measured |
 |--------|--------|----------|
@@ -152,5 +154,5 @@ Maintained-consumer and in-repo profile rows are **fixture/dogfood** measurement
 
 - [ ] Advisory window ≥14 days with artifact retention
 - [ ] False-positive rate computed and under 5% (or strict not yet enabled)
-- [ ] Link to workflow file and version pin (`@v1.2.0`)
+- [ ] Link to workflow file and version pin (`@v1.2.1` live; `@v1.3.0-rc.1` after attributable cut)
 - [ ] Update the **Active and recruiting** table with measured values
