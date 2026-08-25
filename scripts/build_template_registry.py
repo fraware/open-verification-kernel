@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Build templates/registry/entries.json from template conformance + bridge mapping."""
+"""Build a machine-generated template claim registry from v3 conformance."""
 
 from __future__ import annotations
 
@@ -15,10 +15,10 @@ if str(ROOT) not in sys.path:
 
 from ovk.core.capabilities import validate_capability_manifest  # noqa: E402
 from ovk.core.json_io import read_json_file  # noqa: E402
+from ovk.core.template_conformance_v3 import build_conformance_matrix  # noqa: E402
 
 BRIDGE_PATH = ROOT / "templates" / "registry" / "bridge.json"
-CONFORMANCE_PATH = ROOT / "docs" / "benchmarks" / "template-conformance.json"
-OUTPUT_PATH = ROOT / "templates" / "registry" / "entries.json"
+OUTPUT_PATH = ROOT / ".verification" / "template-claim-registry.json"
 
 
 def _claim_class(bridge: dict[str, Any], property_kind: str, claimed_backends: list[str]) -> str:
@@ -31,6 +31,10 @@ def _claim_class(bridge: dict[str, Any], property_kind: str, claimed_backends: l
 
 
 def _release_status(bridge: dict[str, Any], row: dict[str, Any]) -> str:
+    v3 = str(row.get("conformance_status_v3") or "")
+    v3_map = bridge.get("conformance_status_v3_to_release_status") or {}
+    if v3 in v3_map:
+        return str(v3_map[v3])
     v2 = str(row.get("conformance_status_v2") or "")
     v2_map = bridge.get("conformance_status_v2_to_release_status") or {}
     if v2 in v2_map:
@@ -62,6 +66,8 @@ def build_entries(
         version = str(row.get("version") or "0.0.0")
         release_status = _release_status(bridge, row)
         claim_class = _claim_class(bridge, property_kind, claimed_backends)
+        status_v3 = str(row.get("conformance_status_v3") or "catalog_only")
+        status_v2 = str(row.get("conformance_status_v2") or "catalog_only")
         entry = {
             "capability_id": f"template-{intent_id}-v1",
             "checker_id": f"template:{intent_id}",
@@ -89,7 +95,8 @@ def build_entries(
             },
             "assumptions": [
                 "Template conformance links accurately describe executable surfaces.",
-                f"conformance_status_v2={row.get('conformance_status_v2')}",
+                f"conformance_status_v3={status_v3}",
+                f"conformance_status_v2_compatibility={status_v2}",
             ],
             "trusted_components": [
                 "intent template",
@@ -105,15 +112,19 @@ def build_entries(
             "release_status": release_status,
             "owner": "ovk-maintainers",
             "native_execution": False,
-            "template_conformance_status_v2": row.get("conformance_status_v2"),
+            "template_conformance_status_v3": status_v3,
+            "template_conformance_status_v2": status_v2,
             "production_status": row.get("production_status"),
             "claimed_backends": claimed_backends,
         }
+        qualification = row.get("source_profile_qualification")
+        if isinstance(qualification, dict):
+            entry["source_profile_qualification"] = qualification
         entries.append(entry)
 
     entries.sort(key=lambda item: str(item["checker_id"]))
     return {
-        "schema_version": "ovk.template_capability_registry.v1",
+        "schema_version": "ovk.template_capability_registry.v2",
         "bridge_schema_version": bridge.get("schema_version"),
         "source_conformance_schema_version": conformance.get("schema_version"),
         "entry_count": len(entries),
@@ -122,26 +133,31 @@ def build_entries(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build template claim registry from conformance matrix")
+    parser = argparse.ArgumentParser(description="Build template claim registry from normative conformance")
     parser.add_argument("--repo-root", type=Path, default=ROOT)
     parser.add_argument("--bridge", type=Path, default=None)
-    parser.add_argument("--conformance", type=Path, default=None)
+    parser.add_argument(
+        "--conformance",
+        type=Path,
+        default=None,
+        help="Optional conformance artifact; default builds normative v3 conformance from source.",
+    )
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Exit non-zero if on-disk registry differs from regenerated content",
+        help="Validate the generated registry before emitting it.",
     )
     args = parser.parse_args()
     repo_root = args.repo_root.resolve()
     bridge_path = (args.bridge or (repo_root / "templates" / "registry" / "bridge.json")).resolve()
-    conformance_path = (
-        args.conformance or (repo_root / "docs" / "benchmarks" / "template-conformance.json")
-    ).resolve()
-    output = (args.output or (repo_root / "templates" / "registry" / "entries.json")).resolve()
+    output = (args.output or (repo_root / ".verification" / "template-claim-registry.json")).resolve()
 
     bridge = read_json_file(bridge_path)
-    conformance = read_json_file(conformance_path)
+    if args.conformance is not None:
+        conformance = read_json_file(args.conformance.resolve())
+    else:
+        conformance = build_conformance_matrix(repo_root)
     payload = build_entries(conformance=conformance, bridge=bridge)
 
     failures: list[str] = []
@@ -152,24 +168,15 @@ def main() -> int:
             print(failure, file=sys.stderr)
         return 1
 
-    rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    if args.check:
-        if not output.is_file():
-            print(f"missing template registry: {output}", file=sys.stderr)
-            return 1
-        on_disk = output.read_text(encoding="utf-8")
-        if on_disk != rendered:
-            print(
-                f"stale template registry: {output} (run python scripts/build_template_registry.py)",
-                file=sys.stderr,
-            )
-            return 1
-        print(f"template registry up to date ({payload['entry_count']} entries)")
-        return 0
-
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(rendered, encoding="utf-8")
-    print(f"wrote {payload['entry_count']} template registry entries -> {output}")
+    output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if args.check:
+        print(
+            "template registry generated and validated "
+            f"({payload['entry_count']} entries, {payload['source_conformance_schema_version']})"
+        )
+    else:
+        print(f"wrote {payload['entry_count']} template registry entries -> {output}")
     return 0
 
 
