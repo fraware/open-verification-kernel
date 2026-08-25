@@ -190,15 +190,36 @@ def render_pr_comment(evidence_bundle: Path, output: Optional[Path] = None) -> N
 def validate_outputs_cmd(
     bundle_dir: Path = typer.Argument(..., help="Release bundle directory to validate."),
 ) -> None:
-    """Validate generated JSON artifacts and manifest hashes in a bundle directory."""
-    schema_failures = validate_output_directory(bundle_dir)
-    manifest_failures = verify_release_bundle(bundle_dir)
-    failures = schema_failures + manifest_failures
+    """Validate generated JSON artifacts and manifest hashes in a bundle directory.
+
+    Directory form of the same verifier TCB as ``ovk verify-evidence``.
+    """
+    from ovk.core.evidence_verifier import verify_serialized_artifact
+
+    report = verify_serialized_artifact(bundle_dir)
+    failures = [f"{item['path']}: {item['message']}" for item in report.get("issues", [])]
     for failure in failures:
         typer.echo(failure)
-    if failures:
+    if not report.get("valid"):
         raise typer.Exit(code=1)
     typer.echo("OVK output validation passed")
+
+
+@app.command("verify-evidence")
+def verify_evidence_cmd(
+    bundle_or_directory: Path = typer.Argument(..., help="Evidence bundle JSON or release directory."),
+    output: Optional[Path] = typer.Option(None, help="Optional verifier.report.v1 JSON output."),
+) -> None:
+    """Independently verify schema, semantic trace, digests, decision, manifest, and attestation."""
+    from ovk.core.evidence_verifier import verify_serialized_artifact
+
+    report = verify_serialized_artifact(bundle_or_directory)
+    if output:
+        write_json_file(output, report)
+    else:
+        typer.echo(json.dumps(report, indent=2))
+    if not report.get("valid"):
+        raise typer.Exit(code=1)
 
 
 @app.command("evidence-quality")
@@ -289,13 +310,58 @@ def release_preflight(
 
     report = build_release_preflight_report()
     if output:
-        write_json_file(output, report.to_dict())
+        payload = report.to_dict()
+        # WP-17: include ledger-oriented fields for release-ledger construction.
+        payload["ledger_fields"] = {
+            "schema_version": "ovk.release_ledger.v1",
+            "preflight_passed": report.passed,
+            "failures": list(report.failures),
+            "verified_source_sha": None,
+            "note": "verified_source_sha is set only after offline release-ledger verification",
+        }
+        write_json_file(output, payload)
     for failure in report.failures:
         typer.echo(failure)
     if not report.passed:
         raise typer.Exit(code=1)
     typer.echo("OVK release preflight checks passed")
 
+
+@app.command("verify-release-ledger")
+def verify_release_ledger_cmd(
+    ledger: Path = typer.Argument(..., help="Path to .verification/release-ledger.json"),
+    require_artifacts: bool = typer.Option(False, help="Require wheel/sdist digests"),
+    require_consumers: bool = typer.Option(False, help="Require consumer evidence entries"),
+    require_holdout: bool = typer.Option(False, help="Require holdout digests"),
+    write_authorized: Optional[Path] = typer.Option(
+        None, help="Optional path to write authorized ledger (still published=false, no tag)"
+    ),
+) -> None:
+    """Offline release-ledger verifier. Does not tag or publish."""
+    from ovk.core.release_ledger import verify_release_ledger, write_release_ledger
+
+    payload = json.loads(ledger.read_text(encoding="utf-8"))
+    ok, failures, authorized = verify_release_ledger(
+        payload,
+        repo_root=Path.cwd(),
+        require_artifacts=require_artifacts,
+        require_consumers=require_consumers,
+        require_holdout=require_holdout,
+    )
+    for failure in failures:
+        typer.echo(failure)
+    if write_authorized is not None:
+        write_authorized.parent.mkdir(parents=True, exist_ok=True)
+        write_authorized.write_text(json.dumps(authorized, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        if write_authorized.name == "release-ledger.json":
+            write_release_ledger(Path.cwd(), authorized)
+    if not ok:
+        raise typer.Exit(code=1)
+    typer.echo(
+        "release ledger authorized for "
+        f"{authorized['release_state']['verified_source_sha']} "
+        "(published=false; no tag created)"
+    )
 
 @app.command("release-bundle")
 def release_bundle(

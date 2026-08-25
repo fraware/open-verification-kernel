@@ -1,15 +1,41 @@
-"""Evidence bundle construction utilities."""
+"""Evidence bundle construction utilities.
+
+``content_digest`` canonicalization (identity version ``ovk.canonical_json.v1``):
+
+* UTF-8 JSON via ``json.dumps``
+* object keys sorted lexicographically (``sort_keys=True``)
+* separators ``(",", ":")`` with no extra whitespace
+* list order is significant and preserved
+* ``null`` encodes as JSON null
+* numbers use Python's default JSON encoding (not RFC 8785)
+* NaN and Infinity are rejected; they are not canonical JSON
+* RFC 8785 (JCS) is a future identity-version migration, not this digest
+"""
 
 from __future__ import annotations
 
 import json
+import math
 from hashlib import sha256
-
 from ovk.core.decision import decide_with_reason
 from ovk.core.models import EvidenceBundle, VerificationEvidence
 
+CANONICAL_JSON_VERSION = "ovk.canonical_json.v1"
+
+
+def _reject_nonfinite(value: object, path: str = "$") -> None:
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        raise ValueError(f"non-finite number at {path} is not canonical JSON")
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _reject_nonfinite(item, f"{path}.{key}")
+    elif isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            _reject_nonfinite(item, f"{path}[{index}]")
+
 
 def _stable_json(value: object) -> str:
+    _reject_nonfinite(value)
     return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
 
 
