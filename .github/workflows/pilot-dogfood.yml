@@ -15,7 +15,7 @@ jobs:
   external-consumer-simulation:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Document external consumer pin
         run: |
           echo "Simulating fork consumer: uses ./ with OVK_PACKAGE_VERSION=${OVK_PACKAGE_VERSION}"
@@ -35,7 +35,7 @@ jobs:
           verification-manifest: examples/pilot_repos/external_oss_ci_secrets.json
           bundle-output-dir: .verification/pilot-dogfood-bundle
           post-comment: "false"
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.11'
       - name: Install package for metrics collection
@@ -53,7 +53,7 @@ jobs:
             --ovk-version "${OVK_PACKAGE_VERSION}"
           python scripts/render_pilot_metrics.py --metrics .verification/pilot-dogfood-report.json
       - name: Upload pilot metrics artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pilot-dogfood-metrics
           path: |
