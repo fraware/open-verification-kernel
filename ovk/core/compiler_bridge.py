@@ -12,9 +12,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import importlib
+
 from ovk.compilers.authorization import (
     CoveragePolicy,
     ExpressAuthorizationCompiler,
+    FastApiAstAuthorizationCompiler,
     FastApiAuthorizationCompiler,
     assess_coverage,
     materials_from_pair,
@@ -24,8 +27,10 @@ from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.compilers.cbmc import CbmcProject, guarantee_implies_project_code
 from ovk.compilers.deployment import (
     compile_argo_rollouts,
+    compile_deployment_state,
     compile_explicit_schema,
     compile_github_environments,
+    is_trusted_deployment_state,
 )
 from ovk.compilers.deployment.ir import DeploymentIR
 from ovk.compilers.github_actions import compile_workflow_trust, load_workflow_text
@@ -34,6 +39,26 @@ from ovk.compilers.infrastructure import compile_kubernetes_objects, compile_ter
 from ovk.compilers.infrastructure.ir import InfrastructureIR
 from ovk.core.execution_models import AbstractionCoverage, MaterialReference
 from ovk.core.materials import material_reference_from_payload
+from ovk.core.source_profiles import PROFILE_COMPILER_BINDINGS, compiler_binding_for
+
+
+def _load_bound_compiler(profile_id: str):
+    """Instantiate the profile-bound compiler class (module:Class form)."""
+    binding = compiler_binding_for(profile_id) or PROFILE_COMPILER_BINDINGS.get(profile_id)
+    if not binding or ":" not in binding:
+        raise ValueError(f"no class compiler binding for profile {profile_id}")
+    module_name, attr = binding.split(":", 1)
+    module = importlib.import_module(module_name)
+    target = getattr(module, attr)
+    if callable(target) and not isinstance(target, type):
+        return target
+    return target()
+
+
+# Regex FastAPI remains available for advisory/legacy callers only.
+_ADVISORY_FASTAPI = FastApiAuthorizationCompiler
+_PRODUCTION_FASTAPI_PROFILE = "authorization.fastapi.ast_v1"
+_PRODUCTION_EXPRESS_PROFILE = "authorization.express.ast_v1"
 
 
 def coverage_policy_from_dict(policy: dict[str, Any] | None) -> CoveragePolicy:
@@ -113,33 +138,64 @@ def compile_authorization_ir(
     base_sha: str | None = None,
     head_sha: str | None = None,
     coverage_policy: CoveragePolicy | None = None,
+    advisory: bool = False,
 ) -> tuple[AuthorizationIR, AbstractionCoverage, str, AuthMaterials] | None:
-    """Compile FastAPI/Express sources when materials are present."""
+    """Compile FastAPI/Express sources when materials are present.
+
+    Production compilation uses profile-bound compilers from
+    ``PROFILE_COMPILER_BINDINGS``. The regex FastAPI compiler is advisory/legacy
+    only (``advisory=True`` or ``data['compiler_mode'] == 'advisory'``).
+    """
     materials = extract_auth_materials(data, repo=repo, base_sha=base_sha, head_sha=head_sha)
     if materials is None:
         return None
 
     framework = str(data.get("framework") or "").lower()
+    requested_profile = str(data.get("source_profile_id") or data.get("source_profile") or "").strip()
     if not framework:
-        sample = " ".join(list(materials.head_files.values())[:1] + list(materials.base_files.values())[:1])
-        if "fastapi" in sample.lower() or "APIRouter" in sample:
-            framework = "fastapi"
-        elif "express" in sample.lower() or "require(" in sample:
+        if requested_profile.startswith("authorization.express"):
             framework = "express"
+        elif requested_profile.startswith("authorization.fastapi"):
+            framework = "fastapi"
         else:
-            # Prefer fastapi for .py, express for .js/.ts
-            paths = materials.paths
-            if any(p.endswith((".js", ".ts", ".mjs", ".cjs")) for p in paths):
+            sample = " ".join(list(materials.head_files.values())[:1] + list(materials.base_files.values())[:1])
+            if "fastapi" in sample.lower() or "APIRouter" in sample:
+                framework = "fastapi"
+            elif "express" in sample.lower() or "require(" in sample:
                 framework = "express"
             else:
-                framework = "fastapi"
+                # Prefer fastapi for .py, express for .js/.ts
+                paths = materials.paths
+                if any(p.endswith((".js", ".ts", ".mjs", ".cjs")) for p in paths):
+                    framework = "express"
+                else:
+                    framework = "fastapi"
 
+    use_advisory = advisory or str(data.get("compiler_mode") or "").lower() == "advisory"
     if framework == "express":
-        ir = ExpressAuthorizationCompiler().compile(materials)
-        compiler_id = "ovk.authorization.express.v1"
+        profile_id = requested_profile if requested_profile.startswith("authorization.express") else _PRODUCTION_EXPRESS_PROFILE
+        if use_advisory:
+            ir = ExpressAuthorizationCompiler().compile(materials)
+            compiler_id = "ovk.authorization.express.regex_advisory.v1"
+        else:
+            try:
+                compiler = _load_bound_compiler(profile_id)
+            except Exception:
+                compiler = ExpressAuthorizationCompiler()
+            ir = compiler.compile(materials)
+            compiler_id = f"ovk.authorization.express.profile:{profile_id}"
     else:
-        ir = FastApiAuthorizationCompiler().compile(materials)
-        compiler_id = "ovk.authorization.fastapi.v1"
+        profile_id = requested_profile if requested_profile.startswith("authorization.fastapi") else _PRODUCTION_FASTAPI_PROFILE
+        if use_advisory:
+            ir = _ADVISORY_FASTAPI().compile(materials)
+            compiler_id = "ovk.authorization.fastapi.regex_advisory.v1"
+        else:
+            try:
+                compiler = _load_bound_compiler(profile_id)
+            except Exception:
+                compiler = FastApiAstAuthorizationCompiler()
+            ir = compiler.compile(materials)
+            compiler_id = f"ovk.authorization.fastapi.profile:{profile_id}"
 
     coverage = assess_coverage(ir, materials, policy=coverage_policy)
     return ir, coverage, compiler_id, materials
@@ -189,13 +245,30 @@ def infrastructure_coverage(ir: InfrastructureIR) -> AbstractionCoverage:
 
 def compile_deployment_ir(data: dict[str, Any]) -> tuple[DeploymentIR, str] | None:
     """Select deployment source compiler from materials present."""
+    # Trusted deployment_state.v1 is the only strict path for this profile.
+    if str(data.get("schema_version") or data.get("schema") or "") == "ovk.deployment_state.v1" or isinstance(
+        data.get("deployment_state"), dict
+    ):
+        payload = data.get("deployment_state") if isinstance(data.get("deployment_state"), dict) else data
+        return compile_deployment_state(payload), "ovk.deployment.deployment_state.v1"
     if isinstance(data.get("environments"), list):
         return compile_github_environments(data), "ovk.deployment.github_environments.v1"
     if isinstance(data.get("argo_rollouts"), dict) or data.get("kind") == "Rollout":
         payload = data.get("argo_rollouts") if isinstance(data.get("argo_rollouts"), dict) else data
         return compile_argo_rollouts(payload), "ovk.deployment.argo_rollouts.v1"
     if isinstance(data.get("states"), list) or isinstance(data.get("transitions"), list):
-        return compile_explicit_schema(data), "ovk.deployment.explicit_schema.v1"
+        # Explicit schema without trusted acquisition remains advisory/fixture.
+        ir = compile_explicit_schema(data)
+        if not is_trusted_deployment_state(data):
+            ir = ir.model_copy(
+                update={
+                    "unsupported_constructs": sorted(
+                        set(ir.unsupported_constructs) | {"explicit_schema_advisory_without_trusted_acquisition"}
+                    ),
+                    "warnings": list(ir.warnings) + ["compiler_mode:advisory_fixture"],
+                }
+            )
+        return ir, "ovk.deployment.explicit_schema.v1"
     return None
 
 
