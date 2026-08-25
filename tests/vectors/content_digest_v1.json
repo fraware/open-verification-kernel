@@ -1,0 +1,39 @@
+{
+  "canonicalization": "ovk.canonical_json.v1",
+  "algorithm": {
+    "encoding": "utf-8",
+    "key_order": "sorted",
+    "separators": [",", ":"],
+    "list_order": "preserved",
+    "nulls": "json-null",
+    "numbers": "python-json-default",
+    "reject": ["NaN", "Infinity", "-Infinity"],
+    "rfc8785": "future-identity-version-migration"
+  },
+  "vectors": [
+    {
+      "name": "key-order-independent",
+      "left": {"b": 2, "a": 1},
+      "right": {"a": 1, "b": 2},
+      "equal": true
+    },
+    {
+      "name": "list-order-significant",
+      "left": {"items": [1, 2]},
+      "right": {"items": [2, 1]},
+      "equal": false
+    },
+    {
+      "name": "null-preserved",
+      "left": {"value": null},
+      "right": {"value": null},
+      "equal": true
+    },
+    {
+      "name": "nested-objects",
+      "left": {"outer": {"z": 1, "a": [null, false, true, 0]}},
+      "right": {"outer": {"a": [null, false, true, 0], "z": 1}},
+      "equal": true
+    }
+  ]
+}
