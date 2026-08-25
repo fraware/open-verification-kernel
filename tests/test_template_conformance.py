@@ -102,7 +102,7 @@ def test_write_and_check_round_trip(tmp_path: Path) -> None:
     assert loaded["schema_version"] == "ovk.template_conformance.v3"
 
 
-def test_v3_local_profile_evidence_stops_at_candidate() -> None:
+def test_v3_machine_qualification_can_reach_strict_eligible() -> None:
     repo = Path(__file__).resolve().parents[1]
     matrix = build_conformance_matrix(repo)
     assert set(matrix["conformance_statuses_v3"]) == {
@@ -114,17 +114,17 @@ def test_v3_local_profile_evidence_stops_at_candidate() -> None:
         "deprecated",
     }
     assert matrix["counts_by_status_v3"].get("externally_calibrated_strict", 0) == 0
-    assert matrix["counts_by_status_v3"].get("source_profile_strict_eligible", 0) == 0
-    assert matrix["counts_by_status_v3"].get("source_profile_candidate", 0) >= 1
+    assert matrix["counts_by_status_v3"].get("source_profile_strict_eligible", 0) >= 1
     assert matrix["counts_by_status_v3"].get("executable_advisory", 0) >= 1
 
     by_id = {row["intent_id"]: row for row in matrix["templates"]}
     authorization = by_id["no-admin-route-bypass"]
-    assert authorization["conformance_status_v3"] == "source_profile_candidate"
-    assert authorization["conformance_status_v2"] == "executable_advisory"
+    assert authorization["conformance_status_v3"] == "source_profile_strict_eligible"
+    assert authorization["conformance_status_v2"] == "source_profile_strict_eligible"
     assert authorization["source_profile_qualification"]["candidate_ready"] is True
-    assert authorization["source_profile_qualification"]["strict_ready"] is False
-    assert "positive_corpus" in authorization["source_profile_qualification"]["unmet_strict_obligations"]
+    assert authorization["source_profile_qualification"]["strict_ready"] is True
+    assert authorization["source_profile_qualification"]["unmet_strict_obligations"] == []
+    # Local evidence still cannot self-assert strict maturity.
     assert "strict_eligible" not in authorization["source_profile_evidence"]
     assert authorization["source_profile_evidence"]["maturity_effect"] == "candidate_only"
 
@@ -132,16 +132,19 @@ def test_v3_local_profile_evidence_stops_at_candidate() -> None:
     assert self_protection["conformance_status_v3"] == "executable_advisory"
 
 
-def test_v3_validation_rejects_local_strict_self_assertion() -> None:
+def test_v3_validation_rejects_local_external_calibration_claim() -> None:
     repo = Path(__file__).resolve().parents[1]
     matrix = build_conformance_matrix(repo)
     by_id = {row["intent_id"]: row for row in matrix["templates"]}
     row = by_id["no-admin-route-bypass"]
-    row["conformance_status_v3"] = "source_profile_strict_eligible"
-    row["conformance_status_v2"] = "source_profile_strict_eligible"
-    matrix["counts_by_status_v3"]["source_profile_candidate"] -= 1
-    matrix["counts_by_status_v3"]["source_profile_strict_eligible"] = 1
-    matrix["counts_by_status_v2"]["executable_advisory"] -= 1
-    matrix["counts_by_status_v2"]["source_profile_strict_eligible"] = 1
+    prior = row["conformance_status_v3"]
+    row["conformance_status_v3"] = "externally_calibrated_strict"
+    row["conformance_status_v2"] = "externally_calibrated_strict"
+    matrix["counts_by_status_v3"][prior] = matrix["counts_by_status_v3"].get(prior, 1) - 1
+    matrix["counts_by_status_v3"]["externally_calibrated_strict"] = 1
+    matrix["counts_by_status_v2"]["source_profile_strict_eligible"] = (
+        matrix["counts_by_status_v2"].get("source_profile_strict_eligible", 1) - 1
+    )
+    matrix["counts_by_status_v2"]["externally_calibrated_strict"] = 1
     failures = validate_matrix(matrix)
-    assert any("requires complete machine strict qualification" in item for item in failures)
+    assert any("external calibration" in item for item in failures)
