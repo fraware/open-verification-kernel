@@ -98,8 +98,17 @@ def evaluate_lane(
                     before_workflow_permissions=data.get("before_workflow_permissions"),
                     after_workflow_permissions=data.get("after_workflow_permissions"),
                     ovk_gate_name=str(data.get("ovk_gate_name", "ovk-verify")),
+                    acquisition=(
+                        dict(data["_ovk_acquisition"])
+                        if isinstance(data.get("_ovk_acquisition"), dict)
+                        else None
+                    ),
                 )
             )
+            if isinstance(data.get("_ovk_protected_artifact"), dict):
+                structured["_ovk_protected_artifact"] = dict(data["_ovk_protected_artifact"])
+            if data.get("_ovk_provenance_conflicts"):
+                structured["_ovk_provenance_conflicts"] = data["_ovk_provenance_conflicts"]
         _validate_lane_input(structured, LANE_INPUT_SCHEMAS["self_protection"], lane=canonical)
         return evaluate_self_protection(structured, repo=repo, head_sha=head_sha, base_sha=base_sha)
     if canonical == "authorization":

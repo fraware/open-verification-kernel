@@ -16,6 +16,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from ovk.core.bundle import content_digest
+
 AllowedFallbackCause = Literal[
     "tool_unavailable",
     "timeout",
@@ -29,18 +31,26 @@ AllowedFallbackCause = Literal[
 STRICT_PREEXECUTION_CAUSES: frozenset[str] = frozenset({"tool_unavailable"})
 
 
-class FallbackRule(BaseModel):
-    """One exact authorized evidence substitution."""
+class FallbackAuthorizationRule(BaseModel):
+    """Stable identity for one exact authorized evidence substitution.
 
+    Strict execution remains disabled until the executor records primary attempt,
+    cause, rule id, fallback obligation, fallback attempt, and result as one tuple.
+    """
+
+    rule_id: str | None = None
     primary_backend: str
     primary_guarantee: str
     fallback_backend: str
     fallback_guarantee: str
     allowed_causes: list[AllowedFallbackCause] = Field(default_factory=list)
     requires_independent_attempt: bool = True
+    proposition_id: str | None = None
+    profile_id: str | None = None
+    proof_relation: Literal["equivalent", "subsumes", "review-only"] = "review-only"
 
     @model_validator(mode="after")
-    def _nonempty(self) -> "FallbackRule":
+    def _nonempty(self) -> "FallbackAuthorizationRule":
         for name in (
             "primary_backend",
             "primary_guarantee",
@@ -53,6 +63,24 @@ class FallbackRule(BaseModel):
             raise ValueError("allowed_causes must be non-empty")
         if self.primary_backend == self.fallback_backend and self.primary_guarantee == self.fallback_guarantee:
             raise ValueError("fallback rule must substitute a different backend or guarantee")
+        if not self.rule_id:
+            object.__setattr__(
+                self,
+                "rule_id",
+                "fallback-"
+                + content_digest(
+                    {
+                        "primary_backend": self.primary_backend,
+                        "primary_guarantee": self.primary_guarantee,
+                        "fallback_backend": self.fallback_backend,
+                        "fallback_guarantee": self.fallback_guarantee,
+                        "allowed_causes": list(self.allowed_causes),
+                        "proposition_id": self.proposition_id,
+                        "profile_id": self.profile_id,
+                        "proof_relation": self.proof_relation,
+                    }
+                )[:16],
+            )
         return self
 
     def authorizes(
@@ -71,6 +99,9 @@ class FallbackRule(BaseModel):
             and self.fallback_guarantee == fallback_guarantee
             and cause in set(self.allowed_causes)
         )
+
+
+FallbackRule = FallbackAuthorizationRule
 
 
 def fallback_rules_from_policy(policy: dict[str, Any] | None) -> list[FallbackRule]:

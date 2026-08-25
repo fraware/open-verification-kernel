@@ -61,7 +61,7 @@ def _evaluate_authorization_deterministic(payload: dict[str, Any]) -> dict[str, 
             "raw_result": {
                 "status": "unknown",
                 "reason": "malformed authorization input",
-                "issues": issues,
+                "issues": [issue.to_dict() for issue in issues],
                 "models": [],
                 "counterexamples": [],
             },

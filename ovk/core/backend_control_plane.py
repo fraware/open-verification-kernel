@@ -354,7 +354,7 @@ class BackendControlPlane:
             normalized = adapter.normalize(raw, compiled)
             attempt = _attempt_from_raw(raw=raw, required=required)
             result = normalized.model_copy(update={"attempt_id": attempt.attempt_id})
-            if cache is not None:
+            if cache is not None and raw.envelope_produced:
                 cached_exec = CachedBackendExecution(
                     attempt=attempt,
                     native_execution=attempt.native_execution,

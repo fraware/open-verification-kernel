@@ -36,7 +36,9 @@ from ovk.core.bundle import content_digest
 
 from ovk.core.evidence_from_execution import execution_record_to_evidence
 
-from ovk.core.execution_budget import LocalSubprocessWorker, execution_budget_from_policy
+from ovk.core.execution_budget import execution_budget_from_policy
+
+from ovk.core.sandbox_worker import production_backend_worker
 
 from ovk.core.execution_models import ExecutionContext, RoutingDecision, VerificationObligation
 
@@ -68,14 +70,21 @@ from ovk.core.self_protection_compiler import resolve_metadata_trusted
 from ovk.core.shadow_obligation import build_shadow_obligation
 
 
-def _control_plane(*, cache_dir: Path | None = None) -> BackendControlPlane:
+def _control_plane(*, cache_dir: Path | None = None, use_cache: bool = True) -> BackendControlPlane:
     """Build an enforced/shadow control plane with hardened cache + worker."""
+
+    if not use_cache:
+        return BackendControlPlane(
+            cache=None,
+            worker=production_backend_worker(),
+            use_hardened_cache=False,
+        )
 
     hardened = HardenedResultCache(cache_dir / "control-plane") if cache_dir is not None else HardenedResultCache()
 
     return BackendControlPlane(
         cache=ControlPlaneResultCache(hardened),
-        worker=LocalSubprocessWorker(),
+        worker=production_backend_worker(),
         use_hardened_cache=True,
     )
 
@@ -221,6 +230,7 @@ def _run_shadow_path(
     intent_id: str,
     policy: dict[str, Any] | None,
     cache_dir: Path | None = None,
+    use_cache: bool = True,
 ) -> dict[str, Any] | None:
     """Execute the typed control plane for comparison; never raises to legacy."""
 
@@ -247,7 +257,9 @@ def _run_shadow_path(
 
         routing = route_obligation(obligation, registry, context=context, policy=policy)
 
-        record = _control_plane(cache_dir=cache_dir).execute(obligation, routing, registry=registry)
+        record = _control_plane(cache_dir=cache_dir, use_cache=use_cache).execute(
+            obligation, routing, registry=registry
+        )
 
         return {
             "record": record,
@@ -272,6 +284,7 @@ def _run_enforced_with_routing(
     policy: dict[str, Any] | None,
     schema_version: str,
     cache_dir: Path | None = None,
+    use_cache: bool = True,
 ) -> VerificationEvidence:
     """Execute one enforced lane using a pre-computed immutable routing decision."""
 
@@ -282,7 +295,9 @@ def _run_enforced_with_routing(
 
     registry = registry_builder()
 
-    record = _control_plane(cache_dir=cache_dir).execute(typed_obligation, routing, registry=registry)
+    record = _control_plane(cache_dir=cache_dir, use_cache=use_cache).execute(
+        typed_obligation, routing, registry=registry
+    )
 
     evidence = execution_record_to_evidence(
         record,
@@ -294,7 +309,14 @@ def _run_enforced_with_routing(
     )
 
     if lane == "self_protection":
-        metadata_trusted = resolve_metadata_trusted(policy)
+        subject = typed_obligation.subject
+        metadata_trusted = resolve_metadata_trusted(
+            policy,
+            data=data,
+            repo=subject.repo,
+            head_sha=subject.head_sha,
+            base_sha=subject.base_sha,
+        )
 
         if not metadata_trusted and evidence.decision.get("merge_recommendation") == "allow":
             evidence = evidence.model_copy(
@@ -387,6 +409,7 @@ def _evaluate_obligation(
             policy=policy,
             schema_version=evidence_schema_version,
             cache_dir=cache_dir if use_cache else None,
+            use_cache=use_cache,
         )
 
         return _attach_execution_metadata(
@@ -423,6 +446,7 @@ def _evaluate_obligation(
             intent_id=intent_id,
             policy=policy,
             cache_dir=cache_dir if use_cache else None,
+            use_cache=use_cache,
         )
 
         if shadow and "record" in shadow:
