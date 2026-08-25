@@ -1,7 +1,10 @@
-"""Source-profile identifiers and eligibility gates (Sprint 6).
+"""Source-profile identifiers and candidate-evidence gates.
 
-Profiles authorize deeper compilers when trusted materials are present.
-They do not by themselves grant ``externally_calibrated_strict`` status.
+A source profile identifies a bounded compiler/support-contract pair. Local
+fixture coverage is useful evidence that a profile is a maturity candidate, but
+it is never sufficient by itself to promote a profile to strict eligibility.
+Normative strict promotion is owned by ``source_profile_maturity`` and requires
+the complete machine qualification contract.
 """
 
 from __future__ import annotations
@@ -28,7 +31,6 @@ KNOWN_SOURCE_PROFILES: frozenset[str] = frozenset(
     }
 )
 
-# Maps profile IDs to the production compiler entrypoints that implement them.
 PROFILE_COMPILER_BINDINGS: dict[str, str] = {
     "authorization.fastapi.ast_v1": "ovk.compilers.authorization.fastapi_ast:FastApiAstAuthorizationCompiler",
     "authorization.express.ast_v1": "ovk.compilers.authorization.express_ast:ExpressAstAuthorizationCompiler",
@@ -51,24 +53,29 @@ LANE_DEFAULT_PROFILES: dict[str, tuple[str, ...]] = {
     "deployment": ("deployment.trusted_profile_v1",),
 }
 
-# Remaining gaps (honest): Express module-graph depth, Actions composite recursion
-# beyond current trust_flow expansion, and deployment strictness without an
-# explicit trusted_profile material.
-
 
 def is_known_source_profile(profile_id: str | None) -> bool:
     return bool(profile_id) and profile_id in KNOWN_SOURCE_PROFILES
 
 
-def source_profile_strict_eligible(
+def source_profile_candidate_evidence_complete(
     *,
     profile_id: str | None,
     materials_trusted: bool,
     coverage_complete: bool,
     enforcement_test_present: bool,
 ) -> bool:
-    """Return True when a template may claim source_profile_strict_eligible."""
-    return is_known_source_profile(profile_id) and materials_trusted and coverage_complete and enforcement_test_present
+    """Return whether the legacy local proof is complete enough for candidacy.
+
+    This predicate MUST NOT be used to grant ``source_profile_strict_eligible``.
+    Strict promotion is defined only by ``SourceProfileQualification.strict_ready``.
+    """
+    return (
+        is_known_source_profile(profile_id)
+        and materials_trusted
+        and coverage_complete
+        and enforcement_test_present
+    )
 
 
 def profiles_from_policy(policy: dict[str, Any] | None, *, lane: str) -> list[str]:
