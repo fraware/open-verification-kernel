@@ -198,7 +198,7 @@ jobs:
         with:
           name: ovk-dist
           path: dist
-      - name: Publish to PyPI
+      - name: Publish to PyPI (Trusted Publishing)
         uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1 (release/v1)
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
+        # Trusted Publishing via id-token: write + protected `pypi` environment.
+        # Do not use PYPI_API_TOKEN password authentication.
