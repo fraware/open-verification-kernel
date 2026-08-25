@@ -1,0 +1,41 @@
+{
+  "schema_version": "ovk.support_contract.v1",
+  "profile_id": "deployment.trusted_profile_v1",
+  "contract_version": "1.0.0",
+  "lane": "deployment",
+  "proposition": "Every path from prior deployment state to production for revision R in environment E contains required gates attested by a trusted deployment_state.v1 acquisition artifact.",
+  "guarantee_type": "trusted_deployment_gate_coverage",
+  "compiler_binding": "ovk.compilers.deployment.deployment_state:compile_deployment_state",
+  "supported_constructs": [
+    "deployment_state.v1_acquisition",
+    "ordered_events",
+    "actor_approvals",
+    "revision_image_digest_binding",
+    "required_gate_paths"
+  ],
+  "excluded_constructs": [
+    "untrusted_approved_true_json",
+    "self_asserted_production_transition",
+    "missing_signature_or_system_identity"
+  ],
+  "required_materials": [
+    "deployment_state.v1",
+    "system_identity",
+    "environment",
+    "revision_or_image_digest"
+  ],
+  "coverage_criteria": {
+    "complete_requires": [
+      "trusted_acquisition",
+      "all_production_paths_gated",
+      "signature_verified"
+    ],
+    "unsupported_forces": "review"
+  },
+  "language_or_tool_versions": {
+    "deployment_state_schema": "ovk.deployment_state.v1"
+  },
+  "notes": [
+    "explicit_schema without trusted acquisition remains advisory/fixture only."
+  ]
+}

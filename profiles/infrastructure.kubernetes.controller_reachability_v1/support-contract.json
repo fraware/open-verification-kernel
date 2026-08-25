@@ -1,0 +1,43 @@
+{
+  "schema_version": "ovk.support_contract.v1",
+  "profile_id": "infrastructure.kubernetes.controller_reachability_v1",
+  "contract_version": "1.0.0",
+  "lane": "infrastructure",
+  "proposition": "Public reachability for Kubernetes workloads is computed from namespace-aware Service selectors, Gateway API parent/backend refs, and NetworkPolicy constraints; RBAC is a separate graph.",
+  "guarantee_type": "bounded_infrastructure_exposure",
+  "compiler_binding": "ovk.compilers.infrastructure.kubernetes:compile_kubernetes_objects",
+  "supported_constructs": [
+    "Service",
+    "Ingress_with_trusted_class_material",
+    "Gateway",
+    "HTTPRoute",
+    "ReferenceGrant",
+    "NetworkPolicy",
+    "Deployment_StatefulSet_DaemonSet",
+    "Role_ClusterRole_bindings",
+    "Secret_env_volume_refs"
+  ],
+  "excluded_constructs": [
+    "untrusted_ingress_class_publicness",
+    "cross_namespace_selector_without_grant",
+    "arbitrary_CRDs_without_plugin"
+  ],
+  "required_materials": [
+    "kubernetes_objects_list_or_items"
+  ],
+  "coverage_criteria": {
+    "complete_requires": [
+      "namespace_scoped_service_edges",
+      "no_unsupported_kinds_in_strict_set",
+      "network_policy_applied_or_review"
+    ],
+    "unsupported_forces": "review"
+  },
+  "language_or_tool_versions": {
+    "kubernetes": ">=1.26",
+    "gateway_api": ">=0.8"
+  },
+  "notes": [
+    "CRDs remain unsupported unless a versioned plugin exists."
+  ]
+}

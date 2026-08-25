@@ -1,0 +1,43 @@
+{
+  "schema_version": "ovk.support_contract.v1",
+  "profile_id": "ci_secrets.actions.permissions_flow_v1",
+  "contract_version": "1.0.0",
+  "lane": "ci_secrets",
+  "proposition": "Workflow trust findings for secrets, write tokens, protected environments, and privileged OIDC are derived from YAML plus trusted acquisition materials; remote reusables require immutable 40-hex SHA pins.",
+  "guarantee_type": "workflow_trust_flow",
+  "compiler_binding": "ovk.compilers.github_actions.trust_flow:compile_workflow_trust",
+  "supported_constructs": [
+    "local_reusable_workflows",
+    "remote_reusable_at_sha",
+    "composite_local_recursion",
+    "finite_matrix_evaluation",
+    "job_permissions",
+    "secrets_inherit",
+    "id_token_write_as_privileged",
+    "pr_head_artifact_taint"
+  ],
+  "excluded_constructs": [
+    "mutable_remote_refs",
+    "yaml_self_asserted_protected_environment",
+    "unbounded_matrix_explosion"
+  ],
+  "required_materials": [
+    "workflow_yaml_or_document",
+    "trusted_event_metadata_when_fork_facts_required"
+  ],
+  "coverage_criteria": {
+    "complete_requires": [
+      "no_mutable_remote_refs",
+      "protected_env_from_acquisition_when_claimed",
+      "matrix_finite"
+    ],
+    "unsupported_forces": "review"
+  },
+  "language_or_tool_versions": {
+    "github_actions": "v3+",
+    "workflow_schema": "github-workflow"
+  },
+  "notes": [
+    "Protected environment facts require WP-01 acquisition artifacts; YAML cannot self-assert protection."
+  ]
+}

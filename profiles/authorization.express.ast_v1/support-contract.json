@@ -1,0 +1,54 @@
+{
+  "schema_version": "ovk.support_contract.v1",
+  "profile_id": "authorization.express.ast_v1",
+  "contract_version": "1.1.0",
+  "lane": "authorization",
+  "proposition": "Every compiled Express route that claims admin protection is backed by ordered middleware identities resolved through an ESTree module graph.",
+  "guarantee_type": "source_grounded_authorization_coverage",
+  "compiler_binding": "ovk.compilers.authorization.express_ast:ExpressAstAuthorizationCompiler",
+  "supported_constructs": [
+    "express.Router",
+    "app.use_mounts",
+    "router.route_chaining",
+    "static_path_literals",
+    "static_template_literals_without_interpolation",
+    "esm_cjs_imports",
+    "module.exports_aliases",
+    "ordered_middleware_identifier_lists",
+    "simple_typescript_parameter_erasure"
+  ],
+  "excluded_constructs": [
+    "dynamic_path_construction",
+    "template_literal_interpolation",
+    "eval_or_new_function_middleware",
+    "unresolved_spread_middleware",
+    "array_literal_string_middleware",
+    "jsx_decorators_full_typescript",
+    "regex_only_coverage_claims",
+    "node_binary_parser_required"
+  ],
+  "required_materials": [
+    "js_ts_source_files",
+    "base_and_or_head_revisions"
+  ],
+  "coverage_criteria": {
+    "complete_requires": [
+      "estree_subset_parse_success",
+      "no_unsupported_constructs",
+      "middleware_order_preserved"
+    ],
+    "unsupported_forces": "review"
+  },
+  "language_or_tool_versions": {
+    "parser_id": "ovk.estree.subset.v2",
+    "parser_implementation": "pure_python_in_repo",
+    "node": "not_required_for_strict_path",
+    "ecmascript": "ES2022_subset",
+    "future_node_parser": "optional; if introduced must be digest-pinned in toolchains/backend-tools.lock.json"
+  },
+  "notes": [
+    "Legacy regex Express compiler remains advisory; it cannot contribute strict complete coverage.",
+    "A maintained Node/JS parser was not landed as a required dependency; the in-repo ESTree subset is the production binding and fails closed on unsupported syntax.",
+    "Parser identity is recorded as parser_id=ovk.estree.subset.v2 with a stable digest in compiler warnings."
+  ]
+}
