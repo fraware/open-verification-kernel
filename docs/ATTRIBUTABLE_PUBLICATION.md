@@ -13,7 +13,8 @@ Release procedure: [RELEASE.md](RELEASE.md). Consumer pins: [CONSUMER_VALIDATION
 | `verified_source_sha` | Complete observed required-workflow set only |
 
 Never label a `[skip ci]` badge commit as verified. Never re-attribute `v1.2.1`
-Sigstore / consumer evidence to typed-control-plane commits.
+Sigstore / consumer evidence to typed-control-plane commits. FormalPR-Bench and
+in-repo dogfood do not authorize `verified_source_sha`; that field is release-ledger only.
 
 ## In-repo readiness (OVK-PR9) — complete without live secrets
 

@@ -1,6 +1,6 @@
 # Backend Execution Guide
 
-OVK exposes a common evidence contract across ten formal-methods backends. Their execution depth is not uniform. This document is the authoritative statement of what each backend actually executes in v1.2.0 RC.
+OVK exposes a common evidence contract across ten formal-methods backends. Their execution depth is not uniform. This document is the authoritative statement of what each backend actually executes for package `1.3.0-rc.1` (engineering candidate).
 
 ## Execution maturity
 
@@ -67,12 +67,13 @@ TLA+, Kani, Dafny, Verus, Lean, and Alloy remain non-blocking integration surfac
 - Deterministic external-adapter results use guarantee type `deterministic_fallback`.
 - Synthetic CBMC harnesses use guarantee type `template_harness_model_check` and state that changed project source was not compiled into the checked model.
 - Only an explicitly supplied CBMC harness can use guarantee type `bounded_model_checking`.
+- **Strict post-execution fallback is disabled by default.** Set `routing.allow_fallback: true` in `.verification/config.yml` only when you intentionally accept constrained fallback rules; native timeout, tool error, invalid output, and resource exhaustion still must not become passing results. See [POLICY.md](POLICY.md).
 
 ## Capability manifests and routing
 
 Capability manifests live under `adapters/*/capability.json` and are packaged with the wheel. They support intent/backend ranking and MCP capability discovery.
 
-In v1.2.0 RC, router output is advisory metadata. Core lane obligations still execute their lane evaluator, and the selected generic backend does not yet control compilation or execution. Evidence records `routing_enforced: false` until the backend-selection control plane is implemented.
+The typed backend control plane (`BackendControlPlane` / `route_obligation`) can enforce lane routing when policy opts in. Default product path remains conservative: evidence still records whether routing was enforced for that run. Generic experimental adapters do not claim native proof execution.
 
 ## Entry points
 
