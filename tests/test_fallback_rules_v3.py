@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from ovk.core.authoritative_runtime import AuthoritativePlanError, execute_authoritative_plan
-from ovk.core.fallback_rules import FallbackRule, strict_fallback_rules_from_policy
+from ovk.core.fallback_rules import FallbackAuthorizationRule, FallbackRule, strict_fallback_rules_from_policy
 from ovk.core.routing_pipeline import build_authoritative_routing_plan
 
 
@@ -27,6 +27,32 @@ def _base_policy() -> dict:
         },
         "budget": {"allowed_backends": ["authorization-deterministic"]},
     }
+
+
+def test_fallback_authorization_rule_has_stable_identity() -> None:
+    rule = FallbackAuthorizationRule(
+        primary_backend="z3-native",
+        primary_guarantee="smt_refutation_search",
+        fallback_backend="authorization-deterministic",
+        fallback_guarantee="deterministic_witness",
+        allowed_causes=["tool_unavailable"],
+        proposition_id="no-admin-route-bypass",
+        profile_id="authorization.fastapi.ast_v1",
+        proof_relation="subsumes",
+    )
+    assert rule.rule_id
+    again = FallbackAuthorizationRule(
+        primary_backend="z3-native",
+        primary_guarantee="smt_refutation_search",
+        fallback_backend="authorization-deterministic",
+        fallback_guarantee="deterministic_witness",
+        allowed_causes=["tool_unavailable"],
+        proposition_id="no-admin-route-bypass",
+        profile_id="authorization.fastapi.ast_v1",
+        proof_relation="subsumes",
+    )
+    assert again.rule_id == rule.rule_id
+    assert FallbackRule is FallbackAuthorizationRule
 
 
 def test_fallback_rule_matches_full_tuple_only() -> None:
