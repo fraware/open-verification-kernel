@@ -327,21 +327,29 @@ def verify_evidence_semantics(
     ]:
         _issue(issues, f"{path}.backend_claims", "backend claims do not match normalized execution results")
 
-    expected_state, expected_recommendation = _expected_evidence_decision(
-        obligation=obligation,
-        routing=routing,
-        attempts=attempts,
-        results=results,
-        routing_enforced=bool(item.routing_enforced),
-    )
-    if str(item.decision.get("decision_state")) != expected_state:
-        _issue(issues, f"{path}.decision.decision_state", f"stored decision_state does not recompute to {expected_state}")
-    if str(item.decision.get("merge_recommendation")) != expected_recommendation:
+    try:
+        expected_state, expected_recommendation = _expected_evidence_decision(
+            obligation=obligation,
+            routing=routing,
+            attempts=attempts,
+            results=results,
+            routing_enforced=bool(item.routing_enforced),
+        )
+    except (TypeError, ValueError) as exc:
         _issue(
             issues,
-            f"{path}.decision.merge_recommendation",
-            f"stored merge_recommendation does not recompute to {expected_recommendation}",
+            f"{path}.decision",
+            f"decision recomputation failed for untrusted trace: {type(exc).__name__}: {exc}",
         )
+    else:
+        if str(item.decision.get("decision_state")) != expected_state:
+            _issue(issues, f"{path}.decision.decision_state", f"stored decision_state does not recompute to {expected_state}")
+        if str(item.decision.get("merge_recommendation")) != expected_recommendation:
+            _issue(
+                issues,
+                f"{path}.decision.merge_recommendation",
+                f"stored merge_recommendation does not recompute to {expected_recommendation}",
+            )
 
     expected_evidence_id = "ev-" + content_digest(
         {
