@@ -87,11 +87,26 @@ def test_cbmc_guarantee_naming_honesty(tmp_path: Path) -> None:
         intent_id="cbmc-buffer-bounds",
         includes_project_code=True,
     )
-    project2 = CbmcProject(functions=functions, harnesses=[linked])
+    project2 = CbmcProject(
+        functions=functions,
+        harnesses=[linked],
+        compile_commands_path="compile_commands.json",
+        source_roots=["src"],
+    )
     project2.guarantee_type = project2.declare_guarantee()
     assert project2.guarantee_type == "bounded_project_model_check"
     assert guarantee_implies_project_code(project2.guarantee_type) is True
     assert validate_project_traceability(project2) == []
+
+    # Missing unwind / compile DB cannot claim project model check.
+    no_unwind = linked.model_copy(update={"bound": None})
+    project3 = CbmcProject(
+        functions=functions,
+        harnesses=[no_unwind],
+        compile_commands_path="compile_commands.json",
+        source_roots=["src"],
+    )
+    assert project3.declare_guarantee() == "bounded_harness_model_check"
 
 
 def test_cbmc_rejects_project_guarantee_without_project_code() -> None:
