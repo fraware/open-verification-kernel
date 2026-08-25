@@ -8,7 +8,7 @@ from ovk.compilers.github_actions import compile_workflow_trust, load_workflow_t
 from ovk.compilers.github_actions.reusable_workflows import parse_uses
 
 
-def test_untrusted_pr_with_secret_is_finding() -> None:
+def test_untrusted_pr_checkout_with_secret_is_finding() -> None:
     workflow = load_workflow_text(
         """
 on: pull_request_target
@@ -18,6 +18,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: checkout-pr
+        uses: actions/checkout@0123456789012345678901234567890123456789
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: run-pr
         run: echo "${{ secrets.DEPLOY_KEY }}"
 """.strip(),
