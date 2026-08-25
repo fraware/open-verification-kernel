@@ -5,14 +5,19 @@ name: OVK Consumer Validation
 #   https://github.com/fraware/ovk-consumer-fastapi-terraform
 #   https://github.com/fraware/ovk-consumer-express-actions
 #
-# Sprint 9 target pin: immutable v1.3.0-rc.1 (or audited full SHA) AFTER the
-# attributable rc.1 tag exists. Until then, keep the signed v1.2.1 pin.
+# Ledger-ready consumer evidence requires an exact 40-hex OVK candidate SHA pin.
+# Tag pins (v1.2.1 / v1.3.0-rc.1) cannot evidence a candidate commit.
 # Do not push consumer changes from this template alone.
 
 on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      ovk_candidate_sha:
+        description: Exact 40-hex OVK candidate SHA (required for ledger evidence)
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -20,32 +25,82 @@ permissions:
   checks: write
 
 env:
-  # Package version must match ovk.__version__ / tag without leading v.
+  # Prefer OVK_CANDIDATE_SHA (40-hex). Package version is informational only.
   OVK_PACKAGE_VERSION: "1.3.0-rc.1"
-  OVK_ACTION_REF: "v1.3.0-rc.1"
+  OVK_CANDIDATE_SHA: ${{ inputs.ovk_candidate_sha || '' }}
 
 jobs:
   ovk-consumer-validation:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 2
-      - name: Guard pin target
+
+      - name: Require exact 40-hex OVK pin
+        env:
+          OVK_SHA: ${{ env.OVK_CANDIDATE_SHA }}
         run: |
-          echo "Expected Action ref: ${OVK_ACTION_REF}"
-          echo "Expected package: ${OVK_PACKAGE_VERSION}"
-          echo "Refuse floating @main pins. Prefer tag or full commit SHA."
+          python - <<'PY'
+          import os, re, sys
+          sha = (os.environ.get("OVK_SHA") or "").strip().lower()
+          if not re.fullmatch(r"[0-9a-f]{40}", sha):
+              sys.exit(
+                  "OVK_CANDIDATE_SHA must be exact 40-hex for ledger-ready consumer evidence; "
+                  f"got {sha!r}. Tag pins are insufficient."
+              )
+          print(f"candidate sha ok: {sha}")
+          PY
+
+      - name: Guard forbidden local Action path
+        run: |
+          if grep -R "uses: ./" .github/workflows 2>/dev/null; then
+            echo "fail-closed: uses: ./ is forbidden for consumer pin evidence"
+            exit 1
+          fi
+
       - name: Run OVK advisory consumer path
-        # Replace with the immutable tag/SHA once v1.3.0-rc.1 exists.
-        uses: fraware/open-verification-kernel@v1.3.0-rc.1
+        # Replace OWNER/REPO and keep the exact SHA pin below.
+        uses: fraware/open-verification-kernel@0000000000000000000000000000000000000000
         with:
           mode: advisory
           use-check: "true"
           emit-check: "true"
           post-comment: "true"
-      - name: Record pilot ledger reminder
+        # NOTE: replace the zero SHA above with ${{ env.OVK_CANDIDATE_SHA }} once
+        # GitHub Actions supports expression pins in uses:; until then, paste the
+        # exact 40-hex SHA literally before running this template.
+
+      - name: Emit ledger-ready consumer evidence digests
+        env:
+          OVK_SHA: ${{ env.OVK_CANDIDATE_SHA }}
         run: |
-          echo "Adjudicate this PR into a pilot ledger conforming to schemas/pilot.ledger.schema.json"
-          echo "Do not set production_gate_met=true until 30 human adjudications exist."
-          echo "Keep automated_scenario rows distinct from human adjudications."
+          mkdir -p .verification
+          python - <<'PY'
+          import hashlib, json, os, pathlib
+          sha = os.environ["OVK_SHA"].strip().lower()
+          scenarios = []
+          for path in sorted(pathlib.Path(".").rglob("**/ovk*.json")):
+              if ".verification" in path.parts:
+                  continue
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              scenarios.append({"path": path.as_posix(), "sha256": digest})
+          payload = {
+              "schema_version": "ovk.consumer_pin_evidence.v1",
+              "ovk_candidate_sha": sha,
+              "pin": f"fraware/open-verification-kernel@{sha}",
+              "forbidden_uses_dot_slash": False,
+              "scenarios": scenarios,
+              "note": "Upload this artifact into the release ledger consumers[] entry.",
+          }
+          out = pathlib.Path(".verification/consumer-pin-evidence.json")
+          raw = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+          out.write_text(raw, encoding="utf-8")
+          print(f"consumer evidence sha256={hashlib.sha256(raw.encode()).hexdigest()}")
+          PY
+
+      - name: Upload consumer pin evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ovk-consumer-pin-evidence
+          path: .verification/consumer-pin-evidence.json
