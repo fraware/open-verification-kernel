@@ -82,7 +82,17 @@ def resolve_local_reusable(
                 )
             )
         if ref.remote:
-            if ref.mutable_ref:
+            # Remote reusables are strict only at immutable 40-hex SHA with acquired material.
+            if ref.digest is None or not ref.digest:
+                findings.append(
+                    TrustFinding(
+                        kind="mutable_remote_ref",
+                        summary=f"job {job_id} uses remote reusable without immutable 40-hex SHA: {uses}",
+                        node_ids=[str(job_id)],
+                        evidence={"uses": uses, "requirement": "immutable_40_hex_sha"},
+                    )
+                )
+            elif ref.mutable_ref:
                 findings.append(
                     TrustFinding(
                         kind="mutable_remote_ref",

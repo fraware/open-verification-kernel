@@ -35,6 +35,7 @@ from ovk.compilers.github_actions.ir import (
     WorkflowRef,
 )
 from ovk.compilers.github_actions.loader import load_workflow_file
+from ovk.compilers.github_actions.matrix import evaluate_matrix
 from ovk.compilers.github_actions.permissions import (
     PermissionCeiling,
     effective_permissions_for_job,
@@ -71,6 +72,8 @@ def compile_workflow_trust(
 
     ``protected_environments`` must come from a separately trusted acquisition
     path. The workflow payload itself is never allowed to self-assert this fact.
+    Use ``ovk.core.metadata_provenance.trusted_protected_environment_names`` to
+    project names from a subject-bound ``ProtectedMetadataArtifact``.
     """
     path = str(workflow.get("_ovk_path") or "workflow.yml")
     workflow_node_id = f"{_id_prefix}workflow:{path}"
@@ -136,6 +139,32 @@ def compile_workflow_trust(
         job_node.labels.append(f"permissions_source:{permission_source}")
         nodes.append(job_node)
         edges.append(TrustEdge(source=workflow_node_id, target=job_node_id, kind="contains_job"))
+
+        # Finite matrix evaluation (WP-10).
+        matrix_combos, matrix_unsupported = evaluate_matrix(
+            job.get("strategy") if isinstance(job.get("strategy"), dict) else None
+        )
+        unsupported.extend(f"job:{job_id}:{item}" for item in matrix_unsupported)
+        if matrix_combos:
+            job_node.labels.append(f"matrix_combinations:{len(matrix_combos)}")
+            if len(matrix_combos) > 64:
+                warnings.append(f"job:{job_id}:large_matrix:{len(matrix_combos)}")
+
+        # id-token: write is privileged OIDC.
+        for grant in effective_permissions:
+            if str(grant.scope).lower() == "id-token" and str(grant.level).lower() in {"write", "write-all"}:
+                job_node.labels.append("privileged_oidc_id_token")
+                findings.append(
+                    TrustFinding(
+                        kind="untrusted_code_with_privileged_capability"
+                        if workflow_code_untrusted
+                        else "review",
+                        summary=f"job {job_id} requests id-token:write (privileged OIDC)",
+                        node_ids=[job_node_id],
+                        evidence={"permission": "id-token:write"},
+                    )
+                )
+                break
 
         environment = job.get("environment")
         environment_name = _environment_name(environment)
