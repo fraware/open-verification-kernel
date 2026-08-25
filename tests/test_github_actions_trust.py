@@ -71,14 +71,16 @@ jobs:
 
 
 def test_cycle_prevention(tmp_path: Path) -> None:
-    a = tmp_path / "a.yml"
-    b = tmp_path / "b.yml"
+    workflow_dir = tmp_path / ".github" / "workflows"
+    workflow_dir.mkdir(parents=True)
+    a = workflow_dir / "a.yml"
+    b = workflow_dir / "b.yml"
     a.write_text(
         """
 on: workflow_call
 jobs:
   call:
-    uses: ./b.yml
+    uses: ./.github/workflows/b.yml
 """.strip(),
         encoding="utf-8",
     )
@@ -87,13 +89,14 @@ jobs:
 on: workflow_call
 jobs:
   call:
-    uses: ./a.yml
+    uses: ./.github/workflows/a.yml
 """.strip(),
         encoding="utf-8",
     )
-    workflow = load_workflow_text(a.read_text(encoding="utf-8"), path=str(a))
-    # Force path identity used by cycle detection.
-    workflow["_ovk_path"] = str(a.resolve())
+    workflow = load_workflow_text(
+        a.read_text(encoding="utf-8"),
+        path=".github/workflows/a.yml",
+    )
     ir = compile_workflow_trust(workflow, repo_root=tmp_path)
     assert any(item.kind == "cycle" for item in ir.findings)
 
