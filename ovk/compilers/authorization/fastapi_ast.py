@@ -20,6 +20,11 @@ from ovk.compilers.authorization.ir import (
     SourceSpan,
 )
 from ovk.compilers.authorization.material_loader import AuthMaterials
+from ovk.compilers.authorization.module_graph import (
+    ModuleGraph,
+    build_module_graph,
+    trusted_guard_roles,
+)
 
 _HTTP_METHODS = frozenset({"get", "post", "put", "patch", "delete", "options", "head"})
 _SOURCE_PROFILE_ID = "authorization.fastapi.ast_v1"
@@ -55,10 +60,23 @@ def _depends_names(node: ast.AST | None) -> list[str]:
     if node is None:
         return found
     for child in ast.walk(node):
-        if isinstance(child, ast.Call) and _call_name(child) == "Depends" and child.args:
+        if isinstance(child, ast.Call) and _call_name(child) in {"Depends", "Security"} and child.args:
             dep = _name_of(child.args[0])
             if dep:
                 found.append(dep)
+        # Annotated[T, Depends(x)] / Annotated[T, Security(x)]
+        if isinstance(child, ast.Subscript) and _name_of(child.value) == "Annotated":
+            slice_node = child.slice
+            elts: list[ast.AST] = []
+            if isinstance(slice_node, ast.Tuple):
+                elts = list(slice_node.elts)
+            else:
+                elts = [slice_node]
+            for elt in elts:
+                if isinstance(elt, ast.Call) and _call_name(elt) in {"Depends", "Security"} and elt.args:
+                    dep = _name_of(elt.args[0])
+                    if dep:
+                        found.append(dep)
     return found
 
 
@@ -70,6 +88,11 @@ def _span(path: str, node: ast.AST) -> SourceSpan:
     )
 
 
+def _fq_route_id(*, module: str, router: str, mount: str, path: str, method: str, handler: str | None) -> str:
+    handler_part = handler or "anonymous"
+    return f"{module}/{router}/{mount}/{method}:{path}:{handler_part}"
+
+
 class FastApiAstAuthorizationCompiler:
     """Compile FastAPI sources via the Python AST (not regex)."""
 
@@ -77,8 +100,9 @@ class FastApiAstAuthorizationCompiler:
     source_profile_id = _SOURCE_PROFILE_ID
 
     def compile(self, materials: AuthMaterials) -> AuthorizationIR:
-        base_index = self._index(materials.base_files)
-        head_index = self._index(materials.head_files)
+        graph = build_module_graph({**materials.base_files, **materials.head_files})
+        base_index = self._index(materials.base_files, graph=graph)
+        head_index = self._index(materials.head_files, graph=graph)
         routes = self._merge_routes(base_index, head_index)
         mounts = sorted(
             {**base_index["mounts"], **head_index["mounts"]}.values(),
@@ -88,8 +112,13 @@ class FastApiAstAuthorizationCompiler:
             {**base_index["dependencies"], **head_index["dependencies"]}.values(),
             key=lambda item: item.name,
         )
-        unsupported = sorted(set(base_index["unsupported"] + head_index["unsupported"]))
-        warnings: list[str] = [f"compiled_with_source_profile:{_SOURCE_PROFILE_ID}"]
+        unsupported = sorted(
+            set(base_index["unsupported"] + head_index["unsupported"] + graph.unsupported)
+        )
+        warnings: list[str] = [
+            f"compiled_with_source_profile:{_SOURCE_PROFILE_ID}",
+            "trusted_guard_registry:v1",
+        ]
         if not materials.has_base():
             warnings.append("base materials missing")
         if not materials.has_head():
@@ -107,14 +136,16 @@ class FastApiAstAuthorizationCompiler:
             materials=materials.paths,
         )
 
-    def _index(self, files: dict[str, str]) -> dict[str, Any]:
+    def _index(self, files: dict[str, str], *, graph: ModuleGraph) -> dict[str, Any]:
         routers: dict[str, str] = {}
         mounts: dict[str, AuthMount] = {}
         dependencies: dict[str, AuthDependency] = {}
         route_map: dict[tuple[str, str], dict[str, Any]] = {}
         unsupported: list[str] = []
+        seen_registrations: dict[tuple[str, str], str] = {}
 
         for path, source in sorted(files.items()):
+            module_key = path.replace("\\", "/")
             try:
                 tree = ast.parse(source, filename=path)
             except SyntaxError as exc:
@@ -123,14 +154,16 @@ class FastApiAstAuthorizationCompiler:
 
             for node in tree.body:
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    roles = (
-                        ["admin"] if looks_admin_protected(ast.get_source_segment(source, node) or node.name) else []
-                    )
+                    roles = trusted_guard_roles(node.name)
+                    if not roles and looks_admin_protected(ast.get_source_segment(source, node) or node.name):
+                        # Name/text heuristics are not trusted for strict admin claims.
+                        unsupported.append(f"{path}:untrusted_guard_heuristic:{node.name}")
+                        roles = []
                     dependencies[node.name] = AuthDependency(
                         name=node.name,
                         kind="dependency",
                         role_checks=roles,
-                        support="supported",
+                        support="supported" if roles or not looks_admin_protected(node.name) else "unsupported",
                     )
 
             for node in ast.walk(tree):
@@ -157,9 +190,11 @@ class FastApiAstAuthorizationCompiler:
                         if not router:
                             continue
                         prefix = _kw_str(node, "prefix") or routers.get(router, "")
+                        include_deps = _depends_names(node)
                         mounts[f"{path}:include:{router}"] = AuthMount(
                             mount_id=f"{path}:include:{router}",
                             prefix=prefix,
+                            middleware=include_deps,
                             included_router=router,
                         )
                         routers.setdefault(router, prefix)
@@ -174,10 +209,19 @@ class FastApiAstAuthorizationCompiler:
                             routers=routers,
                             dependencies=dependencies,
                             unsupported=unsupported,
+                            graph=graph,
+                            module_key=module_key,
                         )
                         if route is None:
                             continue
                         key = (route["path"], route["method"])
+                        prior = seen_registrations.get(key)
+                        if prior and prior != path:
+                            # Starlette last-registration-wins; mark duplicate as unsupported for strict.
+                            unsupported.append(f"{path}:duplicate_route_registration:{route['method']}:{route['path']}")
+                            route["support"] = "unsupported"
+                            route["unsupported"] = list(route.get("unsupported") or []) + ["duplicate_route_registration"]
+                        seen_registrations[key] = path
                         route_map[key] = route
 
         return {
@@ -197,6 +241,8 @@ class FastApiAstAuthorizationCompiler:
         routers: dict[str, str],
         dependencies: dict[str, AuthDependency],
         unsupported: list[str],
+        graph: ModuleGraph,
+        module_key: str,
     ) -> dict[str, Any] | None:
         if not isinstance(decorator, ast.Call) or not isinstance(decorator.func, ast.Attribute):
             return None
@@ -215,7 +261,7 @@ class FastApiAstAuthorizationCompiler:
         prefix = routers.get(app, "")
         full_path = normalize_path(prefix, route_path)
         deps = _depends_names(decorator)
-        # Also inspect handler signature defaults for Depends(...).
+        # Also inspect handler signature defaults for Depends(...)/Security(...)/Annotated.
         if isinstance(handler, (ast.FunctionDef, ast.AsyncFunctionDef)):
             for arg in list(handler.args.args) + list(handler.args.kwonlyargs):
                 deps.extend(_depends_names(arg.annotation))
@@ -231,12 +277,19 @@ class FastApiAstAuthorizationCompiler:
 
         checks: list[AuthCheck] = []
         admin = False
+        route_unsupported: list[str] = []
         for dep in ordered_deps:
-            dep_meta = dependencies.get(dep)
-            roles = list(dep_meta.role_checks) if dep_meta else []
-            if looks_admin_protected(dep) or roles:
+            resolved = graph.resolve(module_key, dep)
+            resolved_name = resolved.name if resolved else dep
+            roles = trusted_guard_roles(resolved_name) or trusted_guard_roles(dep)
+            dep_meta = dependencies.get(dep) or dependencies.get(resolved_name)
+            if not roles and dep_meta:
+                roles = list(dep_meta.role_checks)
+            if looks_admin_protected(dep) and not roles:
+                route_unsupported.append(f"unknown_auth_wrapper:{dep}")
+                unsupported.append(f"{path}:unknown_auth_wrapper:{dep}")
+            if roles:
                 admin = True
-                roles = roles or ["admin"]
             checks.append(
                 AuthCheck(
                     kind="dependency",
@@ -251,10 +304,20 @@ class FastApiAstAuthorizationCompiler:
             handler_meta = dependencies.get(handler_name)
             if handler_meta and handler_meta.role_checks:
                 admin = True
+            # Body text heuristics must not mint strict admin claims.
             body_text = ast.get_source_segment(source, handler) or ""
-            if looks_admin_protected(body_text):
-                admin = True
+            if looks_admin_protected(body_text) and not admin:
+                route_unsupported.append("untrusted_body_admin_heuristic")
+                unsupported.append(f"{path}:untrusted_body_admin_heuristic:{handler_name}")
 
+        fq_id = _fq_route_id(
+            module=module_key,
+            router=app,
+            mount=prefix or "/",
+            path=full_path,
+            method=method.upper(),
+            handler=handler_name,
+        )
         return {
             "path": full_path,
             "method": method.upper(),
@@ -263,10 +326,11 @@ class FastApiAstAuthorizationCompiler:
             "checks": checks,
             "dependencies": ordered_deps,
             "admin_only": admin,
-            "support": "supported",
-            "unsupported": [],
+            "support": "unsupported" if route_unsupported else "supported",
+            "unsupported": route_unsupported,
             "span": _span(path, decorator),
             "source_path": path,
+            "fq_route_id": fq_id,
         }
 
     def _merge_routes(self, base_index: dict[str, Any], head_index: dict[str, Any]) -> list[AuthRoute]:
@@ -277,9 +341,10 @@ class FastApiAstAuthorizationCompiler:
             after = head_index["routes"].get(key)
             path = (after or before)["path"]
             method = (after or before)["method"]
+            fq = (after or before).get("fq_route_id") or f"fastapi-ast:{path}:{method}:{index}"
             routes.append(
                 AuthRoute(
-                    route_id=f"fastapi-ast:{path}:{method}:{index}",
+                    route_id=fq,
                     methods=[method],
                     path=path,
                     handler=(after or before).get("handler"),
