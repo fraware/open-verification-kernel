@@ -38,7 +38,7 @@ ovk release-bundle --lane infrastructure --input <input.json> --output-dir ovk-b
 ovk validate-outputs ovk-bundle
 ```
 
-See [STATUS.md](STATUS.md) for the full command surface.
+See [STATUS.md](STATUS.md) for generated maturity and profile inventory. For the full CLI surface, run `ovk --help` or `python scripts/check_command_surface.py`.
 
 ### MCP server
 

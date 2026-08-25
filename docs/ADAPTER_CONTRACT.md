@@ -3,6 +3,7 @@
 OVK adapters connect verification intents to concrete formal methods tools. An adapter may wrap a policy engine, SMT solver, model checker, proof assistant, static analyzer, bounded verifier, or runtime monitor.
 
 Adapters must be explicit about guarantees. No adapter may return a bare boolean.
+Bounded guarantees apply only inside the adapter's declared assumptions, materials, and support contract; unsupported inputs must force review rather than invent a pass.
 
 ## Interface
 

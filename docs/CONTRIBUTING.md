@@ -96,7 +96,7 @@ A template must include:
 - Unknown and error states require human review.
 - Use shared output helpers in `ovk/core/run_outputs.py`.
 - Release artifacts must pass `ovk validate-outputs`.
-- Update [STATUS.md](STATUS.md) when the command surface changes.
+- Update generated status via `python scripts/build_project_status.py` when maturity claims change (do not hand-edit [STATUS.md](STATUS.md) into drift).
 - Run `python scripts/check_command_surface.py` after CLI changes.
 
 ## Release documentation

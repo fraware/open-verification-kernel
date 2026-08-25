@@ -24,7 +24,7 @@ pip install open-verification-kernel==1.3.0-rc.1
 pip install "open-verification-kernel[solvers]==1.3.0-rc.1"
 ```
 
-Until the wheel is on PyPI, use `pip install -e '.[dev]'` from a checkout or pin the GitHub Action at `@v1.3.0-rc.1` (after the tag exists) with matching `OVK_PACKAGE_VERSION`. Signed production consumers may still use `@v1.2.1` until the RC is attributable.
+Until the wheel is on PyPI, use `pip install -e '.[dev]'` from a checkout. **Live signed pin today:** `@v1.2.1` with `OVK_PACKAGE_VERSION: "1.2.1"`. **Candidate after attributable tag:** `@v1.3.0-rc.1` with matching `OVK_PACKAGE_VERSION`. Do not pin `@main` or treat uncommitted branch work as a verified release.
 
 Optional Z3: `pip install -e '.[solvers]'`
 
@@ -107,7 +107,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: fraware/open-verification-kernel@v1.2.0
+      - uses: fraware/open-verification-kernel@v1.2.1
         id: ovk
         with:
           mode: advisory
@@ -125,7 +125,7 @@ Development reference: `uses: ./`
 ### All five check types (manifest)
 
 ```yaml
-- uses: fraware/open-verification-kernel@v1.2.0
+- uses: fraware/open-verification-kernel@v1.2.1
   with:
     mode: advisory
     verification-manifest: .verification/full_mvp.json
@@ -161,7 +161,7 @@ When `verification-manifest` is set, the manifest path wins over `use-check`.
 Downstream example:
 
 ```yaml
-- uses: fraware/open-verification-kernel@v1.2.0
+- uses: fraware/open-verification-kernel@v1.2.1
   id: ovk
   with:
     mode: strict
@@ -217,7 +217,7 @@ Explicit metadata (most reliable):
 ```
 
 ```yaml
-- uses: fraware/open-verification-kernel@v1.2.0
+- uses: fraware/open-verification-kernel@v1.2.1
   with:
     check-metadata: ovk-required-checks.json
 ```
@@ -285,9 +285,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: fraware/open-verification-kernel@v1.2.0
+      - uses: fraware/open-verification-kernel@v1.2.1
         env:
-          OVK_PACKAGE_VERSION: "1.2.0"
+          OVK_PACKAGE_VERSION: "1.2.1"
         with:
           mode: advisory
           use-check: "true"

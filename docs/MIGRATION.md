@@ -1,14 +1,42 @@
 # Migrating OVK
 
-Upgrade paths between major releases. Current version: **v1.2.0**. Adoption checklist: [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md).
+Upgrade paths between releases. Current package metadata in this tree: **`1.3.0-rc.1`** (engineering candidate). Live signed Action pin: **`v1.2.1`**. Adoption checklist: [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md).
 
-## Upgrade from v1.1.0 to v1.2.0
+## Upgrade toward v1.3.0-rc.1 (after attributable tag)
 
-1. Pin the GitHub Action and PyPI package to `1.2.0`:
+1. Keep advisory mode until you have run your own diffs against the RC pin.
+2. Bump Action and package together:
 
 ```yaml
 env:
-  OVK_PACKAGE_VERSION: "1.2.0"
+  OVK_PACKAGE_VERSION: "1.3.0-rc.1"
+jobs:
+  ovk:
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    steps:
+      - uses: fraware/open-verification-kernel@v1.3.0-rc.1
+        with:
+          mode: advisory
+          use-check: "true"
+          emit-check: "true"
+```
+
+3. Read [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md) and [RELEASE_NOTES_v1.3.0-rc.1.md](RELEASE_NOTES_v1.3.0-rc.1.md) before strict mode.
+4. Expect stricter honesty around source profiles, support contracts, and fallback policy (`routing.allow_fallback` remains off unless you opt in).
+5. Do not treat `v1.2.1` consumer evidence as validation of typed-control-plane commits.
+
+Until the rc.1 tag exists, remain on `@v1.2.1` / `1.2.1` for production pins.
+
+## Upgrade from v1.1.0 to v1.2.0 / v1.2.1
+
+1. Pin the GitHub Action and PyPI package to the signed release you intend (`1.2.1` preferred over `1.2.0`):
+
+```yaml
+env:
+  OVK_PACKAGE_VERSION: "1.2.1"
 jobs:
   ovk:
     permissions:
@@ -16,7 +44,7 @@ jobs:
       checks: write          # required when emit-check: true
       pull-requests: write # required when post-comment: true
     steps:
-      - uses: fraware/open-verification-kernel@v1.2.0
+      - uses: fraware/open-verification-kernel@v1.2.1
         id: ovk
         with:
           mode: advisory
@@ -29,11 +57,11 @@ jobs:
 4. Optional: wire `.verification/config.yml` `default_on_unknown` — now honored on the `ovk check` path ([POLICY.md](POLICY.md)).
 5. No evidence bundle schema version changes are required.
 
-Full notes: [RELEASE_NOTES_v1.2.0.md](RELEASE_NOTES_v1.2.0.md).
+Full notes: [RELEASE_NOTES_v1.2.0.md](RELEASE_NOTES_v1.2.0.md), [RELEASE_NOTES_v1.2.1.md](RELEASE_NOTES_v1.2.1.md).
 
 ## Upgrade from v1.0.0 to v1.1.0
 
-1. Pin to `1.1.0` (or jump directly to `1.2.0` using the section above).
+1. Pin to `1.1.0` (or jump directly to `1.2.1` using the section above).
 2. Review [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md) before strict mode on protected branches.
 3. Optional: `ovk bench --expanded` for the `real_diff` category and repair-loop cases.
 
@@ -67,7 +95,7 @@ The composite Action defaults to `ovk check` (`use-check: true`). Strict enforce
 
 ### Backends and routing
 
-Ten optional backends with deterministic fallbacks when native binaries are absent. OVK selects backends from changed file paths. Repository memory under `.verification/memory/` can influence backend preferences.
+Ten optional backends with deterministic contract paths when native binaries are absent. OVK selects backends from changed file paths. Post-execution strict fallback remains disabled unless policy opts in ([BACKENDS.md](BACKENDS.md), [POLICY.md](POLICY.md)).
 
 ### Agent and MCP tools
 
@@ -79,13 +107,15 @@ High-risk checks cannot return `allow` without template provenance or an explici
 
 ### Benchmarking
 
+FormalPR-Bench is an internal regression suite (not external calibration):
+
 ```bash
 ovk bench --expanded --leaderboard .verification/formal-pr-bench-leaderboard.json
 ```
 
 ### Breaking changes from pre-1.0 builds
 
-- Release metadata exposes semver `version` (currently `1.2.0`).
+- Release metadata exposes semver `version` (see `pyproject.toml`; this tree uses `1.3.0-rc.1`).
 - `ovk bench` is part of release readiness checks.
 - Infrastructure diff parsing emits normalized inputs for Terraform hunks.
 
