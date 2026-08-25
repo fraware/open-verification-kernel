@@ -40,8 +40,13 @@ ovk/package_data/
 /ovk-action-dogfood-bundle/
 /ovk-verify-bundle/
 
-# Editor
+# Editor / OS junk
 .idea/
 .vscode/
 *.swp
 *~
+Thumbs.db
+.DS_Store
+
+# Internal engineering handoff (not public product docs)
+docs/internal/*.docx
