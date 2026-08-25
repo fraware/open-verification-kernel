@@ -179,9 +179,16 @@ def _attach_execution_metadata(
     if shadow_comparison is not None:
         artifacts.append(shadow_comparison)
 
+    # V3 evidence_id is a canonical identity derived from the typed execution
+    # record and must remain externally recomputable. The historical suffix is a
+    # compatibility identity only for legacy evidence versions.
+    evidence_id = evidence.evidence_id
+    if not str(evidence.schema_version).startswith("ovk.evidence.v3"):
+        evidence_id = f"{evidence.evidence_id}-{evidence_suffix}"
+
     updated = evidence.model_copy(
         update={
-            "evidence_id": f"{evidence.evidence_id}-{evidence_suffix}",
+            "evidence_id": evidence_id,
             "generated_artifacts": artifacts,
             "routing_id": evidence.routing_id or (metadata or {}).get("routing_id"),
             "routing_enforced": routing_enforced,
