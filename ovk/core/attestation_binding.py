@@ -50,6 +50,14 @@ def _expected_attestation_evidence_item(evidence: Any) -> dict[str, Any]:
     }
 
 
+def _evidence_mismatch_message(key: str) -> str:
+    if key == "routing_id":
+        return "evidence and attestation routing IDs disagree (OVK-INV-020)"
+    if key == "material_set_digest":
+        return "evidence and attestation material_set_digest disagree (OVK-INV-021)"
+    return f"attestation evidence field {key!r} does not match bundle evidence"
+
+
 def verify_bundle_statement_binding(bundle: EvidenceBundle, statement: dict[str, Any]) -> list[EvidenceInvariantIssue]:
     """Verify an attestation statement is exactly derived from the evidence bundle."""
     issues: list[EvidenceInvariantIssue] = []
@@ -144,7 +152,7 @@ def verify_bundle_statement_binding(bundle: EvidenceBundle, statement: dict[str,
                 issues.append(
                     _issue(
                         f"predicate.verification.evidence[{index}].{key}",
-                        f"attestation evidence field {key!r} does not match bundle evidence",
+                        _evidence_mismatch_message(key),
                     )
                 )
         extra = sorted(set(observed) - set(expected))
