@@ -20,7 +20,16 @@ jobs:
           python scripts/sync_package_data.py
           pip install --no-cache-dir -e '.[dev]'
       - name: Lint
-        run: ruff check ovk tests benchmarks/formal_pr_bench
+        run: |
+          set -o pipefail
+          ruff check ovk tests benchmarks/formal_pr_bench 2>&1 | tee ruff-report.txt
+      - name: Upload lint report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruff-report
+          path: ruff-report.txt
+          if-no-files-found: error
       - name: Unit and integration pytest
         run: pytest -x -vv --tb=long --junitxml=pytest-results.xml
       - name: Upload pytest results on failure
