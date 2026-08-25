@@ -73,7 +73,13 @@ def sign_acquisition_record(
     """Authenticate an acquisition record using a protected collector key."""
     if not key:
         raise ValueError("metadata signing key must be non-empty")
-    unsigned = _unsigned_record_payload(record)
+
+    # Normalize through the typed model before signing so omitted optional fields
+    # receive the same canonical defaults used during later verification.
+    normalized = MetadataAcquisitionRecord.model_validate(
+        {**_unsigned_record_payload(record), "signature": None}
+    )
+    unsigned = _unsigned_record_payload(normalized)
     digest = hmac.new(key.encode("utf-8"), _canonical_bytes(unsigned), hashlib.sha256).hexdigest()
     unsigned["signature"] = {
         "algorithm": SIGNATURE_ALGORITHM,
