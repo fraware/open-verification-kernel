@@ -13,6 +13,7 @@ from ovk.core.diff_iac import infra_inputs_from_diff
 from ovk.core.diff_parser import is_unified_diff
 from ovk.core.multi_lane import normalize_lane_name
 from ovk.core.planner import plan_from_changed_files, plan_from_diff_text
+from ovk.core.metadata_provenance import merge_loaded_protected_metadata
 from ovk.core.self_protection_input import build_from_json_like as build_self_protection_input
 from ovk.core.sprint1_runner import build_metadata_from_inputs
 
@@ -53,12 +54,9 @@ def compile_lane_inputs_from_plan(
                 check_metadata_path=check_metadata_path,
                 github_event_path=github_event_path,
             )
-            # Explicit caller/context metadata may carry acquisition provenance;
-            # loaded GitHub/check metadata supplies normalized check sets.
-            acquisition = meta.get("_ovk_acquisition")
-            meta = {**meta, **loaded}
-            if isinstance(acquisition, dict):
-                meta["_ovk_acquisition"] = acquisition
+            # Loaded protected artifact owns acquisition/subject/payload fields.
+            # Caller may add non-protected context only; conflicts fail closed.
+            meta, _conflicts = merge_loaded_protected_metadata(meta, loaded)
             meta.setdefault("changed_files", plan.get("changed_files", []))
         elif not meta.get("changed_files"):
             meta["changed_files"] = plan.get("changed_files", [])

@@ -25,6 +25,7 @@ SUPPORTED_COMMANDS = [
     "ovk release-preflight",
     "ovk evidence-quality",
     "ovk validate-outputs",
+    "ovk verify-evidence",
     "ovk verify",
     "ovk extract-workflow",
     "ovk plan",

@@ -72,4 +72,9 @@ def build_from_json_like(data: dict[str, Any]) -> dict[str, Any]:
             else None
         ),
     )
-    return build_self_protection_input(metadata)
+    payload = build_self_protection_input(metadata)
+    if isinstance(data.get("_ovk_protected_artifact"), dict):
+        payload["_ovk_protected_artifact"] = dict(data["_ovk_protected_artifact"])
+    if data.get("_ovk_provenance_conflicts"):
+        payload["_ovk_provenance_conflicts"] = data["_ovk_provenance_conflicts"]
+    return payload
