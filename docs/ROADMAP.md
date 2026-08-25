@@ -1,12 +1,12 @@
 # OVK Roadmap
 
-Current product positioning: **`v1.3.0-rc.1` in-repo release candidate** (package `1.3.0-rc.1`; typed control plane + adoption-surface program post-date signed `v1.2.1`). What OVK can do today: [STATUS.md](STATUS.md). Adoption status: [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md). TCB: [TRUSTED_COMPUTING_BASE.md](TRUSTED_COMPUTING_BASE.md). Authoritative program: [ENGINEERING_PROGRAM_2026-07-23_R2.md](ENGINEERING_PROGRAM_2026-07-23_R2.md).
+Current product positioning: **`v1.3.0-rc.1` engineering candidate** on branch `hardening/full-vision-2026-08-24` (package `1.3.0-rc.1`; completion-program work in this tree post-dates signed `v1.2.1` and is not yet an attributable tag). What OVK can do today: [STATUS.md](STATUS.md). Adoption status: [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md). TCB: [TRUSTED_COMPUTING_BASE.md](TRUSTED_COMPUTING_BASE.md). Authoritative program: [ENGINEERING_PROGRAM_2026-07-23_R2.md](ENGINEERING_PROGRAM_2026-07-23_R2.md).
 
 ## Release history
 
 | Version | Summary | Changelog |
 |---|---|---|
-| v1.3.0-rc.1 (in-repo RC) | Adoption surface PR1–PR9: registry, lattice, evidence integrity, conformance, bench provenance, Action SHA pins, App alpha, pilots, TCB; live attributable tag pending | [RELEASE_NOTES_v1.3.0-rc.1.md](RELEASE_NOTES_v1.3.0-rc.1.md) |
+| v1.3.0-rc.1 (engineering candidate) | Adoption surface PR1–PR9 plus completion-program compilers/contracts/ledger work; live attributable tag pending | [RELEASE_NOTES_v1.3.0-rc.1.md](RELEASE_NOTES_v1.3.0-rc.1.md) |
 | v1.2.1 | Signed release on pre-control-plane commit; consumer pin baseline | [RELEASE_NOTES_v1.2.1.md](RELEASE_NOTES_v1.2.1.md) |
 | v1.2.0 | All five check types validated end-to-end; clearer GitHub Action outputs; example rollout workflows | [RELEASE_NOTES_v1.2.0.md](RELEASE_NOTES_v1.2.0.md) |
 | v1.1.0 | Realistic PR diff benchmark set; required native checker CI for OPA, Z3, CBMC, Cedar; external rollout guide | [RELEASE_NOTES_v1.1.0.md](RELEASE_NOTES_v1.1.0.md) |
@@ -26,12 +26,13 @@ Current product positioning: **`v1.3.0-rc.1` in-repo release candidate** (packag
 
 ## What we are working on next
 
-1. **Attributable publication of `v1.3.0-rc.1`** — non-`[skip ci]` workflow IDs, signed tag, Publish/Sigstore, consumer remotes on the immutable pin ([ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md)).
-2. **Promotion path to `v1.3.0`** — after the 18-condition gate, consumer validation, and attributable holdout aggregates.
-3. Ongoing calibration of strict lanes on real diffs (advisory remains the default recommendation until attributable RC evidence exists).
+1. **Attributable publication of `v1.3.0-rc.1`** — non-`[skip ci]` workflow IDs, release ledger authorization of `verified_source_sha`, signed tag, Publish/Sigstore, consumer remotes on the immutable pin ([ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md)).
+2. **Promotion path to `v1.3.0`** — after the 18-condition gate, independent consumer validation, and attributable holdout aggregates.
+3. Ongoing calibration of strict lanes on real diffs (advisory remains the default recommendation until attributable RC evidence exists). FormalPR-Bench remains regression-only.
 
 ## Not planned as product promises
 
 - PyPI publication depends on maintainer release tagging (workflow is ready).
 - Optional native checkers (TLA+, Kani, Dafny, Verus, Lean, Alloy) remain non-blocking in CI until their harnesses mature.
 - Re-attributing `v1.2.1` Sigstore/CI evidence to typed-control-plane commits.
+- Claiming `externally_calibrated_strict` from local dogfood or FormalPR-Bench alone.

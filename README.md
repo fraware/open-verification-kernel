@@ -65,7 +65,7 @@ Details and fallback rules: [docs/BACKENDS.md](docs/BACKENDS.md).
 | Each formal tool has its own CLI, format, and semantics | One command and one evidence format across tools |
 | Agent PRs rely on self-review or generic lint | High-risk changes get targeted, explainable checks |
 | "Pass" can hide missing context or wrong assumptions | Every outcome lists assumptions, limits, and unknowns |
-| Hard to benchmark agent-generated diffs | [FormalPR-Bench](docs/BENCHMARK.md) scores real PR scenarios |
+| Hard to benchmark agent-generated diffs | [FormalPR-Bench](docs/BENCHMARK.md) scores regression on curated PR scenarios |
 
 ---
 
@@ -169,7 +169,7 @@ Copy a full consumer example: [`examples/github_workflows/external_consumer.yml`
 | **GitHub Action** | Every PR in your org |
 | **Agent server** (`ovk-mcp`) | Let coding agents run checks from their tool loop (`pip install '.[mcp]'`) |
 | **Templates** ([`templates/`](templates/)) | Reusable rules for common risks (100 included) |
-| **Benchmark** (`ovk bench`) | Measure regression on agent-style PR diffs |
+| **Benchmark** (`ovk bench`) | Measure regression on agent-style PR diffs (not external calibration) |
 
 Agent repair walkthrough: [docs/AGENT_REPAIR_LOOP.md](docs/AGENT_REPAIR_LOOP.md)
 
@@ -214,9 +214,9 @@ Questions, ideas, or a first PR — you are welcome. See [docs/ARCHITECTURE.md](
 | Install locally or wire up CI | [INTEGRATION.md](docs/INTEGRATION.md) |
 | Tune strictness and checker selection | [POLICY.md](docs/POLICY.md) |
 | Understand checkers and fallbacks | [BACKENDS.md](docs/BACKENDS.md) |
-| Run or extend the benchmark | [BENCHMARK.md](docs/BENCHMARK.md) |
+| Run or extend the regression benchmark | [BENCHMARK.md](docs/BENCHMARK.md) |
 | Roll out on an external OSS repo | [EXTERNAL_PILOT_PLAYBOOK.md](docs/EXTERNAL_PILOT_PLAYBOOK.md) |
-| See current capabilities | [STATUS.md](docs/STATUS.md) |
+| See generated maturity status | [STATUS.md](docs/STATUS.md) |
 | Known limitations | [RELEASE.md](docs/RELEASE.md#known-limitations) |
 | Upgrade from an older version | [MIGRATION.md](docs/MIGRATION.md) |
 

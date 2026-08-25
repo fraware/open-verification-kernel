@@ -6,7 +6,7 @@ Maintainer guide for shipping Open Verification Kernel. Current readiness: [CURR
 
 Package version: `1.3.0-rc.1`.
 
-Release judgment: **in-repo release candidate** for attributable tag `v1.3.0-rc.1`. The five bounded evidence lanes, artifact chain, CLI, MCP surface, composite Action (SHA-pinned third parties), capability registry, decision lattice, evidence integrity, conformance matrix, FormalPR-Bench provenance, App alpha, pilots, and TCB doc are implemented. Live workflow IDs, signed tag/Sigstore, and consumer remotes on the RC pin remain maintainer gates — see [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md) and [ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md).
+Release judgment: **engineering candidate** for attributable tag `v1.3.0-rc.1` (branch work may still be uncommitted). The five bounded evidence lanes, artifact chain, CLI, MCP surface, composite Action (SHA-pinned third parties), capability registry, decision lattice, evidence integrity, conformance matrix, FormalPR-Bench provenance, App alpha, pilots, and TCB doc are implemented. Live workflow IDs, release-ledger `verified_source_sha`, signed tag/Sigstore, and consumer remotes on the RC pin remain maintainer gates — see [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md) and [ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md).
 
 ## Known limitations
 
@@ -15,8 +15,10 @@ Release judgment: **in-repo release candidate** for attributable tag `v1.3.0-rc.
 - OPA and Z3 have native semantic paths; CBMC checks explicit or template harnesses; Cedar and six other external adapters do not yet perform native policy/proof execution.
 - The 100-template catalog is broader than the production-executable property set.
 - Auto-collected branch-protection metadata cannot reconstruct a removed required check without trusted before/after data.
-- FormalPR-Bench is an internal curated regression suite, not an independent accuracy estimate.
-- Current external-validation workflows use in-repository dogfooding; independent tagged consumers are still required.
+- FormalPR-Bench is an internal curated regression suite, not an independent accuracy estimate or external calibration.
+- Current external-validation workflows use in-repository dogfooding; independent tagged consumers are still required and are distinct from dogfood green runs.
+- Post-execution strict fallback remains disabled unless `routing.allow_fallback: true` is explicitly set.
+- `verified_source_sha` is release-ledger authorized only; badge/holdout/dogfood must not mint it.
 
 ## Source release gates
 
@@ -227,6 +229,7 @@ When `changed-files` is omitted, the Action materializes the pull-request diff a
 
 | Version | Changelog |
 |---|---|
+| v1.3.0-rc.1 (candidate) | [RELEASE_NOTES_v1.3.0-rc.1.md](RELEASE_NOTES_v1.3.0-rc.1.md) |
 | v1.2.1 | [RELEASE_NOTES_v1.2.1.md](RELEASE_NOTES_v1.2.1.md) |
 | v1.2.0 | [RELEASE_NOTES_v1.2.0.md](RELEASE_NOTES_v1.2.0.md) |
 | v1.1.0 | [RELEASE_NOTES_v1.1.0.md](RELEASE_NOTES_v1.1.0.md) |

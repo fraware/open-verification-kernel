@@ -2,30 +2,31 @@
 
 Living adoption dashboard for Open Verification Kernel.
 
-**Last updated:** 2026-07-25
+**Last updated:** 2026-08-25
 
-**Release judgment:** **`v1.3.0-rc.1` in-repo release candidate**. Package metadata is `1.3.0-rc.1`. The typed backend control plane and adoption-surface program (OVK-PR1–PR9) post-date signed `v1.2.1` (`a27d5720f4350c00bca34f71d991c31f5a2f38c7`). Default product path remains shadow/legacy-authoritative; enforced routing is lane-policy opt-in until attributable publication closes. Do not treat current `main` as a re-validation of signed `v1.2.1`.
+**Release judgment:** **`v1.3.0-rc.1` engineering candidate on branch `hardening/full-vision-2026-08-24`**. Package metadata is `1.3.0-rc.1`. Completion-program work (support contracts, compilers, release ledger, sandbox worker, workflows) is present in this working tree and is **not yet an attributable signed release**. The last signed immutable tag remains `v1.2.1` (`a27d5720f4350c00bca34f71d991c31f5a2f38c7`). Do not treat this branch, uncommitted diffs, or local dogfood as a re-validation of signed `v1.2.1`, and do not mint `verified_source_sha` until the release ledger gate closes.
 
-Authoritative audit: [DEEP_AUDIT_2026-07-23_R2.md](DEEP_AUDIT_2026-07-23_R2.md). Engineering program: [ENGINEERING_PROGRAM_2026-07-23_R2.md](ENGINEERING_PROGRAM_2026-07-23_R2.md). TCB: [TRUSTED_COMPUTING_BASE.md](TRUSTED_COMPUTING_BASE.md). Historical: [VISION_AUDIT_2026-07-22.md](VISION_AUDIT_2026-07-22.md) (superseded for day-to-day status).
+Authoritative audit: [DEEP_AUDIT_2026-07-23_R2.md](DEEP_AUDIT_2026-07-23_R2.md). Engineering program: [ENGINEERING_PROGRAM_2026-07-23_R2.md](ENGINEERING_PROGRAM_2026-07-23_R2.md). Publication gate: [ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md). TCB: [TRUSTED_COMPUTING_BASE.md](TRUSTED_COMPUTING_BASE.md). Machine status: [STATUS.md](STATUS.md) (generated from project-status).
 
 ## At a glance
 
 | Signal | Current state |
 |---|---|
-| **Package version** | Working tree / RC metadata: `1.3.0-rc.1` (intended tag `v1.3.0-rc.1`); signed immutable tag remains `v1.2.1` only for that tag’s commit |
-| **FormalPR-Bench** | Provenance + partitions + version manifest (`benchmarks/formal_pr_bench/manifest.v1.json`); cite `benchmark_version` separately from `verified_source_sha` |
+| **Package version** | Working tree / RC metadata: `1.3.0-rc.1` (intended tag `v1.3.0-rc.1`); signed immutable tag remains `v1.2.1` only for that tag's commit |
+| **FormalPR-Bench** | Internal regression suite with provenance + partitions (`benchmarks/formal_pr_bench/manifest.v1.json`); cite `benchmark_source_sha` / `benchmark_version` — **not** external calibration |
 | **Check types** | Five bounded production lanes: self-protection, authorization, infrastructure, CI secrets, deployment |
-| **Backend execution** | Typed `BackendControlPlane` + `route_obligation`; five policy-selectable enforced lanes via `adapter_runtime` |
+| **Backend execution** | Typed `BackendControlPlane` + `route_obligation`; five policy-selectable enforced lanes via `adapter_runtime`; post-execution strict fallback remains disabled unless `routing.allow_fallback: true` |
 | **Capability registry** | Every advertised checker in `adapters/*/capability.json`; `stable ⊆` full seven-item conformance |
 | **Decision / evidence** | Normative `DecisionState` lattice; integrity envelope with controlling-finding reconstruction |
-| **Unit and workflow tests** | In-repo suites green locally; live GitHub Actions workflow IDs still pending on a non-`[skip ci]` SHA |
+| **Unit and workflow tests** | In-repo suites present; live GitHub Actions workflow IDs for this candidate SHA still pending |
 | **Package portability** | `scripts/verify_rc_install.py` covers Action SHA pins + metadata; `--wheel` builds/imports outside checkout |
-| **GitHub Action** | Composite Action SHA-pins third-party deps (PR6); consumers still live-pin `v1.2.1` until rc.1 tag exists |
-| **External validation** | Three advisory pilot reports under `docs/pilots/` (≥2 with full workflow reproduction) |
+| **GitHub Action** | Composite Action SHA-pins third-party deps; consumers still live-pin `v1.2.1` until rc.1 is attributable |
+| **External validation** | Weekly matrix is **in-repo dogfood**, not independent consumer calibration; three advisory pilot reports under `docs/pilots/` |
 | **GitHub App** | Private alpha under `integrations/github-app/` (not Marketplace) |
 | **Sigstore** | Immutable-tag E2E closed for `v1.2.1` only — not attributable to typed-control-plane / RC commits |
+| **Release ledger** | `verified_source_sha` deferred until offline release-ledger verification (WP-17); never set from badge/holdout alone |
 
-OVK is not complete formal verification of arbitrary code. It provides explainable, conservative checks for a bounded set of high-risk changes and emits explicit unknown and human-review outcomes.
+OVK is not complete formal verification of arbitrary code. It provides explainable, conservative checks for a bounded set of high-risk changes and emits explicit unknown and human-review outcomes. Bounded guarantees apply only inside declared support contracts and trusted materials; unsupported inputs force review. `externally_calibrated_strict` is **not** claimed.
 
 ## Adoption-surface program (OVK-PR1–PR9)
 
@@ -48,15 +49,15 @@ Local DoD verifier: `python scripts/verify_rc_dod.py`. Install surface: `python 
 | Field | Meaning | When to set |
 |---|---|---|
 | `benchmark_source_sha` | Commit whose FormalPR-Bench (or badge) artifacts were measured | Any bench/badge run |
-| `verified_source_sha` | Commit with a **complete observed required-workflow set** | Only after Sprint 0 / release gates attach live workflow IDs |
+| `verified_source_sha` | Commit authorized by a **complete observed required-workflow set** via the release ledger | Only after Sprint 0 / release-ledger gates attach live workflow IDs |
 
-Badge-only or `[skip ci]` commits must set `benchmark_source_sha` and must **not** be labeled `verified_source_sha`.
+Badge-only, holdout-only, dogfood-only, or `[skip ci]` commits must set `benchmark_source_sha` (when applicable) and must **not** be labeled `verified_source_sha`.
 
 ## Local Sprint 0 / RC baseline
 
 Local evidence only. Distinguishes from GitHub Actions workflow IDs (still pending).
 
-Multi-OS reproducible baselines (OVK-01): see [REPRO_BASELINE.md](REPRO_BASELINE.md) and the [`repro-baseline`](../.github/workflows/repro-baseline.yml) workflow. Records are uploaded by CI (see [baselines/README.md](baselines/README.md)); the directory may be empty until maintainers download or commit matrix artifacts.
+Multi-OS reproducible baselines (OVK-01): see [REPRO_BASELINE.md](REPRO_BASELINE.md) and the [`repro-baseline`](../.github/workflows/repro-baseline.yml) workflow. Records are uploaded by CI (see [baselines/README.md](baselines/README.md); the directory may be empty until maintainers download or commit matrix artifacts).
 
 | Gate | Command | Notes |
 |---|---|---|
@@ -65,15 +66,16 @@ Multi-OS reproducible baselines (OVK-01): see [REPRO_BASELINE.md](REPRO_BASELINE
 | RC install (static) | `python scripts/verify_rc_install.py` | Action SHA pins + package metadata |
 | RC install (wheel) | `python scripts/verify_rc_install.py --wheel` | Optional; needs `build` |
 | TCB freshness | `python scripts/render_tcb_doc.py --check` | Regenerates via `--write` |
+| Project status | `python scripts/build_project_status.py` | Regenerates [STATUS.md](STATUS.md) |
 | Release preflight | `ovk release-preflight` | Includes RC DoD + install + TCB |
 
 ### Still pending (live GitHub Actions / secrets) — maintainer publication
 
 | Gate | Status | Evidence |
 |---|---|---|
-| General CI / unit+gates on non-`[skip ci]` SHA | Pending live run | Record run URL → `verified_source_sha` |
+| General CI / unit+gates on non-`[skip ci]` SHA | Pending live run | Record run URL → release ledger → `verified_source_sha` |
 | Native Tier 1 | Pending | — |
-| Action dogfood | Pending | — |
+| Action dogfood | Pending | Local dogfood ≠ external consumer validation |
 | Expanded FormalPR-Bench on release SHA | Pending | Use `benchmark_source_sha` |
 | Adversarial release-bundle in Actions | Pending | Local `verify_release_bundle.py` entrypoint present |
 | Label-separated holdout live eval | Pending | Needs `HOLDOUT_DOWNLOAD_TOKEN` + `HOLDOUT_ASSET_SHA256` |
@@ -86,8 +88,8 @@ Multi-OS reproducible baselines (OVK-01): see [REPRO_BASELINE.md](REPRO_BASELINE
 |---|---|---|
 | **Local/demo** | Appropriate after current local/CI green | Use shipped examples and inspect assumptions and limits |
 | **Advisory Action** | Appropriate for pilots on pinned tags | Prefer signed `v1.2.1` until `v1.3.0-rc.1` is attributable; collect FPs/unknowns |
-| **Strict required check** | Repository-specific only | Calibrate on real diffs; trusted abstraction sources; protected policy metadata |
-| **Production-stable general enforcement** | Not yet | Needs attributable rc.1 (or later), consumer pins, and Sprint 0 live gates |
+| **Strict required check** | Repository-specific only | Calibrate on real diffs; trusted abstraction sources; protected policy metadata; support-contract materials |
+| **Production-stable general enforcement** | Not yet | Needs attributable rc.1 (or later), independent consumer pins, holdout aggregates, and Sprint 0 live gates |
 
 Suggested rollout: local validation → advisory artifacts → advisory check run/comment → calibrated strict lane → protected required check.
 
@@ -95,7 +97,7 @@ Suggested rollout: local validation → advisory artifacts → advisory check ru
 
 Code for R2 P0 PRs 1–9 is present in this working tree. Historical defect inventory: [DEEP_AUDIT_2026-07-23_R2.md](DEEP_AUDIT_2026-07-23_R2.md). Program: [ENGINEERING_PROGRAM_2026-07-23_R2.md](ENGINEERING_PROGRAM_2026-07-23_R2.md).
 
-**Still open for attributable release:** live non-`[skip ci]` workflow IDs, consumer repo pins on immutable rc.1, label-separated holdout aggregates, and signed publication gates — see [ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md).
+**Still open for attributable release:** live non-`[skip ci]` workflow IDs, consumer repo pins on immutable rc.1, label-separated holdout aggregates, release ledger authorization of `verified_source_sha`, and signed publication gates — see [ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md).
 
 ## Maintainer release gates
 
@@ -112,7 +114,7 @@ Before tagging or publishing **`v1.3.0-rc.1`**:
 - [ ] validate a complete release bundle, including evidence-quality semantics;
 - [ ] exercise HMAC signing and identity-bound Sigstore signing according to release policy;
 - [ ] run the immutable Action or release wheel in both independent consumer repositories at the rc.1 pin;
-- [ ] update status with exact `verified_source_sha` and workflow links;
+- [ ] authorize `verified_source_sha` via the release ledger and record workflow links;
 - [ ] keep the package classifier at Beta until independent pilots and P0 closure meet the production gate.
 
 Promotion to **`v1.3.0`** additionally requires P0 closure + consumer + holdout evidence per [ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md). Do not re-attribute `v1.2.1` Sigstore evidence to typed-control-plane commits.
@@ -125,15 +127,16 @@ Promotion to **`v1.3.0`** additionally requires P0 closure + consumer + holdout 
 | [ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md) | Sprint 10 / RC publication gate |
 | [DEEP_AUDIT_2026-07-23_R2.md](DEEP_AUDIT_2026-07-23_R2.md) | Authoritative R2 deep audit |
 | [ENGINEERING_PROGRAM_2026-07-23_R2.md](ENGINEERING_PROGRAM_2026-07-23_R2.md) | Sprint/PR execution program |
-| [SOURCE_PROFILE_HARDENING.md](SOURCE_PROFILE_HARDENING.md) | Sprint 6 profile status |
+| [SOURCE_PROFILE_HARDENING.md](SOURCE_PROFILE_HARDENING.md) | Source-profile status |
 | [HOLDOUT_LABEL_SEPARATION.md](HOLDOUT_LABEL_SEPARATION.md) | Sprint 8 prediction/eval split |
 | [CONSUMER_VALIDATION_CHECKLIST.md](CONSUMER_VALIDATION_CHECKLIST.md) | Sprint 9 consumer pins |
 | [VISION_AUDIT_2026-07-22.md](VISION_AUDIT_2026-07-22.md) | Historical pre-control-plane audit |
-| [STATUS.md](STATUS.md) | Command and lane inventory |
+| [STATUS.md](STATUS.md) | Generated maturity / profile inventory |
 | [BACKENDS.md](BACKENDS.md) | Exact backend execution maturity and guarantee classes |
 | [REPRO_BASELINE.md](REPRO_BASELINE.md) | Multi-OS reproducible baseline harness (OVK-01) |
 | [INTEGRATION.md](INTEGRATION.md) | Installation and GitHub Action setup |
 | [RELEASE.md](RELEASE.md) | Maintainer release procedure |
 | [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md) | Independent advisory pilot process |
 | [pilots/README.md](pilots/README.md) | Published OVK-PR8 advisory pilot reports |
-| [BENCHMARK.md](BENCHMARK.md) | Internal benchmark format and execution |
+| [BENCHMARK.md](BENCHMARK.md) | Internal regression benchmark format and execution |
+| [internal/README.md](internal/README.md) | Internal engineering handoffs (not public claims) |
