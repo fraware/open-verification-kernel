@@ -1,8 +1,8 @@
-"""Trusted deployment_state.v1 acquisition compiler (WP-11).
+"""Deployment state compiler with explicit trust injection.
 
 Untrusted ``approved=true`` JSON cannot authorize. Strict compilation requires
-a signed/attested acquisition artifact with system identity, environment,
-revision/image digest, ordered events, and actor/approvals.
+a caller-supplied authentication result from a protected acquisition verifier;
+material fields inside the deployment document can never assert their own trust.
 """
 
 from __future__ import annotations
@@ -20,8 +20,17 @@ _REQUIRED_FIELDS = (
 )
 
 
-def compile_deployment_state(data: dict[str, Any]) -> DeploymentIR:
-    """Compile a trusted deployment_state.v1 document into DeploymentIR."""
+def compile_deployment_state(
+    data: dict[str, Any],
+    *,
+    acquisition_trusted: bool = False,
+) -> DeploymentIR:
+    """Compile a deployment_state.v1 document into DeploymentIR.
+
+    ``acquisition_trusted`` is deliberately not derivable from ``data``. It may
+    be set only by a caller that authenticated a subject-bound acquisition
+    artifact against an external trust root. The default therefore fails closed.
+    """
     unsupported: list[str] = []
     warnings: list[str] = []
 
@@ -29,10 +38,7 @@ def compile_deployment_state(data: dict[str, Any]) -> DeploymentIR:
     if schema != _SCHEMA:
         unsupported.append("missing_or_invalid_deployment_state_schema")
 
-    acquisition = data.get("_ovk_acquisition") if isinstance(data.get("_ovk_acquisition"), dict) else None
-    trusted = bool(acquisition and acquisition.get("trusted") is True)
-    if not trusted:
-        # Explicitly reject self-asserted approval without acquisition.
+    if not acquisition_trusted:
         unsupported.append("untrusted_deployment_state_acquisition")
         if data.get("approved") is True:
             unsupported.append("untrusted_approved_true_json")
@@ -45,8 +51,12 @@ def compile_deployment_state(data: dict[str, Any]) -> DeploymentIR:
     if not revision:
         unsupported.append("missing_revision_or_image_digest")
 
+    # Presence of a signature-like field is never authentication. Keep the
+    # diagnostic because authenticated collectors are expected to expose an
+    # attestation reference, but trust comes solely from acquisition_trusted.
+    acquisition = data.get("_ovk_acquisition") if isinstance(data.get("_ovk_acquisition"), dict) else None
     if not data.get("signature") and not (acquisition and acquisition.get("signature_ref")):
-        unsupported.append("missing_signature_or_attestation_ref")
+        warnings.append("signature_or_attestation_reference_not_exposed")
 
     events = data.get("events") if isinstance(data.get("events"), list) else []
     states: list[DeploymentState] = []
@@ -84,7 +94,6 @@ def compile_deployment_state(data: dict[str, Any]) -> DeploymentIR:
                     label=str(event.get("label") or event.get("type") or "transition"),
                 )
             )
-        # Gate honesty: production transitions need approvals when required.
         if target in production and required and not approvals and not actor:
             unsupported.append(f"events[{index}]:production_transition_missing_actor_or_approvals")
         previous = target
@@ -92,7 +101,7 @@ def compile_deployment_state(data: dict[str, Any]) -> DeploymentIR:
     if not events:
         warnings.append("events missing")
     if unsupported:
-        warnings.append("strict_requires_trusted_deployment_state_v1")
+        warnings.append("strict_requires_authenticated_deployment_state_v1")
 
     return DeploymentIR(
         source="deployment_state.v1",
@@ -106,9 +115,13 @@ def compile_deployment_state(data: dict[str, Any]) -> DeploymentIR:
     )
 
 
-def is_trusted_deployment_state(data: dict[str, Any]) -> bool:
+def is_trusted_deployment_state(
+    data: dict[str, Any],
+    *,
+    acquisition_trusted: bool = False,
+) -> bool:
+    """Return whether a valid deployment schema also has external authentication."""
     return (
-        str(data.get("schema_version") or data.get("schema") or "") == _SCHEMA
-        and isinstance(data.get("_ovk_acquisition"), dict)
-        and data["_ovk_acquisition"].get("trusted") is True
+        acquisition_trusted
+        and str(data.get("schema_version") or data.get("schema") or "") == _SCHEMA
     )
