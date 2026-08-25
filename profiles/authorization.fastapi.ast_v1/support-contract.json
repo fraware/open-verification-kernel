@@ -1,0 +1,43 @@
+{
+  "schema_version": "ovk.support_contract.v1",
+  "profile_id": "authorization.fastapi.ast_v1",
+  "contract_version": "1.0.0",
+  "lane": "authorization",
+  "proposition": "Every compiled FastAPI route that claims admin protection is backed by a trusted guard dependency or annotated Security dependency reachable via the module graph.",
+  "guarantee_type": "source_grounded_authorization_coverage",
+  "compiler_binding": "ovk.compilers.authorization.fastapi_ast:FastApiAstAuthorizationCompiler",
+  "supported_constructs": [
+    "APIRouter",
+    "include_router",
+    "Depends",
+    "Annotated",
+    "Security",
+    "static_path_literals",
+    "module_imports_aliases_reexports"
+  ],
+  "excluded_constructs": [
+    "dynamic_path_construction",
+    "runtime_dependency_overrides",
+    "unknown_auth_wrappers",
+    "star_import_unbounded_symbols"
+  ],
+  "required_materials": [
+    "python_source_files",
+    "base_and_or_head_revisions"
+  ],
+  "coverage_criteria": {
+    "complete_requires": [
+      "all_routes_have_fq_identity",
+      "no_unsupported_constructs",
+      "trusted_guard_registry_match"
+    ],
+    "unsupported_forces": "review"
+  },
+  "language_or_tool_versions": {
+    "python": ">=3.11",
+    "fastapi": ">=0.100"
+  },
+  "notes": [
+    "Regex FastAPI compiler is advisory/legacy only and must not enter strict coverage."
+  ]
+}

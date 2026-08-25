@@ -1,0 +1,8 @@
+{
+  "malformed": true,
+  "author_type": "ai_agent",
+  "agent": "codex",
+  "task": "malformed",
+  "trust_context": "untrusted_fork_pr",
+  "workflows": "not-a-list"
+}

@@ -1,0 +1,42 @@
+{
+  "schema_version": "formal_pr_bench.manifest.v1",
+  "benchmark_version": "v1",
+  "case_count": 132,
+  "partitions": [
+    "train",
+    "development",
+    "test",
+    "held_out"
+  ],
+  "partition_digests": {
+    "train": "49fe037304d3079d02b7a74c70769a909588dd47ec0a1c7f1c77d1c367da0f08",
+    "development": "cbfdf09cccde76211274127a8dd1d900d0ebbca64949dde67a82fb531ad15258",
+    "test": "be82773e68d8039f903307e769a44322dc1447d64fae57a70beb625fdbd1ea7b",
+    "held_out": "9cf3f23408841a79692c07694f7e72f3fc7e73b2d1d9de4924bdf5f81c7c1c91"
+  },
+  "corpus_digest": "a2614ab01ddceff43fef508f6f0519b16474f94084a38f1ddc6e84aab92d347e",
+  "licenses_digest": "c9f88a6e5bce11b3ed75cf2f46d6d9f63e63a1ac7d0fe99a409fd4c29c5cde98",
+  "duplication_report_digest": "6ed405025a47c7621c5cf69918acf79de07ef2350e39936b62a99ac5a0bfef10",
+  "artifact_layout": {
+    "provenance": "provenance/<case_id>.json",
+    "licenses": "licenses.json",
+    "partitions": "partitions.json",
+    "duplication_report": "duplication_report.json",
+    "mutations": "mutations/",
+    "held_out": "held_out/",
+    "adversarial": "adversarial/",
+    "rationales": "rationales/<case_id>.md",
+    "template_dev_cases": "template_dev_cases.json"
+  },
+  "real_diff_case_count": 18,
+  "mutation_files": [
+    "control_removed__flip_merge_to_allow.json",
+    "auth_bypass__drop_counterexample.json",
+    "ci_secrets_exposed__status_to_pass.json"
+  ],
+  "adversarial_files": [
+    "misleading_docs_hides_secret.diff",
+    "misleading_docs_hides_secret.json",
+    "forged_allow_label.json"
+  ]
+}

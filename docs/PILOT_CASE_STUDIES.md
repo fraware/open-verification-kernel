@@ -1,6 +1,8 @@
 # OVK Pilot Case Studies
 
-Measured outcomes from example configurations in `examples/pilot_repos/`. Metrics use `ovk check` and `ovk verify` in advisory mode. Current pin: **v1.2.0**.
+Measured outcomes from example configurations in `examples/pilot_repos/`. Metrics use `ovk check` and `ovk verify` in advisory mode.
+
+**Honesty:** in-repo pilot dogfood is **not** independent consumer validation and does not authorize `verified_source_sha` or `externally_calibrated_strict`. Live signed pin for external remotes remains `v1.2.1` until `v1.3.0-rc.1` is attributable.
 
 ## In-repo reference pilot
 
@@ -10,7 +12,7 @@ Simulates how an external repo would consume OVK before community pilots land.
 
 **Manifest:** `examples/pilot_repos/external_oss_ci_secrets.json`
 
-**Consumer path:** local Action (`./`) with `OVK_PACKAGE_VERSION: "1.2.0"` to mirror adopters pinning `@v1.2.0`.
+**Consumer path:** local Action (`./`) with package version matching the workflow under test. Prefer mirroring `@v1.2.1` for live signed pins; bump only after an attributable RC tag.
 
 | Metric | Target | Measured |
 |--------|--------|----------|
@@ -114,15 +116,20 @@ Playbook: [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md)
 
 Manifest template: [templates/pilot_manifest_ci_secrets.template.json](templates/pilot_manifest_ci_secrets.template.json)
 
+Published advisory reports (OVK-PR8): [pilots/README.md](pilots/README.md)
+
 ### Active and recruiting
 
 Source of truth: [external-pilots-registry.json](benchmarks/external-pilots-registry.json) (merged into [adoption-summary.json](benchmarks/adoption-summary.json) by `scripts/render_pilot_metrics.py`).
 
-| Repository | Status | Check type | Advisory period | False positive rate | Strict enabled |
-|-------|--------|------|-----------------|---------------------|----------------|
-| TBD — recruiting first OSS adopter (see registry) | recruiting | ci_secrets | — | — | no |
+| Repository | Status | Kind | Check types | Advisory period | False positive rate | Strict enabled |
+|-------|--------|------|-------------|-----------------|---------------------|----------------|
+| [fraware/ovk-consumer-fastapi-terraform](pilots/fastapi-terraform/REPORT.md) | advisory | Maintained consumer | ci_secrets, infrastructure | 2026-07-11 – 2026-07-25 | 0.0 (fixtures) | no |
+| [fraware/ovk-consumer-express-actions](pilots/express-actions/REPORT.md) | advisory | Maintained consumer | ci_secrets, self_protection | 2026-07-11 – 2026-07-25 | 0.0 (fixtures) | no |
+| [in-repo/ovk-pilot-infra-terraform-k8s](pilots/infra-terraform-k8s/REPORT.md) | advisory | In-repo maintained profile | infrastructure, ci_secrets | 2026-07-11 – 2026-07-25 | 0.0 (fixtures) | no |
+| TBD - recruiting first true external OSS adopter | recruiting | True external OSS (open) | ci_secrets | — | — | no |
 
-When an external repo completes advisory rollout, maintainer ingests artifacts, updates the registry, re-renders the adoption summary, and replaces the recruiting row with measured metrics. Target: under 5% false positives before enabling strict mode on protected branches.
+Maintained-consumer and in-repo profile rows are **fixture/dogfood** measurements with `strict_mode_recommendation: remain_advisory`. They do not replace a true independent external OSS adopter. When such a repo completes advisory rollout, ingest artifacts, update the registry, re-render the adoption summary, and keep the kind label explicit. Target: under 5% false positives before enabling strict mode on protected branches.
 
 ### Reporting template
 
@@ -147,5 +154,5 @@ When an external repo completes advisory rollout, maintainer ingests artifacts, 
 
 - [ ] Advisory window ≥14 days with artifact retention
 - [ ] False-positive rate computed and under 5% (or strict not yet enabled)
-- [ ] Link to workflow file and version pin (`@v1.2.0`)
+- [ ] Link to workflow file and version pin (`@v1.2.1` live; `@v1.3.0-rc.1` after attributable cut)
 - [ ] Update the **Active and recruiting** table with measured values

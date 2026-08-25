@@ -1,0 +1,19 @@
+{
+  "schema_version": "formal_pr_bench.held_out.v1",
+  "case_id": "rd_cbmc_integer_overflow_quota",
+  "forbidden_from_template_dev_scoring": true,
+  "case": {
+    "case_id": "rd_cbmc_integer_overflow_quota",
+    "category": "real_diff",
+    "input_fixture": "benchmarks/real_diffs/cbmc_integer_overflow_quota.diff",
+    "expected_lanes": [
+      "backend"
+    ],
+    "expected_intents": [
+      "cbmc-no-integer-overflow-quota",
+      "cbmc-buffer-bounds",
+      "cbmc-no-unchecked-buffer-copy"
+    ],
+    "expected_merge_recommendation": "block"
+  }
+}

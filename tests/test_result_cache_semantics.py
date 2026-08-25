@@ -57,6 +57,7 @@ def test_cache_distinguishes_input_normalization_formats(monkeypatch, tmp_path: 
         head_sha="abc",
         cache_dir=tmp_path,
         parallel=False,
+        policy={"routing": {"mode": "legacy"}},
     )
     adapter_runtime.execute_obligations(
         terraform,
@@ -65,6 +66,7 @@ def test_cache_distinguishes_input_normalization_formats(monkeypatch, tmp_path: 
         head_sha="abc",
         cache_dir=tmp_path,
         parallel=False,
+        policy={"routing": {"mode": "legacy"}},
     )
     adapter_runtime.execute_obligations(
         terraform,
@@ -73,6 +75,7 @@ def test_cache_distinguishes_input_normalization_formats(monkeypatch, tmp_path: 
         head_sha="abc",
         cache_dir=tmp_path,
         parallel=False,
+        policy={"routing": {"mode": "legacy"}},
     )
 
     assert calls == ["infra", "terraform"]

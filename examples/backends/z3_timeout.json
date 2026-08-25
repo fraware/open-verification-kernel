@@ -1,0 +1,6 @@
+{
+  "timeout": true,
+  "author_type": "ai_agent",
+  "agent": "codex",
+  "task": "timeout"
+}

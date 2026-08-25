@@ -1,0 +1,7 @@
+{
+  "intent_id": "opa-policy-check",
+  "status": "fail",
+  "violations": [
+    "required ovk gate removed from branch protection"
+  ]
+}

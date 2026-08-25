@@ -1,0 +1,14 @@
+{
+  "schema_version": "formal_pr_bench.held_out.v1",
+  "case_id": "kani_unknown_variant_2",
+  "forbidden_from_template_dev_scoring": true,
+  "case": {
+    "case_id": "kani_unknown_variant_2",
+    "input_fixture": "examples/backends/kani_unknown.json",
+    "expected_intent": "kani-harness-check",
+    "expected_backend_class": "model_checker",
+    "expected_status": "unknown",
+    "expected_merge_recommendation": "require_human_review",
+    "expected_counterexample_class": "malformed_input"
+  }
+}

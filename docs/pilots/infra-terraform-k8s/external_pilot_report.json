@@ -1,0 +1,57 @@
+{
+  "schema_version": "ovk.external_pilot_report.v1",
+  "repository": "in-repo/ovk-pilot-infra-terraform-k8s",
+  "repository_url": "https://github.com/fraware/open-verification-kernel/tree/main/docs/pilots/infra-terraform-k8s",
+  "consumer_kind": "in_repo_maintained_profile",
+  "stack": "Terraform + Kubernetes-oriented infrastructure fixtures",
+  "check_types": [
+    "infrastructure",
+    "ci_secrets"
+  ],
+  "advisory_start": "2026-07-11",
+  "advisory_end": "2026-07-25",
+  "prs_evaluated": 3,
+  "prs_blocked": 2,
+  "false_positives": 0,
+  "false_negatives": 0,
+  "unknowns": 0,
+  "false_positive_rate": 0.0,
+  "median_check_latency_ms": 46.14,
+  "strict_enabled": false,
+  "strict_mode_recommendation": "remain_advisory",
+  "ovk_version_pin": "1.2.1",
+  "workflow_path": "docs/pilots/infra-terraform-k8s/profile/ovk-pilot.workflow.yml",
+  "evidence_url": "docs/pilots/infra-terraform-k8s/pilot-report.json",
+  "measurement_basis": "fixture_and_dogfood",
+  "complete_workflow_reproduction": false,
+  "notes": "In-repo maintained infrastructure pilot profile (no live remote). Advisory metrics published from Terraform/K8s-oriented fixtures. Not true external OSS. Strict remain_advisory. See docs/pilots/infra-terraform-k8s/REPORT.md.",
+  "check_case_results": [
+    {
+      "case": "infra_passing",
+      "expected": "allow",
+      "merge_recommendation": "allow",
+      "elapsed_ms": 46.14,
+      "intents": [
+        "no-public-sensitive-resource"
+      ]
+    },
+    {
+      "case": "infra_failing",
+      "expected": "block",
+      "merge_recommendation": "block",
+      "elapsed_ms": 44.99,
+      "intents": [
+        "no-public-sensitive-resource"
+      ]
+    },
+    {
+      "case": "infra_public_s3",
+      "expected": "block",
+      "merge_recommendation": "block",
+      "elapsed_ms": 46.14,
+      "intents": [
+        "no-public-sensitive-resource"
+      ]
+    }
+  ]
+}

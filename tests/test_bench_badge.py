@@ -15,6 +15,8 @@ def test_badge_color_rules() -> None:
 def test_render_badge_shape() -> None:
     leaderboard = {
         "schema_version": "formal_pr_bench.leaderboard.v1",
+        "benchmark_version": "v1",
+        "partition": "all",
         "summary": {"cases_total": 100, "cases_passed": 100},
         "timing_ms": {"p50": 1.0, "p95": 2.0, "max": 3.0},
     }

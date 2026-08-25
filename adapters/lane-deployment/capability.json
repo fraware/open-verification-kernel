@@ -1,0 +1,48 @@
+{
+  "capability_id": "lane-deployment-v1",
+  "checker_id": "lane-deployment",
+  "version": "0.1.0",
+  "implementation": "ovk-adapter-lane-deployment",
+  "input_contract": "Deployment state-machine abstraction JSON.",
+  "output_contract": "ovk.evidence via deployment lane evaluator",
+  "claim_class": "deterministic_witness",
+  "tool": {
+    "name": "lane-deployment",
+    "adapter": "ovk-adapter-lane-deployment",
+    "adapter_version": "0.1.0"
+  },
+  "backend_class": "model_checker",
+  "supported_domains": [
+    "deployment"
+  ],
+  "supported_property_kinds": [
+    "safety",
+    "invariant",
+    "forbidden_configuration"
+  ],
+  "guarantee": {
+    "type": "deterministic_witness",
+    "meaning_of_pass": "Production states are unreachable without required approvals.",
+    "meaning_of_fail": "A path skips a required approval state before production.",
+    "meaning_of_unknown": "State machine missing or malformed."
+  },
+  "assumptions": [
+    "States and transitions faithfully represent the deployment pipeline."
+  ],
+  "trusted_components": [
+    "deployment lane evaluator"
+  ],
+  "limits": [
+    "Does not execute Argo/GitHub Environments; evaluates the supplied machine only."
+  ],
+  "failure_semantics": "Malformed machines map to unknown; evaluator errors map to error.",
+  "timeout_semantics": "unknown",
+  "unsupported_semantics": "Does not prove runtime orchestrator behavior beyond the abstraction.",
+  "determinism_status": "deterministic",
+  "release_status": "experimental",
+  "owner": "ovk-maintainers",
+  "native_execution": false,
+  "conformance": {
+    "suite": "conformance/manifest.json"
+  }
+}

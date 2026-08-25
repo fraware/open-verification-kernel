@@ -39,6 +39,7 @@ def test_worker_rejects_non_positive_timeout_without_execution(tmp_path: Path) -
         cwd=tmp_path,
         timeout_seconds=0,
     )
-    assert result.timed_out is True
+    assert result.timed_out is False
     assert result.exit_code is None
+    assert "non-positive" in result.stderr
     assert marker.exists() is False

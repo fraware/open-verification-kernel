@@ -1,0 +1,95 @@
+{
+  "schema_version": "ovk.backend_tools.lock.v1",
+  "isolation_profile": "oci-sandbox.v1",
+  "worker_image": {
+    "name": null,
+    "digest": null,
+    "note": "Digest-pinned OCI worker images remain optional until an image digest is recorded here."
+  },
+  "tools": [
+    {
+      "id": "opa",
+      "version": "0.67.0",
+      "platform": "linux-amd64",
+      "url": "https://openpolicyagent.org/downloads/v0.67.0/opa_linux_amd64_static",
+      "sha256": "cfb5bca154da65867b23790a5039e4cf8ccbf28d4c2d8fe4b6bd9e1a1aa459f0",
+      "expected_version_substr": "0.67.0",
+      "license": "Apache-2.0",
+      "install": "binary",
+      "binary_name": "opa",
+      "required_for_native_matrix": true
+    },
+    {
+      "id": "z3",
+      "version": "4.13.4.0",
+      "platform": "pip",
+      "url": "pypi:z3-solver==4.13.4.0",
+      "sha256": "2fb8a857adf1064f89581c424fd729ee3e8bad95f4ebf0fb4c1210f65b831f37",
+      "artifact_filename": "z3_solver-4.13.4.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "sha256_note": "Primary Linux CI wheel digest from PyPI; install_backend.sh verifies downloaded wheel when present.",
+      "expected_version_substr": "4.13.4",
+      "license": "MIT",
+      "install": "pip",
+      "package": "z3-solver==4.13.4.0",
+      "required_for_native_matrix": true
+    },
+    {
+      "id": "cedar",
+      "version": "4.8.2",
+      "platform": "cargo",
+      "url": "https://crates.io/api/v1/crates/cedar-policy-cli/4.8.2/download",
+      "sha256": "b104955337acdc0574eee1aad08c02559706dcd5a22f94ec8c6f7b01fcd19f5f",
+      "sha256_note": "crates.io .crate checksum for cedar-policy-cli 4.8.2",
+      "expected_version_substr": "4.8",
+      "license": "Apache-2.0",
+      "install": "cargo",
+      "crate": "cedar-policy-cli",
+      "binary_name": "cedar",
+      "required_for_native_matrix": true
+    },
+    {
+      "id": "cbmc",
+      "version": "6.4.1",
+      "platform": "linux-amd64",
+      "url": "https://github.com/diffblue/cbmc/releases/download/cbmc-6.4.1/ubuntu-24.04-cbmc-6.4.1-Linux.deb",
+      "sha256": "f269f875c84b27453dc66c8556ecc79481ddb82e642e7d713eac571bdd12edef",
+      "expected_version_substr": "6.4.1",
+      "license": "BSD-4-Clause",
+      "install": "deb",
+      "binary_name": "cbmc",
+      "required_for_native_matrix": true,
+      "allow_distro_fallback": false
+    },
+    {
+      "id": "tla",
+      "version": "1.8.0",
+      "platform": "java",
+      "url": "https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar",
+      "sha256": "eabd140a70f49eb9305a3bd3f3df944eddf87e5a90d329789085f8953a80533a",
+      "expected_version_substr": null,
+      "license": "MIT",
+      "install": "jar",
+      "binary_name": "tlc",
+      "required_for_native_matrix": false,
+      "allow_silent_skip": false
+    },
+    {
+      "id": "kani",
+      "version": "0.67.0",
+      "platform": "cargo",
+      "url": "https://crates.io/api/v1/crates/kani-verifier/0.67.0/download",
+      "sha256": "d6225a7ec13037e984f6bebdda33d34390e643a1cd2a4522cb5d5e8e6ed85e2b",
+      "sha256_note": "crates.io .crate checksum for kani-verifier 0.67.0",
+      "expected_version_substr": "0.67",
+      "license": "MIT OR Apache-2.0",
+      "install": "cargo",
+      "crate": "kani-verifier",
+      "required_for_native_matrix": false,
+      "allow_silent_skip": false
+    }
+  ],
+  "notes": [
+    "PLACEHOLDER_RESOLVE_AT_INSTALL is forbidden for required_for_native_matrix tools.",
+    "Optional tools (tla, kani) still carry concrete digests and must not silently skip when invoked."
+  ]
+}

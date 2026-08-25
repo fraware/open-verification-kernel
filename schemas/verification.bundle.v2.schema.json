@@ -29,11 +29,28 @@
     },
     "decision": {
       "type": "object",
-      "required": ["merge_recommendation"],
+      "required": ["decision_state"],
       "properties": {
+        "decision_state": {
+          "type": "string",
+          "enum": ["allow", "block", "needs_review", "unknown", "error", "skipped"]
+        },
+        "original_decision_state": {
+          "type": "string",
+          "enum": ["allow", "block", "needs_review", "unknown", "error", "skipped"]
+        },
         "merge_recommendation": {
           "type": "string",
-          "enum": ["allow", "block", "require_human_review", "allow_with_warning", "require_stronger_check"]
+          "enum": ["allow", "block", "require_human_review", "allow_with_warning", "require_stronger_check"],
+          "description": "Deprecated alias of decision_state."
+        },
+        "controlling_finding_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "finding_contributions": {
+          "type": "array",
+          "items": { "type": "object", "additionalProperties": true }
         },
         "reason": { "type": "string" }
       },

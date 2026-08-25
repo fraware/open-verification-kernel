@@ -1,0 +1,48 @@
+{
+  "capability_id": "lane-ci-secrets-v1",
+  "checker_id": "lane-ci-secrets",
+  "version": "0.1.0",
+  "implementation": "ovk-adapter-lane-ci-secrets",
+  "input_contract": "CI workflow secret exposure abstraction JSON.",
+  "output_contract": "ovk.evidence via ci_secrets lane evaluator",
+  "claim_class": "deterministic_witness",
+  "tool": {
+    "name": "lane-ci-secrets",
+    "adapter": "ovk-adapter-lane-ci-secrets",
+    "adapter_version": "0.1.0"
+  },
+  "backend_class": "static_analyzer",
+  "supported_domains": [
+    "ci_cd"
+  ],
+  "supported_property_kinds": [
+    "data_boundary",
+    "forbidden_configuration",
+    "safety"
+  ],
+  "guarantee": {
+    "type": "deterministic_witness",
+    "meaning_of_pass": "Secrets are not exposed on untrusted workflow triggers.",
+    "meaning_of_fail": "A secret is reachable from an untrusted trigger context.",
+    "meaning_of_unknown": "Workflow abstraction missing or malformed."
+  },
+  "assumptions": [
+    "Workflow triggers and env bindings faithfully represent the change."
+  ],
+  "trusted_components": [
+    "ci_secrets lane evaluator"
+  ],
+  "limits": [
+    "Does not execute GitHub Actions; evaluates the supplied abstraction only."
+  ],
+  "failure_semantics": "Malformed workflows map to unknown; evaluator errors map to error.",
+  "timeout_semantics": "unknown",
+  "unsupported_semantics": "Does not analyze composite actions beyond the supplied steps.",
+  "determinism_status": "deterministic",
+  "release_status": "experimental",
+  "owner": "ovk-maintainers",
+  "native_execution": false,
+  "conformance": {
+    "suite": "conformance/manifest.json"
+  }
+}

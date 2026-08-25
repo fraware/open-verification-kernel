@@ -1,19 +1,56 @@
 {
   "capability_id": "alloy-relational-v1",
-  "tool": {"name": "alloy", "adapter": "ovk-adapter-alloy", "adapter_version": "0.1.0"},
+  "checker_id": "alloy",
+  "version": "0.1.0",
+  "implementation": "ovk-adapter-alloy",
+  "input_contract": "Alloy relational-model contract payload for authorization, infrastructure, or deployment topology.",
+  "output_contract": "ovk.result.v1 with instance counterexamples (deterministic evaluator today)",
+  "claim_class": "bounded_model_check",
+  "tool": {
+    "name": "alloy",
+    "adapter": "ovk-adapter-alloy",
+    "adapter_version": "0.1.0"
+  },
   "backend_class": "model_checker",
-  "input_languages": ["alloy"],
-  "supported_domains": ["authorization", "infrastructure", "deployment"],
-  "supported_property_kinds": ["invariant", "access_control", "forbidden_configuration"],
+  "input_languages": [
+    "alloy"
+  ],
+  "supported_domains": [
+    "authorization",
+    "infrastructure",
+    "deployment"
+  ],
+  "supported_property_kinds": [
+    "invariant",
+    "access_control",
+    "forbidden_configuration"
+  ],
   "guarantee": {
     "type": "bounded_model_check",
     "meaning_of_pass": "Alloy found no counterexample within scope.",
     "meaning_of_fail": "Alloy found a violating instance.",
     "meaning_of_unknown": "Alloy unavailable or model incomplete."
   },
-  "assumptions": ["Relational model captures relevant configuration."],
-  "limits": ["Finite scope analysis only."],
+  "assumptions": [
+    "Relational model captures relevant configuration."
+  ],
+  "trusted_components": [
+    "deterministic relational-model contract evaluator"
+  ],
+  "limits": [
+    "Finite scope analysis only."
+  ],
+  "failure_semantics": "Unavailable Alloy or incomplete model maps to unknown; evaluator errors map to error.",
+  "timeout_semantics": "unknown",
+  "timeout_behavior": "unknown",
+  "unsupported_semantics": "Native Alloy analysis is not implemented; finite scope analysis only under the deterministic evaluator.",
+  "determinism_status": "deterministic",
+  "release_status": "experimental",
+  "owner": "ovk-maintainers",
+  "native_execution": false,
   "result_format": "ovk.result.v1",
   "counterexample_format": "instance",
-  "timeout_behavior": "unknown"
+  "conformance": {
+    "suite": "conformance/manifest.json"
+  }
 }

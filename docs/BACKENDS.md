@@ -1,23 +1,44 @@
 # Backend Execution Guide
 
-OVK exposes a common evidence contract across ten formal-methods backends. Their execution depth is not uniform. This document is the authoritative statement of what each backend actually executes in v1.2.0 RC.
+OVK exposes a common evidence contract across ten formal-methods backends. Their execution depth is not uniform. This document is the authoritative statement of what each backend actually executes for package `1.3.0-rc.1` (engineering candidate).
 
 ## Execution maturity
 
-| Backend | Current execution | Native result can determine evidence? | Current limit |
-|---|---|---:|---|
-| `opa` | Native `opa eval` path plus deterministic self-protection evaluator | Yes, when the OPA strategy is selected | Generic kernel router selections do not yet control lane execution |
-| `z3` | Native Python Z3 SMT query plus deterministic authorization evaluator | Yes, when Z3 is installed | The query checks a normalized authorization abstraction, not arbitrary application code |
-| `cbmc` | Native bounded checking of an explicit or OVK template harness | Yes | Template/generated harnesses model a risk pattern and do not prove that changed project source was compiled into the model |
-| `cedar` | Deterministic Cedar-shaped input evaluator; Cedar CLI version probe | No | Native Cedar policy evaluation is not implemented |
-| `tla+` | Deterministic state-machine contract evaluator | No | TLC execution is not implemented |
-| `kani` | Deterministic Rust-harness contract evaluator | No | Native Kani execution is not implemented |
-| `dafny` | Deterministic proof-obligation contract evaluator | No | Native Dafny verification is not implemented |
-| `verus` | Deterministic verified-Rust contract evaluator | No | Native Verus verification is not implemented |
-| `lean` | Deterministic theorem-obligation contract evaluator | No | Native Lean checking is not implemented |
-| `alloy` | Deterministic relational-model contract evaluator | No | Native Alloy analysis is not implemented |
+<!-- BEGIN OVK_CAPABILITY_TABLE -->
+| Backend | release_status | Current execution | Native result can determine evidence? | Current limit |
+|---|---|---|---:|---|
+| `opa` | preview | Native path available (tool_dependent) | Yes | Does not prove properties of arbitrary program execution |
+| `z3` | preview | Native path available (tool_dependent) | Yes | Does not prove properties outside the encoded abstraction |
+| `cbmc` | preview | Native path available (tool_dependent) | Yes | Bounded verification only |
+| `cedar` | experimental | Deterministic contract evaluator only (deterministic) | No | Native Cedar policy evaluation is not implemented |
+| `tla+` | experimental | Deterministic contract evaluator only (deterministic) | No | TLC execution is not implemented |
+| `kani` | experimental | Deterministic contract evaluator only (deterministic) | No | Native Kani execution is not implemented |
+| `dafny` | experimental | Deterministic contract evaluator only (deterministic) | No | Native Dafny verification is not implemented |
+| `verus` | experimental | Deterministic contract evaluator only (deterministic) | No | Native Verus verification is not implemented |
+| `lean` | experimental | Deterministic contract evaluator only (deterministic) | No | Native Lean checking is not implemented |
+| `alloy` | experimental | Deterministic contract evaluator only (deterministic) | No | Native Alloy analysis is not implemented |
+| `lane-authorization` | experimental | Deterministic contract evaluator only (tool_dependent) | No | Does not reconstruct frameworks beyond the supplied route abstraction. |
+| `lane-ci-secrets` | experimental | Deterministic contract evaluator only (deterministic) | No | Does not analyze composite actions beyond the supplied steps. |
+| `lane-deployment` | experimental | Deterministic contract evaluator only (deterministic) | No | Does not prove runtime orchestrator behavior beyond the abstraction. |
+| `lane-infrastructure` | experimental | Deterministic contract evaluator only (deterministic) | No | Does not prove runtime cloud configurations beyond the abstraction. |
+| `lane-self-protection` | experimental | Deterministic contract evaluator only (deterministic) | No | Does not analyze checks outside the declared OVK gate name. |
+<!-- END OVK_CAPABILITY_TABLE -->
 
-A binary-presence or version probe is never labeled as native verification. Evidence artifacts record `used_native_binary`, the guarantee type, assumptions, and limits.
+A binary-presence or version probe is never labeled as native verification. Evidence artifacts record `used_native_binary`, the guarantee type, assumptions, and limits. Tables above are regenerated from `adapters/*/capability.json` via `scripts/render_capability_tables.py`.
+
+## Adapter conformance (OVK-05)
+
+Every advertised adapter ships a seven-item suite under `adapters/<id>/conformance/`:
+
+1. pass fixture
+2. fail fixture
+3. malformed-output fixture
+4. timeout fixture
+5. unavailable-binary fixture
+6. documentation of what a pass establishes
+7. documentation of what remains outside the claim
+
+Validate with `python scripts/validate_adapter_conformance.py`. `release_status=stable` requires all seven; non-conformant adapters that claim `stable` are auto-downgraded when capability tables are rendered. Only native candidates (`opa`, `z3`, `cbmc`) may become `stable` once fully conformant; other adapters remain `preview`/`experimental`.
 
 ## CI tiers
 
@@ -46,12 +67,13 @@ TLA+, Kani, Dafny, Verus, Lean, and Alloy remain non-blocking integration surfac
 - Deterministic external-adapter results use guarantee type `deterministic_fallback`.
 - Synthetic CBMC harnesses use guarantee type `template_harness_model_check` and state that changed project source was not compiled into the checked model.
 - Only an explicitly supplied CBMC harness can use guarantee type `bounded_model_checking`.
+- **Strict post-execution fallback is disabled by default.** Set `routing.allow_fallback: true` in `.verification/config.yml` only when you intentionally accept constrained fallback rules; native timeout, tool error, invalid output, and resource exhaustion still must not become passing results. See [POLICY.md](POLICY.md).
 
 ## Capability manifests and routing
 
 Capability manifests live under `adapters/*/capability.json` and are packaged with the wheel. They support intent/backend ranking and MCP capability discovery.
 
-In v1.2.0 RC, router output is advisory metadata. Core lane obligations still execute their lane evaluator, and the selected generic backend does not yet control compilation or execution. Evidence records `routing_enforced: false` until the backend-selection control plane is implemented.
+The typed backend control plane (`BackendControlPlane` / `route_obligation`) can enforce lane routing when policy opts in. Default product path remains conservative: evidence still records whether routing was enforced for that run. Generic experimental adapters do not claim native proof execution.
 
 ## Entry points
 

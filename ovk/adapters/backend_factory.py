@@ -8,11 +8,14 @@ from ovk.adapters.external.stub import evaluate_with_optional_binary
 
 
 def _policy_pass(data: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
+    from ovk.adapters.wave2_oracle import classify_conformance_flags
+
+    early = classify_conformance_flags(data)
+    if early is not None:
+        return early
     violations = data.get("violations", [])
     if violations:
         return "fail", [{"summary": str(violations[0]), "failure_mode": "policy_violation"}]
-    if data.get("malformed"):
-        return "unknown", [{"summary": "malformed input", "failure_mode": "malformed_input"}]
     return "pass", []
 
 

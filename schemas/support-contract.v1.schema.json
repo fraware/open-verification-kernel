@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-verification-kernel.dev/schemas/support-contract.v1.schema.json",
+  "title": "OVK Source Profile Support Contract v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile_id",
+    "contract_version",
+    "proposition",
+    "guarantee_type",
+    "compiler_binding",
+    "supported_constructs",
+    "excluded_constructs",
+    "required_materials",
+    "coverage_criteria",
+    "language_or_tool_versions"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "ovk.support_contract.v1"
+    },
+    "profile_id": { "type": "string", "minLength": 1 },
+    "contract_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "proposition": { "type": "string", "minLength": 1 },
+    "guarantee_type": { "type": "string", "minLength": 1 },
+    "compiler_binding": { "type": "string", "minLength": 1 },
+    "lane": { "type": "string" },
+    "supported_constructs": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "excluded_constructs": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "required_materials": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
+    },
+    "coverage_criteria": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["complete_requires", "unsupported_forces"],
+      "properties": {
+        "complete_requires": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "unsupported_forces": {
+          "type": "string",
+          "const": "review"
+        }
+      }
+    },
+    "language_or_tool_versions": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

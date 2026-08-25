@@ -1,13 +1,9 @@
-"""Express source-grounded authorization compiler.
+"""Express source-grounded authorization compiler (legacy regex / advisory).
 
-Supports:
-* ``express.Router()`` and ``app.use`` mounting
-* middleware order on routers/app
-* route handlers (``get/post/...``)
-* imported middleware identities
-* common auth/role checks (``requireAuth``, ``requireAdmin``, role arrays)
-
-Dynamic paths and unrecognized middleware are marked unsupported.
+Production profile ``authorization.express.ast_v1`` uses
+``ExpressAstAuthorizationCompiler`` in ``express_ast.py``. This regex compiler
+remains for advisory/legacy callers only and must not contribute strict
+complete coverage.
 """
 
 from __future__ import annotations
@@ -34,7 +30,10 @@ _DYNAMIC = re.compile(r"\.(?:get|post|put|patch|delete)\(\s*(?![`'\"]).+?\)")
 
 
 class ExpressAuthorizationCompiler:
+    """Advisory regex Express compiler — not strict-complete."""
+
     framework = "express"
+    advisory_only = True
 
     def compile(self, materials: AuthMaterials) -> AuthorizationIR:
         base_index = self._index(materials.base_files)
@@ -49,7 +48,7 @@ class ExpressAuthorizationCompiler:
             key=lambda item: item.name,
         )
         unsupported = sorted(set(base_index["unsupported"] + head_index["unsupported"]))
-        warnings: list[str] = []
+        warnings: list[str] = ["compiler_mode:regex_advisory", "not_strict_complete"]
         if not materials.has_base():
             warnings.append("base materials missing")
         if not materials.has_head():
@@ -62,7 +61,7 @@ class ExpressAuthorizationCompiler:
             routes=sorted(routes, key=lambda item: (item.path, ",".join(item.methods), item.route_id)),
             mounts=list(mounts),
             dependencies=list(dependencies),
-            unsupported_constructs=unsupported,
+            unsupported_constructs=unsupported + ["regex_compiler_advisory_only"],
             warnings=warnings,
             materials=materials.paths,
         )

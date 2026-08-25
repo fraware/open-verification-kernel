@@ -1,0 +1,14 @@
+{
+  "schema_version": "formal_pr_bench.case_provenance.v1",
+  "case_id": "infra_private_sensitive_variant_1",
+  "source": "benchmarks/formal_pr_bench/seed_cases_expanded.json",
+  "author": "fraware",
+  "date": "2026-07-25",
+  "derivation": "expanded_variant",
+  "partition": "train",
+  "template_dev": false,
+  "fixture": "examples/infrastructure_exposure/input_private_sensitive_resource.json",
+  "category": "lane",
+  "license": "Apache-2.0",
+  "notes": "Evaluation/regression case; cite benchmark_version + partition when publishing scores."
+}

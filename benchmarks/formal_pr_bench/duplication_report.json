@@ -1,0 +1,631 @@
+{
+  "schema_version": "formal_pr_bench.duplication_report.v1",
+  "benchmark_version": "v1",
+  "method": {
+    "fixture_path_collision": "exact",
+    "outcome_fingerprint": "sha256 over selected expectation fields",
+    "real_diff_text": "token Jaccard >= 0.85 on normalized unified diffs"
+  },
+  "fixture_path_duplicates": [
+    {
+      "fixture": "examples/auth_regression/input_admin_bypass.json",
+      "case_ids": [
+        "auth_bypass",
+        "auth_bypass_variant_1",
+        "auth_bypass_variant_2"
+      ]
+    },
+    {
+      "fixture": "examples/auth_regression/input_admin_protected.json",
+      "case_ids": [
+        "auth_preserved",
+        "auth_preserved_variant_1",
+        "auth_preserved_variant_2"
+      ]
+    },
+    {
+      "fixture": "examples/auth_regression/input_malformed_missing_routes.json",
+      "case_ids": [
+        "auth_malformed",
+        "auth_malformed_variant_1",
+        "auth_malformed_variant_2"
+      ]
+    },
+    {
+      "fixture": "examples/backends/alloy_fail.json",
+      "case_ids": [
+        "alloy_fail",
+        "alloy_fail_variant_1"
+      ]
+    },
+    {
+      "fixture": "examples/backends/alloy_pass.json",
+      "case_ids": [
+        "alloy_pass",
+        "alloy_pass_variant_1"
+      ]
+    },
+    {
+      "fixture": "examples/backends/cbmc_fail.json",
+      "case_ids": [
+        "cbmc_fail",
+        "cbmc_fail_variant_1"
+      ]
+    },
+    {
+      "fixture": "examples/backends/cbmc_native_buffer_bounds_pass.json",
+      "case_ids": [
+        "cbmc_native_buffer_bounds_pass",
+        "cbmc_native_buffer_bounds_pass_variant_1"
+      ]
+    },
+    {
+      "fixture": "examples/backends/cbmc_native_integer_overflow_pass.json",
+      "case_ids": [
+        "cbmc_native_integer_overflow_pass",
+        "cbmc_native_integer_overflow_pass_variant_1"
+      ]
+    },
+    {
+      "fixture": "examples/backends/cbmc_native_uaf_pass.json",
+      "case_ids": [
+        "cbmc_native_uaf_pass",
+        "cbmc_native_uaf_pass_variant_1"
+      ]
+    },
+    {
+      "fixture": "examples/backends/cbmc_native_unchecked_copy_pass.json",
+      "case_ids": [
+        "cbmc_native_unchecked_copy_pass",
+        "cbmc_native_unchecked_copy_pass_variant_1"
+      ]
+    },
+    {
+      "fixture": "examples/backends/cbmc_pass.json",
+      "case_ids": [
+        "cbmc_pass",
+        "cbmc_pass_variant_1"
+      ]
+    },
+    {
+      "fixture": "examples/backends/cedar_fail.json",
+      "case_ids": [
+        "cedar_fail",
+        "cedar_fail_variant_1",
+        "cedar_fail_variant_2"
+      ]
+    },
+    {
+      "fixture": "examples/backends/cedar_malformed.json",
+      "case_ids": [
+        "cedar_malformed",
+        "cedar_malformed_variant_1",
+        "cedar_malformed_variant_2"
+      ]
+    },
+    {
+      "fixture": "examples/backends/cedar_pass.json",
+      "case_ids": [
+        "cedar_pass",
+        "cedar_pass_variant_1",
+        "cedar_pass_variant_2"
+      ]
+    },
+    {
+      "fixture": "examples/backends/cedar_unknown.json",
+      "case_ids": [
+        "cedar_unknown",
+        "cedar_unknown_variant_1",
+        "cedar_unknown_variant_2"
+      ]
+    },
+    {
+      "fixture": "examples/backends/dafny_fail.json",
+      "case_ids": [
+        "dafny_fail",
+        "dafny_fail_variant_1"
+      ]
+    },
+    {
+      "fixture": "examples/backends/dafny_pass.json",
+      "case_ids": [
+        "dafny_pass",
+        "dafny_pass_variant_1"
+      ]
+    },
+    {
+      "fixture": "examples/backends/kani_fail.json",
+      "case_ids": [
+        "kani_fail",
+        "kani_fail_variant_1",
+        "kani_fail_variant_2"
+      ]
+    },
+    {
+      "fixture": "examples/backends/kani_malformed.json",
+      "case_ids": [
+        "kani_malformed",
+        "kani_malformed_variant_1",
+        "kani_malformed_variant_2"
+      ]
+    },
+    {
+      "fixture": "examples/backends/kani_pass.json",
+      "case_ids": [
+        "kani_pass",
+        "kani_pass_variant_1",
+        "kani_pass_variant_2"
+      ]
+    },
+    {
+      "fixture": "examples/backends/kani_unknown.json",
+      "case_ids": [
+        "kani_unknown",
+        "kani_unknown_variant_1",
+        "kani_unknown_variant_2"
+      ]
+    },
+    {
+      "fixture": "examples/backends/lean_fail.json",
+      "case_ids": [
+        "lean_fail",
+        "lean_fail_variant_1"
+      ]
+    },
+    {
+      "fixture": "examples/backends/lean_pass.json",
+      "case_ids": [
+        "lean_pass",
+        "lean_pass_variant_1"
+      ]
+    },
+    {
+      "fixture": "examples/backends/tla_fail.json",
+      "case_ids": [
+        "tla_fail",
+        "tla_fail_variant_1",
+        "tla_fail_variant_2"
+      ]
+    },
+    {
+      "fixture": "examples/backends/tla_malformed.json",
+      "case_ids": [
+        "tla_malformed",
+        "tla_malformed_variant_1",
+        "tla_malformed_variant_2"
+      ]
+    },
+    {
+      "fixture": "examples/backends/tla_pass.json",
+      "case_ids": [
+        "tla_pass",
+        "tla_pass_variant_1",
+        "tla_pass_variant_2"
+      ]
+    },
+    {
+      "fixture": "examples/backends/tla_unknown.json",
+      "case_ids": [
+        "tla_unknown",
+        "tla_unknown_variant_1",
+        "tla_unknown_variant_2"
+      ]
+    },
+    {
+      "fixture": "examples/backends/verus_fail.json",
+      "case_ids": [
+        "verus_fail",
+        "verus_fail_variant_1"
+      ]
+    },
+    {
+      "fixture": "examples/backends/verus_pass.json",
+      "case_ids": [
+        "verus_pass",
+        "verus_pass_variant_1"
+      ]
+    },
+    {
+      "fixture": "examples/ci_secrets/input_secrets_exposed.json",
+      "case_ids": [
+        "ci_secrets_exposed",
+        "ci_secrets_exposed_variant_1",
+        "ci_secrets_exposed_variant_2"
+      ]
+    },
+    {
+      "fixture": "examples/ci_secrets/input_secrets_safe.json",
+      "case_ids": [
+        "ci_secrets_safe",
+        "ci_secrets_safe_variant_1",
+        "ci_secrets_safe_variant_2"
+      ]
+    },
+    {
+      "fixture": "examples/deployment_state/input_skipped_approval.json",
+      "case_ids": [
+        "deployment_skipped_approval",
+        "deployment_skipped_approval_variant_1",
+        "deployment_skipped_approval_variant_2"
+      ]
+    },
+    {
+      "fixture": "examples/deployment_state/input_valid_approval_path.json",
+      "case_ids": [
+        "deployment_valid_path",
+        "deployment_valid_path_variant_1",
+        "deployment_valid_path_variant_2"
+      ]
+    },
+    {
+      "fixture": "examples/infrastructure_exposure/input_private_sensitive_resource.json",
+      "case_ids": [
+        "infra_private_sensitive",
+        "infra_private_sensitive_variant_1",
+        "infra_private_sensitive_variant_2"
+      ]
+    },
+    {
+      "fixture": "examples/infrastructure_exposure/input_public_sensitive_resource.json",
+      "case_ids": [
+        "infra_public_sensitive",
+        "infra_public_sensitive_variant_1",
+        "infra_public_sensitive_variant_2"
+      ]
+    },
+    {
+      "fixture": "examples/multi_surface/pr_combined.diff",
+      "case_ids": [
+        "multi_surface_combined_pr",
+        "recall_multi_surface_combined"
+      ]
+    },
+    {
+      "fixture": "examples/no_agent_self_approval/input_gate_preserved.json",
+      "case_ids": [
+        "control_preserved",
+        "control_preserved_variant_1",
+        "control_preserved_variant_2"
+      ]
+    },
+    {
+      "fixture": "examples/no_agent_self_approval/input_gate_removed.json",
+      "case_ids": [
+        "control_removed",
+        "control_removed_variant_1",
+        "control_removed_variant_2"
+      ]
+    },
+    {
+      "fixture": "examples/no_agent_self_approval/input_missing_metadata.json",
+      "case_ids": [
+        "control_metadata_missing",
+        "control_metadata_missing_variant_1",
+        "control_metadata_missing_variant_2"
+      ]
+    }
+  ],
+  "outcome_near_duplicates": [
+    {
+      "fingerprint": "043b4798d055dd048639ca0bf33d871e5829644565e37ff5e97a4d248737f600",
+      "case_ids": [
+        "kani_fail",
+        "kani_fail_variant_1",
+        "kani_fail_variant_2"
+      ]
+    },
+    {
+      "fingerprint": "0e77b7edcddd6529c16fa737cfe8ad4ffa2ec09ca20d403474e35f74c461906d",
+      "case_ids": [
+        "tla_pass",
+        "tla_pass_variant_1",
+        "tla_pass_variant_2"
+      ]
+    },
+    {
+      "fingerprint": "197bc5fde6d6bf6097b2bab3c935e53071241b430c10c9524f3399442cfbdfb5",
+      "case_ids": [
+        "lean_fail",
+        "lean_fail_variant_1"
+      ]
+    },
+    {
+      "fingerprint": "266504e9b13f303af716d30b6d622efb8115b92e447c9b331b5949c1cccbdd98",
+      "case_ids": [
+        "cedar_fail",
+        "cedar_fail_variant_1",
+        "cedar_fail_variant_2"
+      ]
+    },
+    {
+      "fingerprint": "2808e2e15ecd72ec73372204403b2492a8f2e8bd528ce3de465f5477ef6df601",
+      "case_ids": [
+        "auth_preserved",
+        "auth_preserved_variant_1",
+        "auth_preserved_variant_2"
+      ]
+    },
+    {
+      "fingerprint": "289ebeb734fce28babb4966f4ed3a115177d305996db492f629dad986205cf77",
+      "case_ids": [
+        "control_removed",
+        "control_removed_variant_1",
+        "control_removed_variant_2"
+      ]
+    },
+    {
+      "fingerprint": "2cdfc1c1b41b8dc5cc5b4db62204c02b272ec45cd24dbfbd89e4ede8f64037bb",
+      "case_ids": [
+        "kani_malformed",
+        "kani_malformed_variant_1",
+        "kani_malformed_variant_2"
+      ]
+    },
+    {
+      "fingerprint": "2f40724f281a035b6fb3f8dc02c625e43f02220b54ce38e17e7b5b7ba106ca21",
+      "case_ids": [
+        "dafny_pass",
+        "dafny_pass_variant_1"
+      ]
+    },
+    {
+      "fingerprint": "36b3fb322fa047071dd7e8942f35701de6cd07930fec8fc4a6d0a0fac351f120",
+      "case_ids": [
+        "auth_malformed",
+        "auth_malformed_variant_1",
+        "auth_malformed_variant_2"
+      ]
+    },
+    {
+      "fingerprint": "49e34369a6d84ea2d34a4b35cc2a107ba431f73e0042ca30ab993659c5949c03",
+      "case_ids": [
+        "verus_fail",
+        "verus_fail_variant_1"
+      ]
+    },
+    {
+      "fingerprint": "53471e8a926dc2a0ada741025e05f46be24bd2703df975affcbbdd2344d995c8",
+      "case_ids": [
+        "kani_unknown",
+        "kani_unknown_variant_1",
+        "kani_unknown_variant_2"
+      ]
+    },
+    {
+      "fingerprint": "565dc78b30156718ed8772ec01ae8a78c81409268da24b34555918fabc07d456",
+      "case_ids": [
+        "infra_public_sensitive",
+        "infra_public_sensitive_variant_1",
+        "infra_public_sensitive_variant_2"
+      ]
+    },
+    {
+      "fingerprint": "57bc9f8a6beb5318b5ee0f4adaf3e36620b9cbcf310bf230dcb512aaf251d328",
+      "case_ids": [
+        "cedar_pass",
+        "cedar_pass_variant_1",
+        "cedar_pass_variant_2"
+      ]
+    },
+    {
+      "fingerprint": "64ac5d9130e63cec5d3a190abb97e7d998d76106f52909430470f459b2600ccf",
+      "case_ids": [
+        "cbmc_native_unchecked_copy_pass",
+        "cbmc_native_unchecked_copy_pass_variant_1"
+      ]
+    },
+    {
+      "fingerprint": "6825ec5f920d1dd77ac844dc4244742dacf57d83e674e1c0a718ea49c72a0299",
+      "case_ids": [
+        "deployment_skipped_approval",
+        "deployment_skipped_approval_variant_1",
+        "deployment_skipped_approval_variant_2"
+      ]
+    },
+    {
+      "fingerprint": "6af8ca43084fec42674341788bad573d32b7683a857ce9657cac8134fffa0c18",
+      "case_ids": [
+        "ci_secrets_exposed",
+        "ci_secrets_exposed_variant_1",
+        "ci_secrets_exposed_variant_2"
+      ]
+    },
+    {
+      "fingerprint": "6e53b424f8bbbcbf3d57d7cb864a78ada6e843a82c29ad80b326e029f10d15b8",
+      "case_ids": [
+        "control_metadata_missing",
+        "control_metadata_missing_variant_1",
+        "control_metadata_missing_variant_2"
+      ]
+    },
+    {
+      "fingerprint": "6e984c25d11073694021a007eedcd0831899be6e972ce4664f9bae5d0f808453",
+      "case_ids": [
+        "lean_pass",
+        "lean_pass_variant_1"
+      ]
+    },
+    {
+      "fingerprint": "71b7998f55e7f923b972ccffdad5d69fabc7b31c552e10b424298af6d5e75bd6",
+      "case_ids": [
+        "control_preserved",
+        "control_preserved_variant_1",
+        "control_preserved_variant_2"
+      ]
+    },
+    {
+      "fingerprint": "94c9760b9dcad1b4fd9c3fe62a0b3e727598ede0e1c6402b405aab32b8e250e0",
+      "case_ids": [
+        "cbmc_native_buffer_bounds_pass",
+        "cbmc_native_buffer_bounds_pass_variant_1"
+      ]
+    },
+    {
+      "fingerprint": "9f12dc52449c75ed94354304d66735757000cd295dcbeebde4abd9139bb32aad",
+      "case_ids": [
+        "tla_unknown",
+        "tla_unknown_variant_1",
+        "tla_unknown_variant_2"
+      ]
+    },
+    {
+      "fingerprint": "a50b8ff467857b62fa2ffee18efb93cf34941f47149db359ef2e64c80743cc0b",
+      "case_ids": [
+        "alloy_fail",
+        "alloy_fail_variant_1"
+      ]
+    },
+    {
+      "fingerprint": "a827abc0cf2a41984fb1cfa20676858cb147eca72c245fb66041c86c12d7219d",
+      "case_ids": [
+        "alloy_pass",
+        "alloy_pass_variant_1"
+      ]
+    },
+    {
+      "fingerprint": "a8a0c6c9938631ba8235702d32e0f8b881026637efe0bf0d3d5d9a0acdb6de11",
+      "case_ids": [
+        "auth_bypass",
+        "auth_bypass_variant_1",
+        "auth_bypass_variant_2"
+      ]
+    },
+    {
+      "fingerprint": "b260621c384abfe27e8335fe0ddcdef624b09525301a377c0f48e1e2e7d9c7d0",
+      "case_ids": [
+        "tla_malformed",
+        "tla_malformed_variant_1",
+        "tla_malformed_variant_2"
+      ]
+    },
+    {
+      "fingerprint": "be08cbbc374fe975daf3cf7f333997ddf67f841a8f0e1dce82f356e68e0830df",
+      "case_ids": [
+        "dafny_fail",
+        "dafny_fail_variant_1"
+      ]
+    },
+    {
+      "fingerprint": "be908a6692acaa5354d532a71bb40784d66b4809a862ecc736ae335ddbae5428",
+      "case_ids": [
+        "deployment_valid_path",
+        "deployment_valid_path_variant_1",
+        "deployment_valid_path_variant_2"
+      ]
+    },
+    {
+      "fingerprint": "cde1df5205315274dedf956b4ad003ff2645566752810f25b4fd7cfaaa239a68",
+      "case_ids": [
+        "cbmc_native_integer_overflow_pass",
+        "cbmc_native_integer_overflow_pass_variant_1"
+      ]
+    },
+    {
+      "fingerprint": "d819e0585505c710308e48b58e2b15702d41326b6f749b7e259207a4505098db",
+      "case_ids": [
+        "infra_private_sensitive",
+        "infra_private_sensitive_variant_1",
+        "infra_private_sensitive_variant_2"
+      ]
+    },
+    {
+      "fingerprint": "d8e93317f6c006f40bc5510b3be8e639b4af4c2c3ee2b5840fa9a498483623e6",
+      "case_ids": [
+        "cbmc_pass",
+        "cbmc_pass_variant_1"
+      ]
+    },
+    {
+      "fingerprint": "dd0d00f176d3940f66a68ad99c81b69a11a24de19b3e3e080252a55797bfd651",
+      "case_ids": [
+        "cbmc_fail",
+        "cbmc_fail_variant_1"
+      ]
+    },
+    {
+      "fingerprint": "e266ae5dace85f9d91897e6aaa75a0b8e79ed2bd7e026019172b7685b7aa9361",
+      "case_ids": [
+        "tla_fail",
+        "tla_fail_variant_1",
+        "tla_fail_variant_2"
+      ]
+    },
+    {
+      "fingerprint": "e4cada696c5440f57a4f5535eaeda81c8ff7abfcaa50d65c95e0aec72a6aa35c",
+      "case_ids": [
+        "kani_pass",
+        "kani_pass_variant_1",
+        "kani_pass_variant_2"
+      ]
+    },
+    {
+      "fingerprint": "e62522616303c39c7fb87e59353b7fc04d28873dcd44880a2a4eef2731ed283d",
+      "case_ids": [
+        "cbmc_native_uaf_pass",
+        "cbmc_native_uaf_pass_variant_1"
+      ]
+    },
+    {
+      "fingerprint": "e9152171f47b86ae6782aa5fd7f00e91543193f2faaa726315b81a05d9d33330",
+      "case_ids": [
+        "ci_secrets_safe",
+        "ci_secrets_safe_variant_1",
+        "ci_secrets_safe_variant_2"
+      ]
+    },
+    {
+      "fingerprint": "eb150d10105ad85b069c3ebd43fee41ca7ea94d3f721dbaf15afab20d9b26a34",
+      "case_ids": [
+        "cedar_malformed",
+        "cedar_malformed_variant_1",
+        "cedar_malformed_variant_2"
+      ]
+    },
+    {
+      "fingerprint": "f5733bdf5014f472d006914ab177b9608e537822ad27660b2292dc177160bfe4",
+      "case_ids": [
+        "verus_pass",
+        "verus_pass_variant_1"
+      ]
+    },
+    {
+      "fingerprint": "fe406be62d4dfb0425ed1744cdf776af860f7dc032a8ecb1a057846b29df7ce7",
+      "case_ids": [
+        "cedar_unknown",
+        "cedar_unknown_variant_1",
+        "cedar_unknown_variant_2"
+      ]
+    }
+  ],
+  "real_diff_text_near_duplicates": [
+    {
+      "case_ids": [
+        "rd_auth_admin_route_guarded",
+        "rd_auth_admin_route_unguarded"
+      ],
+      "jaccard": 0.95,
+      "threshold": 0.85
+    },
+    {
+      "case_ids": [
+        "rd_ci_secrets_pr_preview",
+        "rd_workflow_secrets_partial_hunk"
+      ],
+      "jaccard": 1.0,
+      "threshold": 0.85
+    },
+    {
+      "case_ids": [
+        "rd_deployment_direct_skip",
+        "rd_deployment_valid_chain"
+      ],
+      "jaccard": 0.963,
+      "threshold": 0.85
+    }
+  ],
+  "summary": {
+    "fixture_path_duplicate_groups": 39,
+    "outcome_near_duplicate_groups": 38,
+    "real_diff_text_near_duplicate_pairs": 3
+  }
+}

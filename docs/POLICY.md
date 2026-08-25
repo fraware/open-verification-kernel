@@ -6,6 +6,8 @@ Schema: `schemas/verification.config.schema.json`.
 
 When you run `ovk check`, OVK reads `default_on_unknown` from `.verification/config.yml` and uses it for merge recommendations. Focused per-check commands (`ovk ci-secrets`, etc.) use the schema default unless you load policy explicitly.
 
+**Fallback:** post-execution strict fallback is **disabled** unless you set `routing.allow_fallback: true`. Even then, native timeout, tool error, invalid output, and resource exhaustion must not become passing results. See [BACKENDS.md](BACKENDS.md).
+
 Tests: `tests/test_policy_config.py` and routing tests under `tests/`.
 
 ## Example 1: Advisory OSS default

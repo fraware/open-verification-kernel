@@ -9,7 +9,6 @@ from ovk.adapters.workflow.diff_extract import workflow_inputs_from_diff
 from ovk.adapters.workflow.yaml_extract import workflow_yaml_to_ci_secrets_input
 from ovk.core.bundle import make_bundle
 from ovk.core.changed_files import load_changed_files
-from ovk.core.decision import decide
 from ovk.core.diff_parser import is_unified_diff
 from ovk.core.evidence_quality import build_evidence_quality_report
 from ovk.core.models import EvidenceBundle
@@ -110,12 +109,17 @@ def create_evidence_bundle(evidence_items: list[dict[str, Any]]) -> dict[str, An
 
 
 def get_merge_recommendation(evidence_bundle: dict[str, Any]) -> dict[str, Any]:
-    """Compute merge recommendation from an evidence bundle."""
+    """Compute decision_state (and deprecated merge_recommendation alias) from a bundle."""
+    from ovk.core.decision import decide_with_reason
+
     bundle = EvidenceBundle.model_validate(evidence_bundle)
-    recommendation = decide(bundle, enforce=True)
+    decision = decide_with_reason(bundle, enforce=True)
     quality = build_evidence_quality_report(bundle)
     return {
-        "merge_recommendation": recommendation.value,
+        "decision_state": decision["decision_state"],
+        "merge_recommendation": decision["merge_recommendation"],
+        "original_decision_state": decision["original_decision_state"],
+        "controlling_finding_ids": decision["controlling_finding_ids"],
         "quality_passed": quality.passed,
         "quality_issues": [issue.to_dict() for issue in quality.issues],
     }

@@ -44,7 +44,7 @@ def render_badge(
     cases_passed = int(summary.get("cases_passed", 0))
     rate = (cases_passed / cases_total * 100.0) if cases_total else 0.0
     bench_sha = benchmark_source_sha or resolve_benchmark_source_sha()
-    verified_sha = verified_source_sha or resolve_verified_source_sha()
+    verified_sha = verified_source_sha  # never auto-resolve from env for badges
     payload: dict[str, Any] = {
         "schemaVersion": 1,
         "label": "FormalPR-Bench",
@@ -53,6 +53,8 @@ def render_badge(
     }
     if bench_sha:
         payload["benchmark_source_sha"] = bench_sha
+    # WP-15: badges must not mint verified_source_sha unless explicitly supplied
+    # by release-ledger machinery (WP-17). Env auto-resolution is disabled here.
     if verified_sha:
         payload["verified_source_sha"] = verified_sha
     return payload
@@ -68,7 +70,7 @@ def render_summary(
     summary = leaderboard.get("summary", {})
     timing = leaderboard.get("timing_ms", {})
     bench_sha = benchmark_source_sha or resolve_benchmark_source_sha()
-    verified_sha = verified_source_sha or resolve_verified_source_sha()
+    verified_sha = verified_source_sha  # explicit only; badges do not mint from env
     payload: dict[str, Any] = {
         "schema_version": "formal_pr_bench.summary.v1",
         "generated_from": leaderboard.get("schema_version", "formal_pr_bench.leaderboard.v1"),
@@ -113,7 +115,7 @@ def write_outputs(
     """Read leaderboard and write badge + summary files."""
     leaderboard = json.loads(leaderboard_path.read_text(encoding="utf-8"))
     bench_sha = benchmark_source_sha or resolve_benchmark_source_sha()
-    verified_sha = verified_source_sha or resolve_verified_source_sha()
+    verified_sha = verified_source_sha  # WP-15: never auto-mint verified_source_sha
     badge = render_badge(
         leaderboard,
         benchmark_source_sha=bench_sha,

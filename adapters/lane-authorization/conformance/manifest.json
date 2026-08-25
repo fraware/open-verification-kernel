@@ -1,0 +1,26 @@
+{
+  "adapter_id": "lane-authorization",
+  "kind": "lane_adapter",
+  "schema_version": "ovk.adapter_conformance.v1",
+  "fixtures": {
+    "pass": {
+      "path": "examples/auth_regression/input_admin_protected.json"
+    },
+    "fail": {
+      "path": "examples/auth_regression/input_admin_bypass.json"
+    },
+    "malformed": {
+      "path": "examples/auth_regression/input_malformed_missing_routes.json"
+    },
+    "timeout": {
+      "path": "fixtures/timeout.json"
+    },
+    "unavailable": {
+      "path": "fixtures/unavailable.json"
+    }
+  },
+  "docs": {
+    "pass_establishes": "CLAIMS.md#pass-establishes",
+    "outside_claim": "CLAIMS.md#outside-the-claim"
+  }
+}

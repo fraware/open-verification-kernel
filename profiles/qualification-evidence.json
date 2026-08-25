@@ -1,0 +1,672 @@
+{
+  "schema_version": "ovk.qualification_evidence.v1",
+  "description": "Named evidence entries for source-profile qualification. Counts are derived by aggregating these IDs; summary integers must not be hand-authored here.",
+  "entries": [
+    {
+      "evidence_id": "fastapi.ast.positive.admin_depends",
+      "profile_id": "authorization.fastapi.ast_v1",
+      "bucket": "positive",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_fastapi_positive_admin_depends"
+    },
+    {
+      "evidence_id": "fastapi.ast.positive.router_prefix",
+      "profile_id": "authorization.fastapi.ast_v1",
+      "bucket": "positive",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_fastapi_positive_router_prefix"
+    },
+    {
+      "evidence_id": "fastapi.ast.positive.multi_dependency",
+      "profile_id": "authorization.fastapi.ast_v1",
+      "bucket": "positive",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_fastapi_positive_multi_dependency"
+    },
+    {
+      "evidence_id": "fastapi.ast.negative.admin_bypass",
+      "profile_id": "authorization.fastapi.ast_v1",
+      "bucket": "negative",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_fastapi_negative_admin_bypass"
+    },
+    {
+      "evidence_id": "fastapi.ast.negative.dynamic_path",
+      "profile_id": "authorization.fastapi.ast_v1",
+      "bucket": "negative",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_fastapi_negative_dynamic_path"
+    },
+    {
+      "evidence_id": "fastapi.ast.negative.heuristic_name_only",
+      "profile_id": "authorization.fastapi.ast_v1",
+      "bucket": "negative",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_fastapi_negative_heuristic_name_only"
+    },
+    {
+      "evidence_id": "fastapi.ast.unsupported.star_import",
+      "profile_id": "authorization.fastapi.ast_v1",
+      "bucket": "unsupported",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_fastapi_unsupported_star_import"
+    },
+    {
+      "evidence_id": "fastapi.ast.malformed.syntax",
+      "profile_id": "authorization.fastapi.ast_v1",
+      "bucket": "malformed",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_fastapi_malformed_syntax"
+    },
+    {
+      "evidence_id": "fastapi.ast.unknown.missing_base",
+      "profile_id": "authorization.fastapi.ast_v1",
+      "bucket": "unknown",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_fastapi_unknown_missing_base"
+    },
+    {
+      "evidence_id": "fastapi.ast.timeout.unknown_semantics",
+      "profile_id": "authorization.fastapi.ast_v1",
+      "bucket": "timeout",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_fastapi_timeout_maps_to_unknown_semantics"
+    },
+    {
+      "evidence_id": "fastapi.ast.source_range.route",
+      "profile_id": "authorization.fastapi.ast_v1",
+      "bucket": "source_range",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_fastapi_source_range_on_route"
+    },
+    {
+      "evidence_id": "fastapi.ast.evidence_invariant.roundtrip",
+      "profile_id": "authorization.fastapi.ast_v1",
+      "bucket": "evidence_invariant",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_fastapi_evidence_invariant_roundtrip"
+    },
+    {
+      "evidence_id": "fastapi.ast.end_to_end.bridge",
+      "profile_id": "authorization.fastapi.ast_v1",
+      "bucket": "end_to_end_bundle",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_fastapi_end_to_end_bridge_compile"
+    },
+    {
+      "evidence_id": "fastapi.ast.installed_package.import",
+      "profile_id": "authorization.fastapi.ast_v1",
+      "bucket": "installed_package",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_fastapi_installed_package_import"
+    },
+    {
+      "evidence_id": "fastapi.ast.action.consumer_template",
+      "profile_id": "authorization.fastapi.ast_v1",
+      "bucket": "action",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_fastapi_action_pin_shape_in_consumer_template"
+    },
+    {
+      "evidence_id": "fastapi.ast.candidate.materials_trusted",
+      "profile_id": "authorization.fastapi.ast_v1",
+      "bucket": "candidate_gate",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_fastapi_positive_admin_depends",
+      "gate": "materials_trusted"
+    },
+    {
+      "evidence_id": "fastapi.ast.candidate.measured_coverage_complete",
+      "profile_id": "authorization.fastapi.ast_v1",
+      "bucket": "candidate_gate",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_fastapi_positive_admin_depends",
+      "gate": "measured_coverage_complete"
+    },
+    {
+      "evidence_id": "fastapi.ast.candidate.executable_path_complete",
+      "profile_id": "authorization.fastapi.ast_v1",
+      "bucket": "candidate_gate",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_fastapi_end_to_end_bridge_compile",
+      "gate": "executable_path_complete"
+    },
+    {
+      "evidence_id": "express.ast.positive.require_admin",
+      "profile_id": "authorization.express.ast_v1",
+      "bucket": "positive",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_express_positive_require_admin"
+    },
+    {
+      "evidence_id": "express.ast.positive.router_mount",
+      "profile_id": "authorization.express.ast_v1",
+      "bucket": "positive",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_express_positive_router_mount"
+    },
+    {
+      "evidence_id": "express.ast.positive.route_chain",
+      "profile_id": "authorization.express.ast_v1",
+      "bucket": "positive",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_express_positive_route_chain"
+    },
+    {
+      "evidence_id": "express.ast.negative.middleware_removal",
+      "profile_id": "authorization.express.ast_v1",
+      "bucket": "negative",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_express_negative_middleware_removal"
+    },
+    {
+      "evidence_id": "express.ast.negative.dynamic_path",
+      "profile_id": "authorization.express.ast_v1",
+      "bucket": "negative",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_express_negative_dynamic_path"
+    },
+    {
+      "evidence_id": "express.ast.negative.spread_middleware",
+      "profile_id": "authorization.express.ast_v1",
+      "bucket": "negative",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_express_negative_spread_middleware"
+    },
+    {
+      "evidence_id": "express.ast.unsupported.eval",
+      "profile_id": "authorization.express.ast_v1",
+      "bucket": "unsupported",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_express_unsupported_eval"
+    },
+    {
+      "evidence_id": "express.ast.malformed.unbalanced",
+      "profile_id": "authorization.express.ast_v1",
+      "bucket": "malformed",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_express_malformed_unbalanced"
+    },
+    {
+      "evidence_id": "express.ast.unknown.missing_base",
+      "profile_id": "authorization.express.ast_v1",
+      "bucket": "unknown",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_express_unknown_missing_base"
+    },
+    {
+      "evidence_id": "express.ast.timeout.unknown_semantics",
+      "profile_id": "authorization.express.ast_v1",
+      "bucket": "timeout",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_express_timeout_maps_to_unknown_semantics"
+    },
+    {
+      "evidence_id": "express.ast.source_range.route",
+      "profile_id": "authorization.express.ast_v1",
+      "bucket": "source_range",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_express_source_range_on_route"
+    },
+    {
+      "evidence_id": "express.ast.evidence_invariant.roundtrip",
+      "profile_id": "authorization.express.ast_v1",
+      "bucket": "evidence_invariant",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_express_evidence_invariant_roundtrip"
+    },
+    {
+      "evidence_id": "express.ast.end_to_end.bridge",
+      "profile_id": "authorization.express.ast_v1",
+      "bucket": "end_to_end_bundle",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_express_end_to_end_bridge_compile"
+    },
+    {
+      "evidence_id": "express.ast.installed_package.import",
+      "profile_id": "authorization.express.ast_v1",
+      "bucket": "installed_package",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_express_installed_package_import"
+    },
+    {
+      "evidence_id": "express.ast.action.consumer_pin",
+      "profile_id": "authorization.express.ast_v1",
+      "bucket": "action",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_express_action_pin_shape_in_consumer_template"
+    },
+    {
+      "evidence_id": "express.ast.candidate.materials_trusted",
+      "profile_id": "authorization.express.ast_v1",
+      "bucket": "candidate_gate",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_express_positive_require_admin",
+      "gate": "materials_trusted"
+    },
+    {
+      "evidence_id": "express.ast.candidate.measured_coverage_complete",
+      "profile_id": "authorization.express.ast_v1",
+      "bucket": "candidate_gate",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_express_positive_require_admin",
+      "gate": "measured_coverage_complete"
+    },
+    {
+      "evidence_id": "express.ast.candidate.executable_path_complete",
+      "profile_id": "authorization.express.ast_v1",
+      "bucket": "candidate_gate",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_express_end_to_end_bridge_compile",
+      "gate": "executable_path_complete"
+    },
+    {
+      "evidence_id": "terraform.plan.positive.public_sg",
+      "profile_id": "infrastructure.terraform.plan_recursive_v1",
+      "bucket": "positive",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_terraform_positive_public_sg"
+    },
+    {
+      "evidence_id": "terraform.plan.positive.nested_module",
+      "profile_id": "infrastructure.terraform.plan_recursive_v1",
+      "bucket": "positive",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_terraform_positive_nested_module_bucket"
+    },
+    {
+      "evidence_id": "terraform.plan.positive.private_explicit",
+      "profile_id": "infrastructure.terraform.plan_recursive_v1",
+      "bucket": "positive",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_terraform_positive_private_explicit"
+    },
+    {
+      "evidence_id": "terraform.plan.negative.after_unknown",
+      "profile_id": "infrastructure.terraform.plan_recursive_v1",
+      "bucket": "negative",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_terraform_negative_after_unknown"
+    },
+    {
+      "evidence_id": "terraform.plan.negative.missing_format",
+      "profile_id": "infrastructure.terraform.plan_recursive_v1",
+      "bucket": "negative",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_terraform_negative_missing_format"
+    },
+    {
+      "evidence_id": "terraform.plan.negative.empty_not_public",
+      "profile_id": "infrastructure.terraform.plan_recursive_v1",
+      "bucket": "negative",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_terraform_negative_empty_changes_not_public"
+    },
+    {
+      "evidence_id": "terraform.plan.unsupported.missing_format",
+      "profile_id": "infrastructure.terraform.plan_recursive_v1",
+      "bucket": "unsupported",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_terraform_unsupported_missing_format_version"
+    },
+    {
+      "evidence_id": "terraform.plan.malformed.not_object",
+      "profile_id": "infrastructure.terraform.plan_recursive_v1",
+      "bucket": "malformed",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_terraform_malformed_not_object"
+    },
+    {
+      "evidence_id": "terraform.plan.unknown.partial",
+      "profile_id": "infrastructure.terraform.plan_recursive_v1",
+      "bucket": "unknown",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_terraform_unknown_partial_plan"
+    },
+    {
+      "evidence_id": "terraform.plan.timeout.unknown_semantics",
+      "profile_id": "infrastructure.terraform.plan_recursive_v1",
+      "bucket": "timeout",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_terraform_timeout_maps_to_unknown_semantics"
+    },
+    {
+      "evidence_id": "terraform.plan.source_range.model",
+      "profile_id": "infrastructure.terraform.plan_recursive_v1",
+      "bucket": "source_range",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_terraform_source_range_placeholder"
+    },
+    {
+      "evidence_id": "terraform.plan.evidence_invariant.roundtrip",
+      "profile_id": "infrastructure.terraform.plan_recursive_v1",
+      "bucket": "evidence_invariant",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_terraform_evidence_invariant_roundtrip"
+    },
+    {
+      "evidence_id": "terraform.plan.end_to_end.compile",
+      "profile_id": "infrastructure.terraform.plan_recursive_v1",
+      "bucket": "end_to_end_bundle",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_terraform_end_to_end_compile"
+    },
+    {
+      "evidence_id": "terraform.plan.installed_package.import",
+      "profile_id": "infrastructure.terraform.plan_recursive_v1",
+      "bucket": "installed_package",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_terraform_installed_package_import"
+    },
+    {
+      "evidence_id": "terraform.plan.action.consumer_pin",
+      "profile_id": "infrastructure.terraform.plan_recursive_v1",
+      "bucket": "action",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_terraform_action_consumer_pin_workflow"
+    },
+    {
+      "evidence_id": "terraform.plan.candidate.materials_trusted",
+      "profile_id": "infrastructure.terraform.plan_recursive_v1",
+      "bucket": "candidate_gate",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_terraform_positive_public_sg",
+      "gate": "materials_trusted"
+    },
+    {
+      "evidence_id": "terraform.plan.candidate.measured_coverage_complete",
+      "profile_id": "infrastructure.terraform.plan_recursive_v1",
+      "bucket": "candidate_gate",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_terraform_positive_public_sg",
+      "gate": "measured_coverage_complete"
+    },
+    {
+      "evidence_id": "terraform.plan.candidate.executable_path_complete",
+      "profile_id": "infrastructure.terraform.plan_recursive_v1",
+      "bucket": "candidate_gate",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_terraform_end_to_end_compile",
+      "gate": "executable_path_complete"
+    },
+    {
+      "evidence_id": "k8s.reachability.positive.same_ns",
+      "profile_id": "infrastructure.kubernetes.controller_reachability_v1",
+      "bucket": "positive",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_k8s_positive_same_namespace"
+    },
+    {
+      "evidence_id": "k8s.reachability.positive.networkpolicy",
+      "profile_id": "infrastructure.kubernetes.controller_reachability_v1",
+      "bucket": "positive",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_k8s_positive_networkpolicy_deny"
+    },
+    {
+      "evidence_id": "k8s.reachability.positive.gateway",
+      "profile_id": "infrastructure.kubernetes.controller_reachability_v1",
+      "bucket": "positive",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_k8s_positive_gateway_route"
+    },
+    {
+      "evidence_id": "k8s.reachability.negative.cross_ns",
+      "profile_id": "infrastructure.kubernetes.controller_reachability_v1",
+      "bucket": "negative",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_k8s_negative_cross_namespace"
+    },
+    {
+      "evidence_id": "k8s.reachability.negative.missing_selector",
+      "profile_id": "infrastructure.kubernetes.controller_reachability_v1",
+      "bucket": "negative",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_k8s_negative_missing_selector"
+    },
+    {
+      "evidence_id": "k8s.reachability.negative.wrong_labels",
+      "profile_id": "infrastructure.kubernetes.controller_reachability_v1",
+      "bucket": "negative",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_k8s_negative_wrong_labels"
+    },
+    {
+      "evidence_id": "k8s.reachability.unsupported.custom_kind",
+      "profile_id": "infrastructure.kubernetes.controller_reachability_v1",
+      "bucket": "unsupported",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_k8s_unsupported_custom_kind"
+    },
+    {
+      "evidence_id": "k8s.reachability.malformed.missing_metadata",
+      "profile_id": "infrastructure.kubernetes.controller_reachability_v1",
+      "bucket": "malformed",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_k8s_malformed_missing_metadata"
+    },
+    {
+      "evidence_id": "k8s.reachability.unknown.empty",
+      "profile_id": "infrastructure.kubernetes.controller_reachability_v1",
+      "bucket": "unknown",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_k8s_unknown_empty_list"
+    },
+    {
+      "evidence_id": "k8s.reachability.timeout.unknown_semantics",
+      "profile_id": "infrastructure.kubernetes.controller_reachability_v1",
+      "bucket": "timeout",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_k8s_timeout_maps_to_unknown_semantics"
+    },
+    {
+      "evidence_id": "k8s.reachability.source_range.model",
+      "profile_id": "infrastructure.kubernetes.controller_reachability_v1",
+      "bucket": "source_range",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_k8s_source_range_model"
+    },
+    {
+      "evidence_id": "k8s.reachability.evidence_invariant.roundtrip",
+      "profile_id": "infrastructure.kubernetes.controller_reachability_v1",
+      "bucket": "evidence_invariant",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_k8s_evidence_invariant_roundtrip"
+    },
+    {
+      "evidence_id": "k8s.reachability.end_to_end.compile",
+      "profile_id": "infrastructure.kubernetes.controller_reachability_v1",
+      "bucket": "end_to_end_bundle",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_k8s_end_to_end_compile"
+    },
+    {
+      "evidence_id": "k8s.reachability.installed_package.import",
+      "profile_id": "infrastructure.kubernetes.controller_reachability_v1",
+      "bucket": "installed_package",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_k8s_installed_package_import"
+    },
+    {
+      "evidence_id": "k8s.reachability.action.consumer_pin",
+      "profile_id": "infrastructure.kubernetes.controller_reachability_v1",
+      "bucket": "action",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_k8s_action_consumer_pin_workflow"
+    },
+    {
+      "evidence_id": "k8s.reachability.candidate.materials_trusted",
+      "profile_id": "infrastructure.kubernetes.controller_reachability_v1",
+      "bucket": "candidate_gate",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_k8s_positive_same_namespace",
+      "gate": "materials_trusted"
+    },
+    {
+      "evidence_id": "k8s.reachability.candidate.measured_coverage_complete",
+      "profile_id": "infrastructure.kubernetes.controller_reachability_v1",
+      "bucket": "candidate_gate",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_k8s_positive_same_namespace",
+      "gate": "measured_coverage_complete"
+    },
+    {
+      "evidence_id": "k8s.reachability.candidate.executable_path_complete",
+      "profile_id": "infrastructure.kubernetes.controller_reachability_v1",
+      "bucket": "candidate_gate",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_k8s_end_to_end_compile",
+      "gate": "executable_path_complete"
+    },
+    {
+      "evidence_id": "actions.flow.positive.secret_taint",
+      "profile_id": "ci_secrets.actions.permissions_flow_v1",
+      "bucket": "positive",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_actions_positive_secret_taint"
+    },
+    {
+      "evidence_id": "actions.flow.positive.write_token",
+      "profile_id": "ci_secrets.actions.permissions_flow_v1",
+      "bucket": "positive",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_actions_positive_write_token_taint"
+    },
+    {
+      "evidence_id": "actions.flow.positive.secrets_inherit_shape",
+      "profile_id": "ci_secrets.actions.permissions_flow_v1",
+      "bucket": "positive",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_actions_positive_secrets_inherit"
+    },
+    {
+      "evidence_id": "actions.flow.negative.clean_push",
+      "profile_id": "ci_secrets.actions.permissions_flow_v1",
+      "bucket": "negative",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_actions_negative_clean_push"
+    },
+    {
+      "evidence_id": "actions.flow.negative.mutable_ref",
+      "profile_id": "ci_secrets.actions.permissions_flow_v1",
+      "bucket": "negative",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_actions_negative_mutable_ref"
+    },
+    {
+      "evidence_id": "actions.flow.negative.local_uses",
+      "profile_id": "ci_secrets.actions.permissions_flow_v1",
+      "bucket": "negative",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_actions_negative_local_uses_dot"
+    },
+    {
+      "evidence_id": "actions.flow.unsupported.mutable_remote",
+      "profile_id": "ci_secrets.actions.permissions_flow_v1",
+      "bucket": "unsupported",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_actions_unsupported_mutable_remote"
+    },
+    {
+      "evidence_id": "actions.flow.malformed.empty",
+      "profile_id": "ci_secrets.actions.permissions_flow_v1",
+      "bucket": "malformed",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_actions_malformed_empty_workflow"
+    },
+    {
+      "evidence_id": "actions.flow.unknown.empty_jobs",
+      "profile_id": "ci_secrets.actions.permissions_flow_v1",
+      "bucket": "unknown",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_actions_unknown_empty_jobs"
+    },
+    {
+      "evidence_id": "actions.flow.timeout.unknown_semantics",
+      "profile_id": "ci_secrets.actions.permissions_flow_v1",
+      "bucket": "timeout",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_actions_timeout_maps_to_unknown_semantics"
+    },
+    {
+      "evidence_id": "actions.flow.source_range.model",
+      "profile_id": "ci_secrets.actions.permissions_flow_v1",
+      "bucket": "source_range",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_actions_source_range_model"
+    },
+    {
+      "evidence_id": "actions.flow.evidence_invariant.roundtrip",
+      "profile_id": "ci_secrets.actions.permissions_flow_v1",
+      "bucket": "evidence_invariant",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_actions_evidence_invariant_roundtrip"
+    },
+    {
+      "evidence_id": "actions.flow.end_to_end.compile",
+      "profile_id": "ci_secrets.actions.permissions_flow_v1",
+      "bucket": "end_to_end_bundle",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_actions_end_to_end_compile"
+    },
+    {
+      "evidence_id": "actions.flow.installed_package.import",
+      "profile_id": "ci_secrets.actions.permissions_flow_v1",
+      "bucket": "installed_package",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_actions_installed_package_import"
+    },
+    {
+      "evidence_id": "actions.flow.action.reusable_authority",
+      "profile_id": "ci_secrets.actions.permissions_flow_v1",
+      "bucket": "action",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_actions_action_reusable_authority"
+    },
+    {
+      "evidence_id": "actions.flow.candidate.materials_trusted",
+      "profile_id": "ci_secrets.actions.permissions_flow_v1",
+      "bucket": "candidate_gate",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_actions_positive_secret_taint",
+      "gate": "materials_trusted"
+    },
+    {
+      "evidence_id": "actions.flow.candidate.measured_coverage_complete",
+      "profile_id": "ci_secrets.actions.permissions_flow_v1",
+      "bucket": "candidate_gate",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_actions_positive_secret_taint",
+      "gate": "measured_coverage_complete"
+    },
+    {
+      "evidence_id": "actions.flow.candidate.executable_path_complete",
+      "profile_id": "ci_secrets.actions.permissions_flow_v1",
+      "bucket": "candidate_gate",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_actions_end_to_end_compile",
+      "gate": "executable_path_complete"
+    },
+    {
+      "evidence_id": "deployment.trusted.positive.trusted_state",
+      "profile_id": "deployment.trusted_profile_v1",
+      "bucket": "positive",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_deployment_positive_trusted_state"
+    },
+    {
+      "evidence_id": "deployment.trusted.positive.explicit_schema",
+      "profile_id": "deployment.trusted_profile_v1",
+      "bucket": "positive",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_deployment_positive_explicit_schema_path"
+    },
+    {
+      "evidence_id": "deployment.trusted.positive.github_environments",
+      "profile_id": "deployment.trusted_profile_v1",
+      "bucket": "positive",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_deployment_positive_github_environments"
+    },
+    {
+      "evidence_id": "deployment.trusted.negative.untrusted_approved",
+      "profile_id": "deployment.trusted_profile_v1",
+      "bucket": "negative",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_deployment_negative_untrusted_approved"
+    },
+    {
+      "evidence_id": "deployment.trusted.negative.skipped_approval",
+      "profile_id": "deployment.trusted_profile_v1",
+      "bucket": "negative",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_deployment_negative_skipped_approval"
+    },
+    {
+      "evidence_id": "deployment.trusted.negative.missing_signature",
+      "profile_id": "deployment.trusted_profile_v1",
+      "bucket": "negative",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_deployment_negative_missing_signature"
+    },
+    {
+      "evidence_id": "deployment.trusted.unsupported.untrusted_json",
+      "profile_id": "deployment.trusted_profile_v1",
+      "bucket": "unsupported",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_deployment_unsupported_untrusted_json"
+    },
+    {
+      "evidence_id": "deployment.trusted.malformed.not_mapping",
+      "profile_id": "deployment.trusted_profile_v1",
+      "bucket": "malformed",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_deployment_malformed_not_mapping"
+    },
+    {
+      "evidence_id": "deployment.trusted.unknown.empty_events",
+      "profile_id": "deployment.trusted_profile_v1",
+      "bucket": "unknown",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_deployment_unknown_empty_events"
+    },
+    {
+      "evidence_id": "deployment.trusted.timeout.unknown_semantics",
+      "profile_id": "deployment.trusted_profile_v1",
+      "bucket": "timeout",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_deployment_timeout_maps_to_unknown_semantics"
+    },
+    {
+      "evidence_id": "deployment.trusted.source_range.model",
+      "profile_id": "deployment.trusted_profile_v1",
+      "bucket": "source_range",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_deployment_source_range_model"
+    },
+    {
+      "evidence_id": "deployment.trusted.evidence_invariant.roundtrip",
+      "profile_id": "deployment.trusted_profile_v1",
+      "bucket": "evidence_invariant",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_deployment_evidence_invariant_roundtrip"
+    },
+    {
+      "evidence_id": "deployment.trusted.end_to_end.bridge",
+      "profile_id": "deployment.trusted_profile_v1",
+      "bucket": "end_to_end_bundle",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_deployment_end_to_end_bridge"
+    },
+    {
+      "evidence_id": "deployment.trusted.installed_package.import",
+      "profile_id": "deployment.trusted_profile_v1",
+      "bucket": "installed_package",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_deployment_installed_package_import"
+    },
+    {
+      "evidence_id": "deployment.trusted.action.consumer_template",
+      "profile_id": "deployment.trusted_profile_v1",
+      "bucket": "action",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_deployment_action_consumer_template"
+    },
+    {
+      "evidence_id": "deployment.trusted.candidate.materials_trusted",
+      "profile_id": "deployment.trusted_profile_v1",
+      "bucket": "candidate_gate",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_deployment_positive_trusted_state",
+      "gate": "materials_trusted"
+    },
+    {
+      "evidence_id": "deployment.trusted.candidate.measured_coverage_complete",
+      "profile_id": "deployment.trusted_profile_v1",
+      "bucket": "candidate_gate",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_deployment_positive_trusted_state",
+      "gate": "measured_coverage_complete"
+    },
+    {
+      "evidence_id": "deployment.trusted.candidate.executable_path_complete",
+      "profile_id": "deployment.trusted_profile_v1",
+      "bucket": "candidate_gate",
+      "artifact": "tests/test_source_profile_strict_corpus.py::test_deployment_end_to_end_bridge",
+      "gate": "executable_path_complete"
+    }
+  ]
+}

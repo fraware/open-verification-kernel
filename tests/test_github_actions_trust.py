@@ -8,7 +8,7 @@ from ovk.compilers.github_actions import compile_workflow_trust, load_workflow_t
 from ovk.compilers.github_actions.reusable_workflows import parse_uses
 
 
-def test_untrusted_pr_with_secret_is_finding() -> None:
+def test_untrusted_pr_checkout_with_secret_is_finding() -> None:
     workflow = load_workflow_text(
         """
 on: pull_request_target
@@ -18,6 +18,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: checkout-pr
+        uses: actions/checkout@0123456789012345678901234567890123456789
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: run-pr
         run: echo "${{ secrets.DEPLOY_KEY }}"
 """.strip(),
@@ -67,14 +71,16 @@ jobs:
 
 
 def test_cycle_prevention(tmp_path: Path) -> None:
-    a = tmp_path / "a.yml"
-    b = tmp_path / "b.yml"
+    workflow_dir = tmp_path / ".github" / "workflows"
+    workflow_dir.mkdir(parents=True)
+    a = workflow_dir / "a.yml"
+    b = workflow_dir / "b.yml"
     a.write_text(
         """
 on: workflow_call
 jobs:
   call:
-    uses: ./b.yml
+    uses: ./.github/workflows/b.yml
 """.strip(),
         encoding="utf-8",
     )
@@ -83,13 +89,14 @@ jobs:
 on: workflow_call
 jobs:
   call:
-    uses: ./a.yml
+    uses: ./.github/workflows/a.yml
 """.strip(),
         encoding="utf-8",
     )
-    workflow = load_workflow_text(a.read_text(encoding="utf-8"), path=str(a))
-    # Force path identity used by cycle detection.
-    workflow["_ovk_path"] = str(a.resolve())
+    workflow = load_workflow_text(
+        a.read_text(encoding="utf-8"),
+        path=".github/workflows/a.yml",
+    )
     ir = compile_workflow_trust(workflow, repo_root=tmp_path)
     assert any(item.kind == "cycle" for item in ir.findings)
 

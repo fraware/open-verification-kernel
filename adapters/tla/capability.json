@@ -1,19 +1,56 @@
 {
   "capability_id": "tla-plus-v1",
-  "tool": {"name": "tla+", "adapter": "ovk-adapter-tla", "adapter_version": "0.1.0"},
+  "checker_id": "tla+",
+  "version": "0.1.0",
+  "implementation": "ovk-adapter-tla",
+  "input_contract": "TLA+/CFG state-machine contract payload derived from deployment or CI workflow abstractions.",
+  "output_contract": "ovk.result.v1 with trace counterexamples (deterministic evaluator today)",
+  "claim_class": "bounded_model_check",
+  "tool": {
+    "name": "tla+",
+    "adapter": "ovk-adapter-tla",
+    "adapter_version": "0.1.0"
+  },
   "backend_class": "model_checker",
-  "input_languages": ["tla", "cfg"],
-  "supported_domains": ["deployment", "ci_cd"],
-  "supported_property_kinds": ["invariant", "safety", "liveness"],
+  "input_languages": [
+    "tla",
+    "cfg"
+  ],
+  "supported_domains": [
+    "deployment",
+    "ci_cd"
+  ],
+  "supported_property_kinds": [
+    "invariant",
+    "safety",
+    "liveness"
+  ],
   "guarantee": {
     "type": "bounded_model_check",
     "meaning_of_pass": "TLC found no counterexample within configured bounds.",
     "meaning_of_fail": "TLC found a violating trace.",
     "meaning_of_unknown": "TLC unavailable or state space incomplete."
   },
-  "assumptions": ["State machine abstraction matches deployment workflow."],
-  "limits": ["Bounded exploration only."],
+  "assumptions": [
+    "State machine abstraction matches deployment workflow."
+  ],
+  "trusted_components": [
+    "deterministic state-machine contract evaluator"
+  ],
+  "limits": [
+    "Bounded exploration only."
+  ],
+  "failure_semantics": "Unavailable TLC or incomplete model maps to unknown; evaluator errors map to error.",
+  "timeout_semantics": "unknown",
+  "timeout_behavior": "unknown",
+  "unsupported_semantics": "TLC execution is not implemented; bounded exploration only under the deterministic contract evaluator.",
+  "determinism_status": "deterministic",
+  "release_status": "experimental",
+  "owner": "ovk-maintainers",
+  "native_execution": false,
   "result_format": "ovk.result.v1",
   "counterexample_format": "trace",
-  "timeout_behavior": "unknown"
+  "conformance": {
+    "suite": "conformance/manifest.json"
+  }
 }

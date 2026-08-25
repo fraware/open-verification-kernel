@@ -6,6 +6,14 @@
     "source_profile_strict_eligible",
     "externally_calibrated_strict"
   ],
+  "conformance_statuses_v3": [
+    "deprecated",
+    "catalog_only",
+    "executable_advisory",
+    "source_profile_candidate",
+    "source_profile_strict_eligible",
+    "externally_calibrated_strict"
+  ],
   "counts_by_domain": {
     "agent_authority": 12,
     "authorization": 18,
@@ -20,8 +28,19 @@
   },
   "counts_by_status_v2": {
     "catalog_only": 95,
-    "executable_advisory": 2,
-    "source_profile_strict_eligible": 3
+    "executable_advisory": 1,
+    "source_profile_strict_eligible": 4
+  },
+  "counts_by_status_v3": {
+    "catalog_only": 95,
+    "executable_advisory": 1,
+    "source_profile_strict_eligible": 4
+  },
+  "maturity_contract": {
+    "external_calibration_inferred_from_template_metadata": false,
+    "local_profile_evidence_maximum": "source_profile_candidate",
+    "normative_status_field": "conformance_status_v3",
+    "strict_requires_complete_machine_qualification": true
   },
   "production_statuses": [
     "deprecated",
@@ -54,52 +73,60 @@
     "lane",
     "notes"
   ],
-  "schema_version": "ovk.template_conformance.v1",
+  "schema_version": "ovk.template_conformance.v3",
   "source_profile_evidence": {
     "no-admin-route-bypass": {
+      "candidate_evidence_complete": true,
       "coverage_complete": true,
       "enforcement_test_present": true,
+      "evidence_scope": "local_profile_regression",
       "materials_trusted": true,
+      "maturity_effect": "candidate_only",
       "notes": [
         "routes=1",
         "profile_marker=yes"
       ],
-      "profile_id": "authorization.fastapi.ast_v1",
-      "strict_eligible": true
+      "profile_id": "authorization.fastapi.ast_v1"
     },
     "no-public-sensitive-resource": {
+      "candidate_evidence_complete": true,
       "coverage_complete": true,
       "enforcement_test_present": true,
+      "evidence_scope": "local_profile_regression",
       "materials_trusted": true,
+      "maturity_effect": "candidate_only",
       "notes": [
         "resources=1",
         "eligibility=strict"
       ],
-      "profile_id": "infrastructure.terraform.plan_recursive_v1",
-      "strict_eligible": true
+      "profile_id": "infrastructure.terraform.plan_recursive_v1"
     },
     "no-secrets-in-untrusted-context": {
+      "candidate_evidence_complete": true,
       "coverage_complete": true,
       "enforcement_test_present": true,
+      "evidence_scope": "local_profile_regression",
       "materials_trusted": true,
+      "maturity_effect": "candidate_only",
       "notes": [
         "secrets=2",
         "write_token=True",
-        "findings=2",
+        "findings=0",
         "compiled_with_source_profile:ci_secrets.actions.permissions_flow_v1"
       ],
-      "profile_id": "ci_secrets.actions.permissions_flow_v1",
-      "strict_eligible": true
+      "profile_id": "ci_secrets.actions.permissions_flow_v1"
     },
     "no-skipped-approval-state": {
+      "candidate_evidence_complete": false,
       "coverage_complete": false,
       "enforcement_test_present": true,
+      "evidence_scope": "local_profile_regression",
       "materials_trusted": false,
+      "maturity_effect": "candidate_only",
       "notes": [
         "requires explicit trusted_profile material for strictness"
       ],
-      "profile_id": "deployment.trusted_profile_v1",
-      "strict_eligible": false
+      "profile_id": "deployment.trusted_profile_v1"
     }
   },
   "template_count": 100,
@@ -111,6 +138,7 @@
       ],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "agent_authority",
       "executable_links": {
         "backend_registry": false,
@@ -147,6 +175,7 @@
       ],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "agent_authority",
       "executable_links": {
         "backend_registry": false,
@@ -183,6 +212,7 @@
       ],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "agent_authority",
       "executable_links": {
         "backend_registry": false,
@@ -216,6 +246,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "agent_authority",
       "executable_links": {
         "backend_registry": false,
@@ -249,6 +280,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "agent_authority",
       "executable_links": {
         "backend_registry": false,
@@ -282,6 +314,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "agent_authority",
       "executable_links": {
         "backend_registry": false,
@@ -315,6 +348,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "agent_authority",
       "executable_links": {
         "backend_registry": false,
@@ -348,6 +382,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "agent_authority",
       "executable_links": {
         "backend_registry": false,
@@ -381,6 +416,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "agent_authority",
       "executable_links": {
         "backend_registry": false,
@@ -414,6 +450,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "agent_authority",
       "executable_links": {
         "backend_registry": false,
@@ -451,6 +488,7 @@
         "dafny"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "agent_authority",
       "executable_links": {
         "backend_registry": false,
@@ -489,6 +527,7 @@
         "opa"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "agent_authority",
       "executable_links": {
         "backend_registry": false,
@@ -526,6 +565,7 @@
       ],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "authorization",
       "executable_links": {
         "backend_registry": false,
@@ -562,6 +602,7 @@
       ],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "authorization",
       "executable_links": {
         "backend_registry": false,
@@ -598,6 +639,7 @@
       ],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "authorization",
       "executable_links": {
         "backend_registry": false,
@@ -635,6 +677,7 @@
         "cedar"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "authorization",
       "executable_links": {
         "backend_registry": false,
@@ -674,6 +717,7 @@
         "cedar"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "authorization",
       "executable_links": {
         "backend_registry": false,
@@ -712,6 +756,7 @@
         "cedar"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "authorization",
       "executable_links": {
         "backend_registry": false,
@@ -751,6 +796,7 @@
         "cedar"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "authorization",
       "executable_links": {
         "backend_registry": false,
@@ -790,6 +836,7 @@
         "cedar"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "authorization",
       "executable_links": {
         "backend_registry": false,
@@ -831,6 +878,7 @@
         "z3-native"
       ],
       "conformance_status_v2": "source_profile_strict_eligible",
+      "conformance_status_v3": "source_profile_strict_eligible",
       "domain": "authorization",
       "executable_links": {
         "backend_registry": true,
@@ -846,24 +894,52 @@
       "missing_executable_links": [],
       "notes": [
         "all required executable links present",
-        "source_profile_evidence:strict_ok"
+        "source_profile_evidence:candidate_complete",
+        "v3_maturity:source_profile_strict_eligible"
       ],
       "path": "templates/authorization/no_admin_route_bypass.intent.json",
       "production_status": "strict_eligible",
       "property_kind": "access_control",
       "risk_severity": "high",
       "source_profile_evidence": {
+        "candidate_evidence_complete": true,
         "coverage_complete": true,
         "enforcement_test_present": true,
+        "evidence_scope": "local_profile_regression",
         "materials_trusted": true,
+        "maturity_effect": "candidate_only",
         "notes": [
           "routes=1",
           "profile_marker=yes"
         ],
-        "profile_id": "authorization.fastapi.ast_v1",
-        "strict_eligible": true
+        "profile_id": "authorization.fastapi.ast_v1"
       },
       "source_profile_id": "authorization.fastapi.ast_v1",
+      "source_profile_qualification": {
+        "action_cases": 1,
+        "candidate_ready": true,
+        "compiler_binding_present": true,
+        "end_to_end_bundle_cases": 1,
+        "enforcement_test_present": true,
+        "evidence_invariant_cases": 1,
+        "executable_path_complete": true,
+        "installed_package_cases": 1,
+        "malformed_cases": 1,
+        "materials_trusted": true,
+        "measured_coverage_complete": true,
+        "min_negative_cases": 3,
+        "min_positive_cases": 3,
+        "negative_cases": 3,
+        "positive_cases": 3,
+        "profile_id": "authorization.fastapi.ast_v1",
+        "source_range_cases": 1,
+        "strict_ready": true,
+        "support_contract_version": "1.0.0",
+        "timeout_cases": 1,
+        "unknown_cases": 1,
+        "unmet_strict_obligations": [],
+        "unsupported_cases": 1
+      },
       "version": "0.1.0"
     },
     {
@@ -874,6 +950,7 @@
         "cedar"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "authorization",
       "executable_links": {
         "backend_registry": false,
@@ -908,6 +985,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "authorization",
       "executable_links": {
         "backend_registry": false,
@@ -941,6 +1019,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "authorization",
       "executable_links": {
         "backend_registry": false,
@@ -974,6 +1053,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "authorization",
       "executable_links": {
         "backend_registry": false,
@@ -1007,6 +1087,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "authorization",
       "executable_links": {
         "backend_registry": false,
@@ -1040,6 +1121,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "authorization",
       "executable_links": {
         "backend_registry": false,
@@ -1073,6 +1155,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "authorization",
       "executable_links": {
         "backend_registry": false,
@@ -1106,6 +1189,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "authorization",
       "executable_links": {
         "backend_registry": false,
@@ -1144,6 +1228,7 @@
         "kani"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "authorization",
       "executable_links": {
         "backend_registry": false,
@@ -1184,6 +1269,7 @@
         "self-protection-deterministic"
       ],
       "conformance_status_v2": "executable_advisory",
+      "conformance_status_v3": "executable_advisory",
       "domain": "ci_cd",
       "executable_links": {
         "backend_registry": true,
@@ -1213,6 +1299,7 @@
       ],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "ci_cd",
       "executable_links": {
         "backend_registry": false,
@@ -1249,6 +1336,7 @@
       ],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "ci_cd",
       "executable_links": {
         "backend_registry": false,
@@ -1285,6 +1373,7 @@
       ],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "ci_cd",
       "executable_links": {
         "backend_registry": false,
@@ -1321,6 +1410,7 @@
       ],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "ci_cd",
       "executable_links": {
         "backend_registry": false,
@@ -1354,6 +1444,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "ci_cd",
       "executable_links": {
         "backend_registry": false,
@@ -1387,6 +1478,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "ci_cd",
       "executable_links": {
         "backend_registry": false,
@@ -1420,6 +1512,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "ci_cd",
       "executable_links": {
         "backend_registry": false,
@@ -1453,6 +1546,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "ci_cd",
       "executable_links": {
         "backend_registry": false,
@@ -1486,6 +1580,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "ci_cd",
       "executable_links": {
         "backend_registry": false,
@@ -1519,6 +1614,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "ci_cd",
       "executable_links": {
         "backend_registry": false,
@@ -1552,6 +1648,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "ci_cd",
       "executable_links": {
         "backend_registry": false,
@@ -1585,6 +1682,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "ci_cd",
       "executable_links": {
         "backend_registry": false,
@@ -1623,6 +1721,7 @@
         "kani"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "ci_cd",
       "executable_links": {
         "backend_registry": false,
@@ -1662,6 +1761,7 @@
         "kani"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "ci_cd",
       "executable_links": {
         "backend_registry": false,
@@ -1701,6 +1801,7 @@
         "kani"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "ci_cd",
       "executable_links": {
         "backend_registry": false,
@@ -1737,6 +1838,7 @@
         "ci-secrets-deterministic"
       ],
       "conformance_status_v2": "source_profile_strict_eligible",
+      "conformance_status_v3": "source_profile_strict_eligible",
       "domain": "ci_cd",
       "executable_links": {
         "backend_registry": true,
@@ -1752,26 +1854,54 @@
       "missing_executable_links": [],
       "notes": [
         "all required executable links present",
-        "source_profile_evidence:strict_ok"
+        "source_profile_evidence:candidate_complete",
+        "v3_maturity:source_profile_strict_eligible"
       ],
       "path": "templates/ci_cd/no_secrets_in_untrusted_context.intent.json",
       "production_status": "strict_eligible",
       "property_kind": "data_boundary",
       "risk_severity": "critical",
       "source_profile_evidence": {
+        "candidate_evidence_complete": true,
         "coverage_complete": true,
         "enforcement_test_present": true,
+        "evidence_scope": "local_profile_regression",
         "materials_trusted": true,
+        "maturity_effect": "candidate_only",
         "notes": [
           "secrets=2",
           "write_token=True",
-          "findings=2",
+          "findings=0",
           "compiled_with_source_profile:ci_secrets.actions.permissions_flow_v1"
         ],
-        "profile_id": "ci_secrets.actions.permissions_flow_v1",
-        "strict_eligible": true
+        "profile_id": "ci_secrets.actions.permissions_flow_v1"
       },
       "source_profile_id": "ci_secrets.actions.permissions_flow_v1",
+      "source_profile_qualification": {
+        "action_cases": 1,
+        "candidate_ready": true,
+        "compiler_binding_present": true,
+        "end_to_end_bundle_cases": 1,
+        "enforcement_test_present": true,
+        "evidence_invariant_cases": 1,
+        "executable_path_complete": true,
+        "installed_package_cases": 1,
+        "malformed_cases": 1,
+        "materials_trusted": true,
+        "measured_coverage_complete": true,
+        "min_negative_cases": 3,
+        "min_positive_cases": 3,
+        "negative_cases": 3,
+        "positive_cases": 3,
+        "profile_id": "ci_secrets.actions.permissions_flow_v1",
+        "source_range_cases": 1,
+        "strict_ready": true,
+        "support_contract_version": "1.0.0",
+        "timeout_cases": 1,
+        "unknown_cases": 1,
+        "unmet_strict_obligations": [],
+        "unsupported_cases": 1
+      },
       "version": "0.1.0"
     },
     {
@@ -1782,6 +1912,7 @@
         "verus"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "ci_cd",
       "executable_links": {
         "backend_registry": false,
@@ -1820,6 +1951,7 @@
         "z3"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "ci_cd",
       "executable_links": {
         "backend_registry": false,
@@ -1858,6 +1990,7 @@
         "cbmc"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "data_boundary",
       "executable_links": {
         "backend_registry": false,
@@ -1897,6 +2030,7 @@
         "cbmc"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "data_boundary",
       "executable_links": {
         "backend_registry": false,
@@ -1936,6 +2070,7 @@
         "cbmc"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "data_boundary",
       "executable_links": {
         "backend_registry": false,
@@ -1975,6 +2110,7 @@
         "cbmc"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "data_boundary",
       "executable_links": {
         "backend_registry": false,
@@ -2012,6 +2148,7 @@
       ],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "data_boundary",
       "executable_links": {
         "backend_registry": false,
@@ -2048,6 +2185,7 @@
       ],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "data_boundary",
       "executable_links": {
         "backend_registry": false,
@@ -2084,6 +2222,7 @@
       ],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "data_boundary",
       "executable_links": {
         "backend_registry": false,
@@ -2117,6 +2256,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "data_boundary",
       "executable_links": {
         "backend_registry": false,
@@ -2150,6 +2290,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "data_boundary",
       "executable_links": {
         "backend_registry": false,
@@ -2183,6 +2324,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "data_boundary",
       "executable_links": {
         "backend_registry": false,
@@ -2216,6 +2358,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "data_boundary",
       "executable_links": {
         "backend_registry": false,
@@ -2249,6 +2392,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "data_boundary",
       "executable_links": {
         "backend_registry": false,
@@ -2282,6 +2426,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "data_boundary",
       "executable_links": {
         "backend_registry": false,
@@ -2315,6 +2460,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "data_boundary",
       "executable_links": {
         "backend_registry": false,
@@ -2352,6 +2498,7 @@
         "lean"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "data_boundary",
       "executable_links": {
         "backend_registry": false,
@@ -2386,6 +2533,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "deployment",
       "executable_links": {
         "backend_registry": false,
@@ -2419,6 +2567,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "deployment",
       "executable_links": {
         "backend_registry": false,
@@ -2452,6 +2601,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "deployment",
       "executable_links": {
         "backend_registry": false,
@@ -2485,6 +2635,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "deployment",
       "executable_links": {
         "backend_registry": false,
@@ -2518,6 +2669,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "deployment",
       "executable_links": {
         "backend_registry": false,
@@ -2551,6 +2703,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "deployment",
       "executable_links": {
         "backend_registry": false,
@@ -2584,6 +2737,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "deployment",
       "executable_links": {
         "backend_registry": false,
@@ -2617,6 +2771,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "deployment",
       "executable_links": {
         "backend_registry": false,
@@ -2653,6 +2808,7 @@
       ],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "deployment",
       "executable_links": {
         "backend_registry": false,
@@ -2689,6 +2845,7 @@
       ],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "deployment",
       "executable_links": {
         "backend_registry": false,
@@ -2725,6 +2882,7 @@
       ],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "deployment",
       "executable_links": {
         "backend_registry": false,
@@ -2759,7 +2917,8 @@
       "claimed_backends": [
         "deployment-deterministic"
       ],
-      "conformance_status_v2": "executable_advisory",
+      "conformance_status_v2": "source_profile_strict_eligible",
+      "conformance_status_v3": "source_profile_strict_eligible",
       "domain": "deployment",
       "executable_links": {
         "backend_registry": true,
@@ -2775,23 +2934,51 @@
       "missing_executable_links": [],
       "notes": [
         "all required executable links present",
-        "source_profile_evidence:incomplete"
+        "source_profile_evidence:incomplete",
+        "v3_maturity:source_profile_strict_eligible"
       ],
       "path": "templates/deployment/no_skipped_approval_state.intent.json",
       "production_status": "strict_eligible",
       "property_kind": "invariant",
       "risk_severity": "high",
       "source_profile_evidence": {
+        "candidate_evidence_complete": false,
         "coverage_complete": false,
         "enforcement_test_present": true,
+        "evidence_scope": "local_profile_regression",
         "materials_trusted": false,
+        "maturity_effect": "candidate_only",
         "notes": [
           "requires explicit trusted_profile material for strictness"
         ],
-        "profile_id": "deployment.trusted_profile_v1",
-        "strict_eligible": false
+        "profile_id": "deployment.trusted_profile_v1"
       },
       "source_profile_id": "deployment.trusted_profile_v1",
+      "source_profile_qualification": {
+        "action_cases": 1,
+        "candidate_ready": true,
+        "compiler_binding_present": true,
+        "end_to_end_bundle_cases": 1,
+        "enforcement_test_present": true,
+        "evidence_invariant_cases": 1,
+        "executable_path_complete": true,
+        "installed_package_cases": 1,
+        "malformed_cases": 1,
+        "materials_trusted": true,
+        "measured_coverage_complete": true,
+        "min_negative_cases": 3,
+        "min_positive_cases": 3,
+        "negative_cases": 3,
+        "positive_cases": 3,
+        "profile_id": "deployment.trusted_profile_v1",
+        "source_range_cases": 1,
+        "strict_ready": true,
+        "support_contract_version": "1.0.0",
+        "timeout_cases": 1,
+        "unknown_cases": 1,
+        "unmet_strict_obligations": [],
+        "unsupported_cases": 1
+      },
       "version": "0.1.0"
     },
     {
@@ -2802,6 +2989,7 @@
         "tla"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "deployment",
       "executable_links": {
         "backend_registry": false,
@@ -2841,6 +3029,7 @@
         "tla"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "deployment",
       "executable_links": {
         "backend_registry": false,
@@ -2880,6 +3069,7 @@
         "tla"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "deployment",
       "executable_links": {
         "backend_registry": false,
@@ -2918,6 +3108,7 @@
         "tla"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "deployment",
       "executable_links": {
         "backend_registry": false,
@@ -2957,6 +3148,7 @@
         "tla"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "deployment",
       "executable_links": {
         "backend_registry": false,
@@ -2996,6 +3188,7 @@
         "alloy"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "infrastructure",
       "executable_links": {
         "backend_registry": false,
@@ -3035,6 +3228,7 @@
         "alloy"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "infrastructure",
       "executable_links": {
         "backend_registry": false,
@@ -3074,6 +3268,7 @@
         "alloy"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "infrastructure",
       "executable_links": {
         "backend_registry": false,
@@ -3112,6 +3307,7 @@
         "alloy"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "infrastructure",
       "executable_links": {
         "backend_registry": false,
@@ -3146,6 +3342,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "infrastructure",
       "executable_links": {
         "backend_registry": false,
@@ -3179,6 +3376,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "infrastructure",
       "executable_links": {
         "backend_registry": false,
@@ -3212,6 +3410,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "infrastructure",
       "executable_links": {
         "backend_registry": false,
@@ -3245,6 +3444,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "infrastructure",
       "executable_links": {
         "backend_registry": false,
@@ -3278,6 +3478,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "infrastructure",
       "executable_links": {
         "backend_registry": false,
@@ -3311,6 +3512,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "infrastructure",
       "executable_links": {
         "backend_registry": false,
@@ -3344,6 +3546,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "infrastructure",
       "executable_links": {
         "backend_registry": false,
@@ -3377,6 +3580,7 @@
       "acceptable_evidence_kinds": [],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "infrastructure",
       "executable_links": {
         "backend_registry": false,
@@ -3413,6 +3617,7 @@
       ],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "infrastructure",
       "executable_links": {
         "backend_registry": false,
@@ -3449,6 +3654,7 @@
       ],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "infrastructure",
       "executable_links": {
         "backend_registry": false,
@@ -3485,6 +3691,7 @@
       ],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "infrastructure",
       "executable_links": {
         "backend_registry": false,
@@ -3521,6 +3728,7 @@
       ],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "infrastructure",
       "executable_links": {
         "backend_registry": false,
@@ -3556,6 +3764,7 @@
       ],
       "claimed_backends": [],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "infrastructure",
       "executable_links": {
         "backend_registry": false,
@@ -3593,6 +3802,7 @@
         "alloy"
       ],
       "conformance_status_v2": "catalog_only",
+      "conformance_status_v3": "catalog_only",
       "domain": "infrastructure",
       "executable_links": {
         "backend_registry": false,
@@ -3632,6 +3842,7 @@
         "infrastructure-deterministic"
       ],
       "conformance_status_v2": "source_profile_strict_eligible",
+      "conformance_status_v3": "source_profile_strict_eligible",
       "domain": "infrastructure",
       "executable_links": {
         "backend_registry": true,
@@ -3647,24 +3858,52 @@
       "missing_executable_links": [],
       "notes": [
         "all required executable links present",
-        "source_profile_evidence:strict_ok"
+        "source_profile_evidence:candidate_complete",
+        "v3_maturity:source_profile_strict_eligible"
       ],
       "path": "templates/infrastructure/no_public_sensitive_resource.intent.json",
       "production_status": "strict_eligible",
       "property_kind": "data_boundary",
       "risk_severity": "high",
       "source_profile_evidence": {
+        "candidate_evidence_complete": true,
         "coverage_complete": true,
         "enforcement_test_present": true,
+        "evidence_scope": "local_profile_regression",
         "materials_trusted": true,
+        "maturity_effect": "candidate_only",
         "notes": [
           "resources=1",
           "eligibility=strict"
         ],
-        "profile_id": "infrastructure.terraform.plan_recursive_v1",
-        "strict_eligible": true
+        "profile_id": "infrastructure.terraform.plan_recursive_v1"
       },
       "source_profile_id": "infrastructure.terraform.plan_recursive_v1",
+      "source_profile_qualification": {
+        "action_cases": 1,
+        "candidate_ready": true,
+        "compiler_binding_present": true,
+        "end_to_end_bundle_cases": 1,
+        "enforcement_test_present": true,
+        "evidence_invariant_cases": 1,
+        "executable_path_complete": true,
+        "installed_package_cases": 1,
+        "malformed_cases": 1,
+        "materials_trusted": true,
+        "measured_coverage_complete": true,
+        "min_negative_cases": 3,
+        "min_positive_cases": 3,
+        "negative_cases": 3,
+        "positive_cases": 3,
+        "profile_id": "infrastructure.terraform.plan_recursive_v1",
+        "source_range_cases": 1,
+        "strict_ready": true,
+        "support_contract_version": "1.0.0",
+        "timeout_cases": 1,
+        "unknown_cases": 1,
+        "unmet_strict_obligations": [],
+        "unsupported_cases": 1
+      },
       "version": "0.1.0"
     }
   ]

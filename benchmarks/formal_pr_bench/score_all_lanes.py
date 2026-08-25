@@ -103,12 +103,30 @@ def run_benchmark(
     *,
     expanded: bool = False,
     include_extended: bool = True,
+    partition: str | None = None,
 ) -> tuple[list[Any], dict[str, Any]]:
     from ovk.core.capabilities import CapabilityRegistry
 
+    from benchmarks.formal_pr_bench.provenance_kit import (
+        BENCHMARK_VERSION,
+        filter_cases_for_partition,
+        load_partitions,
+    )
     from benchmarks.formal_pr_bench.scoring import build_leaderboard, score_case
 
     cases, case_set = load_cases(expanded=expanded, include_extended=include_extended)
+    # Mixed corpus regression cites partition "all"; --partition filters membership.
+    score_partition = partition or "all"
+    if partition is not None:
+        cases = filter_cases_for_partition(cases, partition=partition)
+        case_set = f"{case_set}#{partition}"
+    else:
+        # Still enforce that the held_out membership is uncontaminated even when
+        # the default mixed corpus includes those cases for regression.
+        from benchmarks.formal_pr_bench.provenance_kit import assert_no_template_dev_contamination
+
+        assert_no_template_dev_contamination(partitions=load_partitions())
+
     capabilities = CapabilityRegistry.from_directory(ROOT / "adapters").all()
     lane_evaluator: Callable[[dict[str, Any]], tuple[str, str, str | None]] = evaluate_lane_case
     scores = [score_case(case, capabilities=capabilities, lane_evaluator=lane_evaluator) for case in cases]
@@ -116,6 +134,8 @@ def run_benchmark(
         scores,
         benchmark_name="FormalPR-Bench",
         case_set=case_set,
+        partition=score_partition,
+        benchmark_version=BENCHMARK_VERSION,
     )
     return scores, leaderboard
 
@@ -124,12 +144,19 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--expanded", action="store_true", help="Score the 100-case expanded benchmark set.")
     parser.add_argument("--no-extended", action="store_true", help="Skip routing/adversarial/repair-loop cases.")
+    parser.add_argument(
+        "--partition",
+        choices=["train", "development", "test", "held_out"],
+        default=None,
+        help="Score only cases in this FormalPR-Bench partition (contamination-guarded).",
+    )
     parser.add_argument("--leaderboard", type=Path, default=None, help="Write leaderboard JSON to this path.")
     args = parser.parse_args()
 
     scores, leaderboard = run_benchmark(
         expanded=args.expanded,
         include_extended=not args.no_extended,
+        partition=args.partition,
     )
     failures = [score for score in scores if not score.passed]
     for score in scores:

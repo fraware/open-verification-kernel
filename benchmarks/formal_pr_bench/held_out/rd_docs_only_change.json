@@ -1,0 +1,13 @@
+{
+  "schema_version": "formal_pr_bench.held_out.v1",
+  "case_id": "rd_docs_only_change",
+  "forbidden_from_template_dev_scoring": true,
+  "case": {
+    "case_id": "rd_docs_only_change",
+    "category": "real_diff",
+    "input_fixture": "benchmarks/real_diffs/docs_only_change.diff",
+    "expected_lanes": [],
+    "expected_intents": [],
+    "expected_merge_recommendation": "require_human_review"
+  }
+}

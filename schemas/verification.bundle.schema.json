@@ -30,7 +30,22 @@
       "type": "object",
       "required": ["merge_recommendation"],
       "properties": {
-        "merge_recommendation": { "type": "string", "enum": ["allow", "block", "require_human_review", "allow_with_warning", "require_stronger_check"] },
+        "decision_state": {
+          "type": "string",
+          "enum": ["allow", "block", "needs_review", "unknown", "error", "skipped"]
+        },
+        "original_decision_state": {
+          "type": "string",
+          "enum": ["allow", "block", "needs_review", "unknown", "error", "skipped"]
+        },
+        "merge_recommendation": {
+          "type": "string",
+          "enum": ["allow", "block", "require_human_review", "allow_with_warning", "require_stronger_check"]
+        },
+        "controlling_finding_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
         "reason": { "type": "string" }
       },
       "additionalProperties": true

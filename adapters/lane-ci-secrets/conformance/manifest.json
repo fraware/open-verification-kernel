@@ -1,0 +1,26 @@
+{
+  "adapter_id": "lane-ci-secrets",
+  "kind": "lane_adapter",
+  "schema_version": "ovk.adapter_conformance.v1",
+  "fixtures": {
+    "pass": {
+      "path": "examples/ci_secrets/input_secrets_safe.json"
+    },
+    "fail": {
+      "path": "examples/ci_secrets/input_secrets_exposed.json"
+    },
+    "malformed": {
+      "path": "fixtures/malformed.json"
+    },
+    "timeout": {
+      "path": "fixtures/timeout.json"
+    },
+    "unavailable": {
+      "path": "fixtures/unavailable.json"
+    }
+  },
+  "docs": {
+    "pass_establishes": "CLAIMS.md#pass-establishes",
+    "outside_claim": "CLAIMS.md#outside-the-claim"
+  }
+}

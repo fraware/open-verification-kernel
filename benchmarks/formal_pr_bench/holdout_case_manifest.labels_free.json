@@ -1,0 +1,11 @@
+{
+  "schema_version": "ovk.holdout.case_manifest.labels_free.v1",
+  "description": "Labels-free holdout case ids for predict-only runs. Synthetic regression evidence — never external calibration.",
+  "synthetic": true,
+  "case_ids": [
+    "synthetic.auth.fastapi.allow.001",
+    "synthetic.auth.fastapi.block.001",
+    "synthetic.infra.terraform.review.001",
+    "synthetic.actions.trust.block.001"
+  ]
+}

@@ -419,13 +419,39 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--predictions", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--ovk-commit-sha", required=True)
-    parser.add_argument("--verified-source-sha", default=None)
+    parser.add_argument(
+        "--candidate-source-sha",
+        default=None,
+        help="Candidate SHA under evaluation (ordinary holdout). Prefer this over verified_source_sha.",
+    )
+    parser.add_argument(
+        "--verified-source-sha",
+        default=None,
+        help="WP-17 release-ledger only. Ordinary holdout must omit this.",
+    )
     parser.add_argument(
         "--print-aggregates",
         action="store_true",
         help="Print sanitized aggregates to stdout after fail-closed checks",
     )
     args = parser.parse_args(argv)
+
+    # Public FormalPR-Bench held_out must stay disjoint from template-dev cases.
+    # Private FormalPR-Holdout evaluation is separate, but contamination of the
+    # in-repo held_out partition still fails closed here.
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from benchmarks.formal_pr_bench.provenance_kit import (
+        ProvenanceError,
+        assert_no_template_dev_contamination,
+        verify_manifest_digests,
+    )
+
+    try:
+        assert_no_template_dev_contamination()
+        verify_manifest_digests()
+    except ProvenanceError as exc:
+        _fail(str(exc))
 
     token = os.environ.get("HOLDOUT_DOWNLOAD_TOKEN") or os.environ.get("GITHUB_TOKEN")
     asset_name = args.asset_name or f"FormalPR-Holdout-{args.tag}.tar.gz"
@@ -461,14 +487,26 @@ def main(argv: list[str] | None = None) -> int:
         from scripts.digest_holdout_predictions import assert_predictions_label_free
 
         assert_predictions_label_free(pred_payload)
+        candidate_sha = args.candidate_source_sha or args.ovk_commit_sha
+        if args.verified_source_sha:
+            _fail(
+                "ordinary holdout must not set --verified-source-sha; "
+                "use --candidate-source-sha (verified_source_sha is WP-17 release-ledger only)"
+            )
         payload = run_harness(
             release_root=release_root,
             predictions=args.predictions,
             holdout_tag=args.tag,
-            ovk_sha=args.ovk_commit_sha,
-            verified_sha=args.verified_source_sha,
+            ovk_sha=candidate_sha,
+            verified_sha=None,
             output=tmp_path / "aggregate.json",
         )
+        # Normalize identity fields for ordinary holdout.
+        if isinstance(payload, dict):
+            payload = dict(payload)
+            payload["candidate_source_sha"] = candidate_sha
+            payload["ovk_commit_sha"] = candidate_sha
+            payload.pop("verified_source_sha", None)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")

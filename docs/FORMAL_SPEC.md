@@ -124,33 +124,61 @@ ValidEvidence(E) iff
 ## Merge decision
 
 ```text
-MergePolicy(I, EvidenceSet) -> Decision
+MergePolicy(I, EvidenceSet) -> DecisionState
 ```
 
-Decision is one of:
+Normative ``DecisionState`` lattice:
 
 ```text
 allow
 block
-require_human_review
-allow_with_warning
-require_stronger_check
+needs_review
+unknown
+error
+skipped
 ```
 
-Default logic:
+Checker claim statuses remain distinct:
 
 ```text
-if any critical intent fails:
-    block
-elif any critical intent is unknown, error, or skipped:
-    require_human_review
-elif all required intents pass:
-    allow
-elif low-risk intents are skipped with justification:
-    allow_with_warning
-else:
-    require_human_review
+pass | fail | unknown | error | skipped
 ```
+
+``merge_recommendation`` is a deprecated alias of ``decision_state``
+(``needs_review`` ↔ ``require_human_review``). Legacy values
+``allow_with_warning`` and ``require_stronger_check`` are not lattice
+members; they map onto ``needs_review`` (never onto ``allow``).
+
+Hard rules:
+
+```text
+error never promotes to allow          (strict and advisory)
+unknown never becomes allow in strict  (advisory preserves unknown)
+required skipped never silent-allows   (strict: skipped or block)
+advisory preserves original_decision_state
+decision lists controlling_finding_ids[] and finding_contributions[]
+```
+
+Default strict logic:
+
+```text
+if any required claim fails:
+    block
+elif any required claim is error:
+    error
+elif any required claim is unknown:
+    needs_review or block   # per default_on_unknown; never allow
+elif any required claim is skipped:
+    skipped or block        # per default_on_required_skip; never allow
+elif all required claims pass:
+    allow
+else:
+    needs_review
+```
+
+Advisory mode keeps the honest lattice member in ``decision_state`` /
+``original_decision_state`` and does not invent ``allow_with_warning``
+as a lattice value; non-blocking behavior is an exit-code / CI concern.
 
 ## Security rules
 
@@ -163,19 +191,25 @@ These match the rules in [THREAT_MODEL.md](THREAT_MODEL.md): agents cannot self-
 EXTENDS Naturals, Sequences
 
 CONSTANTS Intents, Critical, Pass, Fail, Unknown, Error, Skipped
-CONSTANTS Allow, Block, RequireHumanReview
+CONSTANTS Allow, Block, NeedsReview, DecisionUnknown, DecisionError, DecisionSkipped
 
 VARIABLES result, decision
 
 Init ==
   /\ result \in [Intents -> {Pass, Fail, Unknown, Error, Skipped}]
-  /\ decision = RequireHumanReview
+  /\ decision = NeedsReview
 
 CriticalFailure ==
   \E i \in Critical : result[i] = Fail
 
+CriticalError ==
+  \E i \in Critical : result[i] = Error
+
 CriticalUnknown ==
-  \E i \in Critical : result[i] \in {Unknown, Error, Skipped}
+  \E i \in Critical : result[i] = Unknown
+
+CriticalSkipped ==
+  \E i \in Critical : result[i] = Skipped
 
 AllRequiredPass ==
   \A i \in Critical : result[i] = Pass
@@ -183,17 +217,27 @@ AllRequiredPass ==
 Decide ==
   IF CriticalFailure THEN
     decision' = Block
+  ELSE IF CriticalError THEN
+    decision' = DecisionError
   ELSE IF CriticalUnknown THEN
-    decision' = RequireHumanReview
+    decision' = NeedsReview
+  ELSE IF CriticalSkipped THEN
+    decision' = DecisionSkipped
   ELSE IF AllRequiredPass THEN
     decision' = Allow
   ELSE
-    decision' = RequireHumanReview
+    decision' = NeedsReview
 
 Safety_NoAllowOnCriticalFail ==
   CriticalFailure => decision # Allow
 
+Safety_NoAllowOnCriticalError ==
+  CriticalError => decision # Allow
+
 Safety_NoAllowOnCriticalUnknown ==
   CriticalUnknown => decision # Allow
+
+Safety_NoAllowOnCriticalSkipped ==
+  CriticalSkipped => decision # Allow
 =============================================================================
 ```

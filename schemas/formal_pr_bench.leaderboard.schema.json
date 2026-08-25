@@ -3,10 +3,15 @@
   "$id": "https://openverification.dev/schemas/formal_pr_bench.leaderboard.schema.json",
   "title": "FormalPR-Bench Leaderboard",
   "type": "object",
-  "required": ["schema_version", "benchmark", "case_set", "summary", "timing_ms", "cases"],
+  "required": ["schema_version", "benchmark", "benchmark_version", "partition", "case_set", "summary", "timing_ms", "cases"],
   "properties": {
     "schema_version": { "const": "formal_pr_bench.leaderboard.v1" },
     "benchmark": { "type": "string" },
+    "benchmark_version": { "type": "string", "minLength": 1 },
+    "partition": {
+      "type": "string",
+      "enum": ["train", "development", "test", "held_out", "all"]
+    },
     "case_set": { "type": "string" },
     "generated_at_unix_ms": { "type": "integer" },
     "summary": {

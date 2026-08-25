@@ -18,9 +18,8 @@ from ovk.adapters.opa import evaluate_self_protection
 from ovk.adapters.z3.validated_path import evaluate_validated_authorization_path
 from ovk.core.bundle import make_bundle
 from ovk.core.changed_files import load_changed_files
-from ovk.core.decision import decide
 from ovk.core.evidence_quality import build_evidence_quality_report
-from ovk.core.exit_codes import exit_code_for_recommendation
+from ovk.core.exit_codes import exit_code_for_decision_state, exit_code_for_recommendation
 from ovk.core.json_io import read_json_file, write_json_file
 from ovk.core.models import EvidenceBundle, VerificationEvidence
 from ovk.core.output_validation import validate_output_directory
@@ -55,6 +54,14 @@ template_app = typer.Typer(help="Verification intent template commands")
 app.add_typer(template_app, name="template")
 
 
+def _bundle_decision_state(bundle: EvidenceBundle) -> str:
+    """Primary decision_state with deprecated merge_recommendation fallback."""
+    decision = bundle.decision or {}
+    if decision.get("decision_state"):
+        return str(decision["decision_state"])
+    return str(decision.get("merge_recommendation", "needs_review"))
+
+
 def _finish_lane(
     bundle: EvidenceBundle,
     *,
@@ -76,10 +83,14 @@ def _finish_lane(
             quality_report=quality_output,
         )
     write_standard_run_outputs(bundle, paths)
-    recommendation = str(bundle.decision.get("merge_recommendation", "require_human_review"))
-    typer.echo(f"OVK {label} recommendation: {recommendation}")
+    decision_state = str(
+        bundle.decision.get("decision_state")
+        or bundle.decision.get("merge_recommendation", "needs_review")
+    )
+    recommendation = str(bundle.decision.get("merge_recommendation", decision_state))
+    typer.echo(f"OVK {label} decision_state: {decision_state} (merge_recommendation={recommendation})")
     if not advisory:
-        raise typer.Exit(code=exit_code_for_recommendation(recommendation))
+        raise typer.Exit(code=exit_code_for_decision_state(decision_state))
 
 
 @app.command("init")
@@ -155,10 +166,13 @@ def validate(instance: Path, schema: Path) -> None:
 
 @app.command("decide-bundle")
 def decide_bundle(evidence_bundle: Path, enforce: bool = True) -> None:
-    """Compute a merge recommendation for an evidence bundle."""
+    """Compute a decision_state for an evidence bundle."""
+    from ovk.core.decision import decide_with_reason
+
     bundle = EvidenceBundle.model_validate(read_json_file(evidence_bundle))
-    recommendation = decide(bundle, enforce=enforce)
-    typer.echo(recommendation.value)
+    decision = decide_with_reason(bundle, enforce=enforce)
+    typer.echo(decision["decision_state"])
+    typer.echo(f"merge_recommendation={decision['merge_recommendation']}", err=True)
 
 
 @app.command("render-pr-comment")
@@ -176,15 +190,36 @@ def render_pr_comment(evidence_bundle: Path, output: Optional[Path] = None) -> N
 def validate_outputs_cmd(
     bundle_dir: Path = typer.Argument(..., help="Release bundle directory to validate."),
 ) -> None:
-    """Validate generated JSON artifacts and manifest hashes in a bundle directory."""
-    schema_failures = validate_output_directory(bundle_dir)
-    manifest_failures = verify_release_bundle(bundle_dir)
-    failures = schema_failures + manifest_failures
+    """Validate generated JSON artifacts and manifest hashes in a bundle directory.
+
+    Directory form of the same verifier TCB as ``ovk verify-evidence``.
+    """
+    from ovk.core.evidence_verifier import verify_serialized_artifact
+
+    report = verify_serialized_artifact(bundle_dir)
+    failures = [f"{item['path']}: {item['message']}" for item in report.get("issues", [])]
     for failure in failures:
         typer.echo(failure)
-    if failures:
+    if not report.get("valid"):
         raise typer.Exit(code=1)
     typer.echo("OVK output validation passed")
+
+
+@app.command("verify-evidence")
+def verify_evidence_cmd(
+    bundle_or_directory: Path = typer.Argument(..., help="Evidence bundle JSON or release directory."),
+    output: Optional[Path] = typer.Option(None, help="Optional verifier.report.v1 JSON output."),
+) -> None:
+    """Independently verify schema, semantic trace, digests, decision, manifest, and attestation."""
+    from ovk.core.evidence_verifier import verify_serialized_artifact
+
+    report = verify_serialized_artifact(bundle_or_directory)
+    if output:
+        write_json_file(output, report)
+    else:
+        typer.echo(json.dumps(report, indent=2))
+    if not report.get("valid"):
+        raise typer.Exit(code=1)
 
 
 @app.command("evidence-quality")
@@ -275,13 +310,58 @@ def release_preflight(
 
     report = build_release_preflight_report()
     if output:
-        write_json_file(output, report.to_dict())
+        payload = report.to_dict()
+        # WP-17: include ledger-oriented fields for release-ledger construction.
+        payload["ledger_fields"] = {
+            "schema_version": "ovk.release_ledger.v1",
+            "preflight_passed": report.passed,
+            "failures": list(report.failures),
+            "verified_source_sha": None,
+            "note": "verified_source_sha is set only after offline release-ledger verification",
+        }
+        write_json_file(output, payload)
     for failure in report.failures:
         typer.echo(failure)
     if not report.passed:
         raise typer.Exit(code=1)
     typer.echo("OVK release preflight checks passed")
 
+
+@app.command("verify-release-ledger")
+def verify_release_ledger_cmd(
+    ledger: Path = typer.Argument(..., help="Path to .verification/release-ledger.json"),
+    require_artifacts: bool = typer.Option(False, help="Require wheel/sdist digests"),
+    require_consumers: bool = typer.Option(False, help="Require consumer evidence entries"),
+    require_holdout: bool = typer.Option(False, help="Require holdout digests"),
+    write_authorized: Optional[Path] = typer.Option(
+        None, help="Optional path to write authorized ledger (still published=false, no tag)"
+    ),
+) -> None:
+    """Offline release-ledger verifier. Does not tag or publish."""
+    from ovk.core.release_ledger import verify_release_ledger, write_release_ledger
+
+    payload = json.loads(ledger.read_text(encoding="utf-8"))
+    ok, failures, authorized = verify_release_ledger(
+        payload,
+        repo_root=Path.cwd(),
+        require_artifacts=require_artifacts,
+        require_consumers=require_consumers,
+        require_holdout=require_holdout,
+    )
+    for failure in failures:
+        typer.echo(failure)
+    if write_authorized is not None:
+        write_authorized.parent.mkdir(parents=True, exist_ok=True)
+        write_authorized.write_text(json.dumps(authorized, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        if write_authorized.name == "release-ledger.json":
+            write_release_ledger(Path.cwd(), authorized)
+    if not ok:
+        raise typer.Exit(code=1)
+    typer.echo(
+        "release ledger authorized for "
+        f"{authorized['release_state']['verified_source_sha']} "
+        "(published=false; no tag created)"
+    )
 
 @app.command("release-bundle")
 def release_bundle(
@@ -355,9 +435,10 @@ def demo_self_protection(
     if markdown_output:
         markdown_output.write_text(render_bundle_markdown(bundle), encoding="utf-8")
     recommendation = bundle.decision.get("merge_recommendation", "require_human_review")
-    typer.echo(f"OVK recommendation: {recommendation}")
+    decision_state = _bundle_decision_state(bundle)
+    typer.echo(f"OVK decision_state: {decision_state} (merge_recommendation={recommendation})")
     if enforce:
-        raise typer.Exit(code=exit_code_for_recommendation(str(recommendation)))
+        raise typer.Exit(code=exit_code_for_decision_state(decision_state))
 
 
 @app.command("ci")
@@ -573,10 +654,11 @@ def verify(
     if failures:
         raise typer.Exit(code=1)
     recommendation = str(bundle.decision.get("merge_recommendation", "require_human_review"))
-    typer.echo(f"OVK multi-lane recommendation: {recommendation}")
+    decision_state = _bundle_decision_state(bundle)
+    typer.echo(f"OVK multi-lane decision_state: {decision_state} (merge_recommendation={recommendation})")
     typer.echo(f"Release bundle written to {output_dir}")
     if not advisory:
-        raise typer.Exit(code=exit_code_for_recommendation(recommendation))
+        raise typer.Exit(code=exit_code_for_decision_state(decision_state))
 
 
 @app.command("extract-workflow")
@@ -672,7 +754,11 @@ def check(
     write_standard_run_outputs(result.bundle, paths)
     record_run(result.bundle.model_dump(mode="json"))
     recommendation = str(result.bundle.decision.get("merge_recommendation", "require_human_review"))
-    typer.echo(f"OVK check recommendation: {recommendation} ({result.elapsed_ms:.0f}ms)")
+    decision_state = _bundle_decision_state(result.bundle)
+    typer.echo(
+        f"OVK check decision_state: {decision_state} "
+        f"(merge_recommendation={recommendation}, {result.elapsed_ms:.0f}ms)"
+    )
     if format == "json":
         typer.echo(json.dumps(result.bundle.model_dump(mode="json"), indent=2))
     elif format != "md":
@@ -680,7 +766,7 @@ def check(
     else:
         typer.echo(result.markdown)
     if enforce_exit:
-        raise typer.Exit(code=exit_code_for_recommendation(recommendation))
+        raise typer.Exit(code=exit_code_for_decision_state(decision_state))
 
 
 @app.command("doctor")
@@ -738,10 +824,14 @@ def run_cmd(
     write_standard_run_outputs(result.bundle, paths)
     record_run(result.bundle.model_dump(mode="json"))
     recommendation = str(result.bundle.decision.get("merge_recommendation", "require_human_review"))
-    typer.echo(f"OVK run recommendation: {recommendation} ({result.elapsed_ms:.0f}ms)")
+    decision_state = _bundle_decision_state(result.bundle)
+    typer.echo(
+        f"OVK run decision_state: {decision_state} "
+        f"(merge_recommendation={recommendation}, {result.elapsed_ms:.0f}ms)"
+    )
     typer.echo(f"OVK run lanes: {sorted({item['lane'] for item in result.obligations})}")
     if not advisory:
-        raise typer.Exit(code=exit_code_for_recommendation(recommendation))
+        raise typer.Exit(code=exit_code_for_decision_state(decision_state))
 
 
 @app.command("generate-test")

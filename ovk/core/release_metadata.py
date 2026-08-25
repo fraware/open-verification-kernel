@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 
-OVK_VERSION = "1.2.1"
+OVK_VERSION = "1.3.0-rc.1"
 OVK_RELEASE_CANDIDATE = OVK_VERSION
 
 
@@ -25,6 +25,7 @@ SUPPORTED_COMMANDS = [
     "ovk release-preflight",
     "ovk evidence-quality",
     "ovk validate-outputs",
+    "ovk verify-evidence",
     "ovk verify",
     "ovk extract-workflow",
     "ovk plan",

@@ -19,10 +19,11 @@ from __future__ import annotations
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ovk.core.bundle import content_digest
 from ovk.core.models import (
+    DecisionState,
     MergeRecommendation,
     RiskSeverity,
     SourceRange,
@@ -67,6 +68,9 @@ TerminationKind = Literal[
 ]
 FallbackOutcome = Literal["unknown", "error", "fail", "fallback"]
 TimeoutBehavior = Literal["unknown", "error", "fail"]
+ReleaseStatus = Literal["stable", "preview", "experimental", "disabled"]
+DeterminismStatus = Literal["deterministic", "tool_dependent", "non_deterministic", "unknown"]
+VALID_RELEASE_STATUSES: frozenset[str] = frozenset({"stable", "preview", "experimental", "disabled"})
 
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
 _URI_SCHEME_RE = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*):")
@@ -182,6 +186,66 @@ class BackendCapabilityManifest(BaseModel):
     result_format: str | None = None
     counterexample_format: str | None = None
     timeout_behavior: TimeoutBehavior = "unknown"
+    # Normative claim-registry fields (OVK-02). Empty strings are filled by the
+    # post-validator from existing tool/guarantee fields so lane adapters stay concise.
+    checker_id: str = ""
+    version: str = ""
+    implementation: str = ""
+    input_contract: str = ""
+    output_contract: str = ""
+    claim_class: str = ""
+    trusted_components: list[str] = Field(default_factory=list)
+    failure_semantics: str = ""
+    timeout_semantics: TimeoutBehavior | None = None
+    unsupported_semantics: str = ""
+    determinism_status: DeterminismStatus = "unknown"
+    release_status: ReleaseStatus = "experimental"
+    owner: str = "ovk-maintainers"
+    native_execution: bool | None = None
+
+    @model_validator(mode="after")
+    def _normalize_normative_fields(self) -> "BackendCapabilityManifest":
+        if not self.checker_id.strip():
+            object.__setattr__(self, "checker_id", self.tool.name or self.capability_id)
+        if not self.version.strip():
+            object.__setattr__(
+                self,
+                "version",
+                self.tool.adapter_version or self.tool.version or "0.0.0",
+            )
+        if not self.implementation.strip():
+            object.__setattr__(self, "implementation", self.tool.adapter)
+        if not self.input_contract.strip():
+            langs = ", ".join(self.input_languages) if self.input_languages else "unspecified"
+            object.__setattr__(
+                self,
+                "input_contract",
+                f"Accepts {langs} inputs per adapter compile contract.",
+            )
+        if not self.output_contract.strip():
+            object.__setattr__(self, "output_contract", self.result_format or "ovk.result.v1")
+        if not self.claim_class.strip():
+            object.__setattr__(self, "claim_class", self.guarantee.type)
+        if not self.failure_semantics.strip():
+            object.__setattr__(
+                self,
+                "failure_semantics",
+                self.guarantee.meaning_of_fail or "Map tool/adapter failure to error or unknown.",
+            )
+        if self.timeout_semantics is None:
+            object.__setattr__(self, "timeout_semantics", self.timeout_behavior)
+        if not self.unsupported_semantics.strip():
+            object.__setattr__(
+                self,
+                "unsupported_semantics",
+                "; ".join(self.limits) if self.limits else "Unsupported inputs yield unknown.",
+            )
+        if self.release_status not in VALID_RELEASE_STATUSES:
+            raise ValueError(
+                f"unknown release_status {self.release_status!r}; "
+                f"expected one of {sorted(VALID_RELEASE_STATUSES)}"
+            )
+        return self
 
 
 class BackendEnvironmentFingerprint(BaseModel):
@@ -405,6 +469,7 @@ class RawBackendExecution(BaseModel):
     tool_version: str | None = None
     tool_digest: str | None = None
     worker_image_digest: str | None = None
+    envelope_produced: bool = False
 
 
 class ExecutionAttempt(BaseModel):
@@ -469,12 +534,15 @@ class ObligationExecutionRecord(BaseModel):
     attempts: list[ExecutionAttempt]
     results: list[NormalizedBackendResult]
     aggregate_status: VerificationStatus
+    decision_state: DecisionState | None = None
+    original_decision_state: DecisionState | None = None
     merge_recommendation: MergeRecommendation
     aggregation_reason: str
     open_obligations: list[dict[str, Any]] = Field(default_factory=list)
     fallback_used: bool = False
     fallback_accepted: bool = False
     fallback_cause: str | None = None
+    controlling_finding_ids: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

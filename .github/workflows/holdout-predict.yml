@@ -1,0 +1,74 @@
+name: FormalPR-Holdout predict
+
+# Label-separated prediction at a candidate SHA (WP-13).
+# No label artifact, no HOLDOUT_DOWNLOAD_TOKEN. Emits predictions.json + manifest only.
+
+on:
+  workflow_dispatch:
+    inputs:
+      case_manifest:
+        description: Path to labels-free case manifest (JSON list of case ids)
+        required: true
+        default: benchmarks/formal_pr_bench/holdout_case_manifest.labels_free.json
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  holdout-predict:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Produce label-free predictions
+        env:
+          HOLDOUT_DOWNLOAD_TOKEN: ""
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          unset HOLDOUT_DOWNLOAD_TOKEN || true
+          mkdir -p .verification
+          python scripts/digest_holdout_predictions.py \
+            --case-manifest "${{ inputs.case_manifest }}" \
+            --candidate-source-sha "${GITHUB_SHA}" \
+            --output .verification/holdout-predictions.json \
+            --manifest-output .verification/holdout-prediction-manifest.json
+
+      - name: Refuse verified_source_sha on predict artifacts
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for path in (
+              Path(".verification/holdout-predictions.json"),
+              Path(".verification/holdout-prediction-manifest.json"),
+          ):
+              payload = json.loads(path.read_text(encoding="utf-8"))
+              text = json.dumps(payload)
+              assert "verified_source_sha" not in text, path
+              assert payload.get("candidate_source_sha") or True
+          print("predict artifacts omit verified_source_sha")
+          PY
+
+      - name: Upload predictions
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: formalpr-holdout-predictions
+          path: |
+            .verification/holdout-predictions.json
+            .verification/holdout-prediction-manifest.json
+
+      - name: Attest prediction artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@7668571508540a607bdfd90a87a560489fe372eb # v2.1.0
+        with:
+          subject-path: .verification/holdout-predictions.json

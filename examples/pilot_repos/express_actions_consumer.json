@@ -1,0 +1,17 @@
+{
+  "schema_version": "ovk.verification_manifest.v1",
+  "name": "pilot-express-actions-consumer",
+  "description": "Maintained JS/TS consumer profile: CI secrets + self-protection (Express + GitHub Actions).",
+  "lanes": [
+    {
+      "lane": "ci_secrets",
+      "input": "../ci_secrets/input_secrets_safe.json",
+      "input_format": "infra"
+    },
+    {
+      "lane": "self_protection",
+      "input": "../no_agent_self_approval/input_gate_preserved.json",
+      "input_format": "infra"
+    }
+  ]
+}

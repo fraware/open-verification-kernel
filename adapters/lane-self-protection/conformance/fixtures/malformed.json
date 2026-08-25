@@ -1,0 +1,16 @@
+{
+  "malformed": true,
+  "actor": {
+    "type": "ai_agent",
+    "id": "codex"
+  },
+  "task": "malformed",
+  "ovk_gate_name": "ovk-verify",
+  "changed_files": [],
+  "before": {
+    "required_checks": []
+  },
+  "after": {
+    "required_checks": []
+  }
+}

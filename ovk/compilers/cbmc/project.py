@@ -48,9 +48,17 @@ class CbmcProject(BaseModel):
 
     def declare_guarantee(self) -> CbmcGuaranteeType:
         """Honest guarantee naming based on what is actually modeled."""
-        if any(harness.includes_project_code for harness in self.harnesses) and self.functions:
+        project_tus = bool(self.compile_commands_path) and bool(self.functions)
+        harnesses_with_project = [h for h in self.harnesses if h.includes_project_code]
+        if harnesses_with_project and project_tus:
+            # bounded_project_model_check requires unwind bounds on every project harness.
+            if any(h.bound is None or h.bound <= 0 for h in harnesses_with_project):
+                return "bounded_harness_model_check"
+            if not self.source_roots:
+                return "bounded_harness_model_check"
             return "bounded_project_model_check"
         if self.harnesses:
+            # Synthetic harness without project TUs stays harness-scoped.
             return "bounded_harness_model_check"
         if self.compile_commands_path:
             return "compile_database_resolution"

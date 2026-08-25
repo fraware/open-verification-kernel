@@ -24,6 +24,39 @@ from ovk.compilers.infrastructure.sensitivity import sensitivity_from_tags
 _SOURCE_PROFILE_ID = "infrastructure.terraform.plan_recursive_v1"
 
 
+def re_search_index(address: str) -> bool:
+    return "[" in address and "]" in address
+
+
+def _provider_family_paths(rtype: str, after: dict[str, Any]) -> list[str]:
+    """Bounded AWS/Azure/GCP family paths — never a bare public=true."""
+    paths: list[str] = []
+    if after.get("acl") in {"public-read", "public-read-write", "website"}:
+        paths.append(f"acl:{after.get('acl')}")
+    if after.get("internet_accessible") is True:
+        paths.append("internet_accessible")
+    cidrs = after.get("cidr_blocks")
+    if isinstance(cidrs, list) and any(str(item) in {"0.0.0.0/0", "::/0"} for item in cidrs):
+        if rtype.startswith("aws_"):
+            paths.append("aws:cidr:internet->sg")
+        elif rtype.startswith("azurerm_"):
+            paths.append("azure:cidr:internet->nsg")
+        elif rtype.startswith("google_"):
+            paths.append("gcp:cidr:internet->firewall")
+        else:
+            paths.append("cidr:internet")
+    ingress = after.get("ingress")
+    if isinstance(ingress, list):
+        for rule in ingress:
+            if not isinstance(rule, dict):
+                continue
+            rule_cidrs = rule.get("cidr_blocks") or rule.get("ipv6_cidr_blocks") or []
+            if isinstance(rule_cidrs, list) and any(str(item) in {"0.0.0.0/0", "::/0"} for item in rule_cidrs):
+                paths.append(f"{rtype}:ingress:internet")
+                break
+    return paths
+
+
 def _walk_module_resources(
     module: dict[str, Any],
     *,
@@ -142,7 +175,48 @@ def compile_terraform_plan(plan: dict[str, Any]) -> InfrastructureIR:
         address = str(change.get("address") or f"resource[{index}]")
         rtype = str(change.get("type") or "unknown")
         change_body = change.get("change", {})
-        after = change_body.get("after") if isinstance(change_body, dict) else None
+        if not isinstance(change_body, dict):
+            change_body = {}
+        after = change_body.get("after")
+        after_unknown = change_body.get("after_unknown")
+        after_sensitive = change_body.get("after_sensitive")
+        actions = change_body.get("actions") if isinstance(change_body.get("actions"), list) else []
+
+        # Moved / count / for_each markers force careful eligibility.
+        if change.get("action_reason") == "move" or "moved" in {str(a) for a in actions}:
+            warnings.append(f"{address}:moved_resource")
+        if re_search_index(address):
+            warnings.append(f"{address}:count_or_for_each_index")
+
+        unknown_exposure = False
+        if isinstance(after_unknown, dict):
+            for key in ("cidr_blocks", "ingress", "egress", "public_exposure", "acl", "internet_accessible", "security_groups"):
+                if after_unknown.get(key):
+                    unknown_exposure = True
+                    unsupported.append(f"{address}:after_unknown:{key}")
+        if isinstance(after_sensitive, dict) and any(after_sensitive.get(k) for k in ("cidr_blocks", "ingress", "acl")):
+            warnings.append(f"{address}:sensitive_exposure_fields")
+            # Sensitive unknown exposure must not be treated as private.
+            unknown_exposure = True
+
+        if after is None and unknown_exposure:
+            # Unknown exposure → review, never public=false claim.
+            resources.append(
+                InfraResourceIR(
+                    resource_id=address,
+                    resource_type=rtype,
+                    kind="terraform",
+                    sensitivity="unknown",
+                    public_exposure=False,
+                    exposure_paths=[],
+                    attributes={
+                        "format_version": format_version,
+                        "exposure_status": "unknown_requires_review",
+                        "after_unknown": after_unknown,
+                    },
+                )
+            )
+            continue
         if after is None:
             unsupported.append(f"{address}:missing_after")
             continue
@@ -154,16 +228,31 @@ def compile_terraform_plan(plan: dict[str, Any]) -> InfrastructureIR:
         paths: list[str] = []
         if isinstance(after.get("exposure_paths"), list):
             paths = [str(item) for item in after["exposure_paths"]]
-        elif after.get("acl") in {"public-read", "public-read-write", "website"}:
-            paths = [f"acl:{after.get('acl')}"]
-        elif after.get("internet_accessible") is True:
-            paths = ["internet_accessible"]
+        else:
+            paths = _provider_family_paths(rtype, after)
+        if unknown_exposure:
+            # Do not mint public=false from unknown; force review via unsupported.
+            paths = []
         public = bool(paths) or after.get("public_exposure") is True
+        if after.get("public_exposure") is True and not paths:
+            # Generic public=true without concrete path cannot be strict.
+            unsupported.append(f"{address}:generic_public_true_without_path")
+            # Keep declared public so eligibility records "without concrete path".
+            public = True
+            paths = []
         attributes: dict[str, Any] = {"format_version": format_version}
         if change.get("module_address"):
             attributes["module_address"] = change["module_address"]
         if used_recursive_profile:
             attributes["source_profile"] = _SOURCE_PROFILE_ID
+        if unknown_exposure:
+            attributes["exposure_status"] = "unknown_requires_review"
+        # Bind TF/provider metadata when present.
+        if isinstance(plan.get("terraform_version"), str):
+            attributes["terraform_version"] = plan["terraform_version"]
+        provider = change.get("provider_name")
+        if provider:
+            attributes["provider_name"] = provider
         resources.append(
             InfraResourceIR(
                 resource_id=address,

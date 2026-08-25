@@ -31,11 +31,11 @@ KNOWN_SOURCE_PROFILES: frozenset[str] = frozenset(
 # Maps profile IDs to the production compiler entrypoints that implement them.
 PROFILE_COMPILER_BINDINGS: dict[str, str] = {
     "authorization.fastapi.ast_v1": "ovk.compilers.authorization.fastapi_ast:FastApiAstAuthorizationCompiler",
-    "authorization.express.ast_v1": "ovk.compilers.authorization.express:ExpressAuthorizationCompiler",
+    "authorization.express.ast_v1": "ovk.compilers.authorization.express_ast:ExpressAstAuthorizationCompiler",
     "infrastructure.terraform.plan_recursive_v1": "ovk.compilers.infrastructure.terraform_plan:compile_terraform_plan",
     "infrastructure.kubernetes.controller_reachability_v1": "ovk.compilers.infrastructure.kubernetes:compile_kubernetes_objects",
     "ci_secrets.actions.permissions_flow_v1": "ovk.compilers.github_actions.trust_flow:compile_workflow_trust",
-    "deployment.trusted_profile_v1": "ovk.compilers.deployment.explicit_schema:compile_explicit_schema",
+    "deployment.trusted_profile_v1": "ovk.compilers.deployment.deployment_state:compile_deployment_state",
 }
 
 LANE_DEFAULT_PROFILES: dict[str, tuple[str, ...]] = {

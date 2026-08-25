@@ -36,7 +36,9 @@ from ovk.core.bundle import content_digest
 
 from ovk.core.evidence_from_execution import execution_record_to_evidence
 
-from ovk.core.execution_budget import LocalSubprocessWorker, execution_budget_from_policy
+from ovk.core.execution_budget import execution_budget_from_policy
+
+from ovk.core.sandbox_worker import production_backend_worker
 
 from ovk.core.execution_models import ExecutionContext, RoutingDecision, VerificationObligation
 
@@ -68,14 +70,21 @@ from ovk.core.self_protection_compiler import resolve_metadata_trusted
 from ovk.core.shadow_obligation import build_shadow_obligation
 
 
-def _control_plane(*, cache_dir: Path | None = None) -> BackendControlPlane:
+def _control_plane(*, cache_dir: Path | None = None, use_cache: bool = True) -> BackendControlPlane:
     """Build an enforced/shadow control plane with hardened cache + worker."""
+
+    if not use_cache:
+        return BackendControlPlane(
+            cache=None,
+            worker=production_backend_worker(),
+            use_hardened_cache=False,
+        )
 
     hardened = HardenedResultCache(cache_dir / "control-plane") if cache_dir is not None else HardenedResultCache()
 
     return BackendControlPlane(
         cache=ControlPlaneResultCache(hardened),
-        worker=LocalSubprocessWorker(),
+        worker=production_backend_worker(),
         use_hardened_cache=True,
     )
 
@@ -130,6 +139,7 @@ def _attach_execution_metadata(
     job_id: str | None = None,
     input_format: str | None = None,
     routing_enforced: bool = False,
+    suppress_legacy_routing_artifact: bool = False,
 ) -> VerificationEvidence:
     """Record routing, input digest, and obligation-scoped evidence identity."""
 
@@ -159,7 +169,10 @@ def _attach_execution_metadata(
 
     metadata = _routing_metadata(routing, intent_id=resolved_intent, routing_enforced=routing_enforced)
 
-    if metadata is not None:
+    # Full ``routing.mode=enforced`` evidence uses typed fields only. Shadow-mode
+    # lane enforcement still emits the compatibility ``backend_routing`` artifact so
+    # MCP/kernel callers can share routing_id without reading typed columns.
+    if metadata is not None and not suppress_legacy_routing_artifact:
         artifacts.append(
             {
                 "kind": "backend_routing",
@@ -175,13 +188,27 @@ def _attach_execution_metadata(
     if shadow_comparison is not None:
         artifacts.append(shadow_comparison)
 
-    return evidence.model_copy(
+    # V3 evidence_id is a canonical identity derived from the typed execution
+    # record and must remain externally recomputable. The historical suffix is a
+    # compatibility identity only for legacy evidence versions.
+    evidence_id = evidence.evidence_id
+    if not str(evidence.schema_version).startswith("ovk.evidence.v3"):
+        evidence_id = f"{evidence.evidence_id}-{evidence_suffix}"
+
+    updated = evidence.model_copy(
         update={
-            "evidence_id": f"{evidence.evidence_id}-{evidence_suffix}",
+            "evidence_id": evidence_id,
             "generated_artifacts": artifacts,
             "routing_id": evidence.routing_id or (metadata or {}).get("routing_id"),
+            "routing_enforced": routing_enforced,
         }
     )
+    # Seal after all metadata mutations so evidence_digest binds the final record.
+    if str(updated.schema_version).endswith(".v3"):
+        from ovk.core.evidence_integrity import seal_evidence
+
+        return seal_evidence(updated)
+    return updated
 
 
 def _legacy_status_and_recommendation(evidence: VerificationEvidence) -> tuple[str, str]:
@@ -202,6 +229,8 @@ def _run_shadow_path(
     base_sha: str | None,
     intent_id: str,
     policy: dict[str, Any] | None,
+    cache_dir: Path | None = None,
+    use_cache: bool = True,
 ) -> dict[str, Any] | None:
     """Execute the typed control plane for comparison; never raises to legacy."""
 
@@ -228,7 +257,9 @@ def _run_shadow_path(
 
         routing = route_obligation(obligation, registry, context=context, policy=policy)
 
-        record = _control_plane().execute(obligation, routing, registry=registry)
+        record = _control_plane(cache_dir=cache_dir, use_cache=use_cache).execute(
+            obligation, routing, registry=registry
+        )
 
         return {
             "record": record,
@@ -252,6 +283,8 @@ def _run_enforced_with_routing(
     typed_obligation: VerificationObligation,
     policy: dict[str, Any] | None,
     schema_version: str,
+    cache_dir: Path | None = None,
+    use_cache: bool = True,
 ) -> VerificationEvidence:
     """Execute one enforced lane using a pre-computed immutable routing decision."""
 
@@ -262,7 +295,9 @@ def _run_enforced_with_routing(
 
     registry = registry_builder()
 
-    record = _control_plane().execute(typed_obligation, routing, registry=registry)
+    record = _control_plane(cache_dir=cache_dir, use_cache=use_cache).execute(
+        typed_obligation, routing, registry=registry
+    )
 
     evidence = execution_record_to_evidence(
         record,
@@ -274,7 +309,14 @@ def _run_enforced_with_routing(
     )
 
     if lane == "self_protection":
-        metadata_trusted = resolve_metadata_trusted(policy)
+        subject = typed_obligation.subject
+        metadata_trusted = resolve_metadata_trusted(
+            policy,
+            data=data,
+            repo=subject.repo,
+            head_sha=subject.head_sha,
+            base_sha=subject.base_sha,
+        )
 
         if not metadata_trusted and evidence.decision.get("merge_recommendation") == "allow":
             evidence = evidence.model_copy(
@@ -324,7 +366,13 @@ def _evaluate_obligation(
 
     precomputed_typed = routing_plan.typed_obligations.get(intent_id)
 
-    if use_cache and cache_dir is not None:
+    routing_config = resolve_routing_config(policy)
+    # Flat legacy cache is only for ``routing.mode=legacy``. Shadow/enforced use the
+    # control-plane hardened namespace so regimes cannot poison each other.
+    use_legacy_flat_cache = bool(use_cache and cache_dir is not None and routing_config.mode == "legacy")
+    suppress_legacy_routing_artifact = routing_config.mode == "enforced"
+
+    if use_legacy_flat_cache:
         cached = get_cached_evidence(cache_dir, key)
 
         if cached is not None:
@@ -339,6 +387,7 @@ def _evaluate_obligation(
                 job_id=obligation.get("job_id"),
                 input_format=input_format,
                 routing_enforced=routing_enforced_for_lane(policy, lane),
+                suppress_legacy_routing_artifact=suppress_legacy_routing_artifact,
             )
 
     if routing_enforced_for_lane(policy, lane):
@@ -359,10 +408,9 @@ def _evaluate_obligation(
             typed_obligation=precomputed_typed,
             policy=policy,
             schema_version=evidence_schema_version,
+            cache_dir=cache_dir if use_cache else None,
+            use_cache=use_cache,
         )
-
-        if use_cache and cache_dir is not None:
-            store_cached_evidence(cache_dir, key, evidence.model_dump(mode="json"))
 
         return _attach_execution_metadata(
             evidence,
@@ -373,6 +421,7 @@ def _evaluate_obligation(
             job_id=obligation.get("job_id"),
             input_format=input_format,
             routing_enforced=True,
+            suppress_legacy_routing_artifact=suppress_legacy_routing_artifact,
         )
 
     evidence = evaluate_lane(
@@ -387,8 +436,6 @@ def _evaluate_obligation(
 
     shadow_comparison: dict[str, Any] | None = None
 
-    routing_config = resolve_routing_config(policy)
-
     if routing_config.mode in {"shadow", "enforced"} and lane in _LANE_REGISTRY_BUILDERS:
         shadow = _run_shadow_path(
             lane=lane,
@@ -398,6 +445,8 @@ def _evaluate_obligation(
             base_sha=base_sha,
             intent_id=intent_id,
             policy=policy,
+            cache_dir=cache_dir if use_cache else None,
+            use_cache=use_cache,
         )
 
         if shadow and "record" in shadow:
@@ -422,7 +471,7 @@ def _evaluate_obligation(
                 "routing_mode": routing_config.mode,
             }
 
-    if use_cache and cache_dir is not None:
+    if use_legacy_flat_cache:
         store_cached_evidence(cache_dir, key, evidence.model_dump(mode="json"))
 
     return _attach_execution_metadata(
@@ -435,6 +484,7 @@ def _evaluate_obligation(
         job_id=obligation.get("job_id"),
         input_format=input_format,
         routing_enforced=False,
+        suppress_legacy_routing_artifact=suppress_legacy_routing_artifact,
     )
 
 

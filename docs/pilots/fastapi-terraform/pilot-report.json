@@ -1,0 +1,28 @@
+{
+  "schema_version": "ovk.pilot_report.v1",
+  "pilot_dir": "docs/pilots/fastapi-terraform",
+  "manifests_total": 2,
+  "manifests_passed": 2,
+  "results": [
+    {
+      "manifest": "examples/pilot_repos/fastapi_terraform_consumer.json",
+      "name": "pilot-fastapi-terraform-consumer",
+      "description": "Maintained Python consumer profile: CI secrets + infrastructure (FastAPI + Terraform).",
+      "lane_count": 2,
+      "evidence_count": 2,
+      "merge_recommendation": "allow",
+      "elapsed_ms": 19.658799999888288,
+      "passed": true
+    },
+    {
+      "manifest": "examples/pilot_repos/ci_secrets_only.json",
+      "name": "pilot-ci-secrets-only",
+      "description": "Pilot manifest: CI secrets lane for workflow-heavy repositories.",
+      "lane_count": 1,
+      "evidence_count": 1,
+      "merge_recommendation": "allow",
+      "elapsed_ms": 3.492200001346646,
+      "passed": true
+    }
+  ]
+}

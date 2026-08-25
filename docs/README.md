@@ -1,8 +1,10 @@
 # OVK Documentation
 
-Documentation for Open Verification Kernel (**v1.3.0-rc.1 candidate**; signed tag remains `v1.2.1`).
+Documentation for Open Verification Kernel (**v1.3.0-rc.1** engineering candidate in this tree; signed production pin remains `v1.2.1` until attributable publication).
 
 Use this index as the canonical entry point. Each guide covers one topic; cross-links replace duplicated content across files.
+
+**Honesty defaults:** FormalPR-Bench is regression, not external calibration. Local dogfood is not independent consumer validation. `verified_source_sha` requires the release ledger. `externally_calibrated_strict` is not claimed. Internal engineering handoffs live under [internal/](internal/README.md) and are not public product claims.
 
 ## By role
 
@@ -21,7 +23,7 @@ Use this index as the canonical entry point. Each guide covers one topic; cross-
 | [DEEP_AUDIT_2026-07-23_R2.md](DEEP_AUDIT_2026-07-23_R2.md) | Authoritative R2 deep audit (supersedes day-to-day VISION_AUDIT) |
 | [ENGINEERING_PROGRAM_2026-07-23_R2.md](ENGINEERING_PROGRAM_2026-07-23_R2.md) | R2 sprint/PR execution program |
 | [RELEASE_AUDIT.md](RELEASE_AUDIT.md) | Engineering audit responses and metric provenance |
-| [STATUS.md](STATUS.md) | Capabilities, CLI surface, and trust model |
+| [STATUS.md](STATUS.md) | Generated maturity / profile inventory (from project-status) |
 | [EXPERIMENTAL_PATHS.md](EXPERIMENTAL_PATHS.md) | Honest limits for non-strict compiler/backend paths |
 | [INTEGRATION.md](INTEGRATION.md) | Install locally or in GitHub Actions |
 | [RELEASE.md](RELEASE.md) | Maintainer release guide and known limitations |
@@ -31,7 +33,7 @@ Use this index as the canonical entry point. Each guide covers one topic; cross-
 
 | Document | Purpose |
 |---|---|
-| [BENCHMARK.md](BENCHMARK.md) | FormalPR-Bench categories, real-diff corpus, leaderboard artifacts |
+| [BENCHMARK.md](BENCHMARK.md) | FormalPR-Bench regression suite, real-diff corpus, leaderboard artifacts |
 | [BACKENDS.md](BACKENDS.md) | Backend requirements in CI, install matrix, fallback semantics |
 | [POLICY.md](POLICY.md) | Verification routing configuration for `.verification/config.yml` |
 | [EXTERNAL_VALIDATION.md](EXTERNAL_VALIDATION.md) | Weekly external validation matrix |
@@ -40,8 +42,10 @@ Use this index as the canonical entry point. Each guide covers one topic; cross-
 | [HOLDOUT_LABEL_SEPARATION.md](HOLDOUT_LABEL_SEPARATION.md) | Sprint 8 label-separated prediction/eval checklist |
 | [SOURCE_PROFILE_HARDENING.md](SOURCE_PROFILE_HARDENING.md) | Sprint 6 source-profile hardening scaffolding |
 | [ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md) | Sprint 10 rc.1 / v1.3.0 publication gate |
+| [TRUSTED_COMPUTING_BASE.md](TRUSTED_COMPUTING_BASE.md) | Reviewer TCB inventory (registry + Action/App) |
 | [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md) | Advisory→strict rollout on external OSS repos |
 | [PILOT_CASE_STUDIES.md](PILOT_CASE_STUDIES.md) | In-repo pilot metrics and external pilot reporting |
+| [pilots/README.md](pilots/README.md) | Published advisory pilot reports (Python, JS/TS, infra) |
 | [AGENT_REPAIR_LOOP.md](AGENT_REPAIR_LOOP.md) | Counterexample-to-repair workflow for MCP agents |
 | [benchmarks/adoption-summary.json](benchmarks/adoption-summary.json) | Machine-readable adoption metrics (see [BENCHMARK.md](BENCHMARK.md) for field-name notes) |
 
@@ -69,6 +73,7 @@ Use this index as the canonical entry point. Each guide covers one topic; cross-
 
 | Document | Purpose |
 |---|---|
+| [RELEASE_NOTES_v1.3.0-rc.1.md](RELEASE_NOTES_v1.3.0-rc.1.md) | v1.3.0-rc.1 candidate changelog |
 | [RELEASE_NOTES_v1.2.0.md](RELEASE_NOTES_v1.2.0.md) | v1.2.0 changelog |
 | [RELEASE_NOTES_v1.1.0.md](RELEASE_NOTES_v1.1.0.md) | v1.1.0 changelog |
 | [RELEASE_NOTES_v1.0.0.md](RELEASE_NOTES_v1.0.0.md) | v1.0.0 changelog |
@@ -79,12 +84,15 @@ Use this index as the canonical entry point. Each guide covers one topic; cross-
 docs/
   README.md                 # this index
   CURRENT_RELEASE_STATUS.md # living adoption dashboard
-  STATUS.md                 # stable capability inventory
+  TRUSTED_COMPUTING_BASE.md # reviewer TCB inventory (OVK-PR9)
+  STATUS.md                 # generated maturity / profile inventory
   RELEASE.md                # maintainer guide + known limitations
   RELEASE_NOTES_v*.md       # immutable per-version changelogs
   INTEGRATION.md            # install and GitHub Actions
   LANES.md, BACKENDS.md, …  # reference and operations guides
   ARCHITECTURE.md, …        # design and specification
+  pilots/                   # published advisory pilot reports (OVK-PR8)
   benchmarks/               # committed leaderboard and adoption JSON
   templates/                # external pilot manifest template
+  internal/                 # engineering handoffs (not public claims)
 ```

@@ -237,6 +237,30 @@ def _check_adapter_capabilities() -> list[str]:
     return validate_capabilities()
 
 
+def _check_rc_dod() -> list[str]:
+    """Verify in-repo OVK-PR9 definition-of-done items."""
+    ensure_repo_on_path()
+    from scripts.verify_rc_dod import verify_rc_dod
+
+    return verify_rc_dod()
+
+
+def _check_rc_install() -> list[str]:
+    """Verify pip metadata + composite Action SHA-pin install surface."""
+    ensure_repo_on_path()
+    from scripts.verify_rc_install import verify_rc_install
+
+    return verify_rc_install(wheel=False)
+
+
+def _check_tcb_doc_fresh() -> list[str]:
+    """Ensure TRUSTED_COMPUTING_BASE.md matches registry + Action surfaces."""
+    ensure_repo_on_path()
+    from scripts.render_tcb_doc import tcb_doc_stale
+
+    return tcb_doc_stale()
+
+
 def build_release_preflight_report() -> PreflightReport:
     """Run release preflight checks and return a structured report."""
     ensure_repo_on_path()
@@ -264,6 +288,9 @@ def build_release_preflight_report() -> PreflightReport:
             check_from_failures("pilot_program", _check_pilot_program()),
             check_from_failures("release_layout_schema_coverage", _check_release_layout_schema_coverage()),
             check_from_failures("adapter_capabilities", _check_adapter_capabilities()),
+            check_from_failures("rc_dod", _check_rc_dod()),
+            check_from_failures("rc_install", _check_rc_install()),
+            check_from_failures("tcb_doc", _check_tcb_doc_fresh()),
         ),
         optional_checks=(check_from_failures("pilot_metrics_dry_run", _check_pilot_metrics_dry_run()),),
     )

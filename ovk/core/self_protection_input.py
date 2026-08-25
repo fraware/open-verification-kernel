@@ -1,4 +1,4 @@
-"""Structured input builder for the Sprint 1 self-protection path."""
+"""Structured input builder for the self-protection path."""
 
 from __future__ import annotations
 
@@ -21,26 +21,19 @@ class SelfProtectionMetadata:
     before_workflow_permissions: dict[str, str] | None = None
     after_workflow_permissions: dict[str, str] | None = None
     ovk_gate_name: str = DEFAULT_GATE_NAME
+    acquisition: dict[str, Any] | None = None
 
 
 def build_self_protection_input(metadata: SelfProtectionMetadata) -> dict[str, Any]:
-    """Build the canonical input object for the self-protection adapter.
-
-    Required-check metadata is intentionally optional. If a high-risk change lacks
-    the before or after required-check set, the adapter must return unknown.
-    """
+    """Build canonical before/after material without inventing missing metadata."""
     payload: dict[str, Any] = {
-        "actor": {
-            "type": metadata.actor_type,
-            "id": metadata.agent_id,
-        },
+        "actor": {"type": metadata.actor_type, "id": metadata.agent_id},
         "task": metadata.task,
         "ovk_gate_name": metadata.ovk_gate_name,
         "changed_files": metadata.changed_files,
         "before": {},
         "after": {},
     }
-
     if metadata.before_required_checks is not None:
         payload["before"]["required_checks"] = metadata.before_required_checks
     if metadata.after_required_checks is not None:
@@ -49,12 +42,20 @@ def build_self_protection_input(metadata: SelfProtectionMetadata) -> dict[str, A
         payload["before"]["workflow_permissions"] = metadata.before_workflow_permissions
     if metadata.after_workflow_permissions is not None:
         payload["after"]["workflow_permissions"] = metadata.after_workflow_permissions
-
+    if metadata.acquisition is not None:
+        payload["_ovk_acquisition"] = dict(metadata.acquisition)
     return payload
 
 
 def build_from_json_like(data: dict[str, Any]) -> dict[str, Any]:
-    """Normalize a JSON-like metadata object into canonical adapter input."""
+    """Normalize flat or already-canonical metadata into canonical adapter input."""
+    # Preserve canonical input exactly enough for provenance digest validation.
+    if isinstance(data.get("before"), dict) or isinstance(data.get("after"), dict):
+        payload = dict(data)
+        payload.setdefault("before", {})
+        payload.setdefault("after", {})
+        return payload
+
     metadata = SelfProtectionMetadata(
         actor_type=str(data.get("actor_type", data.get("author_type", "ai_agent"))),
         agent_id=str(data.get("agent_id", data.get("agent", "unknown"))),
@@ -65,5 +66,15 @@ def build_from_json_like(data: dict[str, Any]) -> dict[str, Any]:
         before_workflow_permissions=data.get("before_workflow_permissions"),
         after_workflow_permissions=data.get("after_workflow_permissions"),
         ovk_gate_name=str(data.get("ovk_gate_name", DEFAULT_GATE_NAME)),
+        acquisition=(
+            dict(data["_ovk_acquisition"])
+            if isinstance(data.get("_ovk_acquisition"), dict)
+            else None
+        ),
     )
-    return build_self_protection_input(metadata)
+    payload = build_self_protection_input(metadata)
+    if isinstance(data.get("_ovk_protected_artifact"), dict):
+        payload["_ovk_protected_artifact"] = dict(data["_ovk_protected_artifact"])
+    if data.get("_ovk_provenance_conflicts"):
+        payload["_ovk_provenance_conflicts"] = data["_ovk_provenance_conflicts"]
+    return payload

@@ -57,7 +57,8 @@ mismatches are cache misses — stale results must not authorize allow.
 ## Metric provenance
 
 Generated badge/summary/adoption metrics must carry `benchmark_source_sha` for
-the commit that produced the numbers. Set `verified_source_sha` only when a
-complete required-workflow set was observed. Later `[skip ci]` badge commits must
-not be cited as the verified source. See program §24.3 and
-[CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md).
+the commit that produced the numbers. Do **not** set `verified_source_sha` from
+badge or holdout jobs; that field is authorized only via the release ledger after
+a complete required-workflow set is observed. Later `[skip ci]` badge commits must
+not be cited as a verified source. See [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md)
+and [ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md).

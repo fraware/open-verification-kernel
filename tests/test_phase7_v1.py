@@ -44,6 +44,8 @@ def test_bench_cli_writes_leaderboard(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["schema_version"] == "formal_pr_bench.leaderboard.v1"
+    assert payload["benchmark_version"] == "v1"
+    assert payload["partition"] == "all"
     assert payload["summary"]["cases_passed"] == payload["summary"]["cases_total"]
 
 
@@ -55,7 +57,7 @@ def test_v1_readiness_checklist() -> None:
     required_backends = {"opa", "z3", "cedar", "tla+", "kani", "dafny", "verus", "lean", "cbmc", "alloy"}
     assert required_backends.issubset(backends)
     assert len(list_templates()) >= 100
-    assert metadata["version"] == "1.2.1"
+    assert metadata["version"] == "1.3.0-rc.1"
     assert "ovk bench" in metadata["supported_commands"]
 
 

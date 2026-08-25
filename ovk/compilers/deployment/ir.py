@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-DeploymentSource = Literal["explicit_schema", "github_environments", "argo_rollouts", "unknown"]
+DeploymentSource = Literal["explicit_schema", "github_environments", "argo_rollouts", "deployment_state.v1", "unknown"]
 
 
 class DeploymentState(BaseModel):

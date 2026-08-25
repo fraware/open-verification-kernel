@@ -1,10 +1,4 @@
-"""Execution budget helpers and bounded backend workers.
-
-``ExecutionBudget`` is defined in ``ovk.core.execution_models``. This module
-re-exports it, provides policy conversion helpers, and defines the worker
-protocol that enforces subprocess environment bounds. Adapters describe
-computation; workers enforce timeout, cwd, env allowlist, and output caps.
-"""
+"""Execution budget helpers and bounded backend workers."""
 
 from __future__ import annotations
 
@@ -19,15 +13,17 @@ from ovk.core.execution_models import ExecutionBudget
 
 __all__ = [
     "BackendWorker",
+    "BudgetBoundWorker",
     "ExecutionBudget",
     "LocalSubprocessWorker",
+    "SandboxedBackendWorker",
     "WorkerResult",
     "execution_budget_from_policy",
+    "production_backend_worker",
 ]
 
 
 def execution_budget_from_policy(policy: dict[str, Any] | None) -> ExecutionBudget:
-    """Build an ``ExecutionBudget`` from repository policy configuration."""
     policy = policy or {}
     budget_section = policy.get("budget", {})
     if not isinstance(budget_section, dict):
@@ -71,8 +67,6 @@ def execution_budget_from_policy(policy: dict[str, Any] | None) -> ExecutionBudg
 
 @dataclass(frozen=True)
 class WorkerResult:
-    """Bounded subprocess execution result."""
-
     exit_code: int | None
     timed_out: bool
     stdout: str
@@ -81,11 +75,14 @@ class WorkerResult:
     stderr_truncated: bool = False
     cwd: str | None = None
     command: tuple[str, ...] = ()
+    isolation_profile: str = "local-subprocess.v1"
+    enforced_controls: tuple[str, ...] = ()
+    tool_digest: str | None = None
+    worker_image_digest: str | None = None
+    termination_category: str = "completed"
 
 
 class BackendWorker(Protocol):
-    """Protocol for workers that enforce execution environment bounds."""
-
     def run(
         self,
         command: Sequence[str],
@@ -98,9 +95,6 @@ class BackendWorker(Protocol):
     ) -> WorkerResult: ...
 
 
-# Environment variable names that must never be passed, even when a caller
-# supplies them explicitly. The worker otherwise starts from a minimal
-# allowlisted parent environment and accepts explicit non-secret additions.
 _SECRET_ENV_DENYLIST = frozenset(
     {
         "AWS_ACCESS_KEY_ID",
@@ -116,6 +110,9 @@ _SECRET_ENV_DENYLIST = frozenset(
         "NPM_TOKEN",
         "OPENAI_API_KEY",
         "OVK_SIGNING_KEY",
+        "OVK_METADATA_VERIFY_KEY",
+        "OVK_METADATA_SIGNING_KEY",
+        "OVK_METADATA_SIGNING_PRIVATE_KEY",
         "PRIVATE_KEY",
         "PYPI_API_TOKEN",
         "SSH_AUTH_SOCK",
@@ -123,35 +120,47 @@ _SECRET_ENV_DENYLIST = frozenset(
 )
 
 
+def _is_python_ovk_worker(command: Sequence[str]) -> bool:
+    normalized = [str(part) for part in command]
+    return "-m" in normalized and "ovk.workers.deterministic_entry" in normalized
+
+
+def _memory_preexec(max_memory_mb: int):
+    """Return a POSIX pre-exec RLIMIT hook or None on unsupported platforms."""
+    if os.name != "posix" or max_memory_mb <= 0:
+        return None
+    try:
+        import resource
+    except ImportError:
+        return None
+
+    limit = int(max_memory_mb) * 1024 * 1024
+
+    def apply_limits() -> None:
+        resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+
+    return apply_limits
+
+
 @dataclass
 class LocalSubprocessWorker:
-    """Local subprocess worker with timeout, cwd bound, and env allowlist.
+    """Local worker with explicit truthful enforcement capabilities.
 
-    Child processes inherit only configured safe parent variables, plus any
-    explicit non-secret additions supplied by the caller. Secret-bearing
-    names are always stripped from inherited and explicit environments.
-    Non-positive wall-time budgets are rejected without starting a process.
+    Base ``run`` enforces timeout, cwd bounds, a minimal environment and output
+    caps. ``run_with_budget`` additionally applies a POSIX address-space limit
+    and, for OVK's Python evaluator process, enables audit-hook denial of network
+    access and filesystem writes. External native commands are rejected when a
+    requested isolation control cannot be enforced rather than being mislabeled
+    as isolated.
     """
 
     allowed_env_keys: frozenset[str] = field(
         default_factory=lambda: frozenset(
             {
-                "PATH",
-                "PATHEXT",
-                "SYSTEMROOT",
-                "TEMP",
-                "TMP",
-                "TMPDIR",
-                "HOME",
-                "USERPROFILE",
-                "LANG",
-                "LC_ALL",
-                "PYTHONPATH",
-                "VIRTUAL_ENV",
-                "LD_LIBRARY_PATH",
-                "DYLD_LIBRARY_PATH",
-                "SSL_CERT_FILE",
-                "SSL_CERT_DIR",
+                "PATH", "PATHEXT", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR",
+                "HOME", "USERPROFILE", "LANG", "LC_ALL", "PYTHONPATH",
+                "VIRTUAL_ENV", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH",
+                "SSL_CERT_FILE", "SSL_CERT_DIR",
             }
         )
     )
@@ -167,26 +176,112 @@ class LocalSubprocessWorker:
         max_stdout_bytes: int = 1_000_000,
         max_stderr_bytes: int = 1_000_000,
     ) -> WorkerResult:
-        cwd_resolved = cwd.resolve()
-        if self.bound_roots:
-            if not any(_is_relative_to(cwd_resolved, root.resolve()) for root in self.bound_roots):
-                return WorkerResult(
-                    exit_code=None,
-                    timed_out=False,
-                    stdout="",
-                    stderr=f"cwd {cwd_resolved} is outside bound roots",
-                    cwd=str(cwd_resolved),
-                    command=tuple(command),
-                )
+        return self._run_internal(
+            command,
+            cwd=cwd,
+            env=env,
+            timeout_seconds=timeout_seconds,
+            max_stdout_bytes=max_stdout_bytes,
+            max_stderr_bytes=max_stderr_bytes,
+            preexec_fn=None,
+            enforced_controls=("timeout", "environment_allowlist", "output_caps"),
+        )
 
-        if timeout_seconds <= 0:
+    def run_with_budget(
+        self,
+        command: Sequence[str],
+        *,
+        budget: ExecutionBudget,
+        cwd: Path,
+        env: Mapping[str, str] | None = None,
+        timeout_seconds: float,
+        max_stdout_bytes: int = 1_000_000,
+        max_stderr_bytes: int = 1_000_000,
+    ) -> WorkerResult:
+        extra = dict(env or {})
+        controls = ["timeout", "environment_allowlist", "output_caps"]
+        python_worker = _is_python_ovk_worker(command)
+        preexec = _memory_preexec(budget.max_memory_mb)
+        unenforceable: list[str] = []
+        if preexec is not None:
+            controls.append("memory_limit")
+        elif budget.max_memory_mb:
+            unenforceable.append("memory_limit")
+        if not budget.allow_network and not python_worker:
+            unenforceable.append("network_denied")
+        if not budget.allow_repository_write and not python_worker:
+            unenforceable.append("filesystem_writes_denied")
+        if unenforceable and not (python_worker and set(unenforceable) <= {"memory_limit"}):
+            reasons: list[str] = []
+            if "network_denied" in unenforceable:
+                reasons.append("network denial requested but cannot be enforced for external native command")
+            if "filesystem_writes_denied" in unenforceable:
+                reasons.append("repository write denial requested but cannot be enforced for external native command")
+            if "memory_limit" in unenforceable:
+                reasons.append("requested memory limit cannot be enforced by local worker on this platform")
             return WorkerResult(
                 exit_code=None,
-                timed_out=True,
+                timed_out=False,
                 stdout="",
-                stderr="execution budget permits no backend wall time",
-                cwd=str(cwd_resolved),
+                stderr="; ".join(reasons),
+                cwd=str(cwd.resolve()),
                 command=tuple(command),
+                isolation_profile="local-subprocess.v2",
+                enforced_controls=tuple(controls),
+                termination_category="isolation_unenforceable",
+            )
+        if unenforceable:
+            # Python worker: memory RLIMIT may be unavailable. Do not claim it.
+            preexec = None
+        extra["PYTHONDONTWRITEBYTECODE"] = "1"
+        if not budget.allow_network:
+            extra["OVK_WORKER_DENY_NETWORK"] = "1"
+            controls.append("network_denied")
+        if not budget.allow_repository_write:
+            extra["OVK_WORKER_DENY_WRITES"] = "1"
+            controls.append("filesystem_writes_denied")
+
+        return self._run_internal(
+            command,
+            cwd=cwd,
+            env=extra,
+            timeout_seconds=timeout_seconds,
+            max_stdout_bytes=max_stdout_bytes,
+            max_stderr_bytes=max_stderr_bytes,
+            preexec_fn=preexec,
+            enforced_controls=tuple(controls),
+            isolation_profile="local-subprocess.v2",
+        )
+
+    def _run_internal(
+        self,
+        command: Sequence[str],
+        *,
+        cwd: Path,
+        env: Mapping[str, str] | None,
+        timeout_seconds: float,
+        max_stdout_bytes: int,
+        max_stderr_bytes: int,
+        preexec_fn,
+        enforced_controls: tuple[str, ...],
+        isolation_profile: str = "local-subprocess.v1",
+    ) -> WorkerResult:
+        cwd_resolved = cwd.resolve()
+        if self.bound_roots and not any(_is_relative_to(cwd_resolved, root.resolve()) for root in self.bound_roots):
+            return WorkerResult(
+                exit_code=None, timed_out=False, stdout="",
+                stderr=f"cwd {cwd_resolved} is outside bound roots",
+                cwd=str(cwd_resolved), command=tuple(command),
+                isolation_profile=isolation_profile,
+                enforced_controls=enforced_controls,
+            )
+        if timeout_seconds <= 0:
+            return WorkerResult(
+                exit_code=None, timed_out=False, stdout="",
+                stderr=f"non-positive wall-time budget rejected: {timeout_seconds}",
+                cwd=str(cwd_resolved), command=tuple(command),
+                isolation_profile=isolation_profile,
+                enforced_controls=enforced_controls,
             )
 
         child_env = self._build_env(env)
@@ -198,41 +293,33 @@ class LocalSubprocessWorker:
                 capture_output=True,
                 timeout=timeout_seconds,
                 check=False,
+                preexec_fn=preexec_fn,
+                start_new_session=(os.name == "posix"),
             )
         except subprocess.TimeoutExpired as exc:
             stdout, stdout_truncated = _truncate(exc.stdout or b"", max_stdout_bytes)
             stderr, stderr_truncated = _truncate(exc.stderr or b"", max_stderr_bytes)
             return WorkerResult(
-                exit_code=None,
-                timed_out=True,
-                stdout=stdout,
-                stderr=stderr,
-                stdout_truncated=stdout_truncated,
-                stderr_truncated=stderr_truncated,
-                cwd=str(cwd_resolved),
-                command=tuple(command),
+                exit_code=None, timed_out=True, stdout=stdout, stderr=stderr,
+                stdout_truncated=stdout_truncated, stderr_truncated=stderr_truncated,
+                cwd=str(cwd_resolved), command=tuple(command),
+                isolation_profile=isolation_profile,
+                enforced_controls=enforced_controls,
+                termination_category="timeout",
             )
 
         stdout, stdout_truncated = _truncate(completed.stdout or b"", max_stdout_bytes)
         stderr, stderr_truncated = _truncate(completed.stderr or b"", max_stderr_bytes)
         return WorkerResult(
-            exit_code=int(completed.returncode),
-            timed_out=False,
-            stdout=stdout,
-            stderr=stderr,
-            stdout_truncated=stdout_truncated,
-            stderr_truncated=stderr_truncated,
-            cwd=str(cwd_resolved),
-            command=tuple(command),
+            exit_code=int(completed.returncode), timed_out=False,
+            stdout=stdout, stderr=stderr,
+            stdout_truncated=stdout_truncated, stderr_truncated=stderr_truncated,
+            cwd=str(cwd_resolved), command=tuple(command),
+            isolation_profile=isolation_profile,
+            enforced_controls=enforced_controls,
         )
 
     def _build_env(self, extra: Mapping[str, str] | None) -> dict[str, str]:
-        """Build a child environment from the configured allowlist only.
-
-        Parent variables are inherited only when their names appear in
-        ``allowed_env_keys``. Explicit ``extra`` keys are merged unless they
-        match the secret denylist. Secret-bearing names are always removed.
-        """
         allow = {key.upper() for key in self.allowed_env_keys}
         baseline: dict[str, str] = {}
         for key, value in os.environ.items():
@@ -244,13 +331,50 @@ class LocalSubprocessWorker:
                     continue
                 baseline[key] = value
         for denied in _SECRET_ENV_DENYLIST:
-            baseline.pop(denied, None)
-            baseline.pop(denied.lower(), None)
-            # Drop any case variant that might have been injected.
             for existing in list(baseline):
                 if existing.upper() == denied.upper():
                     baseline.pop(existing, None)
         return baseline
+
+
+@dataclass(frozen=True)
+class BudgetBoundWorker:
+    """Adapter-facing worker that binds every subprocess call to one budget."""
+
+    worker: BackendWorker
+    budget: ExecutionBudget
+
+    def run(
+        self,
+        command: Sequence[str],
+        *,
+        cwd: Path,
+        env: Mapping[str, str] | None = None,
+        timeout_seconds: float,
+        max_stdout_bytes: int = 1_000_000,
+        max_stderr_bytes: int = 1_000_000,
+    ) -> WorkerResult:
+        run_with_budget = getattr(self.worker, "run_with_budget", None)
+        if callable(run_with_budget):
+            return run_with_budget(
+                command,
+                budget=self.budget,
+                cwd=cwd,
+                env=env,
+                timeout_seconds=min(timeout_seconds, self.budget.per_backend_wall_time_seconds),
+                max_stdout_bytes=max_stdout_bytes,
+                max_stderr_bytes=max_stderr_bytes,
+            )
+        # Custom/test workers remain usable; they are not claimed as the
+        # production LocalSubprocessWorker isolation profile.
+        return self.worker.run(
+            command,
+            cwd=cwd,
+            env=env,
+            timeout_seconds=min(timeout_seconds, self.budget.per_backend_wall_time_seconds),
+            max_stdout_bytes=max_stdout_bytes,
+            max_stderr_bytes=max_stderr_bytes,
+        )
 
 
 def _truncate(raw: bytes | str, limit: int) -> tuple[str, bool]:
@@ -266,3 +390,13 @@ def _is_relative_to(path: Path, root: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def __getattr__(name: str):
+    if name in {"SandboxedBackendWorker", "production_backend_worker"}:
+        from ovk.core.sandbox_worker import SandboxedBackendWorker, production_backend_worker
+
+        globals()["SandboxedBackendWorker"] = SandboxedBackendWorker
+        globals()["production_backend_worker"] = production_backend_worker
+        return globals()[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

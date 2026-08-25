@@ -1,0 +1,93 @@
+{
+  "schema_version": "ovk.action_hardening.scenarios.v1",
+  "description": "Fixture-driven Action hardening scenarios (OVK-PR6 / OVK-07). Local pytest covers all; workflow_dispatch-oriented cases are marked for CI dogfood.",
+  "scenarios": [
+    {
+      "id": "fork_pr",
+      "kind": "local",
+      "description": "Fork PR event stays fail-closed on untrusted secrets; check emission skips without write token",
+      "event": "events/fork_pr.json",
+      "changed_files": "diffs/workflow_secrets.diff",
+      "expected_decision_states": ["block", "needs_review"],
+      "expect_check_skip_without_token": true
+    },
+    {
+      "id": "no_changed_files",
+      "kind": "local",
+      "description": "Empty change set does not invent a block; decision remains allow or skipped/needs_review",
+      "changed_files": "diffs/empty_paths.txt",
+      "expected_decision_states": ["allow", "skipped", "needs_review"]
+    },
+    {
+      "id": "renamed_files",
+      "kind": "local",
+      "description": "Renamed policy path is detected and routed",
+      "changed_files": "diffs/renamed_policy.diff",
+      "expect_paths_include": ["policies/auth_v2.rego"],
+      "expected_decision_states": ["block", "needs_review", "allow", "unknown"]
+    },
+    {
+      "id": "deleted_policies",
+      "kind": "local",
+      "description": "Deleted verification policy/config is treated as a high-risk change surface",
+      "changed_files": "diffs/deleted_policy.diff",
+      "expect_paths_include": [".verification/config.yml"],
+      "expect_domains_include": ["ci_cd"],
+      "expected_decision_states": ["block", "needs_review", "unknown", "allow"]
+    },
+    {
+      "id": "workflow_modifications",
+      "kind": "local",
+      "description": "Workflow modification exposing secrets blocks in the default trust context",
+      "changed_files": "diffs/workflow_secrets.diff",
+      "expected_decision_states": ["block"]
+    },
+    {
+      "id": "malicious_filenames",
+      "kind": "local",
+      "description": "Path-traversal and control-character filenames are ingested without crash",
+      "changed_files": "diffs/malicious_filenames.diff",
+      "expect_no_crash": true,
+      "expected_decision_states": ["allow", "block", "needs_review", "unknown", "error", "skipped"]
+    },
+    {
+      "id": "large_diffs",
+      "kind": "local_generated",
+      "description": "Large multi-file diff completes within a bounded wall clock",
+      "file_count": 400,
+      "max_seconds": 60,
+      "expected_decision_states": ["allow", "block", "needs_review", "unknown", "skipped"]
+    },
+    {
+      "id": "missing_permissions",
+      "kind": "check_emit",
+      "description": "Missing checks:write (HTTP 403) fails emit; advisory path records check_emitted=false",
+      "expect_emit_exit": 1
+    },
+    {
+      "id": "repeated_reruns",
+      "kind": "check_emit",
+      "description": "Repeated emit for the same head SHA updates via external_id (idempotent)",
+      "expect_idempotent_external_id": true
+    },
+    {
+      "id": "concurrent_runs",
+      "kind": "check_emit",
+      "description": "Concurrent emitters for the same SHA share one external_id and update the same check",
+      "expect_idempotent_external_id": true
+    },
+    {
+      "id": "stale_check_results",
+      "kind": "check_emit",
+      "description": "Evidence head_sha mismatch fails closed (no check published)",
+      "expect_stale_exit": 1
+    },
+    {
+      "id": "workflow_dispatch",
+      "kind": "workflow_dispatch",
+      "description": "workflow_dispatch event metadata resolves without a pull_request number",
+      "event": "events/workflow_dispatch.json",
+      "expect_pr_number": null
+    }
+  ]
+}

@@ -57,6 +57,43 @@ def fetch_branch_protection(config: GitHubApiConfig) -> dict[str, Any] | None:
     return _request_json(branch_protection_url(config), config.token)
 
 
+def environments_url(config: GitHubApiConfig) -> str:
+    """Return the repository environments API URL."""
+    owner_repo = config.repository.strip("/")
+    return f"{config.api_base.rstrip('/')}/repos/{owner_repo}/environments"
+
+
+def fetch_environments(config: GitHubApiConfig) -> dict[str, Any] | None:
+    """Fetch repository environments, returning None when unavailable."""
+    if not config.repository:
+        return None
+    return _request_json(environments_url(config), config.token)
+
+
+def protected_environment_names_from_api(payload: dict[str, Any] | None) -> list[str]:
+    """Extract environment names that have protection rules.
+
+    Names alone are not trusted. Callers must bind them into a signed
+    ``ProtectedMetadataArtifact`` before they can authorize workflow analysis.
+    """
+    if not isinstance(payload, dict):
+        return []
+    environments = payload.get("environments")
+    if not isinstance(environments, list):
+        return []
+    names: list[str] = []
+    for item in environments:
+        if not isinstance(item, dict) or not item.get("name"):
+            continue
+        rules = item.get("protection_rules")
+        has_protection = bool(item.get("protection_rules")) or bool(item.get("prevent_self_review"))
+        if isinstance(rules, list) and rules:
+            has_protection = True
+        if has_protection:
+            names.append(str(item["name"]))
+    return names
+
+
 def required_checks_from_branch_protection(branch_protection: dict[str, Any] | None) -> list[str] | None:
     """Extract required checks from a GitHub branch protection response."""
     if branch_protection is None:

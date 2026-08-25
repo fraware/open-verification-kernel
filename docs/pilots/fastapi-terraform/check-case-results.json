@@ -1,0 +1,24 @@
+{
+  "cases": [
+    {
+      "case": "advisory_passing",
+      "expected": "allow",
+      "merge_recommendation": "allow",
+      "elapsed_ms": 100.651,
+      "intents": [
+        "agent-cannot-disable-own-ci-gate",
+        "no-secrets-in-untrusted-context"
+      ]
+    },
+    {
+      "case": "advisory_failing",
+      "expected": "block",
+      "merge_recommendation": "block",
+      "elapsed_ms": 90.58,
+      "intents": [
+        "agent-cannot-disable-own-ci-gate",
+        "no-secrets-in-untrusted-context"
+      ]
+    }
+  ]
+}

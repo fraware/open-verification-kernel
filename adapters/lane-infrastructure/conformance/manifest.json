@@ -1,0 +1,26 @@
+{
+  "adapter_id": "lane-infrastructure",
+  "kind": "lane_adapter",
+  "schema_version": "ovk.adapter_conformance.v1",
+  "fixtures": {
+    "pass": {
+      "path": "examples/infrastructure_exposure/input_private_sensitive_resource.json"
+    },
+    "fail": {
+      "path": "examples/infrastructure_exposure/input_public_sensitive_resource.json"
+    },
+    "malformed": {
+      "path": "fixtures/malformed.json"
+    },
+    "timeout": {
+      "path": "fixtures/timeout.json"
+    },
+    "unavailable": {
+      "path": "fixtures/unavailable.json"
+    }
+  },
+  "docs": {
+    "pass_establishes": "CLAIMS.md#pass-establishes",
+    "outside_claim": "CLAIMS.md#outside-the-claim"
+  }
+}

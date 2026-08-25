@@ -1,6 +1,8 @@
 # FormalPR-Bench
 
-FormalPR-Bench is OVK's regression suite. It scores whether checks return the right recommendation, pick the right backend, produce useful repair hints, and handle realistic PR diffs.
+FormalPR-Bench is OVK's **internal regression suite**. It scores whether checks return the right recommendation, pick the right backend, produce useful repair hints, and handle realistic PR diffs on a frozen corpus.
+
+It is **not** an independent accuracy estimate and must not be cited as external calibration. Published bench artifacts use `benchmark_source_sha` / `benchmark_version`. They must **not** mint `verified_source_sha` (that field is release-ledger only).
 
 ## Public artifacts
 
@@ -43,13 +45,40 @@ python scripts/render_bench_badge.py --leaderboard .verification/formal-pr-bench
 
 ## Realistic PR diff set
 
-- 16 diffs in `benchmarks/real_diffs/` (secrets, auth, infra, deployment, multi-surface, partial hunks).
+- 18 diffs in `benchmarks/real_diffs/` (secrets, auth, infra, deployment, multi-surface, partial hunks, CBMC).
 - Manifest: `benchmarks/real_diffs/manifest.json`.
 - Integration tests: `tests/test_real_diffs.py` (≥95% check detection rate required).
 
 ```bash
 pytest tests/test_real_diffs.py -v
 ```
+
+## Provenance and partitions (OVK-06)
+
+FormalPR-Bench publishes provenance-backed partitions under `benchmarks/formal_pr_bench/`:
+
+| Artifact | Purpose |
+|---|---|
+| `provenance/<case_id>.json` | Source, author, date, derivation |
+| `licenses.json` | Per-case / corpus license (Apache-2.0) |
+| `partitions.json` | `train` / `development` / `test` / `held_out` membership |
+| `duplication_report.json` | Near-duplicate detection |
+| `mutations/` | Controlled mutation variants (not scored as corpus members) |
+| `held_out/` | Cases forbidden from template-dev scoring |
+| `adversarial/` | Misleading diffs |
+| `rationales/<case_id>.md` | Expected-decision rationale |
+| `manifest.v1.json` | Version manifest with partition digests |
+| `template_dev_cases.json` | Cases used during property-template development |
+
+Published leaderboards must cite `benchmark_version` and `partition`. Template-dev cases cannot be counted as `held_out` evaluation; contamination fails CI.
+
+Regenerate artifacts:
+
+```bash
+python scripts/generate_formalpr_provenance.py
+```
+
+Cross-links: [HOLDOUT_LABEL_SEPARATION.md](HOLDOUT_LABEL_SEPARATION.md), [FORMALPR_HOLDOUT_GOVERNANCE.md](FORMALPR_HOLDOUT_GOVERNANCE.md).
 
 ## Category pass rates
 

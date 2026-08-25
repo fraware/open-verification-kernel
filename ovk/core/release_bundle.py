@@ -11,10 +11,12 @@ from ovk.core.artifact_manifest import artifact_entry, build_artifact_manifest, 
 from ovk.core.attestation_binding import verify_bundle_statement_binding, verify_envelope_manifest_binding
 from ovk.core.attestation_envelope import build_attestation_envelope
 from ovk.core.attestation_signing import verify_envelope_signature
+from ovk.core.evidence_verifier import verify_bundle_semantics
 from ovk.core.json_io import read_json_file, write_json_file
 from ovk.core.models import EvidenceBundle
 from ovk.core.output_validation import validate_generated_json, validate_output_directory
 from ovk.core.provenance import build_provenance_statement
+from ovk.core.provenance_binding import verify_provenance_binding
 from ovk.core.release_layout import ReleaseArtifact, missing_required_artifacts
 from ovk.core.run_outputs import StandardOutputPaths, write_standard_run_outputs
 from ovk.core.sigstore_signing import verify_cosign_bundle
@@ -141,10 +143,32 @@ def _artifact_path_within_root(root: Path, rel_path: str) -> Path | None:
 
 
 def verify_release_bundle(root: Path, layout: dict[str, Any] | None = None) -> list[str]:
-    """Verify a release bundle directory, hashes, bindings, and signatures."""
+    """Verify a release bundle directory, semantic evidence, hashes, bindings, and signatures."""
     failures: list[str] = []
     active_layout = layout or release_bundle_layout()
     failures.extend(f"missing artifact: {path}" for path in missing_required_artifacts(root, active_layout))
+
+    evidence_path = root / "ovk-evidence.json"
+    parsed_bundle: EvidenceBundle | None = None
+    if evidence_path.exists():
+        try:
+            parsed_bundle = EvidenceBundle.model_validate(read_json_file(evidence_path))
+        except Exception as exc:  # noqa: BLE001 - verifier must report malformed evidence, not crash
+            failures.append(f"evidence model validation failed: {type(exc).__name__}: {exc}")
+        else:
+            semantic = verify_bundle_semantics(parsed_bundle)
+            for issue in semantic.issues:
+                failures.append(f"evidence semantics: {issue.path}: {issue.message}")
+
+    provenance_path = root / "ovk-provenance.json"
+    if provenance_path.exists() and parsed_bundle is not None:
+        try:
+            provenance = read_json_file(provenance_path)
+        except Exception as exc:  # noqa: BLE001
+            failures.append(f"provenance parsing failed: {type(exc).__name__}: {exc}")
+        else:
+            for issue in verify_provenance_binding(parsed_bundle, provenance):
+                failures.append(f"provenance binding: {issue.path}: {issue.message}")
 
     manifest_path = root / "ovk-artifact-manifest.json"
     if not manifest_path.exists():
@@ -169,7 +193,6 @@ def verify_release_bundle(root: Path, layout: dict[str, Any] | None = None) -> l
             failures.append(f"hash mismatch for {rel_path}: expected {expected_sha}, got {actual_sha}")
 
     envelope_path = root / "ovk-attestation-envelope.json"
-    evidence_path = root / "ovk-evidence.json"
     if envelope_path.exists():
         envelope = read_json_file(envelope_path)
         if envelope.get("signature") and not verify_envelope_signature(envelope):
@@ -188,13 +211,12 @@ def verify_release_bundle(root: Path, layout: dict[str, Any] | None = None) -> l
                 certificate_oidc_issuer=issuer,
             ):
                 failures.append("attestation envelope Sigstore bundle verification failed")
-        if evidence_path.exists():
-            bundle = EvidenceBundle.model_validate(read_json_file(evidence_path))
+        if parsed_bundle is not None:
             statement = envelope.get("statement", {})
-            for issue in verify_bundle_statement_binding(bundle, statement):
-                failures.append(f"attestation binding: {issue.message}")
+            for issue in verify_bundle_statement_binding(parsed_bundle, statement):
+                failures.append(f"attestation binding: {issue.path}: {issue.message}")
             for issue in verify_envelope_manifest_binding(envelope, manifest_sha256=sha256_file(manifest_path)):
-                failures.append(f"envelope binding: {issue.message}")
+                failures.append(f"envelope binding: {issue.path}: {issue.message}")
 
     return failures
 

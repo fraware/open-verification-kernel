@@ -1,19 +1,54 @@
 {
   "capability_id": "verus-rust-v1",
-  "tool": {"name": "verus", "adapter": "ovk-adapter-verus", "adapter_version": "0.1.0"},
+  "checker_id": "verus",
+  "version": "0.1.0",
+  "implementation": "ovk-adapter-verus",
+  "input_contract": "Verified-Rust harness contract payload with Verus-style annotations.",
+  "output_contract": "ovk.result.v1 with proof_failure counterexamples (deterministic evaluator today)",
+  "claim_class": "proof_obligation",
+  "tool": {
+    "name": "verus",
+    "adapter": "ovk-adapter-verus",
+    "adapter_version": "0.1.0"
+  },
   "backend_class": "proof_assistant",
-  "input_languages": ["rust"],
-  "supported_domains": ["authorization", "data_boundary"],
-  "supported_property_kinds": ["invariant", "safety"],
+  "input_languages": [
+    "rust"
+  ],
+  "supported_domains": [
+    "authorization",
+    "data_boundary"
+  ],
+  "supported_property_kinds": [
+    "invariant",
+    "safety"
+  ],
   "guarantee": {
     "type": "proof_obligation",
     "meaning_of_pass": "Verus verified the Rust harness.",
     "meaning_of_fail": "Verus reported verification failures.",
     "meaning_of_unknown": "Verus unavailable or harness incomplete."
   },
-  "assumptions": ["Harness models security-critical code paths."],
-  "limits": ["Verification bounded by annotations."],
+  "assumptions": [
+    "Harness models security-critical code paths."
+  ],
+  "trusted_components": [
+    "deterministic verified-Rust contract evaluator"
+  ],
+  "limits": [
+    "Verification bounded by annotations."
+  ],
+  "failure_semantics": "Unavailable Verus or incomplete harness maps to unknown; evaluator errors map to error.",
+  "timeout_semantics": "unknown",
+  "timeout_behavior": "unknown",
+  "unsupported_semantics": "Native Verus verification is not implemented; verification bounded by annotations.",
+  "determinism_status": "deterministic",
+  "release_status": "experimental",
+  "owner": "ovk-maintainers",
+  "native_execution": false,
   "result_format": "ovk.result.v1",
   "counterexample_format": "proof_failure",
-  "timeout_behavior": "unknown"
+  "conformance": {
+    "suite": "conformance/manifest.json"
+  }
 }

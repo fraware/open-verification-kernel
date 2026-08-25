@@ -93,8 +93,23 @@ def run_sprint1_self_protection(
             before_workflow_permissions=metadata.get("before_workflow_permissions"),
             after_workflow_permissions=metadata.get("after_workflow_permissions"),
             ovk_gate_name=str(metadata.get("ovk_gate_name", "ovk-verify")),
+            acquisition=(
+                dict(metadata["_ovk_acquisition"])
+                if isinstance(metadata.get("_ovk_acquisition"), dict)
+                else None
+            ),
         )
     )
+    if isinstance(metadata.get("_ovk_protected_artifact"), dict):
+        structured["_ovk_protected_artifact"] = dict(metadata["_ovk_protected_artifact"])
+    if metadata.get("_ovk_provenance_conflicts"):
+        structured["_ovk_provenance_conflicts"] = metadata["_ovk_provenance_conflicts"]
+    if isinstance(metadata.get("before"), dict) and "required_checks" in metadata["before"]:
+        structured.setdefault("before", {})
+        structured["before"]["required_checks"] = metadata["before"]["required_checks"]
+    if isinstance(metadata.get("after"), dict) and "required_checks" in metadata["after"]:
+        structured.setdefault("after", {})
+        structured["after"]["required_checks"] = metadata["after"]["required_checks"]
     bundle = run_self_protection_backends(
         structured,
         strategy=backend_strategy,

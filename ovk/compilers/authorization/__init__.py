@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ovk.compilers.authorization.coverage import CoveragePolicy, assess_coverage, strict_allow_permitted
 from ovk.compilers.authorization.express import ExpressAuthorizationCompiler
+from ovk.compilers.authorization.express_ast import ExpressAstAuthorizationCompiler
 from ovk.compilers.authorization.fastapi import FastApiAuthorizationCompiler
 from ovk.compilers.authorization.fastapi_ast import FastApiAstAuthorizationCompiler
 from ovk.compilers.authorization.ir import AuthorizationIR
@@ -17,6 +18,7 @@ __all__ = [
     "AuthMaterials",
     "AuthorizationIR",
     "CoveragePolicy",
+    "ExpressAstAuthorizationCompiler",
     "ExpressAuthorizationCompiler",
     "FastApiAstAuthorizationCompiler",
     "FastApiAuthorizationCompiler",

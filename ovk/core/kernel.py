@@ -1,4 +1,4 @@
-"""Kernel orchestration: infer → rank → route → compile → run → decide."""
+"""Kernel orchestration: infer → compile → route once → execute → decide."""
 
 from __future__ import annotations
 
@@ -7,23 +7,23 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ovk.core.adapter_runtime import execute_obligations
+from ovk.core.authoritative_runtime import execute_authoritative_plan
 from ovk.core.bundle import make_bundle
 from ovk.core.capabilities import CapabilityRegistry
 from ovk.core.compilation_evidence import compilation_failure_evidence
 from ovk.core.context import RepositoryContext, budget_from_policy, build_repository_context
-from ovk.core.policy_config import bundle_decision_options
 from ovk.core.intent_registry import IntentRegistry
 from ovk.core.lane_compiler import build_plan_from_inputs
 from ovk.core.models import EvidenceBundle
 from ovk.core.obligation_compiler import ObligationCompilerRegistry
+from ovk.core.policy_config import bundle_decision_options
 from ovk.core.render import render_bundle_markdown
 from ovk.core.repo_memory import router_historical_priors
-from ovk.core.surface_routing import surface_backend_bonuses
 from ovk.core.result_cache import DEFAULT_CACHE_DIR
 from ovk.core.risk_ranker import rank_intents
-from ovk.core.routing_pipeline import AuthoritativeRoutingPlan, build_authoritative_routing_plan
 from ovk.core.router import VerificationBudget, route_intent
+from ovk.core.routing_pipeline import AuthoritativeRoutingPlan, build_authoritative_routing_plan
+from ovk.core.surface_routing import surface_backend_bonuses
 from ovk.paths import resource_path
 
 
@@ -49,7 +49,7 @@ def _routing_for_plan(
     template_dir: Path,
     adapter_dir: Path,
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
-    """Build ranked routing decisions for all candidate intents."""
+    """Compatibility routing for the no-obligation/catalog path only."""
     intent_registry = IntentRegistry.from_directory(template_dir)
     capability_registry = CapabilityRegistry.from_directory(adapter_dir)
     historical = router_historical_priors()
@@ -96,7 +96,12 @@ def execute_kernel(
     template_dir: Path | None = None,
     adapter_dir: Path | None = None,
 ) -> KernelResult:
-    """Run the full OVK kernel pipeline for a repository change."""
+    """Run the full OVK kernel pipeline for a repository change.
+
+    For production lane obligations, routing is computed once and the exact
+    ``AuthoritativeRoutingPlan`` is passed to execution. Execution does not
+    reconstruct or merge routing decisions.
+    """
     started = time.perf_counter()
     plan = build_plan_from_inputs(changed_files=changed_files, diff_text=diff_text)
 
@@ -123,7 +128,6 @@ def execute_kernel(
     policy_dict = ctx.policy if isinstance(ctx.policy, dict) else None
 
     authoritative_plan: AuthoritativeRoutingPlan | None = None
-    routing_by_intent: dict[str, Any] = {}
     routing: list[dict[str, Any]] = []
 
     if obligations:
@@ -134,10 +138,9 @@ def execute_kernel(
             head_sha=ctx.head_sha,
             base_sha=ctx.base_sha,
         )
-        routing_by_intent = authoritative_plan.legacy_routing_by_intent()
         routing = authoritative_plan.routing_metadata_list()
     else:
-        routing, routing_by_intent = _routing_for_plan(
+        routing, _routing_by_intent = _routing_for_plan(
             plan,
             context=ctx,
             budget=budget,
@@ -159,9 +162,10 @@ def execute_kernel(
             **decision_options,
         )
     else:
-        evidence_items = execute_obligations(
+        assert authoritative_plan is not None
+        evidence_items = execute_authoritative_plan(
             obligations,
-            routing_by_intent,
+            authoritative_plan,
             repo=ctx.repo,
             head_sha=ctx.head_sha,
             base_sha=ctx.base_sha,

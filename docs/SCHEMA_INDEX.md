@@ -32,7 +32,8 @@ JSON schemas for OVK objects. See also [ARTIFACTS.md](ARTIFACTS.md).
 | [infrastructure.policy.schema.json](../schemas/infrastructure.policy.schema.json) | ovk.infrastructure.policy.v1 | policy configuration files |
 | [verification.config.schema.json](../schemas/verification.config.schema.json) | ovk.config.v1 | `.verification/config.yml` policy routing config |
 | [formal_pr_bench.leaderboard.schema.json](../schemas/formal_pr_bench.leaderboard.schema.json) | formal_pr_bench.leaderboard.v1 | `ovk bench --leaderboard` |
-| [pilot.report.schema.json](../schemas/pilot.report.schema.json) | ovk.pilot_report.v1 | `ovk pilot --output report.json` |
+| [formal_pr_bench.manifest.schema.json](../schemas/formal_pr_bench.manifest.schema.json) | formal_pr_bench.manifest.v1 | `benchmarks/formal_pr_bench/manifest.v1.json` |
+| [pilot.report.schema.json](../schemas/pilot.report.schema.json) | ovk.pilot_report.v1 | `ovk pilot --output report.json`; published under `docs/pilots/*/pilot-report.json` |
 | [pilot.metrics.schema.json](../schemas/pilot.metrics.schema.json) | ovk.pilot_metrics.v1 | `scripts/collect_pilot_metrics.py --output pilot-metrics.json` |
 | [holdout.aggregate_metrics.schema.json](../schemas/holdout.aggregate_metrics.schema.json) | ovk.holdout_aggregate_metrics.v1 | FormalPR holdout aggregate metrics (labels never committed) |
 | [pilot.ledger.schema.json](../schemas/pilot.ledger.schema.json) | ovk.pilot_ledger.v1 | `docs/templates/pilot_ledger.example.json` (scaffolding) |

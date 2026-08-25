@@ -4,11 +4,22 @@ from __future__ import annotations
 
 from typing import Any
 
+from ovk.adapters.wave2_oracle import classify_conformance_flags
+
 
 def evaluate_tla_input(data: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
     """Evaluate deployment state-machine input with a bounded oracle."""
-    if data.get("malformed"):
-        return "unknown", [{"summary": "Malformed state machine.", "failure_mode": "malformed_state_machine"}]
+    early = classify_conformance_flags(data)
+    if early is not None:
+        status, counterexamples = early
+        if data.get("malformed"):
+            counterexamples = [
+                {
+                    "summary": "Malformed state machine.",
+                    "failure_mode": "malformed_state_machine",
+                }
+            ]
+        return status, counterexamples
     if data.get("skipped_states"):
         return "fail", [
             {

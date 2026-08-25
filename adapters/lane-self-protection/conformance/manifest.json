@@ -1,0 +1,26 @@
+{
+  "adapter_id": "lane-self-protection",
+  "kind": "lane_adapter",
+  "schema_version": "ovk.adapter_conformance.v1",
+  "fixtures": {
+    "pass": {
+      "path": "examples/no_agent_self_approval/input_gate_preserved.json"
+    },
+    "fail": {
+      "path": "examples/no_agent_self_approval/input_gate_removed.json"
+    },
+    "malformed": {
+      "path": "fixtures/malformed.json"
+    },
+    "timeout": {
+      "path": "fixtures/timeout.json"
+    },
+    "unavailable": {
+      "path": "fixtures/unavailable.json"
+    }
+  },
+  "docs": {
+    "pass_establishes": "CLAIMS.md#pass-establishes",
+    "outside_claim": "CLAIMS.md#outside-the-claim"
+  }
+}

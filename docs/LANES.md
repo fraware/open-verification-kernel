@@ -27,10 +27,10 @@ ovk ci \
   --advisory
 ```
 
-| Condition | Recommendation |
+| Condition | DecisionState |
 |---|---|
 | Required check removed | `block` |
-| Missing required-check metadata | `require_human_review` |
+| Missing required-check metadata | `needs_review` |
 | Controls preserved | `allow` |
 
 Backend: deterministic evaluator (default), optional OPA via `--backend-strategy`.
@@ -47,11 +47,11 @@ Input schema: `schemas/authorization.input.schema.json`
 
 Required field: non-empty `routes` list. Each route has `path`, `admin_only_before`, `admin_only_after`, and `reachable_after`.
 
-| Solver result | Recommendation |
+| Solver result | DecisionState |
 |---|---|
 | Violation found | `block` |
 | No violation | `allow` |
-| Solver unavailable | `require_human_review` |
+| Solver unavailable | `needs_review` / `unknown` |
 
 Optional Z3 backend: `pip install -e '.[solvers]'`
 
@@ -90,11 +90,11 @@ Optional policy file: `schemas/infrastructure.policy.schema.json`
 
 Pass via `--policy <path>`.
 
-| Condition | Recommendation |
+| Condition | DecisionState |
 |---|---|
 | Sensitive resource publicly exposed | `block` |
 | Resource remains private | `allow` |
-| Invalid abstraction | `require_human_review` |
+| Invalid abstraction | `needs_review` / `error` |
 
 ## CI secrets
 
@@ -109,7 +109,7 @@ Input schema: `schemas/ci_secrets.input.schema.json`
 
 Workflow YAML extraction handles PyYAML 1.1 `on:` → `True` quirk. Unified diffs reconstruct workflow content via `ovk plan` / `ovk infer`.
 
-| Condition | Recommendation |
+| Condition | DecisionState |
 |---|---|
 | Secrets on untrusted trigger (`pull_request`, etc.) | `block` |
 | `pull_request_target` with PR head checkout + secrets | `block` |
@@ -129,7 +129,7 @@ Uses graph reachability over deployment states. Skipped required approval → `b
 
 ## Conservative rule
 
-Invalid input must not produce `allow`. Unknown and error states require human review for every check type.
+Invalid input must not produce `allow`. Under the ``DecisionState`` lattice, ``error``, ``unknown``, and required ``skipped`` never become ``allow`` in strict mode; advisory preserves ``original_decision_state`` rather than inventing an allow-with-warning lattice member.
 
 Examples: `examples/` per check type. Benchmark scorer: `benchmarks/formal_pr_bench/score_all_lanes.py` (internal script name).
 

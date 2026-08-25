@@ -1,6 +1,8 @@
 # External Validation Matrix
 
-Weekly CI job that verifies external repos can run the OVK GitHub Action in advisory and strict modes.
+Weekly CI job that **dogfoods** the OVK GitHub Action against in-repository scenarios in advisory and strict modes.
+
+This workflow is **not** independent consumer validation and does **not** establish `externally_calibrated_strict`. For independent remotes, see [CONSUMER_VALIDATION_CHECKLIST.md](CONSUMER_VALIDATION_CHECKLIST.md) and [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md).
 
 Scenario definitions: `benchmarks/external_validation/scenarios.json`.
 
@@ -19,7 +21,7 @@ Scenario IDs (first column) are stable test names in `scenarios.json`. Names suc
 
 Also runs:
 
-- **Release pin check** — documents `@v1.2.0` consumer path.
+- **Release pin check** — documents the live consumer pin path (`@v1.2.1` today; `@v1.3.0-rc.1` after attributable cut).
 - **Signed bundle smoke** — HMAC signing and `ovk validate-outputs`.
 
 Each scenario asserts the merge recommendation and job exit behavior after the Action runs.
@@ -27,15 +29,16 @@ Each scenario asserts the merge recommendation and job exit behavior after the A
 ## Fork procedure
 
 1. Copy a workflow from `examples/github_workflows/` (start with `pilot_fork_adopter.yml`).
-2. Pin the Action: `uses: fraware/open-verification-kernel@v1.2.0`.
+2. Pin the Action to an immutable tag: `uses: fraware/open-verification-kernel@v1.2.1` (or `@v1.3.0-rc.1` after that tag is attributable). Never pin `@main`.
 3. Start advisory; move to strict per [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md).
 
 ## Strict rollout checklist
 
 - Use `use-check: "true"` for diff-aware analysis.
 - Grant `checks: write` when `emit-check: "true"`.
-- Enable strict only after advisory baselines are stable.
+- Enable strict only after advisory baselines are stable on **your** diffs.
 - Validate bundles with `ovk validate-outputs`.
+- Remember: green dogfood here does not replace independent consumer remotes.
 
 ## Run history
 

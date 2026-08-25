@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-verification-kernel.dev/schemas/release.ledger.v1.schema.json",
+  "title": "OVK Release Ledger v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source",
+    "required_runs",
+    "toolchain",
+    "artifacts",
+    "evidence",
+    "consumers",
+    "holdout",
+    "release_state"
+  ],
+  "properties": {
+    "schema_version": { "const": "ovk.release_ledger.v1" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_sha", "repository"],
+      "properties": {
+        "candidate_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "repository": { "type": "string", "minLength": 1 },
+        "ref": { "type": ["string", "null"] }
+      }
+    },
+    "required_runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["workflow", "run_id", "head_sha", "conclusion"],
+        "properties": {
+          "workflow": { "type": "string" },
+          "run_id": { "type": ["string", "integer"] },
+          "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+          "conclusion": { "type": "string" },
+          "url": { "type": ["string", "null"] },
+          "artifact_digest": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lock_path", "lock_sha256", "isolation_profile"],
+      "properties": {
+        "lock_path": { "type": "string" },
+        "lock_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "isolation_profile": { "type": "string" },
+        "worker_image_digest": { "type": ["string", "null"] }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wheel_sha256", "sdist_sha256"],
+      "properties": {
+        "wheel_sha256": { "type": ["string", "null"], "pattern": "^([0-9a-f]{64})?$" },
+        "sdist_sha256": { "type": ["string", "null"], "pattern": "^([0-9a-f]{64})?$" },
+        "sbom_sha256": { "type": ["string", "null"] },
+        "sigstore_summary_sha256": { "type": ["string", "null"] }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verifier_version", "bundle_digests", "p0_blockers"],
+      "properties": {
+        "verifier_version": { "type": "string" },
+        "bundle_digests": { "type": "array", "items": { "type": "string" } },
+        "profile_qualifications_sha256": { "type": ["string", "null"] },
+        "p0_blockers": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "consumers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["repo", "repo_sha", "scenario", "artifact_digest"],
+        "properties": {
+          "repo": { "type": "string" },
+          "repo_sha": { "type": "string" },
+          "run_id": { "type": ["string", "integer", "null"] },
+          "scenario": { "type": "string" },
+          "artifact_digest": { "type": "string" }
+        }
+      }
+    },
+    "holdout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_source_sha", "predictions_sha256", "aggregate_sha256"],
+      "properties": {
+        "candidate_source_sha": { "type": ["string", "null"] },
+        "predictions_sha256": { "type": ["string", "null"] },
+        "aggregate_sha256": { "type": ["string", "null"] },
+        "holdout_tag": { "type": ["string", "null"] }
+      }
+    },
+    "release_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorized", "verified_source_sha", "tag", "published"],
+      "properties": {
+        "authorized": { "type": "boolean" },
+        "verified_source_sha": { "type": ["string", "null"] },
+        "tag": { "type": ["string", "null"] },
+        "published": { "type": "boolean" },
+        "authorization_reason": { "type": "string" }
+      }
+    }
+  }
+}

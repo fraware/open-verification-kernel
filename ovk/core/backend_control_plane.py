@@ -1,13 +1,9 @@
 """Backend control plane for compiling, executing, and aggregating obligations.
 
-In shadow mode the control plane runs beside legacy lane evaluation; legacy
-results remain authoritative until a lane opts into enforced routing.
-
-By default the control plane uses ``ControlPlaneResultCache`` (hardened
-namespaces + key-component validation) for backend results. Pass
-``cache=None`` explicitly to ``execute`` only when caching must be disabled.
-Adapters describe computation; ``LocalSubprocessWorker`` (or any
-``BackendWorker``) is available for native/subprocess backends.
+By default the control plane uses ``ControlPlaneResultCache`` for backend
+results. Authoritative adapters must execute behind a ``BackendWorker``; the
+production local worker is budget-bound so requested isolation controls are
+either enforced or the subprocess is rejected.
 """
 
 from __future__ import annotations
@@ -19,7 +15,7 @@ from typing import Any, Protocol
 
 from ovk.core.backend_aggregation import aggregate_results
 from ovk.core.backend_registry import BackendRegistry, BackendRegistryError
-from ovk.core.execution_budget import BackendWorker, LocalSubprocessWorker
+from ovk.core.execution_budget import BackendWorker, BudgetBoundWorker, LocalSubprocessWorker
 from ovk.core.execution_models import (
     BackendEnvironmentFingerprint,
     BackendObligation,
@@ -39,10 +35,7 @@ from ovk.core.result_cache import ControlPlaneResultCache
 
 
 class ResultCache(Protocol):
-    """Minimal cache protocol used by the control plane (ovk.cache.v3)."""
-
     def get(self, key: str) -> CachedBackendExecution | None: ...
-
     def put(self, key: str, value: CachedBackendExecution, *, meta: dict[str, Any]) -> None: ...
 
 
@@ -61,17 +54,7 @@ def control_plane_cache_key(
     fingerprint: BackendEnvironmentFingerprint,
     input_format: str = "json",
 ) -> str:
-    """Build a cache key incorporating control-plane identity components.
-
-    Key material includes cache schema version, OVK version, subject,
-    obligation/routing/backend-obligation IDs, environment fingerprint,
-    policy digest, compiler/adapter versions, input format, fallback mode,
-    and aggregation policy.
-    """
-    from ovk.core.result_cache import (
-        build_backend_result_key_components,
-        digest_key_components,
-    )
+    from ovk.core.result_cache import build_backend_result_key_components, digest_key_components
 
     return digest_key_components(
         build_backend_result_key_components(
@@ -92,7 +75,6 @@ def control_plane_cache_components(
     fingerprint: BackendEnvironmentFingerprint,
     input_format: str = "json",
 ) -> dict[str, Any]:
-    """Return the full validated key component map for hardened cache reads."""
     from ovk.core.result_cache import build_backend_result_key_components
 
     return build_backend_result_key_components(
@@ -167,11 +149,7 @@ def _compiler_contract_error_raw(
     return raw.model_copy(update=compute_raw_execution_digests(raw))
 
 
-def _attempt_from_raw(
-    *,
-    raw: RawBackendExecution,
-    required: bool,
-) -> ExecutionAttempt:
+def _attempt_from_raw(*, raw: RawBackendExecution, required: bool) -> ExecutionAttempt:
     provisional = ExecutionAttempt(
         attempt_id="pending",
         backend_obligation_id=raw.backend_obligation_id,
@@ -233,12 +211,7 @@ class BackendControlPlane:
         attempts: list[ExecutionAttempt] = []
         results: list[NormalizedBackendResult] = []
 
-        # Stable submission order: required first, then optional, each by backend id.
-        selected = sorted(
-            routing.selected,
-            key=lambda item: (not item.required, item.backend),
-        )
-
+        selected = sorted(routing.selected, key=lambda item: (not item.required, item.backend))
         for selection in selected:
             attempt, result, compiled = self._execute_one(
                 obligation=obligation,
@@ -255,7 +228,6 @@ class BackendControlPlane:
             attempts.append(attempt)
             results.append(result)
 
-        # Deterministic result ordering by backend id.
         attempts = sorted(attempts, key=lambda item: item.backend)
         results = sorted(results, key=lambda item: item.backend)
         backend_obligations = sorted(backend_obligations, key=lambda item: item.backend)
@@ -290,12 +262,15 @@ class BackendControlPlane:
             attempts=attempts,
             results=results,
             aggregate_status=outcome.status,
+            decision_state=outcome.decision_state,
+            original_decision_state=outcome.original_decision_state,
             merge_recommendation=outcome.merge_recommendation,
             aggregation_reason=outcome.reason,
             open_obligations=open_obligations,
             fallback_used=outcome.fallback_used,
             fallback_accepted=outcome.fallback_accepted,
             fallback_cause=outcome.fallback_cause,
+            controlling_finding_ids=list(outcome.controlling_finding_ids),
         )
 
     def _execute_one(
@@ -346,10 +321,7 @@ class BackendControlPlane:
                     assumptions=[],
                     limits=["compiler guarantee mismatch; execution skipped"],
                     counterexamples=[
-                        {
-                            "summary": message,
-                            "failure_mode": "compiler_contract_violation",
-                        }
+                        {"summary": message, "failure_mode": "compiler_contract_violation"}
                     ],
                     generated_artifacts=[],
                 )
@@ -374,7 +346,6 @@ class BackendControlPlane:
                     bind(key, components)
                 cached = cache.get(key)
                 if cached is not None:
-                    # Replay stored provenance; never re-infer native_execution.
                     stored_attempt = cached.attempt
                     result = cached.normalized_result.model_copy(update={"attempt_id": stored_attempt.attempt_id})
                     return stored_attempt, result, compiled
@@ -383,7 +354,7 @@ class BackendControlPlane:
             normalized = adapter.normalize(raw, compiled)
             attempt = _attempt_from_raw(raw=raw, required=required)
             result = normalized.model_copy(update={"attempt_id": attempt.attempt_id})
-            if cache is not None:
+            if cache is not None and raw.envelope_produced:
                 cached_exec = CachedBackendExecution(
                     attempt=attempt,
                     native_execution=attempt.native_execution,
@@ -433,16 +404,27 @@ class BackendControlPlane:
             )
             return attempt, result, compiled
 
-    def _run_adapter(self, adapter: Any, compiled: BackendObligation, budget: ExecutionBudget) -> RawBackendExecution:
-        """Invoke adapter.run, threading the worker when the adapter accepts it."""
+    def _run_adapter(
+        self,
+        adapter: Any,
+        compiled: BackendObligation,
+        budget: ExecutionBudget,
+    ) -> RawBackendExecution:
+        """Run an authoritative adapter only through a budget-bound worker."""
         run = adapter.run
         try:
             parameters = inspect.signature(run).parameters
-        except (TypeError, ValueError):
-            parameters = {}
-        if "worker" in parameters:
-            return run(compiled, budget, worker=self._worker)
-        return run(compiled, budget)
+        except (TypeError, ValueError) as exc:
+            raise BackendRegistryError(
+                f"cannot inspect authoritative adapter {adapter.backend_id!r} run() signature"
+            ) from exc
+        if "worker" not in parameters:
+            raise BackendRegistryError(
+                f"authoritative adapter {adapter.backend_id!r} must accept BackendWorker; "
+                "in-process execution is forbidden"
+            )
+        worker = BudgetBoundWorker(self._worker, budget)
+        return run(compiled, budget, worker=worker)
 
 
 def compare_shadow_to_legacy(
@@ -451,7 +433,6 @@ def compare_shadow_to_legacy(
     legacy_status: str,
     legacy_recommendation: str,
 ) -> dict[str, Any]:
-    """Compare shadow control-plane outcome to authoritative legacy evidence."""
     shadow_status = shadow.aggregate_status.value
     shadow_recommendation = shadow.merge_recommendation.value
     agree_status = shadow_status == legacy_status

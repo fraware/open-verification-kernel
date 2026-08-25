@@ -1,12 +1,22 @@
 {
   "capability_id": "z3-smt-v1",
+  "checker_id": "z3",
+  "version": "0.1.0",
+  "implementation": "ovk-adapter-z3",
+  "input_contract": "SMT-LIB2 / Python-Z3 / JSON constraint encodings compiled from authorization or infrastructure abstractions.",
+  "output_contract": "ovk.result.v1 with smt_model counterexamples; evidence must state query polarity",
+  "claim_class": "smt_satisfiability",
   "tool": {
     "name": "z3",
     "adapter": "ovk-adapter-z3",
     "adapter_version": "0.1.0"
   },
   "backend_class": "smt_solver",
-  "input_languages": ["smtlib2", "python-z3", "json-constraints"],
+  "input_languages": [
+    "smtlib2",
+    "python-z3",
+    "json-constraints"
+  ],
   "supported_domains": [
     "authorization",
     "infrastructure",
@@ -30,11 +40,26 @@
     "The finite abstraction captures the relevant behavior of the changed system.",
     "The query polarity is recorded in the proof obligation."
   ],
+  "trusted_components": [
+    "z3 solver",
+    "neutral obligation compiler",
+    "encoded abstraction"
+  ],
   "limits": [
     "Does not prove properties outside the encoded abstraction.",
     "May return unknown for unsupported theories or timeout."
   ],
+  "failure_semantics": "Solver/adapter crash maps to error; solver unknown and incomplete encodings map to unknown.",
+  "timeout_semantics": "unknown",
+  "timeout_behavior": "unknown",
+  "unsupported_semantics": "Does not prove properties outside the encoded abstraction; unsupported theories yield unknown.",
+  "determinism_status": "tool_dependent",
+  "release_status": "preview",
+  "owner": "ovk-maintainers",
+  "native_execution": true,
   "result_format": "ovk.result.v1",
   "counterexample_format": "smt_model",
-  "timeout_behavior": "unknown"
+  "conformance": {
+    "suite": "conformance/manifest.json"
+  }
 }

@@ -30,6 +30,12 @@ class EvaluatorWorkerOutcome:
     timed_out: bool
     worker_rejected: bool
     stderr: str | None
+    tool_digest: str | None = None
+    worker_image_digest: str | None = None
+    isolation_profile: str | None = None
+    enforced_controls: tuple[str, ...] = ()
+    termination_category: str | None = None
+    envelope_produced: bool = False
 
 
 def run_evaluator_in_worker(
@@ -76,6 +82,13 @@ def run_evaluator_in_worker(
 
 
 def _parse_worker_result(result: WorkerResult, *, evaluator_id: str) -> EvaluatorWorkerOutcome:
+    extras = {
+        "tool_digest": result.tool_digest,
+        "worker_image_digest": result.worker_image_digest,
+        "isolation_profile": result.isolation_profile,
+        "enforced_controls": result.enforced_controls,
+        "termination_category": result.termination_category,
+    }
     if result.timed_out:
         return EvaluatorWorkerOutcome(
             termination="timeout",
@@ -85,19 +98,25 @@ def _parse_worker_result(result: WorkerResult, *, evaluator_id: str) -> Evaluato
             timed_out=True,
             worker_rejected=False,
             stderr=result.stderr or None,
+            **extras,
         )
     if result.exit_code is None:
+        termination = "tool_unavailable" if result.termination_category == "isolation_unenforceable" else "tool_error"
         return EvaluatorWorkerOutcome(
-            termination="tool_error",
+            termination=termination,
             exit_code=1,
             raw_result={
                 "status": "error",
                 "reason": result.stderr.strip() or "worker rejected execution",
+                "isolation_profile": result.isolation_profile,
+                "enforced_controls": list(result.enforced_controls),
+                "termination_category": result.termination_category,
             },
             native_execution=False,
             timed_out=False,
             worker_rejected=True,
             stderr=result.stderr or None,
+            **extras,
         )
     if not result.stdout.strip():
         return EvaluatorWorkerOutcome(
@@ -111,6 +130,7 @@ def _parse_worker_result(result: WorkerResult, *, evaluator_id: str) -> Evaluato
             timed_out=False,
             worker_rejected=False,
             stderr=result.stderr or None,
+            **extras,
         )
     try:
         envelope = json.loads(result.stdout)
@@ -126,6 +146,7 @@ def _parse_worker_result(result: WorkerResult, *, evaluator_id: str) -> Evaluato
             timed_out=False,
             worker_rejected=False,
             stderr=result.stderr or None,
+            **extras,
         )
     if not isinstance(envelope, dict):
         return EvaluatorWorkerOutcome(
@@ -136,6 +157,7 @@ def _parse_worker_result(result: WorkerResult, *, evaluator_id: str) -> Evaluato
             timed_out=False,
             worker_rejected=False,
             stderr=result.stderr or None,
+            **extras,
         )
     return EvaluatorWorkerOutcome(
         termination=str(envelope.get("termination", "completed")),
@@ -145,6 +167,8 @@ def _parse_worker_result(result: WorkerResult, *, evaluator_id: str) -> Evaluato
         timed_out=False,
         worker_rejected=False,
         stderr=result.stderr or None,
+        envelope_produced=True,
+        **extras,
     )
 
 
@@ -170,6 +194,9 @@ def raw_execution_from_worker_outcome(
         finished_at=_utc_now_iso(),
         duration_ms=duration_ms,
         tool_version=adapter_version,
+        tool_digest=outcome.tool_digest,
+        worker_image_digest=outcome.worker_image_digest,
+        envelope_produced=outcome.envelope_produced,
     )
     return raw.model_copy(update=compute_raw_execution_digests(raw))
 

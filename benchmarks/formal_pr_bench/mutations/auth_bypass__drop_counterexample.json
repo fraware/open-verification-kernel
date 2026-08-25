@@ -1,0 +1,22 @@
+{
+  "schema_version": "formal_pr_bench.mutation.v1",
+  "mutation_id": "auth_bypass__drop_counterexample",
+  "base_case_id": "auth_bypass",
+  "mutation": "drop_counterexample",
+  "description": "Controlled expectation mutation for contamination/robustness tests; not a scored corpus member.",
+  "base_case": {
+    "case_id": "auth_bypass",
+    "input_fixture": "examples/auth_regression/input_admin_bypass.json",
+    "expected_intent": "no-admin-route-bypass",
+    "expected_backend_class": "smt_solver",
+    "expected_status": "fail",
+    "expected_merge_recommendation": "block",
+    "expected_counterexample_class": "admin_route_reachable_by_non_admin"
+  },
+  "overrides": {
+    "expected_counterexample_class": null
+  },
+  "mutated_expectations": {
+    "expected_counterexample_class": null
+  }
+}

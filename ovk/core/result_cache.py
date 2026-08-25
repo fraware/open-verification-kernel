@@ -40,6 +40,15 @@ NAMESPACE_BACKEND_RESULTS = "backend-results"
 NAMESPACE_AGGREGATE = "aggregate"
 
 
+def _source_profile(obligation: VerificationObligation) -> str | None:
+    abstraction = obligation.abstraction if isinstance(obligation.abstraction, dict) else {}
+    for key in ("source_profile_id", "source_profile", "profile_id"):
+        value = abstraction.get(key)
+        if value:
+            return str(value)
+    return None
+
+
 def cache_key(
     lane: str,
     data: dict[str, Any],
@@ -48,7 +57,10 @@ def cache_key(
     subject: dict[str, Any] | None = None,
     execution_fingerprint: dict[str, Any] | None = None,
 ) -> str:
-    """Build a stable legacy cache key for a lane input and execution context."""
+    """Build a stable legacy cache key for a lane input and execution context.
+
+    Observational timing is not part of identity.
+    """
     payload: dict[str, Any] = {
         "ovk_version": OVK_VERSION,
         "lane": lane,
@@ -130,6 +142,9 @@ def build_backend_result_key_components(
         "aggregation_policy": routing.aggregation_policy,
         "backend": backend_obligation.backend,
         "payload_digest": backend_obligation.payload_digest,
+        "source_profile": _source_profile(obligation),
+        "tool_digest": fingerprint.tool_digest,
+        "worker_image_digest": fingerprint.worker_image_digest,
         "namespace": NAMESPACE_BACKEND_RESULTS,
     }
 
@@ -157,6 +172,7 @@ def build_aggregate_key_components(
         "fallback_mode": routing.fallback_policy.model_dump(mode="json"),
         "aggregation_policy": routing.aggregation_policy,
         "attempt_digests": sorted(attempt_digests),
+        "source_profile": _source_profile(obligation),
         "namespace": NAMESPACE_AGGREGATE,
     }
 
@@ -222,6 +238,7 @@ class HardenedResultCache:
             "key_digest": key_digest,
             "key_components": components,
             "payload": payload,
+            "payload_digest": content_digest(payload),
             "meta": meta or {},
         }
         path = self.namespace_dir(namespace) / f"{key_digest}.json"
@@ -250,6 +267,10 @@ class HardenedResultCache:
             path.unlink(missing_ok=True)
             return None
         if stored_digest != key_digest or digest_key_components(stored_components) != key_digest:
+            path.unlink(missing_ok=True)
+            return None
+        stored_payload_digest = record.get("payload_digest")
+        if stored_payload_digest != content_digest(payload):
             path.unlink(missing_ok=True)
             return None
         if not _components_match(stored_components, components):
@@ -360,6 +381,11 @@ def _components_match(stored: dict[str, Any], requested: dict[str, Any]) -> bool
         "input_format",
         "aggregation_policy",
         "namespace",
+        "payload_digest",
+        "source_profile",
+        "tool_digest",
+        "worker_image_digest",
+        "backend",
     )
     for field in critical:
         if field in requested and stored.get(field) != requested.get(field):

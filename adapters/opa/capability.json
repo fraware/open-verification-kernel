@@ -1,12 +1,22 @@
 {
   "capability_id": "opa-policy-v1",
+  "checker_id": "opa",
+  "version": "0.1.0",
+  "implementation": "ovk-adapter-opa",
+  "input_contract": "Structured JSON/YAML input plus Rego policy selected by intent/template.",
+  "output_contract": "ovk.result.v1 with policy_violation counterexamples",
+  "claim_class": "policy_evaluation",
   "tool": {
     "name": "opa",
     "adapter": "ovk-adapter-opa",
     "adapter_version": "0.1.0"
   },
   "backend_class": "policy_engine",
-  "input_languages": ["rego", "json", "yaml"],
+  "input_languages": [
+    "rego",
+    "json",
+    "yaml"
+  ],
   "supported_domains": [
     "ci_cd",
     "infrastructure",
@@ -31,11 +41,26 @@
     "Input extraction faithfully represents the repository state relevant to the policy.",
     "Policy templates accurately encode the intended invariant."
   ],
+  "trusted_components": [
+    "opa binary",
+    "selected Rego policy templates",
+    "input extraction / compiler"
+  ],
   "limits": [
     "Does not prove properties of arbitrary program execution.",
     "Does not establish unbounded liveness."
   ],
+  "failure_semantics": "Adapter or OPA execution failure maps to error; malformed input maps to unknown.",
+  "timeout_semantics": "unknown",
+  "timeout_behavior": "unknown",
+  "unsupported_semantics": "Does not prove properties of arbitrary program execution; unsupported inputs yield unknown.",
+  "determinism_status": "tool_dependent",
+  "release_status": "preview",
+  "owner": "ovk-maintainers",
+  "native_execution": true,
   "result_format": "ovk.result.v1",
   "counterexample_format": "policy_violation",
-  "timeout_behavior": "unknown"
+  "conformance": {
+    "suite": "conformance/manifest.json"
+  }
 }

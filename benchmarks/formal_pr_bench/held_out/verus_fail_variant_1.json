@@ -1,0 +1,14 @@
+{
+  "schema_version": "formal_pr_bench.held_out.v1",
+  "case_id": "verus_fail_variant_1",
+  "forbidden_from_template_dev_scoring": true,
+  "case": {
+    "case_id": "verus_fail_variant_1",
+    "input_fixture": "examples/backends/verus_fail.json",
+    "expected_intent": "verus-harness-check",
+    "expected_backend_class": "proof_assistant",
+    "expected_status": "fail",
+    "expected_merge_recommendation": "block",
+    "expected_counterexample_class": "verus_proof_failed"
+  }
+}

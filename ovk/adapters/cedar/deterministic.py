@@ -4,11 +4,19 @@ from __future__ import annotations
 
 from typing import Any
 
+from ovk.adapters.wave2_oracle import classify_conformance_flags
+
 
 def evaluate_cedar_input(data: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
     """Evaluate Cedar-shaped IAM policy input with a conservative oracle."""
-    if data.get("malformed"):
-        return "unknown", [{"summary": "Malformed Cedar/IAM input.", "failure_mode": "malformed_input"}]
+    early = classify_conformance_flags(data)
+    if early is not None:
+        status, counterexamples = early
+        if data.get("malformed"):
+            counterexamples = [
+                {"summary": "Malformed Cedar/IAM input.", "failure_mode": "malformed_input"}
+            ]
+        return status, counterexamples
 
     violations = list(data.get("violations", []))
     policies = data.get("policies", [])

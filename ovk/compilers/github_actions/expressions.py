@@ -17,7 +17,6 @@ def secret_names(text: str) -> list[str]:
     names: list[str] = []
     for expr in iter_expressions(text):
         names.extend(_SECRET.findall(expr))
-    # Also catch literal secrets.X outside expressions in some fixtures.
     names.extend(_SECRET.findall(text or ""))
     return sorted(set(names))
 
@@ -32,12 +31,21 @@ def references_protected_env(text: str) -> bool:
 
 
 def contains_untrusted_context(text: str) -> bool:
+    """Detect direct interpolation of attacker-influenced GitHub event data.
+
+    This does not mean an entire event is untrusted code. It identifies values
+    that require contextual escaping/data-flow analysis when used by a command or
+    privileged action. Checkout lineage is handled separately by trust_flow.
+    """
     blob = (text or "").lower()
     markers = (
         "github.event.pull_request",
         "github.event.issue",
-        "github.head_ref",
+        "github.event.comment",
         "github.event.review",
-        "pull_request_target",
+        "github.event.workflow_run",
+        "github.head_ref",
+        "github.event.inputs",
+        "github.event.client_payload",
     )
     return any(marker in blob for marker in markers)

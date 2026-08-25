@@ -1,0 +1,26 @@
+{
+  "adapter_id": "z3",
+  "kind": "formal_backend",
+  "schema_version": "ovk.adapter_conformance.v1",
+  "fixtures": {
+    "pass": {
+      "path": "examples/auth_regression/input_admin_protected.json"
+    },
+    "fail": {
+      "path": "examples/auth_regression/input_admin_bypass.json"
+    },
+    "malformed": {
+      "path": "examples/auth_regression/input_malformed_missing_routes.json"
+    },
+    "timeout": {
+      "path": "examples/backends/z3_timeout.json"
+    },
+    "unavailable": {
+      "path": "examples/backends/z3_unavailable.json"
+    }
+  },
+  "docs": {
+    "pass_establishes": "CLAIMS.md#pass-establishes",
+    "outside_claim": "CLAIMS.md#outside-the-claim"
+  }
+}

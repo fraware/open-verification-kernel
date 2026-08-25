@@ -1,0 +1,49 @@
+{
+  "capability_id": "lane-self-protection-v1",
+  "checker_id": "lane-self-protection",
+  "version": "0.1.0",
+  "implementation": "ovk-adapter-lane-self-protection",
+  "input_contract": "Self-protection lane input (actor/before/after required checks).",
+  "output_contract": "ovk.evidence via self_protection lane evaluator",
+  "claim_class": "policy_evaluation",
+  "tool": {
+    "name": "lane-self-protection",
+    "adapter": "ovk-adapter-lane-self-protection",
+    "adapter_version": "0.1.0"
+  },
+  "backend_class": "policy_engine",
+  "supported_domains": [
+    "ci_cd",
+    "agent_authority"
+  ],
+  "supported_property_kinds": [
+    "safety",
+    "forbidden_configuration"
+  ],
+  "guarantee": {
+    "type": "policy_evaluation",
+    "meaning_of_pass": "Required OVK gate remains in branch protection after the change.",
+    "meaning_of_fail": "The change removes or weakens the required OVK gate.",
+    "meaning_of_unknown": "Materials were incomplete or the checker could not decide."
+  },
+  "assumptions": [
+    "Branch-protection metadata faithfully represents repository policy."
+  ],
+  "trusted_components": [
+    "self-protection lane evaluator",
+    "optional OPA native path"
+  ],
+  "limits": [
+    "Does not prove semantic correctness of unrelated workflow steps."
+  ],
+  "failure_semantics": "Missing or malformed materials map to unknown; evaluator errors map to error.",
+  "timeout_semantics": "unknown",
+  "unsupported_semantics": "Does not analyze checks outside the declared OVK gate name.",
+  "determinism_status": "deterministic",
+  "release_status": "experimental",
+  "owner": "ovk-maintainers",
+  "native_execution": false,
+  "conformance": {
+    "suite": "conformance/manifest.json"
+  }
+}

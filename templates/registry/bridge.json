@@ -1,0 +1,33 @@
+{
+  "schema_version": "ovk.template_capability_bridge.v2",
+  "description": "Bridge normative template-conformance maturity onto release_status and claim_class without promoting maturity.",
+  "conformance_status_v3_to_release_status": {
+    "deprecated": "disabled",
+    "catalog_only": "experimental",
+    "executable_advisory": "preview",
+    "source_profile_candidate": "preview",
+    "source_profile_strict_eligible": "preview",
+    "externally_calibrated_strict": "preview"
+  },
+  "conformance_status_v2_to_release_status": {
+    "deprecated": "disabled",
+    "catalog_only": "experimental",
+    "executable_advisory": "preview",
+    "source_profile_strict_eligible": "preview",
+    "externally_calibrated_strict": "preview"
+  },
+  "default_claim_class_by_property_kind": {
+    "access_control": "authorization_invariant",
+    "forbidden_configuration": "configuration_invariant",
+    "safety": "safety_invariant",
+    "invariant": "state_invariant",
+    "liveness": "liveness_property",
+    "data_boundary": "data_boundary_invariant"
+  },
+  "notes": [
+    "stable requires the dedicated adapter conformance and release evidence gates.",
+    "Candidate and strict-profile maturity remain preview at the template registry layer.",
+    "The template claim registry is generated from normative v3 conformance during CI and emitted under .verification.",
+    "User-facing maturity consumes conformance_status_v3 only; production_status is legacy catalog metadata, not a maturity synonym."
+  ]
+}

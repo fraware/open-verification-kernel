@@ -1,0 +1,17 @@
+{
+  "schema_version": "ovk.verification_manifest.v1",
+  "name": "pilot-fastapi-terraform-consumer",
+  "description": "Maintained Python consumer profile: CI secrets + infrastructure (FastAPI + Terraform).",
+  "lanes": [
+    {
+      "lane": "ci_secrets",
+      "input": "../ci_secrets/input_secrets_safe.json",
+      "input_format": "infra"
+    },
+    {
+      "lane": "infrastructure",
+      "input": "../infrastructure_exposure/input_private_sensitive_resource.json",
+      "input_format": "infra"
+    }
+  ]
+}

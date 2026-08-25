@@ -18,8 +18,11 @@ from typing import Any
 REQUIRED_WORKFLOW_NAMES = (
     "CI",
     "Native Tier 1",
-    "Release",
-    "Bench",
+    "Native Tier 1b",
+    "FormalPR-Holdout predict",
+    "FormalPR-Holdout eval",
+    "Consumer Pin Verification",
+    "Bench Badge",
 )
 
 
@@ -91,10 +94,36 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", default="fraware/open-verification-kernel")
     parser.add_argument("--sha", required=True, help="Source commit SHA")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--ledger-output",
+        type=Path,
+        default=None,
+        help="Optional path to write a draft .verification/release-ledger.json from collected runs",
+    )
+    parser.add_argument(
+        "--repo-root",
+        type=Path,
+        default=Path(__file__).resolve().parents[1],
+    )
     args = parser.parse_args(argv)
     payload = collect_for_sha(repo=args.repo, sha=args.sha)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    if args.ledger_output is not None:
+        root = args.repo_root.resolve()
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+        from ovk.core.release_ledger import ledger_from_collect_workflow_evidence
+
+        sha = args.sha.lower()
+        ledger = ledger_from_collect_workflow_evidence(
+            root,
+            evidence=payload,
+            candidate_sha=sha,
+        )
+        args.ledger_output.parent.mkdir(parents=True, exist_ok=True)
+        args.ledger_output.write_text(json.dumps(ledger, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"draft release ledger -> {args.ledger_output} (authorized=false until offline verify)")
     if not payload.get("ok"):
         print(f"blocked: {payload.get('blocker')}: {payload.get('detail')}", file=sys.stderr)
         return 2

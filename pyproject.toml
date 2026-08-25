@@ -1,6 +1,6 @@
 [project]
 name = "open-verification-kernel"
-version = "1.2.1"
+version = "1.3.0-rc.1"
 description = "Solver-agnostic verification kernel for AI-agent engineering workflows"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -70,9 +70,14 @@ ovk = ["package_data/**/*"]
 [tool.ruff]
 line-length = 120
 
+[tool.ruff.lint]
+# Keep the blocking CI contract explicit so linter default expansion cannot
+# silently redefine the repository's required static-analysis policy.
+select = ["E4", "E7", "E9", "F"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = [".", "integrations/github-app"]
 markers = [
   "native_backend(name): native backend integration probe by backend name",
 ]

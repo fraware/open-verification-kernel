@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/metadata.acquisition.v1.schema.json",
+  "title": "Protected Metadata Acquisition Artifact v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "subject",
+    "payload",
+    "collector_id",
+    "collector_version",
+    "acquisition_method",
+    "collected_at",
+    "payload_digest"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "ovk.metadata.acquisition.v1"
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["branch_protection", "protected_environment"]
+    },
+    "subject": {
+      "type": "object",
+      "required": ["repository", "branch", "head_sha"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "branch": { "type": "string", "minLength": 1 },
+        "base_sha": { "type": ["string", "null"] },
+        "head_sha": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "payload": {
+      "type": "object",
+      "description": "Normalized metadata payload. Signed bytes equal this object after canonicalization."
+    },
+    "collector_id": { "type": "string", "minLength": 1 },
+    "collector_version": { "type": "string", "minLength": 1 },
+    "acquisition_method": {
+      "type": "string",
+      "enum": [
+        "oidc_github_actions",
+        "ed25519",
+        "hmac_local",
+        "protected_hmac_key"
+      ]
+    },
+    "collected_at": { "type": "string", "minLength": 1 },
+    "source_endpoint": { "type": ["string", "null"] },
+    "payload_digest": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "signature": {
+      "type": ["object", "null"],
+      "required": ["algorithm", "key_id", "digest"],
+      "properties": {
+        "algorithm": {
+          "type": "string",
+          "enum": ["hmac-sha256", "ed25519", "oidc-attestation"]
+        },
+        "key_id": { "type": "string", "minLength": 1 },
+        "digest": { "type": "string", "minLength": 1 },
+        "public_key": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "attestation_ref": { "type": ["string", "null"] },
+    "oidc": {
+      "type": ["object", "null"],
+      "properties": {
+        "issuer": { "type": "string" },
+        "subject": { "type": "string" },
+        "audience": { "type": ["string", "null"] },
+        "workflow_ref": { "type": ["string", "null"] },
+        "run_id": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "extensions": {
+      "type": "object",
+      "description": "Namespaced non-authoritative extensions. Must not affect trust decisions.",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}
