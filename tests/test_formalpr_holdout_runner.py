@@ -11,12 +11,16 @@ from pathlib import Path
 import pytest
 
 from scripts.run_formalpr_holdout import (
+    _isolated_eval_env,
     assert_aggregate_safe,
     extract_tarball,
     validate_aggregate_schema,
     verify_asset_sha256,
-    _isolated_eval_env,
 )
+
+CANDIDATE_SHA = "a" * 40
+PREDICTIONS_SHA = "b" * 64
+HOLDOUT_ASSET_SHA = "c" * 64
 
 
 def _valid_aggregate() -> dict:
@@ -24,8 +28,10 @@ def _valid_aggregate() -> dict:
         "schema_version": "formalpr_holdout.aggregate_metrics.v1",
         "benchmark": "FormalPR-Holdout",
         "holdout_release_tag": "v0.1.0-synthetic",
-        "ovk_commit_sha": "abc1234",
-        "verified_source_sha": "abc1234",
+        "ovk_commit_sha": CANDIDATE_SHA,
+        "candidate_source_sha": CANDIDATE_SHA,
+        "predictions_sha256": PREDICTIONS_SHA,
+        "holdout_asset_sha256": HOLDOUT_ASSET_SHA,
         "generated_at_unix_ms": 1,
         "cases_scored": 1,
         "lanes": {
@@ -188,7 +194,7 @@ def test_run_formalpr_holdout_against_local_artifact(tmp_path: Path) -> None:
     from scripts import run_formalpr_holdout as runner
 
     # Build perfect predictions without importing holdout labels into assertions output.
-    preds = {"predictions": []}
+    preds = {"predictions": [], "candidate_source_sha": CANDIDATE_SHA}
     for path in sorted(labels.glob("*.json")):
         label = json.loads(path.read_text(encoding="utf-8"))
         preds["predictions"].append(
@@ -225,7 +231,7 @@ def test_run_formalpr_holdout_against_local_artifact(tmp_path: Path) -> None:
             "--predictions",
             str(pred_path),
             "--ovk-commit-sha",
-            "abc1234",
+            CANDIDATE_SHA,
             "--output",
             str(out),
         ]
@@ -233,5 +239,8 @@ def test_run_formalpr_holdout_against_local_artifact(tmp_path: Path) -> None:
     assert rc == 0
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert payload["cases_scored"] == 7
+    assert payload["candidate_source_sha"] == CANDIDATE_SHA
+    assert payload["predictions_sha256"] == hashlib.sha256(pred_path.read_bytes()).hexdigest()
+    assert payload["holdout_asset_sha256"] == digest
     assert "lanes" in payload
     assert "syn-auth-bypass-01" not in out.read_text(encoding="utf-8")
