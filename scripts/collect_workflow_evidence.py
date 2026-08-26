@@ -3,6 +3,10 @@
 This script records live GitHub workflow metadata but does not authorize a
 release and never sets ``verified_source_sha``. Authorization is a separate
 network-backed verification step in ``verify_release_ledger_github.py``.
+
+For final publication, callers pass ``--required-event workflow_dispatch`` so
+PR-merge checks cannot be reused as tag-bound release evidence merely because
+their GitHub run metadata references the same candidate head SHA.
 """
 
 from __future__ import annotations
@@ -38,25 +42,40 @@ def _run_gh(args: list[str]) -> tuple[int, str, str]:
     return completed.returncode, completed.stdout, completed.stderr
 
 
-def collect_for_sha(*, repo: str, sha: str, limit: int = 50) -> dict[str, Any]:
-    code, stdout, stderr = _run_gh(
-        [
-            "run",
-            "list",
-            "--repo",
-            repo,
-            "--commit",
-            sha,
-            "--limit",
-            str(limit),
-            "--json",
-            (
-                "databaseId,displayTitle,workflowName,status,conclusion,url,"
-                "headSha,createdAt"
-            ),
-        ]
+def collect_for_sha(
+    *,
+    repo: str,
+    sha: str,
+    limit: int = 50,
+    required_event: str | None = None,
+) -> dict[str, Any]:
+    fields = (
+        "databaseId,displayTitle,workflowName,status,conclusion,url,"
+        "headSha,createdAt,event"
     )
+    command = [
+        "run",
+        "list",
+        "--repo",
+        repo,
+        "--commit",
+        sha,
+        "--limit",
+        str(limit),
+        "--json",
+        fields,
+    ]
+    if required_event:
+        command.extend(["--event", required_event])
+    code, stdout, stderr = _run_gh(command)
     collected_at = datetime.now(timezone.utc).isoformat()
+    common = {
+        "benchmark_source_sha": sha,
+        "verified_source_sha": None,
+        "required_workflow_names": list(REQUIRED_WORKFLOWS),
+        "required_event": required_event,
+        "collected_at": collected_at,
+    }
     if code != 0:
         return {
             "ok": False,
@@ -64,12 +83,9 @@ def collect_for_sha(*, repo: str, sha: str, limit: int = 50) -> dict[str, Any]:
             "complete_required_set": False,
             "blocker": "gh_run_list_failed",
             "detail": stderr.strip() or stdout.strip() or "gh run list failed",
-            "benchmark_source_sha": sha,
-            "verified_source_sha": None,
-            "required_workflow_names": list(REQUIRED_WORKFLOWS),
+            **common,
             "observed_workflow_names": [],
             "missing_workflow_names": list(REQUIRED_WORKFLOWS),
-            "collected_at": collected_at,
             "runs": [],
         }
 
@@ -82,21 +98,22 @@ def collect_for_sha(*, repo: str, sha: str, limit: int = 50) -> dict[str, Any]:
             "complete_required_set": False,
             "blocker": "gh_run_list_invalid_json",
             "detail": str(exc),
-            "benchmark_source_sha": sha,
-            "verified_source_sha": None,
-            "required_workflow_names": list(REQUIRED_WORKFLOWS),
+            **common,
             "observed_workflow_names": [],
             "missing_workflow_names": list(REQUIRED_WORKFLOWS),
-            "collected_at": collected_at,
             "runs": [],
         }
 
     if not isinstance(runs, list):
         runs = []
+    normalized_runs = [run for run in runs if isinstance(run, dict)]
+    if required_event:
+        normalized_runs = [
+            run for run in normalized_runs if str(run.get("event") or "") == required_event
+        ]
+
     by_workflow: dict[str, list[dict[str, Any]]] = {}
-    for run in runs:
-        if not isinstance(run, dict):
-            continue
+    for run in normalized_runs:
         name = str(run.get("workflowName") or "unknown")
         by_workflow.setdefault(name, []).append(run)
     observed = sorted(by_workflow)
@@ -109,13 +126,10 @@ def collect_for_sha(*, repo: str, sha: str, limit: int = 50) -> dict[str, Any]:
         "complete_required_set": complete,
         "blocker": None if complete else "required_workflows_missing",
         "detail": None if complete else "missing: " + ", ".join(missing),
-        "benchmark_source_sha": sha,
-        "verified_source_sha": None,
-        "required_workflow_names": list(REQUIRED_WORKFLOWS),
+        **common,
         "observed_workflow_names": observed,
         "missing_workflow_names": missing,
-        "collected_at": collected_at,
-        "runs": runs,
+        "runs": normalized_runs,
         "note": (
             "These are untrusted observations used to draft a release ledger. "
             "Only independent live run-ID resolution may mint verified_source_sha."
@@ -147,9 +161,19 @@ def main(argv: list[str] | None = None) -> int:
         default=50,
         help="Maximum GitHub workflow records to inspect",
     )
+    parser.add_argument(
+        "--required-event",
+        default=None,
+        help="Optional exact GitHub Actions event, e.g. workflow_dispatch for release evidence.",
+    )
     args = parser.parse_args(argv)
 
-    payload = collect_for_sha(repo=args.repo, sha=args.sha, limit=args.limit)
+    payload = collect_for_sha(
+        repo=args.repo,
+        sha=args.sha,
+        limit=args.limit,
+        required_event=args.required_event,
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
@@ -179,9 +203,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
+    event_note = f", event={args.required_event}" if args.required_event else ""
     print(
         f"collected complete required workflow set for "
-        f"benchmark_source_sha={args.sha}; verified_source_sha remains unset"
+        f"benchmark_source_sha={args.sha}{event_note}; verified_source_sha remains unset"
     )
     return 0
 
