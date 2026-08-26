@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-
-import pytest
 
 from scripts.digest_holdout_predictions import (
     assert_predictions_label_free,
