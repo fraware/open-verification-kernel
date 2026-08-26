@@ -275,7 +275,8 @@ def test_enforced_ci_secrets_blocks_exposure() -> None:
     assert "ci-secrets-deterministic" in (evidence.selected_backends or [])
 
 
-def test_enforced_deployment_blocks_skipped_approval() -> None:
+def test_enforced_untrusted_deployment_skipped_approval_requires_review() -> None:
+    """An unauthenticated deployment abstraction cannot become authoritative."""
     data = _load("examples/deployment_state/input_skipped_approval.json")
     evidence_items = execute_obligations(
         [{"lane": "deployment", "input": data}],
@@ -287,7 +288,8 @@ def test_enforced_deployment_blocks_skipped_approval() -> None:
     )
     evidence = evidence_items[0]
     assert evidence.routing_enforced is True
-    assert evidence.decision.get("merge_recommendation") == "block"
+    assert evidence.decision.get("merge_recommendation") == "require_human_review"
+    assert evidence.decision.get("merge_recommendation") != "allow"
     assert "deployment-deterministic" in (evidence.selected_backends or [])
 
 
@@ -299,11 +301,6 @@ def test_enforced_pass_cases() -> None:
             "infrastructure-deterministic",
         ),
         ("ci_secrets", "examples/ci_secrets/input_secrets_safe.json", "ci-secrets-deterministic"),
-        (
-            "deployment",
-            "examples/deployment_state/input_valid_approval_path.json",
-            "deployment-deterministic",
-        ),
     ]
     for lane, path, backend in cases:
         data = _load(path)
@@ -318,6 +315,23 @@ def test_enforced_pass_cases() -> None:
         assert evidence.routing_enforced is True
         assert evidence.decision.get("merge_recommendation") == "allow"
         assert backend in (evidence.selected_backends or [])
+
+
+def test_enforced_untrusted_deployment_valid_path_requires_review() -> None:
+    """A benign deployment path still needs authenticated acquisition to allow."""
+    data = _load("examples/deployment_state/input_valid_approval_path.json")
+    evidence = execute_obligations(
+        [{"lane": "deployment", "input": data}],
+        {},
+        repo="example/repo",
+        head_sha="abc",
+        use_cache=False,
+        policy=_enforced_policy("deployment"),
+    )[0]
+    assert evidence.routing_enforced is True
+    assert evidence.decision.get("merge_recommendation") == "require_human_review"
+    assert evidence.decision.get("merge_recommendation") != "allow"
+    assert "deployment-deterministic" in (evidence.selected_backends or [])
 
 
 def test_malformed_infrastructure_is_review_not_allow() -> None:
