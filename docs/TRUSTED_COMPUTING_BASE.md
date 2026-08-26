@@ -28,15 +28,19 @@ Third-party actions in release paths must be immutable SHA pins (enforced by `sc
 | `.github/workflows/publish.yml` | `actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02` | v4.6.2 |
 | `.github/workflows/publish.yml` | `actions/checkout@11d5960a326750d5838078e36cf38b85af677262` | v4.4.0 |
 | `.github/workflows/publish.yml` | `actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065` | v5.6.0 |
-| `.github/workflows/publish.yml` | `actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02` | v4.6.2 |
-| `.github/workflows/publish.yml` | `actions/checkout@11d5960a326750d5838078e36cf38b85af677262` | v4.4.0 |
-| `.github/workflows/publish.yml` | `actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065` | v5.6.0 |
 | `.github/workflows/publish.yml` | `actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093` | v4.3.0 |
 | `.github/workflows/publish.yml` | `sigstore/cosign-installer@d7d6bc7722e3daa8354c50bcb52f4837da5e9b6a` | v3.8.1 |
 | `.github/workflows/publish.yml` | `actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02` | v4.6.2 |
 | `.github/workflows/publish.yml` | `actions/checkout@11d5960a326750d5838078e36cf38b85af677262` | v4.4.0 |
+| `.github/workflows/publish.yml` | `actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065` | v5.6.0 |
+| `.github/workflows/publish.yml` | `actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093` | v4.3.0 |
+| `.github/workflows/publish.yml` | `actions/checkout@11d5960a326750d5838078e36cf38b85af677262` | v4.4.0 |
+| `.github/workflows/publish.yml` | `actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065` | v5.6.0 |
 | `.github/workflows/publish.yml` | `actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093` | v4.3.0 |
 | `.github/workflows/publish.yml` | `pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247` | v1.14.1 (release/v1) |
+| `.github/workflows/publish.yml` | `actions/checkout@11d5960a326750d5838078e36cf38b85af677262` | v4.4.0 |
+| `.github/workflows/publish.yml` | `actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065` | v5.6.0 |
+| `.github/workflows/publish.yml` | `actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093` | v4.3.0 |
 
 Floating third-party refs in release paths: **0** (must be zero for RC).
 
