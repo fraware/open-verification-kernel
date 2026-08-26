@@ -29,6 +29,7 @@ def _strict() -> SourceProfileQualification:
         enforcement_test_present=True,
         materials_trusted=True,
         measured_coverage_complete=True,
+        execution_attested=True,
         support_contract_version="1.0.0",
         positive_cases=3,
         negative_cases=3,
@@ -63,6 +64,7 @@ def test_single_positive_and_negative_fixture_are_not_a_strict_corpus() -> None:
     qualification = SourceProfileQualification(
         **{
             **qualification.__dict__,
+            "execution_attested": True,
             "support_contract_version": "1.0.0",
             "positive_cases": 1,
             "negative_cases": 1,
@@ -85,6 +87,7 @@ def test_single_positive_and_negative_fixture_are_not_a_strict_corpus() -> None:
 def test_every_strict_obligation_is_required() -> None:
     baseline = _strict()
     fields = [
+        "execution_attested",
         "support_contract_version",
         "unsupported_cases",
         "malformed_cases",
@@ -98,7 +101,12 @@ def test_every_strict_obligation_is_required() -> None:
     ]
     for field in fields:
         values = dict(baseline.__dict__)
-        values[field] = None if field == "support_contract_version" else 0
+        if field == "support_contract_version":
+            values[field] = None
+        elif field == "execution_attested":
+            values[field] = False
+        else:
+            values[field] = 0
         degraded = SourceProfileQualification(**values)
         assert degraded.strict_ready() is False, field
 
