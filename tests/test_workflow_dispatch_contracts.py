@@ -102,3 +102,18 @@ def test_consumer_pin_verification_exposes_typed_release_inputs() -> None:
     assert inputs["ovk_candidate_sha"]["required"] == "true"
     assert inputs["fastapi_ref"]["default"] == "main"
     assert inputs["express_ref"]["default"] == "main"
+
+
+def test_consumer_pin_verification_uploads_hidden_evidence() -> None:
+    """Evidence written under `.verification` must not be silently omitted from artifacts."""
+
+    path = WORKFLOW_DIR / "consumer-pin-verification.yml"
+    workflow = _load_workflow(path)
+    steps = workflow["jobs"]["verify-consumer-pins"]["steps"]
+    upload_steps = [step for step in steps if step.get("name") == "Upload consumer pin evidence"]
+
+    assert len(upload_steps) == 1
+    upload = upload_steps[0]
+    assert upload["with"]["path"].startswith(".verification/")
+    assert upload["with"]["if-no-files-found"] == "error"
+    assert upload["with"]["include-hidden-files"] == "true"
