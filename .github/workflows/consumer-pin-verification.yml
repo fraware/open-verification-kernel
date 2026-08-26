@@ -87,14 +87,12 @@ jobs:
                   if "open-verification-kernel@" in ref:
                       if ref.endswith(("@main", "@master", "@HEAD")):
                           failures.append(f"{path.name}: mutable pin {ref}")
-                      # Tags like @v1.2.1 are insufficient for candidate evidence.
                       if re.search(r"@v?\d+\.\d+", ref) and sha not in ref:
                           failures.append(f"{path.name}: tag pin cannot evidence candidate SHA: {ref}")
                       if not ref.lower().endswith("@" + sha):
                           failures.append(f"{path.name}: expected exact SHA pin {pin}, got {ref}")
           joined = "\n".join(texts)
           if pin not in joined.lower() and f"open-verification-kernel@{sha}" not in joined.lower():
-              # Also allow ownerless path forms that still end with @sha
               if f"@{sha}" not in joined.lower() or "open-verification-kernel@" not in joined.lower():
                   failures.append(f"missing required exact pin .../open-verification-kernel@{sha}")
           if failures:
@@ -115,12 +113,18 @@ jobs:
           CONSUMER_REF: ${{ matrix.ref }}
         working-directory: consumer
         run: |
+          set -euo pipefail
+          CONSUMER_SOURCE_SHA="$(git rev-parse HEAD)"
+          export CONSUMER_SOURCE_SHA
           mkdir -p ../.verification
           python - <<'PY'
           import hashlib, json, os, pathlib, re
           sha = os.environ["OVK_SHA"].strip().lower()
           repo = os.environ["CONSUMER_REPO"]
           ref = os.environ["CONSUMER_REF"]
+          consumer_source_sha = os.environ["CONSUMER_SOURCE_SHA"].strip().lower()
+          if not re.fullmatch(r"[0-9a-f]{40}", consumer_source_sha):
+              raise SystemExit(f"consumer_source_sha must be 40-hex, got {consumer_source_sha!r}")
           workflows = list(pathlib.Path(".github/workflows").glob("*.yml")) + list(
               pathlib.Path(".github/workflows").glob("*.yaml")
           )
@@ -133,10 +137,11 @@ jobs:
               "schema_version": "ovk.consumer_pin_evidence.v1",
               "consumer_repository": repo,
               "consumer_ref": ref,
+              "consumer_source_sha": consumer_source_sha,
               "ovk_candidate_sha": sha,
               "pin": f"fraware/open-verification-kernel@{sha}",
               "workflow_digests": scenario_digests,
-              "note": "Ledger-ready shape for release_ledger.consumers[]; requires live consumer checkout.",
+              "note": "Candidate-bound consumer pin evidence; consumer_source_sha records the exact checkout.",
           }
           out = pathlib.Path("../.verification") / f"consumer-pin-{repo.replace('/', '_')}.json"
           out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -148,4 +153,4 @@ jobs:
         with:
           name: consumer-pin-${{ strategy.job-index }}
           path: .verification/consumer-pin-*.json
-          if-no-files-found: warn
+          if-no-files-found: error

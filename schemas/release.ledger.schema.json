@@ -1,0 +1,424 @@
+{
+  "$id": "https://openverification.dev/schemas/release.ledger.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifacts": {
+      "additionalProperties": false,
+      "properties": {
+        "sbom_sha256": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "type": "string"
+            }
+          ]
+        },
+        "sdist_filename": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sdist_sha256": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "type": "string"
+            }
+          ]
+        },
+        "sigstore_summary_sha256": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "type": "string"
+            }
+          ]
+        },
+        "wheel_filename": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "wheel_sha256": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "required": [
+        "wheel_filename",
+        "wheel_sha256",
+        "sdist_filename",
+        "sdist_sha256",
+        "sbom_sha256",
+        "sigstore_summary_sha256"
+      ],
+      "type": "object"
+    },
+    "consumers": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "consumer_ref": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "consumer_repository": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "consumer_source_sha": {
+            "pattern": "^[0-9a-f]{40}$",
+            "type": "string"
+          },
+          "ovk_candidate_sha": {
+            "pattern": "^[0-9a-f]{40}$",
+            "type": "string"
+          },
+          "pin": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "ovk.consumer_pin_evidence.v1"
+          },
+          "workflow_digests": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "sha256": {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "sha256"
+              ],
+              "type": "object"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "schema_version",
+          "consumer_repository",
+          "consumer_ref",
+          "consumer_source_sha",
+          "ovk_candidate_sha",
+          "pin",
+          "workflow_digests"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "bundle_digests": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "p0_blockers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "profile_qualifications_sha256": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          ]
+        },
+        "release_artifact_provenance": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "verifier_version": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "workflow_artifact_provenance": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "workflow_provenance": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "verifier_version",
+        "bundle_digests",
+        "profile_qualifications_sha256",
+        "p0_blockers",
+        "workflow_provenance",
+        "workflow_artifact_provenance",
+        "release_artifact_provenance"
+      ],
+      "type": "object"
+    },
+    "holdout": {
+      "additionalProperties": false,
+      "properties": {
+        "aggregate_sha256": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "type": "string"
+            }
+          ]
+        },
+        "candidate_source_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        },
+        "holdout_tag": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "predictions_sha256": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "required": [
+        "candidate_source_sha",
+        "predictions_sha256",
+        "aggregate_sha256",
+        "holdout_tag"
+      ],
+      "type": "object"
+    },
+    "release_state": {
+      "additionalProperties": false,
+      "properties": {
+        "authorization_reason": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "authorized": {
+          "type": "boolean"
+        },
+        "published": {
+          "type": "boolean"
+        },
+        "tag": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "verified_source_sha": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "required": [
+        "authorized",
+        "verified_source_sha",
+        "tag",
+        "published",
+        "authorization_reason"
+      ],
+      "type": "object"
+    },
+    "required_runs": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_digest": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "conclusion": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "head_sha": {
+            "pattern": "^[0-9a-f]{40}$",
+            "type": "string"
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "repository": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "run_id": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "workflow": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workflow",
+          "run_id",
+          "head_sha",
+          "status",
+          "conclusion",
+          "path",
+          "repository",
+          "url",
+          "artifact_digest",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "ovk.release_ledger.v2"
+    },
+    "source": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        },
+        "ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "repository": {
+          "pattern": "^[^/\\s]+/[^/\\s]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate_sha",
+        "repository",
+        "ref"
+      ],
+      "type": "object"
+    },
+    "toolchain": {
+      "additionalProperties": false,
+      "properties": {
+        "isolation_profile": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "lock_path": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "lock_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "worker_image_digest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "lock_path",
+        "lock_sha256",
+        "isolation_profile",
+        "worker_image_digest"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "source",
+    "required_runs",
+    "toolchain",
+    "artifacts",
+    "evidence",
+    "consumers",
+    "holdout",
+    "release_state"
+  ],
+  "title": "OVK Release Ledger v2",
+  "type": "object"
+}
