@@ -14,10 +14,12 @@ on:
         description: Ref for ovk-consumer-fastapi-terraform
         required: true
         default: main
+        type: string
       express_ref:
         description: Ref for ovk-consumer-express-actions
         required: true
         default: main
+        type: string
 
 permissions:
   contents: read
