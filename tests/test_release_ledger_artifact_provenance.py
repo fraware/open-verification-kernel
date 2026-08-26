@@ -20,7 +20,7 @@ from scripts.verify_release_ledger_github import (
     _inspect_consumer_pin_artifacts,
     _inspect_holdout_aggregate,
     _inspect_holdout_predictions,
-    _release_artifact_resolver,
+    _release_artifact_resolver as _local_dist_resolver,
 )
 from scripts.verify_release_tag_github import validate_signed_tag
 
@@ -404,7 +404,7 @@ def test_local_distribution_resolver_requires_exactly_one_each(tmp_path: Path) -
     sdist = tmp_path / "package.tar.gz"
     wheel.write_bytes(b"wheel")
     sdist.write_bytes(b"sdist")
-    observed = _release_artifact_resolver(tmp_path)()
+    observed = _local_dist_resolver(tmp_path)()
     assert observed["wheel"]["filename"] == wheel.name
     assert observed["wheel"]["sha256"] == hashlib.sha256(b"wheel").hexdigest()
     assert observed["sdist"]["filename"] == sdist.name
@@ -412,7 +412,7 @@ def test_local_distribution_resolver_requires_exactly_one_each(tmp_path: Path) -
     import pytest
 
     with pytest.raises(RuntimeError, match="exactly one wheel"):
-        _release_artifact_resolver(tmp_path)()
+        _local_dist_resolver(tmp_path)()
 
 
 def _authorized_with_real_dist(tmp_path: Path) -> dict[str, Any]:
@@ -425,7 +425,7 @@ def _authorized_with_real_dist(tmp_path: Path) -> dict[str, Any]:
         repo_root=REPO,
         workflow_run_resolver=_live_run_resolver,
         workflow_artifact_resolver=_workflow_artifact_resolver,
-        release_artifact_resolver=_release_artifact_resolver(tmp_path),
+        release_artifact_resolver=_local_dist_resolver(tmp_path),
         expected_repository=REPOSITORY,
         expected_candidate_sha=SHA,
     )
