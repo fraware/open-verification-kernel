@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 import scripts.collect_workflow_evidence as collector
-from ovk.core.release_ledger import REQUIRED_WORKFLOW_PATHS, REQUIRED_WORKFLOWS
+from ovk.core.release_ledger import REQUIRED_WORKFLOWS
 
 SHA = "a" * 40
 
@@ -20,7 +20,6 @@ def _runs() -> list[dict]:
             "url": f"https://github.com/fraware/open-verification-kernel/actions/runs/{index + 1}",
             "headSha": SHA,
             "createdAt": f"2026-08-26T10:{index:02d}:00Z",
-            "path": REQUIRED_WORKFLOW_PATHS[name],
         }
         for index, name in enumerate(REQUIRED_WORKFLOWS)
     ]
@@ -30,7 +29,8 @@ def test_collector_uses_central_release_workflow_contract(monkeypatch) -> None:
     runs = _runs()
 
     def fake_run_gh(args: list[str]) -> tuple[int, str, str]:
-        assert "path" in next(item for item in args if item.startswith("databaseId,"))
+        fields = next(item for item in args if item.startswith("databaseId,"))
+        assert "path" not in fields
         return 0, json.dumps(runs), ""
 
     monkeypatch.setattr(collector, "_run_gh", fake_run_gh)

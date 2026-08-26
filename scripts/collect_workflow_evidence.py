@@ -52,7 +52,7 @@ def collect_for_sha(*, repo: str, sha: str, limit: int = 50) -> dict[str, Any]:
             "--json",
             (
                 "databaseId,displayTitle,workflowName,status,conclusion,url,"
-                "headSha,createdAt,path"
+                "headSha,createdAt"
             ),
         ]
     )
