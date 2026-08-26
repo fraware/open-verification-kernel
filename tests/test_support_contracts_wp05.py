@@ -45,7 +45,8 @@ def test_qualification_counts_are_derived_but_not_execution_attested() -> None:
     assert payload["maturity_contract"]["externally_calibrated_strict_locally_derivable"] is False
     fastapi = payload["profiles"]["authorization.fastapi.ast_v1"]
     qualification = fastapi["qualification"]
-    assert qualification["support_contract_version"] == "1.0.0"
+    contract = load_support_contract("authorization.fastapi.ast_v1", repo_root=REPO)
+    assert qualification["support_contract_version"] == contract.contract_version
     assert fastapi["evidence_count"] == len(fastapi["evidence"])
     assert qualification["positive_cases"] == sum(
         1 for item in fastapi["evidence"] if item["bucket"] == "positive"
@@ -131,7 +132,9 @@ def test_conformance_matrix_declares_v3_normative() -> None:
         if isinstance(row, dict) and row.get("source_profile_id") and row.get("source_profile_qualification")
     ]
     assert profile_rows
-    assert any(
-        (row.get("source_profile_qualification") or {}).get("support_contract_version") == "1.0.0"
-        for row in profile_rows
-    )
+    contracts = load_all_support_contracts(repo_root=REPO)
+    for row in profile_rows:
+        profile_id = row["source_profile_id"]
+        assert (row.get("source_profile_qualification") or {}).get("support_contract_version") == contracts[
+            profile_id
+        ].contract_version
