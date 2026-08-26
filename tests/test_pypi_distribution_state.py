@@ -29,7 +29,7 @@ def _payload(files: dict[str, str]) -> dict:
     return {
         "info": {"version": "1.3.0rc1"},
         "urls": [
-            {"filename": name, "digests": {"sha256": digest}}
+            {"filename": name, "digests": {"sha256": digest}, "yanked": False}
             for name, digest in sorted(files.items())
         ],
     }
@@ -96,3 +96,17 @@ def test_malformed_remote_digest_fails_closed(tmp_path: Path) -> None:
     result = compare_pypi_payload(payload, local_files=local)
     assert result["state"] == "conflict"
     assert any("malformed SHA-256" in item for item in result["failures"])
+
+
+def test_yanked_exact_pypi_files_are_not_safe_recovery(tmp_path: Path) -> None:
+    local = _local_dist(tmp_path)
+    payload = _payload(local)
+    filename = payload["urls"][0]["filename"]
+    payload["urls"][0]["yanked"] = True
+
+    result = compare_pypi_payload(payload, local_files=local)
+
+    assert result["state"] == "conflict"
+    assert f"PyPI file is yanked: {filename}" in result["failures"]
+    assert publication_state_allowed(result, require_exact=False) is False
+    assert publication_state_allowed(result, require_exact=True) is False
