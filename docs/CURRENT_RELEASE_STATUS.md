@@ -4,7 +4,7 @@ Living release/adoption status for Open Verification Kernel.
 
 **Last reviewed:** 2026-08-26
 
-**Current judgment:** `1.3.0-rc.1` is an **engineering release candidate under final review in PR #23** (`hardening/final-release-closure-2026-08-25`). It is not yet an attributable `v1.3.0-rc.1` release. The last previously signed immutable release remains `v1.2.1`; evidence from that tag must not be re-attributed to the RC source tree.
+**Current judgment:** `1.3.0-rc.1` is an **engineering release candidate after the merge of final technical-closure PR #23**. It is not yet an attributable `v1.3.0-rc.1` release. The last previously signed immutable release remains `v1.2.1`; evidence from that tag must not be re-attributed to the RC source tree. The exact RC source identity is the final post-documentation candidate SHA that passes the complete exact-head development matrix; later movement of `main` does not redefine or authorize that candidate.
 
 The authoritative publication procedure is [RELEASE.md](RELEASE.md). The evidence threshold is [ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md). The generated TCB is [TRUSTED_COMPUTING_BASE.md](TRUSTED_COMPUTING_BASE.md).
 
@@ -68,6 +68,17 @@ The exact final candidate SHA must pass all of the following after the last code
 
 A historical green SHA is not enough after the tree changes. The final exact-head matrix is the pre-tag engineering gate.
 
+## Repository ref-integrity gate
+
+Release identity depends on repository refs remaining non-rewritable after they become authoritative. Before public publication:
+
+- [ ] `main` is protected against force-push and deletion, either by branch protection or an active equivalent ruleset;
+- [ ] the release-tag namespace (`v*`, or a stricter equivalent covering this RC and future releases) is protected against update and deletion after tag creation;
+- [ ] the signed annotated tag points directly to the exact final candidate SHA and GitHub reports the tag signature as verified;
+- [ ] repository settings are checked live rather than inferred from documentation.
+
+The current protection gap is tracked in issue #25. Ref protection is defense in depth and does not replace exact-SHA, signed-tag, or release-ledger verification.
+
 ## Tag-bound release authorization gate
 
 After the engineering candidate is frozen and a signed annotated tag is created, release authorization requires **new** `workflow_dispatch` runs on that exact tag for:
@@ -120,6 +131,7 @@ Until an attributable `v1.3.0-rc.1` release exists, do not present that tag as a
 These cannot be truthfully marked complete merely from repository code:
 
 - [ ] freeze the exact final candidate after its complete development matrix is green;
+- [ ] configure and live-verify `main` plus release-tag ref protection (issue #25);
 - [ ] create and push the signed annotated `v1.3.0-rc.1` tag;
 - [ ] execute all seven tag-bound release-evidence workflows;
 - [ ] retain governed holdout and consumer artifacts for those exact run IDs;
