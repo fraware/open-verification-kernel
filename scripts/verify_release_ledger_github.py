@@ -3,9 +3,10 @@
 
 This command is the network/local-artifact trust boundary for release
 authorization. It independently resolves every workflow run through GitHub,
-downloads required holdout/consumer artifacts from those exact run IDs, and
-hashes the wheel/sdist from the local build. It never tags, creates a release,
-signs artifacts, or publishes to PyPI.
+requires final release evidence to come from explicit ``workflow_dispatch``
+runs, downloads required holdout/consumer artifacts from those exact run IDs,
+and hashes the wheel/sdist from the local build. It never tags, creates a
+release, signs artifacts, or publishes to PyPI.
 """
 
 from __future__ import annotations
@@ -26,6 +27,8 @@ if str(ROOT) not in sys.path:
 from ovk.core.release_ledger import verify_release_ledger  # noqa: E402
 from scripts.digest_holdout_predictions import assert_predictions_label_free  # noqa: E402
 from scripts.run_formalpr_holdout import validate_aggregate_schema  # noqa: E402
+
+RELEASE_WORKFLOW_EVENT = "workflow_dispatch"
 
 
 def _run(args: list[str], *, timeout: int = 120) -> subprocess.CompletedProcess[str]:
@@ -55,8 +58,23 @@ def _gh_json(endpoint: str) -> Mapping[str, Any]:
     return payload
 
 
+def validate_release_workflow_run(payload: Mapping[str, Any]) -> list[str]:
+    """Validate release-only run properties not represented by the ledger schema."""
+    failures: list[str] = []
+    event = str(payload.get("event") or "")
+    if event != RELEASE_WORKFLOW_EVENT:
+        failures.append(
+            f"release workflow event must be {RELEASE_WORKFLOW_EVENT}, got {event or '<empty>'}"
+        )
+    return failures
+
+
 def _run_gh_api(repo: str, run_id: int) -> Mapping[str, Any]:
-    return _gh_json(f"repos/{repo}/actions/runs/{run_id}")
+    payload = _gh_json(f"repos/{repo}/actions/runs/{run_id}")
+    failures = validate_release_workflow_run(payload)
+    if failures:
+        raise RuntimeError("; ".join(failures))
+    return payload
 
 
 def _list_run_artifacts(repo: str, run_id: int) -> list[dict[str, Any]]:
