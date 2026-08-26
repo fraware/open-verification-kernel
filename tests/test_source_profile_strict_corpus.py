@@ -169,7 +169,6 @@ def test_fastapi_unknown_missing_base() -> None:
 
 
 def test_fastapi_timeout_maps_to_unknown_semantics() -> None:
-    # Profile timeout obligation: bounded execution must not invent ALLOW on timeout.
     term = "timeout"
     status = "unknown" if term == "timeout" else "pass"
     assert status == "unknown"
@@ -344,7 +343,6 @@ def test_express_malformed_unbalanced() -> None:
     source = "const express = require('express');\nconst app = express();\napp.get('/admin'\n"
     materials = materials_from_pair(path="app.js", base_source=source, head_source=source)
     ir = ExpressAstAuthorizationCompiler().compile(materials)
-    # Fail closed: no invented complete protected routes from truncated syntax.
     assert not any(route.admin_only_after for route in ir.routes)
 
 
@@ -534,7 +532,6 @@ def test_terraform_malformed_not_object() -> None:
 
 def test_terraform_unknown_partial_plan() -> None:
     ir = compile_terraform_plan({"format_version": "1.2"})
-    # No resources → nothing claimed public; unknown surface stays non-ALLOW.
     assert all(not r.public_exposure for r in ir.resources)
 
 
@@ -639,10 +636,8 @@ def test_k8s_positive_gateway_route() -> None:
 
 def test_k8s_negative_cross_namespace() -> None:
     ir = compile_kubernetes_objects(_svc_deploy("default", "other"))
-    # Cross-namespace selector must not silently match.
     matched = [e for e in ir.edges if e.kind == "service_selector"]
     assert not matched or all(getattr(e, "attributes", {}) or True for e in matched)
-    # Prefer explicit non-match evidence when compiler records it.
     assert ir.resources
 
 
@@ -666,7 +661,6 @@ def test_k8s_negative_wrong_labels() -> None:
     assert not any(
         e.kind == "service_selector" and getattr(e, "matched", True) is False for e in ir.edges
     ) or True
-    # At minimum: no false cross-label match claimed as reachability without evidence.
     assert ir is not None
 
 
@@ -765,7 +759,6 @@ jobs:
 
 
 def test_actions_positive_secrets_inherit() -> None:
-    # Documented finding path for secrets: inherit on reusable call.
     from ovk.compilers.github_actions.reusable_workflows import parse_uses
 
     ref = parse_uses("./.github/workflows/reusable.yml")
@@ -816,7 +809,7 @@ def test_actions_malformed_empty_workflow() -> None:
         workflow = load_workflow_text("not: valid: workflow: [", path="bad.yml")
         ir = compile_workflow_trust(workflow)
         assert ir is not None
-    except Exception as exc:  # YAML / loader fail-closed
+    except Exception as exc:
         assert "mapping" in str(exc).lower() or "yaml" in type(exc).__name__.lower() or True
 
 
@@ -879,7 +872,8 @@ def test_deployment_positive_trusted_state() -> None:
                 {"to": "production", "actor": "alice", "approvals": ["alice"]},
             ],
             "_ovk_acquisition": {"trusted": True, "signature_ref": "sig"},
-        }
+        },
+        acquisition_trusted=True,
     )
     assert not ir.unsupported_constructs
     assert any(t.target == "production" for t in ir.transitions)
@@ -949,7 +943,6 @@ def test_deployment_negative_missing_signature() -> None:
             "_ovk_acquisition": {"trusted": True},
         }
     )
-    # Missing signature should not be treated as fully trusted production transition.
     assert ir.unsupported_constructs or not any(t.target == "production" for t in ir.transitions)
 
 
@@ -961,7 +954,6 @@ def test_deployment_unsupported_untrusted_json() -> None:
 def test_deployment_malformed_not_mapping() -> None:
     with pytest.raises((TypeError, ValueError, AttributeError)):
         compile_deployment_state([])  # type: ignore[arg-type]
-    # Alternate malformed object path: empty mapping without schema.
     ir = compile_deployment_state({})
     assert ir.unsupported_constructs
 
