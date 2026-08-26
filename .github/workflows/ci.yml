@@ -11,6 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.11'
@@ -46,6 +49,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.11'
@@ -75,9 +81,11 @@ jobs:
       - name: Score all benchmark cases
         run: python benchmarks/formal_pr_bench/score_all_lanes.py
       - name: Score expanded benchmark and publish leaderboard
+        env:
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           ovk bench --expanded --leaderboard .verification/formal-pr-bench-leaderboard.json
-          python scripts/render_bench_badge.py --benchmark-source-sha "${GITHUB_SHA}" --dry-run
+          python scripts/render_bench_badge.py --benchmark-source-sha "$CANDIDATE_SHA" --dry-run
       - name: Pilot program
         run: ovk pilot
       - name: Exercise ovk check on multi-surface PR
@@ -183,6 +191,9 @@ jobs:
       checks: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - name: Strict emit-check on known-bad diff
         id: ovk
         continue-on-error: true
@@ -206,7 +217,9 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 2
+          persist-credentials: false
       - name: Exercise automatic diff collection
         uses: ./
         with:
@@ -225,6 +238,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
@@ -267,11 +283,15 @@ jobs:
           assert result.routing
           assert result.bundle.subject["repo"] == "wheel/consumer"
           PY
+
   template-conformance:
     needs: unit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.11'
