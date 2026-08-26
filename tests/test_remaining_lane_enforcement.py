@@ -290,7 +290,9 @@ def test_enforced_untrusted_deployment_skipped_approval_requires_review() -> Non
     assert evidence.routing_enforced is True
     assert evidence.decision.get("merge_recommendation") == "require_human_review"
     assert evidence.decision.get("merge_recommendation") != "allow"
-    assert "deployment-deterministic" in (evidence.selected_backends or [])
+    # Partial/untrusted deployment material has no authoritative route. The
+    # direct backend test above separately proves the checker detects the bypass.
+    assert (evidence.selected_backends or []) == []
 
 
 def test_enforced_pass_cases() -> None:
@@ -331,7 +333,8 @@ def test_enforced_untrusted_deployment_valid_path_requires_review() -> None:
     assert evidence.routing_enforced is True
     assert evidence.decision.get("merge_recommendation") == "require_human_review"
     assert evidence.decision.get("merge_recommendation") != "allow"
-    assert "deployment-deterministic" in (evidence.selected_backends or [])
+    # A clean-looking document cannot bootstrap its own authority either.
+    assert (evidence.selected_backends or []) == []
 
 
 def test_malformed_infrastructure_is_review_not_allow() -> None:
