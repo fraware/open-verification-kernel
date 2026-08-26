@@ -68,6 +68,21 @@ def test_validate_sbom_accepts_release_inventory(tmp_path: Path) -> None:
     generate_sbom._validate_sbom(_valid_sbom(), pyproject=pyproject)
 
 
+def test_validate_sbom_accepts_canonical_prerelease_spelling(tmp_path: Path) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    _write_pyproject(pyproject)
+    payload = _valid_sbom()
+    payload["metadata"]["component"]["version"] = "1.3.0rc1"
+
+    generate_sbom._validate_sbom(payload, pyproject=pyproject)
+
+
+def test_version_comparison_does_not_hide_release_number_changes() -> None:
+    assert generate_sbom._version_comparison_key("1.3.0-rc.1") == "1.3.0rc1"
+    assert generate_sbom._version_comparison_key("1.3.0rc1") == "1.3.0rc1"
+    assert generate_sbom._version_comparison_key("1.30rc1") != "1.3.0rc1"
+
+
 def test_validate_sbom_fails_closed_on_missing_direct_dependency(tmp_path: Path) -> None:
     pyproject = tmp_path / "pyproject.toml"
     _write_pyproject(pyproject)
