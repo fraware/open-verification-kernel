@@ -295,9 +295,9 @@ def test_release_ledger_schema_accepts_draft_and_authorized_output() -> None:
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> str:
-    text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    path.write_text(text, encoding="utf-8")
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    raw = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    path.write_bytes(raw)
+    return hashlib.sha256(raw).hexdigest()
 
 
 def test_holdout_prediction_artifact_parser_binds_manifest(tmp_path: Path) -> None:
