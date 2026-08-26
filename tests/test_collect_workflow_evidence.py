@@ -10,7 +10,7 @@ from ovk.core.release_ledger import REQUIRED_WORKFLOWS
 SHA = "a" * 40
 
 
-def _runs() -> list[dict]:
+def _runs(*, event: str = "workflow_dispatch") -> list[dict]:
     return [
         {
             "databaseId": index + 1,
@@ -20,6 +20,7 @@ def _runs() -> list[dict]:
             "url": f"https://github.com/fraware/open-verification-kernel/actions/runs/{index + 1}",
             "headSha": SHA,
             "createdAt": f"2026-08-26T10:{index:02d}:00Z",
+            "event": event,
         }
         for index, name in enumerate(REQUIRED_WORKFLOWS)
     ]
@@ -31,6 +32,7 @@ def test_collector_uses_central_release_workflow_contract(monkeypatch) -> None:
     def fake_run_gh(args: list[str]) -> tuple[int, str, str]:
         fields = next(item for item in args if item.startswith("databaseId,"))
         assert "path" not in fields
+        assert "event" in fields
         return 0, json.dumps(runs), ""
 
     monkeypatch.setattr(collector, "_run_gh", fake_run_gh)
@@ -44,7 +46,46 @@ def test_collector_uses_central_release_workflow_contract(monkeypatch) -> None:
     assert payload["required_workflow_names"] == list(REQUIRED_WORKFLOWS)
     assert payload["missing_workflow_names"] == []
     assert payload["verified_source_sha"] is None
+    assert payload["required_event"] is None
     assert "Bench Badge" not in payload["required_workflow_names"]
+
+
+def test_release_collection_filters_to_workflow_dispatch(monkeypatch) -> None:
+    dispatch_runs = _runs(event="workflow_dispatch")
+    pr_runs = [
+        {**run, "databaseId": run["databaseId"] + 100, "event": "pull_request"}
+        for run in _runs(event="pull_request")
+    ]
+
+    def fake_run_gh(args: list[str]) -> tuple[int, str, str]:
+        assert args[-2:] == ["--event", "workflow_dispatch"]
+        return 0, json.dumps([*pr_runs, *dispatch_runs]), ""
+
+    monkeypatch.setattr(collector, "_run_gh", fake_run_gh)
+    payload = collector.collect_for_sha(
+        repo="fraware/open-verification-kernel",
+        sha=SHA,
+        required_event="workflow_dispatch",
+    )
+    assert payload["ok"] is True
+    assert payload["required_event"] == "workflow_dispatch"
+    assert len(payload["runs"]) == len(REQUIRED_WORKFLOWS)
+    assert {run["event"] for run in payload["runs"]} == {"workflow_dispatch"}
+
+
+def test_release_collection_fails_if_only_pr_runs_exist(monkeypatch) -> None:
+    monkeypatch.setattr(
+        collector,
+        "_run_gh",
+        lambda args: (0, json.dumps(_runs(event="pull_request")), ""),
+    )
+    payload = collector.collect_for_sha(
+        repo="fraware/open-verification-kernel",
+        sha=SHA,
+        required_event="workflow_dispatch",
+    )
+    assert payload["ok"] is False
+    assert payload["missing_workflow_names"] == list(REQUIRED_WORKFLOWS)
 
 
 def test_collector_fails_closed_when_required_workflow_missing(monkeypatch) -> None:
