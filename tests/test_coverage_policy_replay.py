@@ -45,6 +45,15 @@ def _partial_authorization_input() -> dict:
     }
 
 
+def _single_instance(plan, obligations: list[dict]) -> str:
+    """Resolve the sole obligation instance used by these replay fixtures."""
+    assert len(obligations) == 1
+    instance_id = plan.instance_key(obligations[0])
+    assert instance_id in plan.typed_obligations
+    assert instance_id in plan.routing_by_instance
+    return instance_id
+
+
 def test_partial_coverage_requires_explicit_bound_acceptance_for_primary() -> None:
     obligations = [
         {
@@ -60,9 +69,10 @@ def test_partial_coverage_requires_explicit_bound_acceptance_for_primary() -> No
         head_sha="head",
         base_sha="base",
     )
-    default_typed = default_plan.typed_obligations["no-admin-route-bypass"]
+    default_instance = _single_instance(default_plan, obligations)
+    default_typed = default_plan.typed_obligations[default_instance]
     assert default_typed.coverage.status == "partial"
-    assert not any(item.required for item in default_plan.routing_by_intent["no-admin-route-bypass"].selected)
+    assert not any(item.required for item in default_plan.routing_by_instance[default_instance].selected)
 
     accepted_plan = build_authoritative_routing_plan(
         obligations,
@@ -71,9 +81,10 @@ def test_partial_coverage_requires_explicit_bound_acceptance_for_primary() -> No
         head_sha="head",
         base_sha="base",
     )
-    accepted_typed = accepted_plan.typed_obligations["no-admin-route-bypass"]
+    accepted_instance = _single_instance(accepted_plan, obligations)
+    accepted_typed = accepted_plan.typed_obligations[accepted_instance]
     assert accepted_typed.coverage.status == "partial"
-    assert any(item.required for item in accepted_plan.routing_by_intent["no-admin-route-bypass"].selected)
+    assert any(item.required for item in accepted_plan.routing_by_instance[accepted_instance].selected)
 
 
 def test_nondefault_bound_coverage_policy_replays_through_v3_evidence() -> None:
