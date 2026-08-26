@@ -2,8 +2,8 @@
 """Re-check that local distributions are exactly those authorized by a v2 ledger.
 
 This verifier does not mint authority. It consumes an already provenance-
-authorized ledger and fails closed if the candidate identity or distribution
-bytes differ from the authorization record.
+authorized ledger and fails closed if candidate identity, required evidence
+bindings, or distribution bytes differ from the authorization record.
 """
 
 from __future__ import annotations
@@ -33,6 +33,14 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _valid_hex(value: Any, length: int) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == length
+        and all(char in "0123456789abcdef" for char in value.lower())
+    )
+
+
 def verify_authorized_release_inputs(
     ledger: dict[str, Any],
     *,
@@ -42,22 +50,28 @@ def verify_authorized_release_inputs(
 ) -> list[str]:
     failures: list[str] = []
     expected_candidate_sha = expected_candidate_sha.lower()
+    if not _valid_hex(expected_candidate_sha, 40):
+        failures.append("expected_candidate_sha must be exact 40-hex")
 
     if ledger.get("schema_version") != LEDGER_SCHEMA_VERSION:
         failures.append(f"schema_version must be {LEDGER_SCHEMA_VERSION}")
     source = ledger.get("source") if isinstance(ledger.get("source"), dict) else {}
     if source.get("repository") != expected_repository:
         failures.append("source.repository mismatch")
-    if str(source.get("candidate_sha") or "").lower() != expected_candidate_sha:
+    source_candidate = str(source.get("candidate_sha") or "").lower()
+    if not _valid_hex(source_candidate, 40) or source_candidate != expected_candidate_sha:
         failures.append("source.candidate_sha mismatch")
 
     state = ledger.get("release_state") if isinstance(ledger.get("release_state"), dict) else {}
     if state.get("authorized") is not True:
         failures.append("release ledger is not authorized")
-    if str(state.get("verified_source_sha") or "").lower() != expected_candidate_sha:
+    verified_source_sha = str(state.get("verified_source_sha") or "").lower()
+    if not _valid_hex(verified_source_sha, 40) or verified_source_sha != expected_candidate_sha:
         failures.append("verified_source_sha mismatch")
     if state.get("published") is not False:
         failures.append("pre-publication ledger must keep published=false")
+    if state.get("tag") is not None:
+        failures.append("pre-publication ledger must keep tag=null")
 
     evidence = ledger.get("evidence") if isinstance(ledger.get("evidence"), dict) else {}
     if not isinstance(evidence.get("workflow_provenance"), dict):
@@ -71,12 +85,14 @@ def verify_authorized_release_inputs(
         failures.append("p0_blockers must be empty")
 
     holdout = ledger.get("holdout") if isinstance(ledger.get("holdout"), dict) else {}
-    if str(holdout.get("candidate_source_sha") or "").lower() != expected_candidate_sha:
+    holdout_candidate = str(holdout.get("candidate_source_sha") or "").lower()
+    if not _valid_hex(holdout_candidate, 40) or holdout_candidate != expected_candidate_sha:
         failures.append("holdout candidate_source_sha mismatch")
-    for key in ("predictions_sha256", "aggregate_sha256"):
-        value = holdout.get(key)
-        if not isinstance(value, str) or len(value) != 64:
-            failures.append(f"holdout.{key} missing")
+    for key in ("predictions_sha256", "aggregate_sha256", "holdout_asset_sha256"):
+        if not _valid_hex(holdout.get(key), 64):
+            failures.append(f"holdout.{key} missing or malformed")
+    if not isinstance(holdout.get("holdout_tag"), str) or not holdout["holdout_tag"].strip():
+        failures.append("holdout.holdout_tag missing")
 
     consumers = ledger.get("consumers")
     if not isinstance(consumers, list):
@@ -91,14 +107,42 @@ def verify_authorized_release_inputs(
             failures.append("consumer repository set mismatch")
         for item in consumers:
             if not isinstance(item, dict):
+                failures.append("consumer evidence row malformed")
                 continue
-            if str(item.get("ovk_candidate_sha") or "").lower() != expected_candidate_sha:
-                failures.append("consumer candidate SHA mismatch")
-            consumer_source_sha = str(item.get("consumer_source_sha") or "")
-            if len(consumer_source_sha) != 40:
-                failures.append("consumer source SHA missing")
+            repository = str(item.get("consumer_repository") or "")
+            candidate = str(item.get("ovk_candidate_sha") or "").lower()
+            if not _valid_hex(candidate, 40) or candidate != expected_candidate_sha:
+                failures.append(f"consumer candidate SHA mismatch:{repository or '<unknown>'}")
+            consumer_source_sha = str(item.get("consumer_source_sha") or "").lower()
+            if not _valid_hex(consumer_source_sha, 40):
+                failures.append(f"consumer source SHA missing or malformed:{repository or '<unknown>'}")
+            if not isinstance(item.get("consumer_ref"), str) or not item["consumer_ref"].strip():
+                failures.append(f"consumer ref missing:{repository or '<unknown>'}")
+            if item.get("pin") != f"fraware/open-verification-kernel@{expected_candidate_sha}":
+                failures.append(f"consumer pin mismatch:{repository or '<unknown>'}")
+            workflow_digests = item.get("workflow_digests")
+            if not isinstance(workflow_digests, list) or not workflow_digests:
+                failures.append(f"consumer workflow digests missing:{repository or '<unknown>'}")
+            else:
+                seen_paths: set[str] = set()
+                for record in workflow_digests:
+                    if not isinstance(record, dict):
+                        failures.append(f"consumer workflow digest malformed:{repository or '<unknown>'}")
+                        continue
+                    path = str(record.get("path") or "")
+                    if not path or path in seen_paths or not _valid_hex(record.get("sha256"), 64):
+                        failures.append(f"consumer workflow digest malformed:{repository or '<unknown>'}")
+                        continue
+                    seen_paths.add(path)
 
     artifacts = ledger.get("artifacts") if isinstance(ledger.get("artifacts"), dict) else {}
+    for key in ("wheel_sha256", "sdist_sha256"):
+        if not _valid_hex(artifacts.get(key), 64):
+            failures.append(f"artifacts.{key} missing or malformed")
+    for key in ("wheel_filename", "sdist_filename"):
+        if not isinstance(artifacts.get(key), str) or not artifacts[key].strip():
+            failures.append(f"artifacts.{key} missing")
+
     if isinstance(release_provenance, dict):
         for kind, filename_key, digest_key in (
             ("wheel", "wheel_filename", "wheel_sha256"),
@@ -110,9 +154,9 @@ def verify_authorized_release_inputs(
                 continue
             if record.get("filename") != artifacts.get(filename_key):
                 failures.append(f"{kind} provenance filename mismatch")
-            if str(record.get("sha256") or "").lower() != str(
-                artifacts.get(digest_key) or ""
-            ).lower():
+            provenance_digest = str(record.get("sha256") or "").lower()
+            artifact_digest = str(artifacts.get(digest_key) or "").lower()
+            if not _valid_hex(provenance_digest, 64) or provenance_digest != artifact_digest:
                 failures.append(f"{kind} provenance digest mismatch")
 
     wheels = sorted(path for path in dist_dir.glob("*.whl") if path.is_file())
