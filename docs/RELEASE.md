@@ -63,7 +63,15 @@ For this RC, that is `1.3.0-rc.1` and `v1.3.0-rc.1`. PyPI normalizes the version
 
 ## 2. Create a signed annotated immutable tag
 
-Create the tag only after the candidate commit is final:
+Before creating or pushing the release tag, live-verify repository ref protection:
+
+- `main` must be protected against force-push and deletion by branch protection or an active equivalent ruleset;
+- the release-tag namespace (`v*`, or a stricter equivalent covering the RC and future release tags) must be protected against update and deletion after creation;
+- these settings must be checked from live GitHub repository state, not inferred from this document.
+
+For `v1.3.0-rc.1`, the current ref-protection closure is tracked in issue #25. Do not treat the existence of that issue as evidence that the settings are configured.
+
+Create the tag only after the candidate commit is final and the ref-integrity precondition above is satisfied:
 
 ```bash
 export CANDIDATE_SHA='<exact 40-hex candidate commit>'
@@ -74,6 +82,8 @@ git push origin "$TAG"
 ```
 
 The production authorizer requires an **annotated** tag whose signature GitHub reports as verified and whose direct target is exactly `CANDIDATE_SHA`. Lightweight tags, unsigned annotated tags, indirect/wrong targets, moved historical tags, or tags whose version differs from package metadata fail closed.
+
+Ref protection is additional integrity control, not a substitute for those cryptographic and exact-target checks. The release authorizer must independently resolve the annotated tag object and candidate target on every run.
 
 Do not move `v1.2.1` or earlier historical tags. Do not re-attribute historical Sigstore evidence to the new candidate.
 
