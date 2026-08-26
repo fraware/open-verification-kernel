@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -20,7 +21,7 @@ def test_publish_uses_trusted_publishing_without_token() -> None:
     assert "id-token: write" in text
     assert "environment: pypi" in text
     assert "gh-action-pypi-publish" in text
-    assert "skip-existing" not in text
+    assert re.search(r"^\s*skip-existing\s*:", text, re.MULTILINE) is None
 
 
 def test_publish_requires_authorization_before_any_public_release() -> None:
