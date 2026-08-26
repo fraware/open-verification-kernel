@@ -3,8 +3,10 @@
 
 Before Trusted Publishing, ``absent`` or ``exact_match`` are safe states. After
 publication, callers use ``--require-exact`` so only an exact filename and
-SHA-256 match is accepted. This makes recovery after a partial PyPI/GitHub
-publication failure idempotent without a blind ``skip-existing`` policy.
+SHA-256 match is accepted. Existing remote files must also be non-yanked. This
+makes recovery after a partial PyPI/GitHub publication failure idempotent
+without a blind ``skip-existing`` policy or revival of an intentionally yanked
+artifact.
 """
 
 from __future__ import annotations
@@ -75,6 +77,8 @@ def compare_pypi_payload(
         if len(sha) != 64 or any(char not in "0123456789abcdef" for char in sha):
             failures.append(f"PyPI file has malformed SHA-256: {filename}")
             continue
+        if row.get("yanked") is True:
+            failures.append(f"PyPI file is yanked: {filename}")
         remote[filename] = sha
 
     local = {str(name): str(digest).lower() for name, digest in local_files.items()}
