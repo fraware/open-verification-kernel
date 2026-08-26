@@ -280,12 +280,22 @@ jobs:
           python -m pip install --upgrade pip
           python scripts/sync_package_data.py
           pip install --no-cache-dir -e '.[dev]'
+      - name: Generate exact-head template conformance candidate
+        run: |
+          mkdir -p .verification
+          python scripts/build_template_conformance.py \
+            --output .verification/template-conformance.generated.json \
+            --print-domain-counts
       - name: Build and gate template conformance matrix
         run: |
           python scripts/build_template_conformance.py --check --print-domain-counts
           test -f docs/benchmarks/template-conformance.json
       - name: Upload template conformance matrix
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: template-conformance
-          path: docs/benchmarks/template-conformance.json
+          path: |
+            docs/benchmarks/template-conformance.json
+            .verification/template-conformance.generated.json
+          if-no-files-found: error
