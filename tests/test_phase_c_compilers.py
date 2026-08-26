@@ -140,25 +140,32 @@ def test_actions_matrix_and_remote_sha() -> None:
 def test_deployment_state_rejects_untrusted_approved() -> None:
     ir = compile_deployment_state({"approved": True, "schema_version": "ovk.deployment_state.v1"})
     assert "untrusted_approved_true_json" in ir.unsupported_constructs
-    trusted = compile_deployment_state(
-        {
-            "schema_version": "ovk.deployment_state.v1",
-            "system_identity": "deployer-1",
-            "environment": "prod",
-            "revision": "sha256:abc",
-            "signature": "sig",
-            "prior_state": "staging",
-            "required_gates": ["approved"],
-            "production_states": ["production"],
-            "events": [
-                {"to": "approved", "actor": "alice", "approvals": ["alice"]},
-                {"to": "production", "actor": "alice", "approvals": ["alice"]},
-            ],
-            "_ovk_acquisition": {"trusted": True, "signature_ref": "sig"},
-        }
-    )
-    assert not trusted.unsupported_constructs
-    assert any(t.target == "production" for t in trusted.transitions)
+
+    document = {
+        "schema_version": "ovk.deployment_state.v1",
+        "system_identity": "deployer-1",
+        "environment": "prod",
+        "revision": "sha256:abc",
+        "signature": "sig",
+        "prior_state": "staging",
+        "required_gates": ["approved"],
+        "production_states": ["production"],
+        "events": [
+            {"to": "approved", "actor": "alice", "approvals": ["alice"]},
+            {"to": "production", "actor": "alice", "approvals": ["alice"]},
+        ],
+        # Deliberately adversarial: this embedded bit is diagnostic material only
+        # and must never bootstrap trust in the document being evaluated.
+        "_ovk_acquisition": {"trusted": True, "signature_ref": "sig"},
+    }
+    self_asserted = compile_deployment_state(document)
+    assert "untrusted_deployment_state_acquisition" in self_asserted.unsupported_constructs
+
+    # Only a caller that already authenticated the acquisition against an
+    # external trust root may inject the trust result into compilation.
+    authenticated = compile_deployment_state(document, acquisition_trusted=True)
+    assert not authenticated.unsupported_constructs
+    assert any(t.target == "production" for t in authenticated.transitions)
 
 
 def test_cbmc_project_requires_unwind_and_tus() -> None:
