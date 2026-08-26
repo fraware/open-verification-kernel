@@ -156,3 +156,4 @@ jobs:
           name: consumer-pin-${{ strategy.job-index }}
           path: .verification/consumer-pin-*.json
           if-no-files-found: error
+          include-hidden-files: true
