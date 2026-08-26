@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import statistics
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +24,7 @@ EXTERNAL_MANIFEST = resource_path("examples", "pilot_repos", "external_oss_ci_se
 
 
 def _iso_timestamp() -> str:
-    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _real_diff_recall() -> float | None:
