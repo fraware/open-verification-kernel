@@ -11,7 +11,6 @@ permissions:
 jobs:
   migrate:
     if: >-
-      github.actor == 'fraware' &&
       !contains(github.event.head_commit.message, 'science: bind holdout evaluation chain')
     runs-on: ubuntu-latest
     steps:
