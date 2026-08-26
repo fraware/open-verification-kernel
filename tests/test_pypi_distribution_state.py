@@ -10,6 +10,7 @@ import pytest
 from scripts.check_pypi_distribution_state import (
     compare_pypi_payload,
     local_distribution_files,
+    publication_state_allowed,
 )
 
 
@@ -48,6 +49,20 @@ def test_exact_existing_pypi_release_is_safe_recovery(tmp_path: Path) -> None:
     assert result["state"] == "exact_match"
     assert result["failures"] == []
     assert result["remote_files"] == local
+    assert publication_state_allowed(result, require_exact=False) is True
+    assert publication_state_allowed(result, require_exact=True) is True
+
+
+def test_absent_is_safe_only_before_publication() -> None:
+    result = {"state": "absent", "failures": []}
+    assert publication_state_allowed(result, require_exact=False) is True
+    assert publication_state_allowed(result, require_exact=True) is False
+
+
+def test_conflict_is_never_safe() -> None:
+    result = {"state": "conflict", "failures": ["mismatch"]}
+    assert publication_state_allowed(result, require_exact=False) is False
+    assert publication_state_allowed(result, require_exact=True) is False
 
 
 def test_existing_pypi_digest_substitution_fails_closed(tmp_path: Path) -> None:
