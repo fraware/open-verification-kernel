@@ -26,6 +26,13 @@ jobs:
         run: |
           rm scripts/_apply_holdout_chain_patch.py
           rm .github/workflows/temporary-holdout-provenance-migration.yml
+      - name: Normalize generated test EOF
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tests/test_release_ledger_artifact_provenance.py')
+          path.write_text(path.read_text(encoding='utf-8').rstrip() + '\n', encoding='utf-8')
+          PY
       - name: Review migration diff
         run: |
           git diff --check
