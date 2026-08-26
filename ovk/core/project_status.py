@@ -236,22 +236,8 @@ def build_project_status(repo_root: Path, *, candidate_sha: str | None = None) -
     }
 
 
-def write_project_status_and_claims(
-    repo_root: Path,
-    *,
-    candidate_sha: str | None = None,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    claims = build_claim_registry(repo_root)
-    status = build_project_status(repo_root, candidate_sha=candidate_sha)
-    out_dir = repo_root / ".verification"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "claim-registry.json").write_text(
-        json.dumps(claims, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    (out_dir / "project-status.json").write_text(
-        json.dumps(status, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    status_md = repo_root / "docs" / "STATUS.md"
+def render_project_status_markdown(status: dict[str, Any]) -> str:
+    """Render a project-status payload into the committed Markdown surface."""
     lines = [
         "# OVK Status",
         "",
@@ -279,5 +265,63 @@ def write_project_status_and_claims(
     for blocker in status["open_blockers"][:20]:
         lines.append(f"- {blocker}")
     lines.append("")
-    status_md.write_text("\n".join(lines), encoding="utf-8")
+    return "\n".join(lines)
+
+
+def check_committed_status_truthfulness(repo_root: Path) -> list[str]:
+    """Reject stale or stronger-than-supported claims in ``docs/STATUS.md``.
+
+    A Git commit cannot contain its own final SHA without changing that SHA.
+    Consequently the committed status page is intentionally an unbound static
+    snapshot (candidate ``unknown``). Exact-candidate authorization is delegated
+    to release-ledger / external verification artifacts rather than this file.
+    """
+    path = repo_root / "docs" / "STATUS.md"
+    if not path.is_file():
+        return ["docs/STATUS.md is missing"]
+    actual = path.read_text(encoding="utf-8")
+
+    # Build the strongest status that the committed, unbound page is allowed to
+    # publish. Qualification artifacts in .verification are deliberately ignored
+    # by using an isolated projection with no qualification payload semantics:
+    # v1 cannot authorize promotion and current code therefore yields advisory.
+    contracts = load_all_support_contracts(repo_root=repo_root)
+    expected_lines = {
+        profile_id: (
+            f"- `{profile_id}`: executable_advisory "
+            f"(contract {contracts[profile_id].contract_version}, strict_ready=False, candidate_bound=False)"
+        )
+        for profile_id in sorted(KNOWN_SOURCE_PROFILES)
+    }
+
+    failures: list[str] = []
+    if "(candidate `unknown`)." not in actual:
+        failures.append("docs/STATUS.md must use candidate `unknown`; exact SHA belongs in release evidence")
+    for profile_id, expected in expected_lines.items():
+        matching = [line for line in actual.splitlines() if line.startswith(f"- `{profile_id}`:")]
+        if matching != [expected]:
+            failures.append(
+                f"docs/STATUS.md profile claim drift for {profile_id}: expected {expected!r}, got {matching!r}"
+            )
+    return failures
+
+
+def write_project_status_and_claims(
+    repo_root: Path,
+    *,
+    candidate_sha: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    claims = build_claim_registry(repo_root)
+    status = build_project_status(repo_root, candidate_sha=candidate_sha)
+    out_dir = repo_root / ".verification"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "claim-registry.json").write_text(
+        json.dumps(claims, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    (out_dir / "project-status.json").write_text(
+        json.dumps(status, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    (repo_root / "docs" / "STATUS.md").write_text(
+        render_project_status_markdown(status), encoding="utf-8"
+    )
     return claims, status
