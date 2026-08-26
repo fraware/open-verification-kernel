@@ -93,8 +93,14 @@ def test_write_release_ledger(tmp_path: Path) -> None:
     loaded = json.loads(path.read_text(encoding="utf-8"))
     ok, _, authorized = verify_release_ledger(loaded, repo_root=REPO)
     assert ok
+
+    real_path = REPO / ".verification" / "release-ledger.json"
+    real_before = real_path.read_bytes() if real_path.is_file() else None
+
     out = write_release_ledger(tmp_path, authorized)
     assert out == tmp_path / ".verification" / "release-ledger.json"
     on_disk = json.loads(out.read_text(encoding="utf-8"))
     assert on_disk["release_state"]["verified_source_sha"] == SHA
-    assert not (REPO / ".verification" / "release-ledger.json").is_file() or REPO != tmp_path
+
+    real_after = real_path.read_bytes() if real_path.is_file() else None
+    assert real_after == real_before, "tests must not mutate the checkout release ledger"
