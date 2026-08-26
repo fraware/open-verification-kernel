@@ -35,6 +35,16 @@ def test_holdout_eval_workflow_omits_verified_source_sha() -> None:
     assert "verified_source_sha" in text
 
 
+def test_holdout_eval_binds_exact_prediction_run_and_digest() -> None:
+    text = (REPO / ".github" / "workflows" / "holdout-eval.yml").read_text(encoding="utf-8")
+    assert "predictions_run_id" in text
+    assert "run-id: ${{ inputs.predictions_run_id }}" in text
+    assert "github-token: ${{ github.token }}" in text
+    assert "actions: read" in text
+    assert "candidate_source_sha mismatch: predictions=" in text
+    assert "prediction digest mismatch:" in text
+
+
 def test_holdout_predict_workflow_exists() -> None:
     path = REPO / ".github" / "workflows" / "holdout-predict.yml"
     assert path.is_file()
