@@ -18,7 +18,12 @@ on:
         default: ""
         type: string
       predictions_artifact:
-        description: Optional name of a workflow artifact containing predictions.json
+        description: Optional name of a workflow artifact containing predictions
+        required: false
+        default: ""
+        type: string
+      predictions_run_id:
+        description: Exact FormalPR-Holdout predict workflow run ID for predictions_artifact
         required: false
         default: ""
         type: string
@@ -29,6 +34,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -62,34 +68,52 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Require predictions file
+      - name: Require predictions file or exact source run
         if: steps.gate.outputs.configured == 'true'
         id: preds
+        env:
+          PREDICTIONS_ARTIFACT: ${{ inputs.predictions_artifact }}
+          PREDICTIONS_RUN_ID: ${{ inputs.predictions_run_id }}
         run: |
-          if [ -n "${{ inputs.predictions_artifact }}" ]; then
+          set -euo pipefail
+          if [ -n "$PREDICTIONS_ARTIFACT" ]; then
+            if [ -z "$PREDICTIONS_RUN_ID" ]; then
+              echo "predictions_run_id is required when predictions_artifact is set" >&2
+              exit 1
+            fi
+            python - <<'PY'
+          import os, re
+          value = os.environ["PREDICTIONS_RUN_ID"].strip()
+          if not re.fullmatch(r"[1-9][0-9]*", value):
+              raise SystemExit(f"predictions_run_id must be a positive integer, got {value!r}")
+          PY
             echo "mode=artifact" >> "$GITHUB_OUTPUT"
           elif [ -f .verification/holdout-predictions.json ]; then
             echo "mode=workspace" >> "$GITHUB_OUTPUT"
           else
             echo "No predictions provided."
-            echo "Provide predictions_artifact input or .verification/holdout-predictions.json."
+            echo "Provide predictions_artifact + predictions_run_id or .verification/holdout-predictions.json."
             echo "Refusing to invent labels or print expected outcomes."
             exit 1
           fi
 
-      - name: Download predictions artifact
+      - name: Download predictions from exact workflow run
         if: steps.gate.outputs.configured == 'true' && steps.preds.outputs.mode == 'artifact'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: ${{ inputs.predictions_artifact }}
           path: .verification/holdout-pred-in
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.predictions_run_id }}
 
-      - name: Normalize predictions path and verify candidate identity
+      - name: Normalize predictions and verify candidate plus digest binding
         if: steps.gate.outputs.configured == 'true'
         id: identity
         env:
           CANDIDATE: ${{ inputs.candidate_source_sha || github.sha }}
         run: |
+          set -euo pipefail
           if [ "${{ steps.preds.outputs.mode }}" = "artifact" ]; then
             test -f .verification/holdout-pred-in/predictions.json || test -f .verification/holdout-pred-in/holdout-predictions.json
             if [ -f .verification/holdout-pred-in/predictions.json ]; then
@@ -97,28 +121,48 @@ jobs:
             else
               cp .verification/holdout-pred-in/holdout-predictions.json .verification/holdout-predictions.json
             fi
-            if [ -f .verification/holdout-pred-in/holdout-prediction-manifest.json ]; then
-              cp .verification/holdout-pred-in/holdout-prediction-manifest.json .verification/holdout-prediction-manifest.json
-            fi
+            test -f .verification/holdout-pred-in/holdout-prediction-manifest.json
+            cp .verification/holdout-pred-in/holdout-prediction-manifest.json .verification/holdout-prediction-manifest.json
           fi
           test -f .verification/holdout-predictions.json
+          test -f .verification/holdout-prediction-manifest.json
           echo "candidate_source_sha=$CANDIDATE" >> "$GITHUB_OUTPUT"
           python - <<'PY'
-          import json, os
+          import hashlib, json, os, re
           from pathlib import Path
           from scripts.digest_holdout_predictions import assert_predictions_label_free
-          preds = json.loads(Path(".verification/holdout-predictions.json").read_text(encoding="utf-8"))
-          assert_predictions_label_free(preds)
-          text = json.dumps(preds)
-          assert "verified_source_sha" not in text
+
+          expected = os.environ["CANDIDATE"].strip().lower()
+          if not re.fullmatch(r"[0-9a-f]{40}", expected):
+              raise SystemExit(f"candidate_source_sha must be exact lowercase 40-hex, got {expected!r}")
+
+          pred_path = Path(".verification/holdout-predictions.json")
           manifest_path = Path(".verification/holdout-prediction-manifest.json")
-          if manifest_path.is_file():
-              manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-              claimed = str(manifest.get("candidate_source_sha") or "")
-              expected = os.environ["CANDIDATE"]
-              if claimed and claimed != expected:
-                  raise SystemExit(f"candidate_source_sha mismatch: manifest={claimed} expected={expected}")
-          print("predictions label-free; candidate identity checked")
+          preds = json.loads(pred_path.read_text(encoding="utf-8"))
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          assert_predictions_label_free(preds)
+
+          if "verified_source_sha" in json.dumps(preds) or "verified_source_sha" in json.dumps(manifest):
+              raise SystemExit("ordinary holdout prediction artifacts must not contain verified_source_sha")
+
+          pred_candidate = str(preds.get("candidate_source_sha") or "").lower()
+          manifest_candidate = str(manifest.get("candidate_source_sha") or "").lower()
+          if pred_candidate != expected:
+              raise SystemExit(
+                  f"candidate_source_sha mismatch: predictions={pred_candidate!r} expected={expected!r}"
+              )
+          if manifest_candidate != expected:
+              raise SystemExit(
+                  f"candidate_source_sha mismatch: manifest={manifest_candidate!r} expected={expected!r}"
+              )
+
+          actual_digest = hashlib.sha256(pred_path.read_bytes()).hexdigest()
+          manifest_digest = str(manifest.get("predictions_sha256") or "").lower()
+          if manifest_digest != actual_digest:
+              raise SystemExit(
+                  f"prediction digest mismatch: manifest={manifest_digest!r} actual={actual_digest!r}"
+              )
+          print(f"predictions label-free and byte-bound to candidate {expected}: {actual_digest}")
           PY
 
       - name: Download holdout asset (token only here)
@@ -194,3 +238,4 @@ jobs:
         with:
           name: formalpr-holdout-aggregates
           path: .verification/holdout-aggregate-metrics.json
+          if-no-files-found: error

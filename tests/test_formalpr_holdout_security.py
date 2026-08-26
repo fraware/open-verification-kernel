@@ -13,13 +13,20 @@ from scripts.run_formalpr_holdout import (
 )
 
 
+_CANDIDATE_SHA = "a" * 40
+_PREDICTIONS_SHA256 = "b" * 64
+_HOLDOUT_ASSET_SHA256 = "c" * 64
+
+
 def _aggregate() -> dict:
     return {
         "schema_version": "formalpr_holdout.aggregate_metrics.v1",
         "benchmark": "FormalPR-Holdout",
         "holdout_release_tag": "v0.1.0-synthetic",
-        "ovk_commit_sha": "abc1234",
-        "verified_source_sha": "abc1234",
+        "ovk_commit_sha": _CANDIDATE_SHA,
+        "candidate_source_sha": _CANDIDATE_SHA,
+        "predictions_sha256": _PREDICTIONS_SHA256,
+        "holdout_asset_sha256": _HOLDOUT_ASSET_SHA256,
         "generated_at_unix_ms": 1,
         "cases_scored": 1,
         "lanes": {
@@ -127,8 +134,11 @@ Path(args.output).write_text({json.dumps(json.dumps(payload))}, encoding='utf-8'
         release_root=release,
         predictions=predictions,
         holdout_tag="v0.1.0-synthetic",
-        ovk_sha="abc1234",
-        verified_sha="abc1234",
+        ovk_sha=_CANDIDATE_SHA,
+        candidate_source_sha=_CANDIDATE_SHA,
+        predictions_sha256=_PREDICTIONS_SHA256,
+        holdout_asset_sha256=_HOLDOUT_ASSET_SHA256,
+        verified_sha=None,
         output=output,
     )
     assert result["cases_scored"] == 1

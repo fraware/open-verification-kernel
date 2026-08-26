@@ -1,142 +1,146 @@
 # OVK Release Status
 
-Living adoption dashboard for Open Verification Kernel.
+Living release/adoption status for Open Verification Kernel.
 
-**Last updated:** 2026-08-25
+**Last reviewed:** 2026-08-26
 
-**Release judgment:** **`v1.3.0-rc.1` engineering candidate on branch `hardening/full-vision-2026-08-24`**. Package metadata is `1.3.0-rc.1`. Completion-program work (support contracts, compilers, release ledger, sandbox worker, workflows) is present in this working tree and is **not yet an attributable signed release**. The last signed immutable tag remains `v1.2.1` (`a27d5720f4350c00bca34f71d991c31f5a2f38c7`). Do not treat this branch, uncommitted diffs, or local dogfood as a re-validation of signed `v1.2.1`, and do not mint `verified_source_sha` until the release ledger gate closes.
+**Current judgment:** `1.3.0-rc.1` is an **engineering release candidate under final review in PR #23** (`hardening/final-release-closure-2026-08-25`). It is not yet an attributable `v1.3.0-rc.1` release. The last previously signed immutable release remains `v1.2.1`; evidence from that tag must not be re-attributed to the RC source tree.
 
-Authoritative audit: [DEEP_AUDIT_2026-07-23_R2.md](DEEP_AUDIT_2026-07-23_R2.md). Engineering program: [ENGINEERING_PROGRAM_2026-07-23_R2.md](ENGINEERING_PROGRAM_2026-07-23_R2.md). Publication gate: [ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md). TCB: [TRUSTED_COMPUTING_BASE.md](TRUSTED_COMPUTING_BASE.md). Machine status: [STATUS.md](STATUS.md) (generated from project-status).
+The authoritative publication procedure is [RELEASE.md](RELEASE.md). The evidence threshold is [ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md). The generated TCB is [TRUSTED_COMPUTING_BASE.md](TRUSTED_COMPUTING_BASE.md).
 
-## At a glance
+## Release authority
 
-| Signal | Current state |
+The repository deliberately separates three concepts:
+
+| Concept | Current meaning |
 |---|---|
-| **Package version** | Working tree / RC metadata: `1.3.0-rc.1` (intended tag `v1.3.0-rc.1`); signed immutable tag remains `v1.2.1` only for that tag's commit |
-| **FormalPR-Bench** | Internal regression suite with provenance + partitions (`benchmarks/formal_pr_bench/manifest.v1.json`); cite `benchmark_source_sha` / `benchmark_version` — **not** external calibration |
-| **Check types** | Five bounded production lanes: self-protection, authorization, infrastructure, CI secrets, deployment |
-| **Backend execution** | Typed `BackendControlPlane` + `route_obligation`; five policy-selectable enforced lanes via `adapter_runtime`; post-execution strict fallback remains disabled unless `routing.allow_fallback: true` |
-| **Capability registry** | Every advertised checker in `adapters/*/capability.json`; `stable ⊆` full seven-item conformance |
-| **Decision / evidence** | Normative `DecisionState` lattice; integrity envelope with controlling-finding reconstruction |
-| **Unit and workflow tests** | In-repo suites present; live GitHub Actions workflow IDs for this candidate SHA still pending |
-| **Package portability** | `scripts/verify_rc_install.py` covers Action SHA pins + metadata; `--wheel` builds/imports outside checkout |
-| **GitHub Action** | Composite Action SHA-pins third-party deps; consumers still live-pin `v1.2.1` until rc.1 is attributable |
-| **External validation** | Weekly matrix is **in-repo dogfood**, not independent consumer calibration; three advisory pilot reports under `docs/pilots/` |
-| **GitHub App** | Private alpha under `integrations/github-app/` (not Marketplace) |
-| **Sigstore** | Immutable-tag E2E closed for `v1.2.1` only — not attributable to typed-control-plane / RC commits |
-| **Release ledger** | `verified_source_sha` deferred until offline release-ledger verification (WP-17); never set from badge/holdout alone |
+| Development candidate | Source SHA being tested in PR/push CI |
+| `benchmark_source_sha` | Source SHA measured by FormalPR-Bench/badge artifacts |
+| `verified_source_sha` | Source SHA minted only by the complete live release-ledger authorizer |
 
-OVK is not complete formal verification of arbitrary code. It provides explainable, conservative checks for a bounded set of high-risk changes and emits explicit unknown and human-review outcomes. Bounded guarantees apply only inside declared support contracts and trusted materials; unsupported inputs force review. `externally_calibrated_strict` is **not** claimed.
+For `v1.3.0-rc.1`, **`verified_source_sha` is currently unset**. It must not be entered manually in this document or inferred from green PR CI. `scripts/verify_release_ledger_github.py` is the only release-authority path: it independently resolves exact GitHub Actions run IDs, verifies required holdout/consumer artifacts, binds the exact wheel/sdist bytes, and only after the complete evidence scope succeeds may it authorize the ledger.
 
-## Adoption-surface program (OVK-PR1–PR9)
+Offline structural ledger validation does not authorize a release.
 
-| PR | Scope | In-repo status |
-|---|---|---|
-| PR1 | Multi-OS repro baseline + normative capability/template registry | Complete |
-| PR2 | DecisionState lattice + truth tables | Complete |
-| PR3 | Evidence integrity envelope | Complete |
-| PR4 | Adapter conformance matrix; stable ⊆ conformant | Complete |
-| PR5 | FormalPR-Bench provenance / partitions / version manifest | Complete |
-| PR6 | Action scenario hardening + SHA-pinned third parties | Complete |
-| PR7 | GitHub App private alpha | Complete |
-| PR8 | Three advisory pilot reports | Complete |
-| PR9 | RC cut prep, TCB doc, attributable gates, install verification | **In-repo ready** (live tag/Sigstore pending) |
+## What is implemented in the RC tree
 
-Local DoD verifier: `python scripts/verify_rc_dod.py`. Install surface: `python scripts/verify_rc_install.py` (add `--wheel` for outside-checkout import).
+- five bounded verification lanes: self-protection, authorization, infrastructure exposure, CI-secrets exposure, and deployment approval state;
+- normative `DecisionState` aggregation and explicit unknown/review outcomes;
+- evidence-integrity and controlling-finding reconstruction;
+- source-profile support contracts and maturity labels that remain below externally calibrated strictness;
+- capability registry and adapter-conformance honesty gates;
+- FormalPR-Bench provenance/partition infrastructure for **internal regression**, not external accuracy calibration;
+- label-separated FormalPR-Holdout prediction/evaluation workflows;
+- exact candidate-bound consumer-pin evidence for two independent consumer repositories;
+- native required-matrix checks for OPA, Z3, CBMC, and Cedar-related integration surfaces according to their documented backend semantics;
+- multi-OS reproducibility harness for Linux/macOS/Windows × Python 3.10/3.12;
+- SHA-pinned third-party actions on OVK release surfaces;
+- authorization-first Publish workflow with exact distribution hashing, keyless Sigstore, private GitHub Release staging, PyPI Trusted Publishing, and independent PyPI read-back before public GitHub Release publication.
 
-## Source SHA terminology
+These implementation facts do not imply universal formal verification, external calibration, or production-stable enforcement for arbitrary repositories.
 
-| Field | Meaning | When to set |
-|---|---|---|
-| `benchmark_source_sha` | Commit whose FormalPR-Bench (or badge) artifacts were measured | Any bench/badge run |
-| `verified_source_sha` | Commit authorized by a **complete observed required-workflow set** via the release ledger | Only after Sprint 0 / release-ledger gates attach live workflow IDs |
+## Public maturity / claim boundaries
 
-Badge-only, holdout-only, dogfood-only, or `[skip ci]` commits must set `benchmark_source_sha` (when applicable) and must **not** be labeled `verified_source_sha`.
+| Surface | Claim boundary |
+|---|---|
+| FormalPR-Bench | Internal curated regression suite only; not an independent accuracy estimate |
+| Source profiles | Current generated profiles are `executable_advisory`; `externally_calibrated_strict` is not claimed |
+| OPA/Z3/CBMC adapters | Preview native paths; guarantees are bounded by exact compiler/input/tool assumptions documented in [BACKENDS.md](BACKENDS.md) |
+| Cedar/TLA+/Kani/Dafny/Verus/Lean/Alloy catalog paths | Experimental unless their capability registry says otherwise; several are deterministic contract/evidence paths rather than native proof execution |
+| Composite Action | Suitable for pinned advisory evaluation; strict required-check use remains repository-specific and calibration-dependent |
+| GitHub App | Private alpha, not Marketplace/public production surface |
+| Pilot evidence | In-repository dogfood and published advisory pilot reports are not independent human calibration |
 
-## Local Sprint 0 / RC baseline
+Unsupported or untrusted inputs must not silently become `allow`. The intended safety posture is conservative: explicit unknown/review outcomes are preferable to unsupported success claims.
 
-Local evidence only. Distinguishes from GitHub Actions workflow IDs (still pending).
+## Pre-tag development gate
 
-Multi-OS reproducible baselines (OVK-01): see [REPRO_BASELINE.md](REPRO_BASELINE.md) and the [`repro-baseline`](../.github/workflows/repro-baseline.yml) workflow. Records are uploaded by CI (see [baselines/README.md](baselines/README.md); the directory may be empty until maintainers download or commit matrix artifacts).
+The exact final candidate SHA must pass all of the following after the last code/document change:
 
-| Gate | Command | Notes |
-|---|---|---|
-| Release metadata | `python scripts/check_release_metadata.py` | Must equal `1.3.0-rc.1` |
-| RC DoD (in-repo) | `python scripts/verify_rc_dod.py` | Program DoD minus live publication |
-| RC install (static) | `python scripts/verify_rc_install.py` | Action SHA pins + package metadata |
-| RC install (wheel) | `python scripts/verify_rc_install.py --wheel` | Optional; needs `build` |
-| TCB freshness | `python scripts/render_tcb_doc.py --check` | Regenerates via `--write` |
-| Project status | `python scripts/build_project_status.py` | Regenerates [STATUS.md](STATUS.md) |
-| Release preflight | `ovk release-preflight` | Includes RC DoD + install + TCB |
+- [ ] CI, including lint and the complete unit/integration suite;
+- [ ] release preflight and generated-document freshness gates;
+- [ ] package build and outside-checkout wheel smoke;
+- [ ] composite Action advisory/strict dogfood;
+- [ ] template conformance;
+- [ ] all six Repro baseline OS/Python cells;
+- [ ] Native Backends Tier 1;
+- [ ] Native Backends Tier 1b.
 
-### Still pending (live GitHub Actions / secrets) — maintainer publication
+A historical green SHA is not enough after the tree changes. The final exact-head matrix is the pre-tag engineering gate.
 
-| Gate | Status | Evidence |
-|---|---|---|
-| General CI / unit+gates on non-`[skip ci]` SHA | Pending live run | Record run URL → release ledger → `verified_source_sha` |
-| Native Tier 1 | Pending | — |
-| Action dogfood | Pending | Local dogfood ≠ external consumer validation |
-| Expanded FormalPR-Bench on release SHA | Pending | Use `benchmark_source_sha` |
-| Adversarial release-bundle in Actions | Pending | Local `verify_release_bundle.py` entrypoint present |
-| Label-separated holdout live eval | Pending | Needs `HOLDOUT_DOWNLOAD_TOKEN` + `HOLDOUT_ASSET_SHA256` |
-| Consumer remotes on `v1.3.0-rc.1` | Pending tag + push | Template targets rc.1; live remotes still on `v1.2.1` |
-| Signed tag + Publish/Sigstore for rc.1 | Pending | Do not re-attribute `v1.2.1` cosign evidence |
+## Tag-bound release authorization gate
 
-## Adoption readiness
+After the engineering candidate is frozen and a signed annotated tag is created, release authorization requires **new** `workflow_dispatch` runs on that exact tag for:
 
-| Mode | Current recommendation | Conditions |
-|---|---|---|
-| **Local/demo** | Appropriate after current local/CI green | Use shipped examples and inspect assumptions and limits |
-| **Advisory Action** | Appropriate for pilots on pinned tags | Prefer signed `v1.2.1` until `v1.3.0-rc.1` is attributable; collect FPs/unknowns |
-| **Strict required check** | Repository-specific only | Calibrate on real diffs; trusted abstraction sources; protected policy metadata; support-contract materials |
-| **Production-stable general enforcement** | Not yet | Needs attributable rc.1 (or later), independent consumer pins, holdout aggregates, and Sprint 0 live gates |
+1. `CI`;
+2. `Repro baseline`;
+3. `Native Backends Tier 1`;
+4. `Native Backends Tier 1b`;
+5. `FormalPR-Holdout predict`;
+6. `FormalPR-Holdout eval`;
+7. `Consumer Pin Verification`.
 
-Suggested rollout: local validation → advisory artifacts → advisory check run/comment → calibrated strict lane → protected required check.
+PR runs are not reused as final release evidence.
 
-## P0 trust defects (R2 PRs 1–9) — working-tree status
+The holdout evaluator must consume the prediction artifact from an explicit prior prediction run ID and verify candidate/digest identity before label access. The consumer verifier must retain evidence for both required independent consumer repositories pinning the exact 40-hex candidate.
 
-Code for R2 P0 PRs 1–9 is present in this working tree. Historical defect inventory: [DEEP_AUDIT_2026-07-23_R2.md](DEEP_AUDIT_2026-07-23_R2.md). Program: [ENGINEERING_PROGRAM_2026-07-23_R2.md](ENGINEERING_PROGRAM_2026-07-23_R2.md).
+## Publication gate
 
-**Still open for attributable release:** live non-`[skip ci]` workflow IDs, consumer repo pins on immutable rc.1, label-separated holdout aggregates, release ledger authorization of `verified_source_sha`, and signed publication gates — see [ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md).
+The production sequence is intentionally authorization-first:
 
-## Maintainer release gates
+```text
+signed annotated tag
+  -> seven tag-bound release-evidence runs
+  -> live release-ledger authorization
+  -> exact wheel/sdist byte recheck
+  -> Sigstore sign + verify + tamper test
+  -> private GitHub Release draft
+  -> PyPI Trusted Publishing
+  -> exact PyPI filename/SHA-256 read-back
+  -> make the existing GitHub Release public
+```
 
-Before tagging or publishing **`v1.3.0-rc.1`**:
+A public GitHub Release is never used as the trigger for authorization. Maintainers must not manually create the release beforehand; Publish owns the draft-to-public transition.
 
-- [x] package version / `__version__` / release metadata align on `1.3.0-rc.1`
-- [x] TCB documented ([TRUSTED_COMPUTING_BASE.md](TRUSTED_COMPUTING_BASE.md))
-- [x] in-repo RC DoD (`scripts/verify_rc_dod.py`) and Action/pip install surface (`scripts/verify_rc_install.py`)
-- [ ] run all CI and native Tier 1 jobs on a non-`[skip ci]` source commit;
-- [ ] confirm wheel smoke from a directory outside the checkout on that SHA;
-- [ ] confirm automatic-diff composite Action dogfood;
-- [ ] confirm package version matches the release tag (`v1.3.0-rc.1`);
-- [ ] run full expanded FormalPR-Bench and release preflight;
-- [ ] validate a complete release bundle, including evidence-quality semantics;
-- [ ] exercise HMAC signing and identity-bound Sigstore signing according to release policy;
-- [ ] run the immutable Action or release wheel in both independent consumer repositories at the rc.1 pin;
-- [ ] authorize `verified_source_sha` via the release ledger and record workflow links;
-- [ ] keep the package classifier at Beta until independent pilots and P0 closure meet the production gate.
+Safe recovery after a partial PyPI/GitHub failure is allowed only when existing PyPI filenames and SHA-256 values exactly equal the authorized local distributions. Blind `skip-existing` behavior is forbidden.
 
-Promotion to **`v1.3.0`** additionally requires P0 closure + consumer + holdout evidence per [ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md). Do not re-attribute `v1.2.1` Sigstore evidence to typed-control-plane commits.
+## Adoption recommendation
 
-## Related documents
+| Mode | Recommendation |
+|---|---|
+| Local/demo | Appropriate for inspecting supported lanes, assumptions, and artifacts |
+| Advisory Action | Appropriate for pilots when pinned to an immutable released tag/commit and outputs are adjudicated |
+| Strict required check | Repository-specific only after trusted inputs and empirical calibration for the intended lane |
+| General production-stable enforcement | **Not claimed** |
+
+Until an attributable `v1.3.0-rc.1` release exists, do not present that tag as a live install pin. Historical `v1.2.1` remains a separate immutable release with its own source and signing evidence.
+
+## Remaining external/maintainer evidence for the RC
+
+These cannot be truthfully marked complete merely from repository code:
+
+- [ ] freeze the exact final candidate after its complete development matrix is green;
+- [ ] create and push the signed annotated `v1.3.0-rc.1` tag;
+- [ ] execute all seven tag-bound release-evidence workflows;
+- [ ] retain governed holdout and consumer artifacts for those exact run IDs;
+- [ ] obtain a fully authorized release ledger and its `verified_source_sha`;
+- [ ] complete tag-bound Sigstore signing/verification;
+- [ ] complete PyPI Trusted Publishing and exact read-back;
+- [ ] publish the staged GitHub Release only after the PyPI equality gate succeeds.
+
+Promotion beyond the RC requires the additional independent-validation conditions described in [ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md); automated fixtures and internal benchmarks must remain distinct from independent human calibration.
+
+## Key references
 
 | Document | Purpose |
 |---|---|
-| [TRUSTED_COMPUTING_BASE.md](TRUSTED_COMPUTING_BASE.md) | Reviewer TCB inventory (registry + Action/App) |
-| [ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md) | Sprint 10 / RC publication gate |
-| [DEEP_AUDIT_2026-07-23_R2.md](DEEP_AUDIT_2026-07-23_R2.md) | Authoritative R2 deep audit |
-| [ENGINEERING_PROGRAM_2026-07-23_R2.md](ENGINEERING_PROGRAM_2026-07-23_R2.md) | Sprint/PR execution program |
-| [SOURCE_PROFILE_HARDENING.md](SOURCE_PROFILE_HARDENING.md) | Source-profile status |
-| [HOLDOUT_LABEL_SEPARATION.md](HOLDOUT_LABEL_SEPARATION.md) | Sprint 8 prediction/eval split |
-| [CONSUMER_VALIDATION_CHECKLIST.md](CONSUMER_VALIDATION_CHECKLIST.md) | Sprint 9 consumer pins |
-| [VISION_AUDIT_2026-07-22.md](VISION_AUDIT_2026-07-22.md) | Historical pre-control-plane audit |
-| [STATUS.md](STATUS.md) | Generated maturity / profile inventory |
-| [BACKENDS.md](BACKENDS.md) | Exact backend execution maturity and guarantee classes |
-| [REPRO_BASELINE.md](REPRO_BASELINE.md) | Multi-OS reproducible baseline harness (OVK-01) |
-| [INTEGRATION.md](INTEGRATION.md) | Installation and GitHub Action setup |
-| [RELEASE.md](RELEASE.md) | Maintainer release procedure |
-| [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md) | Independent advisory pilot process |
-| [pilots/README.md](pilots/README.md) | Published OVK-PR8 advisory pilot reports |
-| [BENCHMARK.md](BENCHMARK.md) | Internal regression benchmark format and execution |
-| [internal/README.md](internal/README.md) | Internal engineering handoffs (not public claims) |
+| [RELEASE.md](RELEASE.md) | Exact maintainer release procedure and recovery semantics |
+| [ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md) | Release evidence/authority checklist |
+| [TRUSTED_COMPUTING_BASE.md](TRUSTED_COMPUTING_BASE.md) | Generated TCB and pinned release surfaces |
+| [STATUS.md](STATUS.md) | Generated source-profile maturity status |
+| [BACKENDS.md](BACKENDS.md) | Exact backend maturity and guarantee classes |
+| [BENCHMARK.md](BENCHMARK.md) | FormalPR-Bench scope and provenance limits |
+| [FORMALPR_HOLDOUT_GOVERNANCE.md](FORMALPR_HOLDOUT_GOVERNANCE.md) | Holdout governance and leakage boundary |
+| [HOLDOUT_LABEL_SEPARATION.md](HOLDOUT_LABEL_SEPARATION.md) | Prediction/evaluation separation |
+| [CONSUMER_VALIDATION_CHECKLIST.md](CONSUMER_VALIDATION_CHECKLIST.md) | Independent consumer evidence contract |
+| [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md) | Independent advisory pilot methodology |

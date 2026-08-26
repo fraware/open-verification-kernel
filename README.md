@@ -15,9 +15,9 @@
 
 ---
 
-Agents now open real pull requests: they edit CI workflows, change auth rules, touch infrastructure, and ship deployment logic. A comment saying *"looks good to me"* is not enough. OVK is the open layer that turns **"what must still be true after this change?"** into checks your pipeline can run, with results reviewers and bots can trust.
+Agents now open real pull requests: they edit CI workflows, change auth rules, touch infrastructure, and ship deployment logic. A comment saying *"looks good to me"* is not enough. OVK is the open layer that turns **"what must still be true after this change?"** into checks your pipeline can run, with results reviewers and bots can inspect.
 
-OVK does **not** replace the tools you already use (Z3, OPA, Cedar, TLA+, Dafny, Lean, and others). It connects them to everyday PR workflows so every result says clearly: what was checked, what passed, what failed, and what still needs a human.
+OVK does **not** replace the tools you already use (Z3, OPA, Cedar, TLA+, Dafny, Lean, and others). It provides a common evidence/routing layer around supported native and deterministic checker paths so each result can state what was checked, what passed, what failed, and what still needs a human. Backend maturity and native-execution status are explicit below and in [docs/BACKENDS.md](docs/BACKENDS.md).
 
 ```mermaid
 flowchart LR
@@ -69,9 +69,9 @@ Details and fallback rules: [docs/BACKENDS.md](docs/BACKENDS.md).
 
 ---
 
-## What OVK guards on every PR
+## Five bounded risk lanes
 
-These are the five high-risk change types OVK ships today. Each has examples, tests, and a path from **blocked** to **fixed**.
+OVK ships checks for five high-risk change types. Which lanes run depends on the changed files, supported source profiles, configured policy, and available trusted inputs; unsupported or incomplete cases should resolve to review/unknown rather than an unjustified allow.
 
 | Risk | Plain-language rule |
 |---|---|
@@ -81,7 +81,7 @@ These are the five high-risk change types OVK ships today. Each has examples, te
 | **CI secrets** | Workflow changes cannot leak secrets into untrusted contexts (e.g. fork PRs) |
 | **Deployments** | Rollouts cannot skip required approval or rollback safety steps |
 
-Run all of them from a single diff:
+Analyze a diff through the supported routing/checking surface:
 
 ```bash
 ovk check --changed-files path/to/your.diff
@@ -123,13 +123,13 @@ Try a failing then passing repair loop:
 python examples/repair_loops/ci_secrets/demo_repair_loop.py
 ```
 
-More install paths (PyPI, optional solvers, signing): [docs/INTEGRATION.md](docs/INTEGRATION.md)
+Installation, package, optional-solver, and signing paths: [docs/INTEGRATION.md](docs/INTEGRATION.md)
 
 ---
 
 ## GitHub Actions
 
-Add OVK to a pull request workflow. Start in **advisory** mode (reports findings without failing the job); move to **strict** when you trust the signal.
+Add OVK to a pull request workflow. Start in **advisory** mode (reports findings without failing the job); move to **strict** only for lanes/profiles whose signal and trusted inputs you have calibrated for that repository.
 
 ```yaml
 name: Verify PR
@@ -149,13 +149,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: fraware/open-verification-kernel@v1.3.0-rc.1
         with:
-          mode: advisory          # switch to strict when ready
+          mode: advisory          # switch to strict only after calibration
           use-check: "true"       # analyze the PR diff automatically
           emit-check: "true"      # optional; requires checks: write
           post-comment: "true"    # requires pull-requests: write
 ```
 
-Pin target is `v1.3.0-rc.1` after the attributable tag exists. Until then, signed `@v1.2.1` remains the live production pin; see [docs/CURRENT_RELEASE_STATUS.md](docs/CURRENT_RELEASE_STATUS.md).
+Pin target is `v1.3.0-rc.1` only after the attributable tag/release exists. Until then, do not treat that tag as a live install surface; see [docs/CURRENT_RELEASE_STATUS.md](docs/CURRENT_RELEASE_STATUS.md).
 
 Copy a full consumer example: [`examples/github_workflows/external_consumer.yml`](examples/github_workflows/external_consumer.yml)
 
@@ -166,7 +166,7 @@ Copy a full consumer example: [`examples/github_workflows/external_consumer.yml`
 | Surface | Use when |
 |---|---|
 | **CLI** (`ovk`) | Local debugging, CI runners, scripts |
-| **GitHub Action** | Every PR in your org |
+| **GitHub Action** | PR verification in repositories with an explicit rollout policy |
 | **Agent server** (`ovk-mcp`) | Let coding agents run checks from their tool loop (`pip install '.[mcp]'`) |
 | **Templates** ([`templates/`](templates/)) | Reusable rules for common risks (100 included) |
 | **Benchmark** (`ovk bench`) | Measure regression on agent-style PR diffs (not external calibration) |
@@ -217,7 +217,7 @@ Questions, ideas, or a first PR — you are welcome. See [docs/ARCHITECTURE.md](
 | Run or extend the regression benchmark | [BENCHMARK.md](docs/BENCHMARK.md) |
 | Roll out on an external OSS repo | [EXTERNAL_PILOT_PLAYBOOK.md](docs/EXTERNAL_PILOT_PLAYBOOK.md) |
 | See generated maturity status | [STATUS.md](docs/STATUS.md) |
-| Known limitations | [RELEASE.md](docs/RELEASE.md#known-limitations) |
+| Known limitations | [RELEASE.md](docs/RELEASE.md#known-limitations-and-claim-discipline) |
 | Upgrade from an older version | [MIGRATION.md](docs/MIGRATION.md) |
 
 Full index: [docs/README.md](docs/README.md)

@@ -67,6 +67,14 @@ def test_python_ovk_worker_runs_with_isolation_controls(tmp_path: Path) -> None:
     assert "filesystem_writes_denied" in result.enforced_controls
 
 
+def test_macos_does_not_claim_linux_rlimit_as_memory_enforcement(monkeypatch) -> None:
+    """Darwin must not install the Linux-only RLIMIT_AS pre-exec hook."""
+    import ovk.core.execution_budget as execution_budget
+
+    monkeypatch.setattr(execution_budget.sys, "platform", "darwin")
+    assert execution_budget._memory_preexec(256) is None
+
+
 def test_authoritative_control_plane_passes_budget_bound_worker() -> None:
     data = {"routes": [{"path": "/health", "admin_only": False}]}
     obligation = compile_authorization_obligation(data, repo="r", head_sha="h")

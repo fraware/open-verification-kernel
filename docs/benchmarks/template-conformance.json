@@ -28,13 +28,12 @@
   },
   "counts_by_status_v2": {
     "catalog_only": 95,
-    "executable_advisory": 1,
-    "source_profile_strict_eligible": 4
+    "executable_advisory": 5
   },
   "counts_by_status_v3": {
     "catalog_only": 95,
-    "executable_advisory": 1,
-    "source_profile_strict_eligible": 4
+    "executable_advisory": 2,
+    "source_profile_candidate": 3
   },
   "maturity_contract": {
     "external_calibration_inferred_from_template_metadata": false,
@@ -124,7 +123,7 @@
       "materials_trusted": false,
       "maturity_effect": "candidate_only",
       "notes": [
-        "requires explicit trusted_profile material for strictness"
+        "authenticated deployment acquisition required for strictness"
       ],
       "profile_id": "deployment.trusted_profile_v1"
     }
@@ -877,8 +876,8 @@
         "authorization-deterministic",
         "z3-native"
       ],
-      "conformance_status_v2": "source_profile_strict_eligible",
-      "conformance_status_v3": "source_profile_strict_eligible",
+      "conformance_status_v2": "executable_advisory",
+      "conformance_status_v3": "source_profile_candidate",
       "domain": "authorization",
       "executable_links": {
         "backend_registry": true,
@@ -895,7 +894,7 @@
       "notes": [
         "all required executable links present",
         "source_profile_evidence:candidate_complete",
-        "v3_maturity:source_profile_strict_eligible"
+        "v3_maturity:source_profile_candidate"
       ],
       "path": "templates/authorization/no_admin_route_bypass.intent.json",
       "production_status": "strict_eligible",
@@ -916,29 +915,43 @@
       },
       "source_profile_id": "authorization.fastapi.ast_v1",
       "source_profile_qualification": {
-        "action_cases": 1,
+        "action_cases": 0,
         "candidate_ready": true,
         "compiler_binding_present": true,
-        "end_to_end_bundle_cases": 1,
+        "end_to_end_bundle_cases": 0,
         "enforcement_test_present": true,
-        "evidence_invariant_cases": 1,
+        "evidence_invariant_cases": 0,
         "executable_path_complete": true,
-        "installed_package_cases": 1,
-        "malformed_cases": 1,
+        "execution_attested": false,
+        "installed_package_cases": 0,
+        "malformed_cases": 0,
         "materials_trusted": true,
         "measured_coverage_complete": true,
         "min_negative_cases": 3,
         "min_positive_cases": 3,
-        "negative_cases": 3,
-        "positive_cases": 3,
+        "negative_cases": 0,
+        "positive_cases": 0,
         "profile_id": "authorization.fastapi.ast_v1",
-        "source_range_cases": 1,
-        "strict_ready": true,
-        "support_contract_version": "1.0.0",
-        "timeout_cases": 1,
-        "unknown_cases": 1,
-        "unmet_strict_obligations": [],
-        "unsupported_cases": 1
+        "source_range_cases": 0,
+        "strict_ready": false,
+        "support_contract_version": "1.1.0",
+        "timeout_cases": 0,
+        "unknown_cases": 0,
+        "unmet_strict_obligations": [
+          "candidate_bound_execution_attestation",
+          "positive_corpus",
+          "negative_corpus",
+          "unsupported_case",
+          "malformed_case",
+          "unknown_case",
+          "timeout_case",
+          "source_range_case",
+          "evidence_invariant_case",
+          "end_to_end_bundle_case",
+          "installed_package_case",
+          "action_case"
+        ],
+        "unsupported_cases": 0
       },
       "version": "0.1.0"
     },
@@ -1837,8 +1850,8 @@
       "claimed_backends": [
         "ci-secrets-deterministic"
       ],
-      "conformance_status_v2": "source_profile_strict_eligible",
-      "conformance_status_v3": "source_profile_strict_eligible",
+      "conformance_status_v2": "executable_advisory",
+      "conformance_status_v3": "source_profile_candidate",
       "domain": "ci_cd",
       "executable_links": {
         "backend_registry": true,
@@ -1855,7 +1868,7 @@
       "notes": [
         "all required executable links present",
         "source_profile_evidence:candidate_complete",
-        "v3_maturity:source_profile_strict_eligible"
+        "v3_maturity:source_profile_candidate"
       ],
       "path": "templates/ci_cd/no_secrets_in_untrusted_context.intent.json",
       "production_status": "strict_eligible",
@@ -1878,29 +1891,43 @@
       },
       "source_profile_id": "ci_secrets.actions.permissions_flow_v1",
       "source_profile_qualification": {
-        "action_cases": 1,
+        "action_cases": 0,
         "candidate_ready": true,
         "compiler_binding_present": true,
-        "end_to_end_bundle_cases": 1,
+        "end_to_end_bundle_cases": 0,
         "enforcement_test_present": true,
-        "evidence_invariant_cases": 1,
+        "evidence_invariant_cases": 0,
         "executable_path_complete": true,
-        "installed_package_cases": 1,
-        "malformed_cases": 1,
+        "execution_attested": false,
+        "installed_package_cases": 0,
+        "malformed_cases": 0,
         "materials_trusted": true,
         "measured_coverage_complete": true,
         "min_negative_cases": 3,
         "min_positive_cases": 3,
-        "negative_cases": 3,
-        "positive_cases": 3,
+        "negative_cases": 0,
+        "positive_cases": 0,
         "profile_id": "ci_secrets.actions.permissions_flow_v1",
-        "source_range_cases": 1,
-        "strict_ready": true,
-        "support_contract_version": "1.0.0",
-        "timeout_cases": 1,
-        "unknown_cases": 1,
-        "unmet_strict_obligations": [],
-        "unsupported_cases": 1
+        "source_range_cases": 0,
+        "strict_ready": false,
+        "support_contract_version": "1.1.0",
+        "timeout_cases": 0,
+        "unknown_cases": 0,
+        "unmet_strict_obligations": [
+          "candidate_bound_execution_attestation",
+          "positive_corpus",
+          "negative_corpus",
+          "unsupported_case",
+          "malformed_case",
+          "unknown_case",
+          "timeout_case",
+          "source_range_case",
+          "evidence_invariant_case",
+          "end_to_end_bundle_case",
+          "installed_package_case",
+          "action_case"
+        ],
+        "unsupported_cases": 0
       },
       "version": "0.1.0"
     },
@@ -2917,8 +2944,8 @@
       "claimed_backends": [
         "deployment-deterministic"
       ],
-      "conformance_status_v2": "source_profile_strict_eligible",
-      "conformance_status_v3": "source_profile_strict_eligible",
+      "conformance_status_v2": "executable_advisory",
+      "conformance_status_v3": "executable_advisory",
       "domain": "deployment",
       "executable_links": {
         "backend_registry": true,
@@ -2935,7 +2962,7 @@
       "notes": [
         "all required executable links present",
         "source_profile_evidence:incomplete",
-        "v3_maturity:source_profile_strict_eligible"
+        "v3_maturity:executable_advisory"
       ],
       "path": "templates/deployment/no_skipped_approval_state.intent.json",
       "production_status": "strict_eligible",
@@ -2949,35 +2976,50 @@
         "materials_trusted": false,
         "maturity_effect": "candidate_only",
         "notes": [
-          "requires explicit trusted_profile material for strictness"
+          "authenticated deployment acquisition required for strictness"
         ],
         "profile_id": "deployment.trusted_profile_v1"
       },
       "source_profile_id": "deployment.trusted_profile_v1",
       "source_profile_qualification": {
-        "action_cases": 1,
-        "candidate_ready": true,
+        "action_cases": 0,
+        "candidate_ready": false,
         "compiler_binding_present": true,
-        "end_to_end_bundle_cases": 1,
+        "end_to_end_bundle_cases": 0,
         "enforcement_test_present": true,
-        "evidence_invariant_cases": 1,
+        "evidence_invariant_cases": 0,
         "executable_path_complete": true,
-        "installed_package_cases": 1,
-        "malformed_cases": 1,
-        "materials_trusted": true,
-        "measured_coverage_complete": true,
+        "execution_attested": false,
+        "installed_package_cases": 0,
+        "malformed_cases": 0,
+        "materials_trusted": false,
+        "measured_coverage_complete": false,
         "min_negative_cases": 3,
         "min_positive_cases": 3,
-        "negative_cases": 3,
-        "positive_cases": 3,
+        "negative_cases": 0,
+        "positive_cases": 0,
         "profile_id": "deployment.trusted_profile_v1",
-        "source_range_cases": 1,
-        "strict_ready": true,
-        "support_contract_version": "1.0.0",
-        "timeout_cases": 1,
-        "unknown_cases": 1,
-        "unmet_strict_obligations": [],
-        "unsupported_cases": 1
+        "source_range_cases": 0,
+        "strict_ready": false,
+        "support_contract_version": "1.1.0",
+        "timeout_cases": 0,
+        "unknown_cases": 0,
+        "unmet_strict_obligations": [
+          "candidate_requirements",
+          "candidate_bound_execution_attestation",
+          "positive_corpus",
+          "negative_corpus",
+          "unsupported_case",
+          "malformed_case",
+          "unknown_case",
+          "timeout_case",
+          "source_range_case",
+          "evidence_invariant_case",
+          "end_to_end_bundle_case",
+          "installed_package_case",
+          "action_case"
+        ],
+        "unsupported_cases": 0
       },
       "version": "0.1.0"
     },
@@ -3841,8 +3883,8 @@
       "claimed_backends": [
         "infrastructure-deterministic"
       ],
-      "conformance_status_v2": "source_profile_strict_eligible",
-      "conformance_status_v3": "source_profile_strict_eligible",
+      "conformance_status_v2": "executable_advisory",
+      "conformance_status_v3": "source_profile_candidate",
       "domain": "infrastructure",
       "executable_links": {
         "backend_registry": true,
@@ -3859,7 +3901,7 @@
       "notes": [
         "all required executable links present",
         "source_profile_evidence:candidate_complete",
-        "v3_maturity:source_profile_strict_eligible"
+        "v3_maturity:source_profile_candidate"
       ],
       "path": "templates/infrastructure/no_public_sensitive_resource.intent.json",
       "production_status": "strict_eligible",
@@ -3880,29 +3922,43 @@
       },
       "source_profile_id": "infrastructure.terraform.plan_recursive_v1",
       "source_profile_qualification": {
-        "action_cases": 1,
+        "action_cases": 0,
         "candidate_ready": true,
         "compiler_binding_present": true,
-        "end_to_end_bundle_cases": 1,
+        "end_to_end_bundle_cases": 0,
         "enforcement_test_present": true,
-        "evidence_invariant_cases": 1,
+        "evidence_invariant_cases": 0,
         "executable_path_complete": true,
-        "installed_package_cases": 1,
-        "malformed_cases": 1,
+        "execution_attested": false,
+        "installed_package_cases": 0,
+        "malformed_cases": 0,
         "materials_trusted": true,
         "measured_coverage_complete": true,
         "min_negative_cases": 3,
         "min_positive_cases": 3,
-        "negative_cases": 3,
-        "positive_cases": 3,
+        "negative_cases": 0,
+        "positive_cases": 0,
         "profile_id": "infrastructure.terraform.plan_recursive_v1",
-        "source_range_cases": 1,
-        "strict_ready": true,
-        "support_contract_version": "1.0.0",
-        "timeout_cases": 1,
-        "unknown_cases": 1,
-        "unmet_strict_obligations": [],
-        "unsupported_cases": 1
+        "source_range_cases": 0,
+        "strict_ready": false,
+        "support_contract_version": "1.1.0",
+        "timeout_cases": 0,
+        "unknown_cases": 0,
+        "unmet_strict_obligations": [
+          "candidate_bound_execution_attestation",
+          "positive_corpus",
+          "negative_corpus",
+          "unsupported_case",
+          "malformed_case",
+          "unknown_case",
+          "timeout_case",
+          "source_range_case",
+          "evidence_invariant_case",
+          "end_to_end_bundle_case",
+          "installed_package_case",
+          "action_case"
+        ],
+        "unsupported_cases": 0
       },
       "version": "0.1.0"
     }

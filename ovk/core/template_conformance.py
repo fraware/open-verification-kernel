@@ -1,11 +1,9 @@
-"""Template conformance matrix: honest production readiness for intent templates.
+"""Legacy template conformance catalog and conservative v2 projection.
 
-A template is ``catalog_only`` unless every required executable link exists.
-Public executable claims that lack a compiler/adapter/example/test path are
-downgraded honestly rather than advertised as strict-eligible.
-
-PR10 / Sprint 7 semantic statuses (``conformance_status_v2``) derive from
-executed source-profile evidence, not mere file presence.
+The catalog/link layer remains useful for compatibility, but local source-profile
+regression evidence is candidate evidence only. This module therefore never
+promotes a template to a strict v2 maturity state. Normative maturity is owned
+by :mod:`ovk.core.template_conformance_v3` and the machine qualification contract.
 """
 
 from __future__ import annotations
@@ -17,11 +15,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from ovk.core.json_io import read_json_file
-from ovk.core.source_profile_evidence import (
-    ProfileSemanticEvidence,
-    collect_source_profile_evidence,
-)
-from ovk.core.source_profiles import source_profile_strict_eligible
+from ovk.core.source_profile_evidence import ProfileSemanticEvidence, collect_source_profile_evidence
 
 ProductionStatus = Literal[
     "catalog_only",
@@ -30,7 +24,6 @@ ProductionStatus = Literal[
     "strict_eligible",
     "deprecated",
 ]
-
 ProductionStatusV2 = Literal[
     "catalog_only",
     "executable_advisory",
@@ -54,8 +47,6 @@ REQUIRED_ROW_FIELDS = (
     "lane",
     "notes",
 )
-
-# Links that must all exist for a template to leave catalog_only.
 REQUIRED_EXECUTABLE_LINKS = (
     "intent_file",
     "lane_evaluator",
@@ -66,7 +57,6 @@ REQUIRED_EXECUTABLE_LINKS = (
     "enforcement_test",
 )
 
-# Intents with real enforced control-plane paths today.
 EXECUTABLE_CATALOG: dict[str, dict[str, Any]] = {
     "no-admin-route-bypass": {
         "lane": "authorization",
@@ -84,7 +74,6 @@ EXECUTABLE_CATALOG: dict[str, dict[str, Any]] = {
     },
     "agent-cannot-disable-own-ci-gate": {
         "lane": "self_protection",
-        # No source-profile prover yet; stays executable_advisory under v2.
         "source_profile_id": None,
         "claimed_backends": ["opa-native", "self-protection-deterministic"],
         "links": {
@@ -141,22 +130,7 @@ EXECUTABLE_CATALOG: dict[str, dict[str, Any]] = {
     },
 }
 
-# Backend tokens that imply a public native/executable claim when present in
-# intent_id or title. Without a matching executable catalog entry, status is
-# forced down from any advertised executable readiness.
-NATIVE_CLAIM_TOKENS = (
-    "cbmc",
-    "kani",
-    "dafny",
-    "verus",
-    "lean",
-    "alloy",
-    "tla",
-    "cedar",
-    "z3",
-    "opa",
-)
-
+NATIVE_CLAIM_TOKENS = ("cbmc", "kani", "dafny", "verus", "lean", "alloy", "tla", "cedar", "z3", "opa")
 STATUS_RANK = {
     "deprecated": 0,
     "catalog_only": 1,
@@ -164,7 +138,6 @@ STATUS_RANK = {
     "advisory": 3,
     "strict_eligible": 4,
 }
-
 STATUS_RANK_V2 = {
     "deprecated": 0,
     "catalog_only": 1,
@@ -194,38 +167,15 @@ class TemplateConformanceRow:
     externally_calibrated: bool = False
 
     def semantic_status_v2(self) -> ProductionStatusV2:
-        """Derive PR10 semantic status from executed evidence, not file presence alone."""
+        """Conservatively project legacy rows without minting strict maturity."""
         if self.production_status == "deprecated":
             return "deprecated"
-        if self.externally_calibrated and self.profile_evidence is not None:
-            evidence = self.profile_evidence
-            if source_profile_strict_eligible(
-                profile_id=evidence.profile_id,
-                materials_trusted=evidence.materials_trusted,
-                coverage_complete=evidence.coverage_complete,
-                enforcement_test_present=evidence.enforcement_test_present,
-            ):
-                return "externally_calibrated_strict"
-        if self.profile_evidence is not None:
-            evidence = self.profile_evidence
-            if source_profile_strict_eligible(
-                profile_id=evidence.profile_id,
-                materials_trusted=evidence.materials_trusted,
-                coverage_complete=evidence.coverage_complete,
-                enforcement_test_present=evidence.enforcement_test_present,
-            ):
-                return "source_profile_strict_eligible"
-        if (
-            self.production_status in {"strict_eligible", "advisory", "experimental"}
-            and not self.missing_executable_links
-        ):
-            return "executable_advisory"
-        if self.production_status in {"advisory", "experimental"}:
+        if self.production_status in {"strict_eligible", "advisory", "experimental"}:
             return "executable_advisory"
         return "catalog_only"
 
     def to_dict(self) -> dict[str, Any]:
-        payload = {
+        payload: dict[str, Any] = {
             "intent_id": self.intent_id,
             "path": self.path,
             "domain": self.domain,
@@ -252,8 +202,7 @@ def _infer_claimed_backends(intent_id: str, title: str, catalog_entry: dict[str,
     if catalog_entry and catalog_entry.get("claimed_backends"):
         return sorted(str(item) for item in catalog_entry["claimed_backends"])
     blob = f"{intent_id} {title}".lower().replace("_", "-")
-    found = [token for token in NATIVE_CLAIM_TOKENS if token in blob]
-    return found
+    return [token for token in NATIVE_CLAIM_TOKENS if token in blob]
 
 
 def _link_presence(repo_root: Path, catalog_entry: dict[str, Any] | None, intent_path: Path) -> dict[str, bool]:
@@ -271,9 +220,7 @@ def _link_presence(repo_root: Path, catalog_entry: dict[str, Any] | None, intent
 
 
 def _min_status(current: ProductionStatus, ceiling: ProductionStatus) -> ProductionStatus:
-    if STATUS_RANK[current] <= STATUS_RANK[ceiling]:
-        return current
-    return ceiling
+    return current if STATUS_RANK[current] <= STATUS_RANK[ceiling] else ceiling
 
 
 def classify_template(
@@ -283,21 +230,14 @@ def classify_template(
     template: dict[str, Any],
     profile_evidence: ProfileSemanticEvidence | None = None,
 ) -> TemplateConformanceRow:
-    """Classify one template into an honest production status."""
     intent_id = str(template.get("intent_id") or intent_path.stem)
     catalog_entry = EXECUTABLE_CATALOG.get(intent_id)
     links = _link_presence(repo_root, catalog_entry, intent_path)
     missing = sorted(name for name, present in links.items() if not present)
-    claimed = _infer_claimed_backends(
-        intent_id,
-        str(template.get("title") or ""),
-        catalog_entry,
-    )
+    claimed = _infer_claimed_backends(intent_id, str(template.get("title") or ""), catalog_entry)
     notes: list[str] = []
     lane = str(catalog_entry["lane"]) if catalog_entry else None
-    source_profile_id = None
-    if catalog_entry and catalog_entry.get("source_profile_id"):
-        source_profile_id = str(catalog_entry["source_profile_id"])
+    source_profile_id = str(catalog_entry["source_profile_id"]) if catalog_entry and catalog_entry.get("source_profile_id") else None
 
     if not missing:
         status: ProductionStatus = str(catalog_entry.get("max_status", "strict_eligible"))  # type: ignore[assignment]
@@ -312,27 +252,21 @@ def classify_template(
         status = "catalog_only"
         notes.append("no enforced executable path registered")
 
-    # Honest downgrade for native-named templates without executable catalog entry.
     if claimed and intent_id not in EXECUTABLE_CATALOG:
         status = _min_status(status, "catalog_only")
         notes.append("downgraded unsupported public executable claim for backends: " + ", ".join(claimed))
-
     if template.get("deprecated") is True:
         status = "deprecated"
         notes.append("template marked deprecated")
-
     if profile_evidence is not None:
-        notes.append(
-            "source_profile_evidence:"
-            + ("strict_ok" if profile_evidence.as_dict()["strict_eligible"] else "incomplete")
-        )
+        candidate = bool(profile_evidence.as_dict().get("candidate_evidence_complete"))
+        notes.append("source_profile_evidence:" + ("candidate_complete" if candidate else "incomplete"))
 
     relative = intent_path.relative_to(repo_root).as_posix() if intent_path.is_absolute() else intent_path.as_posix()
     evidence = template.get("acceptable_evidence") or []
     evidence_kinds = sorted({str(item.get("kind")) for item in evidence if isinstance(item, dict) and item.get("kind")})
     risk = template.get("risk") if isinstance(template.get("risk"), dict) else {}
     prop = template.get("property") if isinstance(template.get("property"), dict) else {}
-    externally_calibrated = bool(template.get("externally_calibrated") is True)
     return TemplateConformanceRow(
         intent_id=intent_id,
         path=relative,
@@ -349,17 +283,13 @@ def classify_template(
         notes=notes,
         source_profile_id=source_profile_id,
         profile_evidence=profile_evidence,
-        externally_calibrated=externally_calibrated,
+        externally_calibrated=bool(template.get("externally_calibrated") is True),
     )
 
 
 def build_conformance_matrix(repo_root: Path, templates_dir: Path | None = None) -> dict[str, Any]:
-    """Scan templates and build the conformance matrix document."""
     templates_dir = templates_dir or (repo_root / "templates")
-    profile_evidence = collect_source_profile_evidence(
-        repo_root,
-        catalog_by_intent=EXECUTABLE_CATALOG,
-    )
+    profile_evidence = collect_source_profile_evidence(repo_root, catalog_by_intent=EXECUTABLE_CATALOG)
     rows: list[TemplateConformanceRow] = []
     for path in sorted(templates_dir.rglob("*.intent.json")):
         template = read_json_file(path)
@@ -372,28 +302,22 @@ def build_conformance_matrix(repo_root: Path, templates_dir: Path | None = None)
                 profile_evidence=profile_evidence.get(intent_id),
             )
         )
-
-    by_status = Counter(row.production_status for row in rows)
-    by_status_v2 = Counter(row.semantic_status_v2() for row in rows)
-    by_domain = Counter(row.domain for row in rows)
-    payload = {
+    return {
         "schema_version": "ovk.template_conformance.v1",
         "template_count": len(rows),
         "required_row_fields": list(REQUIRED_ROW_FIELDS),
         "required_executable_links": list(REQUIRED_EXECUTABLE_LINKS),
-        "production_statuses": list(STATUS_RANK.keys()),
-        "conformance_statuses_v2": list(STATUS_RANK_V2.keys()),
-        "counts_by_status": dict(sorted(by_status.items())),
-        "counts_by_status_v2": dict(sorted(by_status_v2.items())),
-        "counts_by_domain": dict(sorted(by_domain.items())),
+        "production_statuses": list(STATUS_RANK),
+        "conformance_statuses_v2": list(STATUS_RANK_V2),
+        "counts_by_status": dict(sorted(Counter(row.production_status for row in rows).items())),
+        "counts_by_status_v2": dict(sorted(Counter(row.semantic_status_v2() for row in rows).items())),
+        "counts_by_domain": dict(sorted(Counter(row.domain for row in rows).items())),
         "source_profile_evidence": {intent: item.as_dict() for intent, item in sorted(profile_evidence.items())},
         "templates": [row.to_dict() for row in rows],
     }
-    return payload
 
 
 def validate_matrix(matrix: dict[str, Any]) -> list[str]:
-    """Return gate failures for a conformance matrix."""
     failures: list[str] = []
     if matrix.get("schema_version") != "ovk.template_conformance.v1":
         failures.append("schema_version must be ovk.template_conformance.v1")
@@ -415,34 +339,17 @@ def validate_matrix(matrix: dict[str, Any]) -> list[str]:
         status_v2 = row.get("conformance_status_v2")
         if status_v2 is not None and status_v2 not in allowed_v2:
             failures.append(f"templates[{index}] invalid conformance_status_v2 {status_v2!r}")
-        if status_v2 == "externally_calibrated_strict":
-            evidence = row.get("source_profile_evidence") or {}
-            if not evidence.get("strict_eligible"):
-                failures.append(
-                    f"{row.get('intent_id')}: externally_calibrated_strict requires strict profile evidence"
-                )
-        if status_v2 == "source_profile_strict_eligible":
-            evidence = row.get("source_profile_evidence") or {}
-            if not evidence.get("strict_eligible"):
-                failures.append(
-                    f"{row.get('intent_id')}: source_profile_strict_eligible requires executed profile evidence"
-                )
+        if status_v2 in {"source_profile_strict_eligible", "externally_calibrated_strict"}:
+            failures.append(
+                f"{row.get('intent_id')}: legacy v2 conformance cannot authorize strict maturity; use v3 qualification"
+            )
         missing = row.get("missing_executable_links") or []
-        if status in {"strict_eligible", "advisory"} and missing and status == "strict_eligible":
+        if status == "strict_eligible" and missing:
             failures.append(f"{row.get('intent_id')}: strict_eligible requires empty missing_executable_links")
-        # catalog_only is mandatory when required links are incomplete and no
-        # experimental/advisory catalog path was registered.
-        if (
-            status not in {"deprecated", "experimental", "advisory", "strict_eligible"}
-            and status != "catalog_only"
-            and missing
-        ):
-            failures.append(f"{row.get('intent_id')}: incomplete links must not claim {status}")
     return failures
 
 
 def domain_counts_markdown(matrix: dict[str, Any]) -> str:
-    """Render README-style domain count rows from the matrix."""
     counts = matrix.get("counts_by_domain") or {}
     lines = ["| Domain | Count |", "|---|---|"]
     for domain in sorted(counts):

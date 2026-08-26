@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Install a single OVK external backend binary from toolchains/backend-tools.lock.json.
-# Required matrix backends fail closed when lock entries are missing or digests cannot
-# be verified. Distro CBMC fallback and silent Kani skip are disabled for required tools.
+# Install a single external backend from toolchains/backend-tools.lock.json.
+# Required tools fail closed unless the installed artifact is the exact artifact
+# whose immutable digest is recorded in the lock.
 set -euo pipefail
 
 BACKEND="${1:-}"
@@ -23,25 +23,18 @@ python_lock_query() {
 import json, sys
 from pathlib import Path
 lock = json.loads(Path(r"${LOCK}").read_text(encoding="utf-8"))
-backend = "${BACKEND}"
+backend = {"tla+": "tla"}.get("${BACKEND}", "${BACKEND}")
 tools = {str(t.get("id")): t for t in lock.get("tools") or [] if isinstance(t, dict)}
-# Normalize aliases
-aliases = {"tla+": "tla"}
-backend = aliases.get(backend, backend)
 tool = tools.get(backend)
 if tool is None:
     print(f"fail-closed: backend {backend!r} not in toolchain lock", file=sys.stderr)
     raise SystemExit(1)
 value = tool.get("${field}")
-if value is None:
-    print("")
-else:
-    print(value)
+print("" if value is None else value)
 PY
 }
 
 TOOL_ID="$(python_lock_query id)"
-INSTALL_KIND="$(python_lock_query install)"
 VERSION="$(python_lock_query version)"
 URL="$(python_lock_query url)"
 SHA256="$(python_lock_query sha256)"
@@ -59,21 +52,44 @@ verify_binary() {
   echo "post-install check: $(command -v "${name}")"
 }
 
+require_concrete_sha() {
+  if [[ -z "${SHA256}" || "${SHA256}" == "None" || "${SHA256}" == "PLACEHOLDER_RESOLVE_AT_INSTALL" ]]; then
+    echo "fail-closed: backend ${TOOL_ID} must have a concrete sha256 in ${LOCK}"
+    exit 1
+  fi
+}
+
 download_and_verify() {
   local url="$1"
   local dest="$2"
   local expected_sha="$3"
-  curl -fsSL -o "${dest}" "${url}"
+  curl --retry 3 --retry-all-errors -A "ovk-backend-installer/1.3" -fsSL -o "${dest}" "${url}"
   if [[ -n "${expected_sha}" && "${expected_sha}" != "PLACEHOLDER_RESOLVE_AT_INSTALL" && "${expected_sha}" != "None" ]]; then
     echo "${expected_sha}  ${dest}" | sha256sum -c -
   else
-    echo "warning: lock entry for ${TOOL_ID} has unresolved sha256; recording actual digest"
     sha256sum "${dest}"
     if [[ "${REQUIRED}" == "True" || "${REQUIRED}" == "true" ]]; then
       echo "fail-closed: required backend ${TOOL_ID} must have a concrete sha256 in ${LOCK}"
       exit 1
     fi
   fi
+}
+
+install_verified_crate() {
+  local crate="$1"
+  local version="$2"
+  local tmp srcdir package_root
+  require_concrete_sha
+  tmp="$(mktemp).crate"
+  srcdir="$(mktemp -d)"
+  download_and_verify "${URL}" "${tmp}" "${SHA256}"
+  tar -xzf "${tmp}" -C "${srcdir}"
+  package_root="${srcdir}/${crate}-${version}"
+  if [[ ! -f "${package_root}/Cargo.toml" ]]; then
+    echo "fail-closed: verified crate did not contain expected package root ${crate}-${version}"
+    exit 1
+  fi
+  cargo install --path "${package_root}" --locked --force
 }
 
 install_opa() {
@@ -87,37 +103,28 @@ install_opa() {
 }
 
 install_z3() {
-  local package artifact expected_sha tmpdir wheel
+  local package artifact tmpdir wheel actual
   package="$(python_lock_query package)"
   artifact="$(python_lock_query artifact_filename)"
-  expected_sha="${SHA256}"
-  if [[ -z "${expected_sha}" || "${expected_sha}" == "None" || "${expected_sha}" == "PLACEHOLDER_RESOLVE_AT_INSTALL" ]]; then
-    echo "fail-closed: required backend z3 must have a concrete sha256 in ${LOCK}"
+  require_concrete_sha
+  if [[ -z "${artifact}" || "${artifact}" == "None" ]]; then
+    echo "fail-closed: z3 lock entry must name the exact wheel artifact"
     exit 1
   fi
   tmpdir="$(mktemp -d)"
-  # Prefer verifying the pinned manylinux wheel when pip can fetch it; always pin version.
-  if [[ -n "${artifact}" && "${artifact}" != "None" ]]; then
-    python -m pip download --no-deps -d "${tmpdir}" "${package}" || true
-    wheel="$(ls "${tmpdir}"/*.whl 2>/dev/null | head -n1 || true)"
-    if [[ -n "${wheel}" ]]; then
-      actual="$(sha256sum "${wheel}" | awk '{print $1}')"
-      if [[ "${actual}" != "${expected_sha}" ]]; then
-        # Allow alternate platform wheels only when not required matrix? z3 is required:
-        # accept only the locked digest or fail closed on linux CI when manylinux wheel present.
-        if [[ "$(basename "${wheel}")" == "${artifact}" ]]; then
-          echo "fail-closed: z3 wheel digest mismatch expected=${expected_sha} actual=${actual}"
-          exit 1
-        fi
-        echo "warning: downloaded wheel $(basename "${wheel}") differs from locked ${artifact}; installing pinned version only"
-      else
-        echo "z3 wheel digest verified: ${actual}"
-      fi
-    else
-      echo "warning: could not prefetch z3 wheel for digest check; installing pinned version ${package}"
-    fi
+  python -m pip download --only-binary=:all: --no-deps -d "${tmpdir}" "${package}"
+  wheel="${tmpdir}/${artifact}"
+  if [[ ! -f "${wheel}" ]]; then
+    echo "fail-closed: resolved z3 wheel does not match locked artifact ${artifact}"
+    find "${tmpdir}" -maxdepth 1 -type f -print
+    exit 1
   fi
-  python -m pip install "${package}"
+  actual="$(sha256sum "${wheel}" | awk '{print $1}')"
+  if [[ "${actual}" != "${SHA256}" ]]; then
+    echo "fail-closed: z3 wheel digest mismatch expected=${SHA256} actual=${actual}"
+    exit 1
+  fi
+  python -m pip install "${wheel}"
   python - <<PY
 import z3
 version = z3.get_version_string()
@@ -129,24 +136,16 @@ PY
 }
 
 install_cedar() {
-  local crate version tmp
+  local crate
   crate="$(python_lock_query crate)"
-  version="${VERSION}"
-  if [[ -z "${SHA256}" || "${SHA256}" == "None" || "${SHA256}" == "PLACEHOLDER_RESOLVE_AT_INSTALL" ]]; then
-    echo "fail-closed: required backend cedar must have a concrete sha256 in ${LOCK}"
-    exit 1
-  fi
   if ! command -v cargo >/dev/null 2>&1; then
-    curl -fsSL https://sh.rustup.rs -o /tmp/rustup-init.sh
+    curl --retry 3 --retry-all-errors -A "ovk-backend-installer/1.3" -fsSL https://sh.rustup.rs -o /tmp/rustup-init.sh
     bash /tmp/rustup-init.sh -y --default-toolchain stable --profile minimal
     # shellcheck disable=SC1091
     source "${HOME}/.cargo/env"
     echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH:-/dev/null}"
   fi
-  tmp="$(mktemp).crate"
-  curl -fsSL -o "${tmp}" "${URL}"
-  echo "${SHA256}  ${tmp}" | sha256sum -c -
-  cargo install "${crate}" --version "${version}" --locked --force
+  install_verified_crate "${crate}" "${VERSION}"
   if [[ -x "${HOME}/.cargo/bin/cedar" ]]; then
     sudo ln -sf "${HOME}/.cargo/bin/cedar" /usr/local/bin/cedar
   fi
@@ -159,17 +158,9 @@ install_kani() {
     echo "fail-closed: silent kani skip is disabled"
     exit 1
   fi
-  local crate version tmp
+  local crate
   crate="$(python_lock_query crate)"
-  version="${VERSION}"
-  if [[ -z "${SHA256}" || "${SHA256}" == "None" || "${SHA256}" == "PLACEHOLDER_RESOLVE_AT_INSTALL" ]]; then
-    echo "fail-closed: kani lock entry must carry a concrete sha256"
-    exit 1
-  fi
-  tmp="$(mktemp).crate"
-  curl -fsSL -o "${tmp}" "${URL}"
-  echo "${SHA256}  ${tmp}" | sha256sum -c -
-  cargo install "${crate}" --version "${version}" --locked
+  install_verified_crate "${crate}" "${VERSION}"
   cargo kani setup --yes
   verify_binary cargo
 }
@@ -213,4 +204,4 @@ case "${TOOL_ID}" in
     ;;
 esac
 
-echo "install_backend.sh: ${TOOL_ID} complete (lock-driven)"
+echo "install_backend.sh: ${TOOL_ID} complete (lock-driven exact-artifact install)"

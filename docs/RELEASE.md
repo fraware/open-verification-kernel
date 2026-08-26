@@ -1,28 +1,36 @@
 # OVK Release
 
-Maintainer guide for shipping Open Verification Kernel. Current readiness: [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md). Authoritative audit: [DEEP_AUDIT_2026-07-23_R2.md](DEEP_AUDIT_2026-07-23_R2.md). Engineering program: [ENGINEERING_PROGRAM_2026-07-23_R2.md](ENGINEERING_PROGRAM_2026-07-23_R2.md). Historical: [VISION_AUDIT_2026-07-22.md](VISION_AUDIT_2026-07-22.md).
+Maintainer procedure for attributable Open Verification Kernel releases. Read this together with [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md), [ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md), and [TRUSTED_COMPUTING_BASE.md](TRUSTED_COMPUTING_BASE.md).
 
 ## Current release candidate
 
 Package version: `1.3.0-rc.1`.
 
-Release judgment: **engineering candidate** for attributable tag `v1.3.0-rc.1` (branch work may still be uncommitted). The five bounded evidence lanes, artifact chain, CLI, MCP surface, composite Action (SHA-pinned third parties), capability registry, decision lattice, evidence integrity, conformance matrix, FormalPR-Bench provenance, App alpha, pilots, and TCB doc are implemented. Live workflow IDs, release-ledger `verified_source_sha`, signed tag/Sigstore, and consumer remotes on the RC pin remain maintainer gates — see [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md) and [ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md).
+The corresponding candidate tag is `v1.3.0-rc.1`. A source commit is **not** release-authorized merely because PR CI is green. `verified_source_sha` is minted only by the live release-ledger authorizer after the exact candidate has candidate-bound workflow, holdout, consumer, and distribution provenance. Until that succeeds, the release ledger must remain `authorized=false`, `verified_source_sha=null`, `published=false`, and `tag=null`.
 
-## Known limitations
+## Non-negotiable publication invariant
 
-- Generic backend routing does not yet control lane compilation or execution.
-- Authorization, infrastructure, workflow, and deployment diff extraction remains conservative and heuristic.
-- OPA and Z3 have native semantic paths; CBMC checks explicit or template harnesses; Cedar and six other external adapters do not yet perform native policy/proof execution.
-- The 100-template catalog is broader than the production-executable property set.
-- Auto-collected branch-protection metadata cannot reconstruct a removed required check without trusted before/after data.
-- FormalPR-Bench is an internal curated regression suite, not an independent accuracy estimate or external calibration.
-- Current external-validation workflows use in-repository dogfooding; independent tagged consumers are still required and are distinct from dogfood green runs.
-- Post-execution strict fallback remains disabled unless `routing.allow_fallback: true` is explicitly set.
-- `verified_source_sha` is release-ledger authorized only; badge/holdout/dogfood must not mint it.
+**Do not manually create or publish a GitHub Release before the Publish workflow.**
 
-## Source release gates
+`.github/workflows/publish.yml` is an authorization-first state machine:
 
-Run these gates on the exact non-`[skip ci]` source commit intended for release:
+1. a signed annotated Git tag identifies one immutable source commit;
+2. the seven required release-evidence workflows are rerun with `workflow_dispatch` on that tag;
+3. Publish is dispatched on the **same tag ref**;
+4. the exact wheel and sdist are built once;
+5. the release ledger independently re-resolves exact GitHub run IDs, required holdout/consumer artifacts, and local distribution hashes;
+6. only an authorized ledger may carry `verified_source_sha`;
+7. the exact distributions and authorized ledger are keyless-signed and verified with Sigstore;
+8. when `publish=true`, a GitHub Release is created or recovered as a **draft only** and receives the authorized artifacts;
+9. PyPI Trusted Publishing occurs only for those exact authorized distribution bytes;
+10. PyPI is independently re-read and required to expose exactly the authorized filenames and SHA-256 values;
+11. only then is the already-staged GitHub Release made public.
+
+A `release: published` event is intentionally **not** a production trigger. At that point a GitHub Release would already be public and authorization would be too late.
+
+## 1. Freeze the candidate
+
+Run source gates on the exact commit intended for the tag. Required local checks include:
 
 ```bash
 pip install -e '.[dev]'
@@ -31,6 +39,8 @@ ruff check ovk tests benchmarks scripts
 python scripts/check_release_metadata.py
 python scripts/validate_templates.py
 python scripts/validate_capabilities.py
+python scripts/validate_adapter_conformance.py
+python scripts/render_capability_tables.py --check
 python scripts/render_tcb_doc.py --check
 python scripts/verify_rc_dod.py
 python scripts/verify_rc_install.py
@@ -40,190 +50,279 @@ ovk pilot
 python scripts/external_smoke_checklist.py
 ```
 
-Required evidence:
+Before tagging, require the branch candidate itself to pass CI, Repro baseline, Native Backends Tier 1, and Native Backends Tier 1b. These development gates detect defects before the immutable tag is created. Release authorization later requires new tag-bound runs and does not reuse PR runs.
 
-- [ ] core CI job is green on the source SHA;
-- [ ] package job builds and installs the wheel outside the checkout;
-- [ ] automatic-diff Action dogfood is green;
-- [ ] strict known-bad Action dogfood produces `block` and the expected nonzero result;
-- [ ] OPA, Z3, and CBMC native-execution checks are green;
-- [ ] Cedar toolchain probe and deterministic-evidence honesty checks are green;
-- [ ] full expanded benchmark and preflight artifacts are retained;
-- [ ] complete release-bundle validation is green;
-- [ ] current source SHA and workflow links are recorded in `CURRENT_RELEASE_STATUS.md`.
+Version surfaces must agree exactly:
 
-## Version and tag binding
+- `pyproject.toml` version;
+- `ovk.core.release_metadata.OVK_RELEASE_CANDIDATE`;
+- `ovk.__version__`;
+- tag name `v<OVK_RELEASE_CANDIDATE>`.
 
-The Publish workflow rejects a GitHub release whose tag does not equal `ovk.__version__` after removing an optional leading `v`.
+For this RC, that is `1.3.0-rc.1` and `v1.3.0-rc.1`. PyPI normalizes the version to `1.3.0rc1`; the workflow computes that normalization with `packaging.version.Version` rather than by string rewriting.
 
-Before tagging:
+## 2. Create a signed annotated immutable tag
 
-- [ ] `pyproject.toml`, `ovk.__version__`, and `ovk/core/release_metadata.py` agree on `1.3.0-rc.1`;
-- [ ] `SUPPORTED_COMMANDS` matches the Typer command surface;
-- [ ] consumer examples reference the intended immutable release tag or commit;
-- [ ] release notes describe actual backend execution semantics from [BACKENDS.md](BACKENDS.md);
-- [ ] package classifier remains Beta until the production gate in the vision audit is met;
-- [ ] benchmark and adoption summaries are regenerated from the release source;
-- [ ] [TRUSTED_COMPUTING_BASE.md](TRUSTED_COMPUTING_BASE.md) is fresh (`python scripts/render_tcb_doc.py --check`).
-
-Tag and create the release only after the source gates are attributable:
+Create the tag only after the candidate commit is final:
 
 ```bash
-git tag -s v1.3.0-rc.1 <VERIFIED_SOURCE_SHA>
-git push origin v1.3.0-rc.1
-gh release create v1.3.0-rc.1 \
-  --verify-tag \
-  --title "OVK v1.3.0-rc.1" \
-  --notes-file docs/RELEASE_NOTES_v1.3.0-rc.1.md
+export CANDIDATE_SHA='<exact 40-hex candidate commit>'
+export TAG='v1.3.0-rc.1'
+
+git tag -s "$TAG" "$CANDIDATE_SHA"
+git push origin "$TAG"
 ```
 
-Note: `v1.2.1` and earlier tags remain immutable historical releases. Do not move those tags. Do not re-attribute their Sigstore evidence to this RC.
+The production authorizer requires an **annotated** tag whose signature GitHub reports as verified and whose direct target is exactly `CANDIDATE_SHA`. Lightweight tags, unsigned annotated tags, indirect/wrong targets, moved historical tags, or tags whose version differs from package metadata fail closed.
 
-## Package publication
+Do not move `v1.2.1` or earlier historical tags. Do not re-attribute historical Sigstore evidence to the new candidate.
 
-The release-triggered Publish workflow (`.github/workflows/publish.yml`):
+## 3. Produce tag-bound release evidence
 
-1. verifies release-tag/package-version equality;
-2. synchronizes package data;
-3. runs tests, preflight, pilots, and the expanded benchmark;
-4. builds and checks the sdist and wheel;
-5. installs the wheel in an isolated environment outside the checkout;
-6. validates packaged templates, capabilities, MCP discovery, and `ovk doctor`;
-7. keyless-signs distributions with cosign in the protected `sigstore` environment (`id-token: write`);
-8. verifies signatures in the same workflow against the exact identity + OIDC issuer, runs a tamper test, and retains cosign bundles;
-9. publishes to PyPI only after the protected `pypi` environment permits it (skipped on `workflow_dispatch` dry-run).
+All seven required workflows must be `workflow_dispatch` runs on `--ref "$TAG"`. This is deliberate: PR runs are development evidence, not final release evidence. CI, Repro, Tier 1, and Tier 1b explicitly checkout `${{ github.event.pull_request.head.sha || github.sha }}` so the bytes executed equal the run's recorded head rather than GitHub's synthetic PR merge ref.
 
-PyPI configuration:
+### 3.1 Core validation matrix
 
-- prefer trusted publishing with an environment-bound OIDC policy;
-- otherwise configure `PYPI_API_TOKEN` in the protected `pypi` environment;
-- require maintainer review for the environment;
-- retain the built distributions and verification artifacts.
-
-### Sigstore dry-run (no PyPI publish)
-
-After this workflow is on `main`:
+Dispatch these four workflows on the tag:
 
 ```bash
-gh workflow run Publish.yml --ref main -f dry_run=true
-gh run watch
+gh workflow run ci.yml --ref "$TAG"
+gh workflow run repro-baseline.yml --ref "$TAG"
+gh workflow run native-backends-tier1.yml --ref "$TAG"
+gh workflow run native-backends-tier1b.yml --ref "$TAG"
 ```
 
-`workflow_dispatch` never publishes to PyPI and skips the full release-gate suite so keyless signing can be exercised while unrelated CI failures exist on `main`. It still builds the sdist/wheel, signs with cosign, verifies, tampers, and retains bundles. Dry-run signatures are bound to `@refs/heads/main` (or the dispatched branch). They are **not** a production pin. Production consumers must verify against an immutable tag identity (below). Full release events still run the complete verify suite before signing and PyPI publish.
+Require each run to complete successfully. Repro baseline must retain all six Linux/macOS/Windows × Python 3.10/3.12 cells; the native tiers must not silently skip required backends.
 
-## Attestation signing
+### 3.2 Label-free holdout prediction
 
-### HMAC
+Run the prediction workflow on the tag. It has no holdout labels and no holdout download token:
 
-Set `OVK_SIGNING_KEY` only in a controlled internal environment. Any consumer verifying the HMAC must possess the same secret. A signed envelope fails verification when the key is unavailable or different.
+```bash
+gh workflow run holdout-predict.yml --ref "$TAG"
+```
 
-### Sigstore/cosign (keyless)
+After it completes, record its exact GitHub Actions run ID:
 
-Explicit Sigstore signing fails closed. The protected Publish `sigstore` job has `id-token: write` and signs with `cosign sign-blob` (no long-lived keys in git or secrets).
+```bash
+export PREDICT_RUN_ID="$(
+  gh run list \
+    --workflow holdout-predict.yml \
+    --commit "$CANDIDATE_SHA" \
+    --event workflow_dispatch \
+    --limit 1 \
+    --json databaseId \
+    --jq '.[0].databaseId'
+)"
+test -n "$PREDICT_RUN_ID"
+```
 
-**Exact OIDC issuer (GitHub Actions):**
+The prediction artifact contains both `holdout-predictions.json` and `holdout-prediction-manifest.json`. The manifest binds the exact prediction-file SHA-256 and candidate SHA.
+
+### 3.3 Label-separated holdout evaluation
+
+The evaluation workflow must consume the prediction artifact from that **exact** prior run ID. It independently checks candidate identity and the prediction-file digest before consulting the frozen labeled holdout.
+
+```bash
+export HOLDOUT_TAG='v0.1.0-synthetic'          # replace only through governed holdout versioning
+export HOLDOUT_ASSET_SHA256='<frozen 64-hex release-asset digest>'
+
+gh workflow run holdout-eval.yml \
+  --ref "$TAG" \
+  -f holdout_tag="$HOLDOUT_TAG" \
+  -f asset_sha256="$HOLDOUT_ASSET_SHA256" \
+  -f predictions_artifact='formalpr-holdout-predictions' \
+  -f predictions_run_id="$PREDICT_RUN_ID" \
+  -f candidate_source_sha="$CANDIDATE_SHA"
+```
+
+The resulting public aggregate must cryptographically bind:
 
 ```text
-https://token.actions.githubusercontent.com
+candidate SHA
+  -> exact label-free predictions SHA-256
+  -> exact frozen holdout release-asset SHA-256
+  -> exact aggregate artifact SHA-256
 ```
 
-**Exact workflow identity (production / immutable tag):**
+Ordinary holdout prediction/evaluation artifacts must never mint `verified_source_sha`.
+
+### 3.4 Independent consumer pins
+
+Run the consumer verifier on the same tag and require both independent consumer repositories to pin the exact 40-hex OVK candidate:
+
+```bash
+gh workflow run consumer-pin-verification.yml \
+  --ref "$TAG" \
+  -f ovk_candidate_sha="$CANDIDATE_SHA" \
+  -f fastapi_ref=main \
+  -f express_ref=main
+```
+
+The retained evidence records each consumer repository, requested ref, exact consumer checkout SHA, exact OVK pin, and SHA-256 digests of the consumer workflow files. `uses: ./` is forbidden as consumer evidence.
+
+## 4. Confirm the complete release-evidence set
+
+Before Publish, there must be one successful tag-bound `workflow_dispatch` run for each required workflow:
+
+- `CI`;
+- `Repro baseline`;
+- `Native Backends Tier 1`;
+- `Native Backends Tier 1b`;
+- `FormalPR-Holdout predict`;
+- `FormalPR-Holdout eval`;
+- `Consumer Pin Verification`.
+
+The Publish authorizer independently checks this again. `scripts/collect_workflow_evidence.py --required-event workflow_dispatch` only drafts observations; it cannot authorize. `scripts/verify_release_ledger_github.py` re-fetches every exact run ID via the GitHub API, requires the run event to be `workflow_dispatch`, checks candidate/repository/workflow identity and success, downloads exact holdout and consumer artifacts, verifies their internal bindings, hashes the local wheel and sdist, and only then may mint `verified_source_sha`.
+
+## 5. Authorization and Sigstore dry run
+
+A dry run still requires a real signed tag and the complete release-evidence set. It performs the full authorization/build/Sigstore path but does not create a GitHub Release or publish to PyPI:
+
+```bash
+gh workflow run publish.yml \
+  --ref "$TAG" \
+  -f tag="$TAG" \
+  -f publish=false
+```
+
+The workflow rejects branch-bound dispatches even if the job later checks out a tag. Both `GITHUB_REF` and the Sigstore `GITHUB_WORKFLOW_REF` must be bound to `refs/tags/$TAG`.
+
+The production Sigstore identity is therefore exactly:
 
 ```text
 https://github.com/fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/vX.Y.Z
 ```
 
-Example for **v1.3.0-rc.1** (after the attributable tag exists):
+and the exact GitHub Actions OIDC issuer is:
 
-```bash
-export OVK_SIGSTORE_SIGNING=1
-export OVK_COSIGN_IDENTITY='https://github.com/fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/v1.3.0-rc.1'
-export OVK_COSIGN_ISSUER='https://token.actions.githubusercontent.com'
+```text
+https://token.actions.githubusercontent.com
 ```
 
-Historical example for signed `v1.2.1` (do not re-attribute to this RC):
+The `sigstore` job signs and immediately verifies the wheel, sdist, and authorized release ledger, then mutates copies and requires verification to fail. Retained cosign bundles are part of the signed release transaction.
+
+## 6. Publish
+
+Once the authorization/Sigstore path is satisfactory, dispatch the same workflow on the same immutable tag with publication enabled:
 
 ```bash
-export OVK_COSIGN_IDENTITY='https://github.com/fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/v1.2.1'
+gh workflow run publish.yml \
+  --ref "$TAG" \
+  -f tag="$TAG" \
+  -f publish=true
 ```
 
-Consumer verification of a retained bundle:
+Do **not** run `gh release create` beforehand. Publish owns the GitHub Release lifecycle.
+
+The publication path is:
+
+```text
+AUTHORIZED LEDGER
+      |
+      v
+SIGSTORE SIGN + VERIFY + TAMPER TEST
+      |
+      v
+PRIVATE GITHUB RELEASE DRAFT + AUTHORIZED ASSETS
+      |
+      v
+PYPI TRUSTED PUBLISHING
+      |
+      v
+READ PYPI BACK; REQUIRE EXACT FILENAMES + SHA-256
+      |
+      v
+PATCH THE EXISTING DRAFT TO draft=false
+```
+
+The draft contains the exact wheel/sdist, `release-ledger.authorized.json`, and retained Sigstore bundle JSON. It remains non-public throughout PyPI publication.
+
+## 7. PyPI trust and recovery semantics
+
+PyPI publication uses `pypa/gh-action-pypi-publish` with GitHub OIDC Trusted Publishing in the protected `pypi` environment. Long-lived `PYPI_API_TOKEN`/password authentication is intentionally not part of the production workflow.
+
+Before publishing, `scripts/check_pypi_distribution_state.py` permits only two states:
+
+- `absent`: first publication may proceed;
+- `exact_match`: the version already exists and contains exactly the authorized wheel/sdist filenames and SHA-256 values, so this is a safe recovery run.
+
+Any missing file, extra file, duplicate filename, malformed digest, or digest mismatch is `conflict` and fails closed. The workflow does not use blind `skip-existing` recovery.
+
+After Trusted Publishing, `--require-exact` changes the policy: `absent` is no longer acceptable. PyPI must expose exactly the authorized distribution set before the GitHub Release can become public.
+
+## 8. Partial-failure recovery
+
+PyPI and GitHub Release publication cannot be atomically committed. The workflow therefore has explicit recovery semantics.
+
+### Failure before PyPI publication
+
+The GitHub Release, if created, remains a draft. Fix the underlying problem and rerun `publish=true` on the same tag. The workflow may reuse the existing draft only if it is still a draft and its prerelease state matches the package version.
+
+### PyPI succeeded, final GitHub publication failed
+
+Rerun `publish=true` on the same tag. The workflow rebuilds and reauthorizes the same candidate, then queries PyPI. Publication is skipped only when PyPI's existing files exactly match the newly authorized local wheel/sdist bytes. The draft is then eligible for final publication.
+
+### A public GitHub Release already exists
+
+The workflow refuses to mutate it. This is intentional. A release that became public outside the authorization-first transaction requires explicit incident review rather than automated repair.
+
+### Existing PyPI files conflict with the authorized bytes
+
+Stop. Do not overwrite, ignore, or `skip-existing`. Treat the discrepancy as a release integrity incident.
+
+## 9. Environment and permission requirements
+
+Maintain protected GitHub Environments for:
+
+- `sigstore`: permits `id-token: write` only for the signing job and should require maintainer review;
+- `pypi`: permits Trusted Publishing and should require maintainer review and appropriate tag restrictions.
+
+The workflow keeps default permissions read-only and elevates narrowly:
+
+- live authorization: `actions: read`, `contents: read`;
+- Sigstore: `id-token: write`, `contents: read`;
+- draft/final GitHub Release operations: `contents: write` only in those jobs;
+- PyPI: `id-token: write`, `contents: read`.
+
+No job receives both GitHub Release write authority and the PyPI Trusted Publishing OIDC permission.
+
+## 10. Consumer verification of released Sigstore artifacts
+
+Example verification for `v1.3.0-rc.1`:
 
 ```bash
 cosign verify-blob \
-  --bundle path/to/artifact.cosign.bundle.json \
-  --certificate-identity "https://github.com/fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/v1.3.0-rc.1" \
-  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-  path/to/artifact.whl
+  --bundle path/to/open_verification_kernel-1.3.0rc1-py3-none-any.whl.cosign.bundle.json \
+  --certificate-identity 'https://github.com/fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/v1.3.0-rc.1' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  path/to/open_verification_kernel-1.3.0rc1-py3-none-any.whl
 ```
 
-Policy:
+Consumers should trust only the Publish workflow path, exact immutable tag identity, expected issuer, and distribution digest recorded in the authorized ledger.
 
-- Trust only the Publish workflow path above; do not accept arbitrary workflows in this repository.
-- Trust only immutable `refs/tags/v*` identities for production artifacts.
-- The `sigstore` GitHub Environment should require maintainer reviewers (same class of protection as `pypi`).
-- Cosign bundles and `ovk-sigstore-summary.json` are retained as workflow artifacts (90 days) and attached to the GitHub Release on `release` events.
-- Same-workflow steps: sign → verify with exact identity/issuer → mutate a copy and expect verify failure (`scripts/sigstore_release.py`).
+## Known limitations and claim discipline
 
-Required signing evidence:
+- Generic backend routing does not make every external adapter a native proof engine.
+- Authorization, infrastructure, workflow, and deployment source extraction remains conservative; incomplete abstraction cannot be promoted into a stronger guarantee.
+- FormalPR-Bench is a curated in-repository regression benchmark, not independent external calibration.
+- FormalPR-Holdout aggregate evaluation improves label separation but does not by itself establish external validity.
+- Independent consumer pin verification establishes concrete integration provenance; it does not substitute for human-adjudicated deployment studies.
+- `verified_source_sha` is a release-ledger authorization claim only. Badge, holdout, dogfood, local profile, or declaration-derived evidence must not mint it.
+- A signed artifact proves provenance/integrity under the stated Sigstore trust policy; it does not prove the semantic correctness of the software.
 
-- [x] unsigned bundle validates;
-- [x] HMAC-signed bundle validates with the correct key and fails with the wrong or missing key;
-- [x] Sigstore-signed bundle validates with the trusted identity and issuer on a **protected** `workflow_dispatch` dry-run ([run 30008891551](https://github.com/fraware/open-verification-kernel/actions/runs/30008891551); identity `@refs/heads/main`, environment `sigstore` with required reviewers, retained `ovk-sigstore-bundles`);
-- [x] tampered evidence, manifest, statement, and envelope each fail validation (unit / release verifier); same-workflow artifact tamper test exercised in the dry-run above;
-- [x] signature and transparency artifacts retained as workflow artifacts on the dry-run above;
-- [x] **Immutable-tag protected release E2E:** GitHub Release `v1.2.1` ([release](https://github.com/fraware/open-verification-kernel/releases/tag/v1.2.1); [Publish run 30010876652](https://github.com/fraware/open-verification-kernel/actions/runs/30010876652)) — `verify` green, keyless cosign with `--require-immutable-tag`, identity `.../publish.yml@refs/tags/v1.2.1`, issuer `https://token.actions.githubusercontent.com`, cosign bundles attached to the Release. Production consumers must pin that tag identity (not `@refs/heads/main`).
+## Historical release evidence
 
-## Independent consumer gate
+Historical releases such as `v1.2.1` remain immutable and retain their original evidence. Their workflow runs, release artifacts, and Sigstore identities are historical facts, not evidence for `v1.3.0-rc.1`.
 
-Independent tagged consumers for **v1.2.1** (Action + cosign-verified Release wheel):
+Independent consumer repositories currently used by the consumer-pin workflow are:
 
-| Consumer | URL |
+| Consumer | Repository |
 |---|---|
-| FastAPI + Terraform | https://github.com/fraware/ovk-consumer-fastapi-terraform |
-| Express + GitHub Actions | https://github.com/fraware/ovk-consumer-express-actions |
+| FastAPI + Terraform | `fraware/ovk-consumer-fastapi-terraform` |
+| Express + GitHub Actions | `fraware/ovk-consumer-express-actions` |
 
-Checklist and ledger schema: [CONSUMER_VALIDATION_CHECKLIST.md](CONSUMER_VALIDATION_CHECKLIST.md), `schemas/pilot.ledger.schema.json`. Optional OVK workflow: `.github/workflows/consumer-pin-verification.yml` (`workflow_dispatch`).
-
-Before describing the release as production-stable:
-
-- [x] create separate fixture repositories (two independent consumers above);
-- [x] invoke `fraware/open-verification-kernel@v1.2.1`, never `uses: ./`;
-- [x] automate advisory allow/block, strict block, malformed abstraction, comment/check-run contracts, release bundle, wheel install, cache reuse, policy change, backend unavailable, native timeout, and generated regression artifacts;
-- [x] document fork-PR reduced permissions with a dry simulation (`pull_request`, not `pull_request_target`);
-- [x] install the Release wheel independently with cosign verify-blob (PyPI still optional until published);
-- [ ] complete a true cross-fork PR adjudication in each consumer ledger;
-- [ ] complete 30 human-adjudicated PRs per independent consumer (automated_scenario seeds do not count);
-- [ ] complete additional adjudicated advisory pilots according to [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md).
-
-## External consumer example
-
-```yaml
-name: OVK
-on:
-  pull_request:
-
-permissions:
-  contents: read
-  checks: write
-  pull-requests: write
-
-jobs:
-  verify:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-      - uses: fraware/open-verification-kernel@v1.2.1
-        with:
-          mode: advisory
-          use-check: "true"
-          emit-check: "true"
-          post-comment: "true"
-```
-
-When `changed-files` is omitted, the Action materializes the pull-request diff automatically. Start advisory, adjudicate results, then enable strict mode only for calibrated lanes with trusted inputs.
+See [CONSUMER_VALIDATION_CHECKLIST.md](CONSUMER_VALIDATION_CHECKLIST.md) and [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md) for evidence scopes that go beyond release mechanics.
 
 ## Release history
 

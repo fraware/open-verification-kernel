@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from ovk.compilers.authorization import FastApiAstAuthorizationCompiler, materials_from_pair
 from ovk.core.compiler_bridge import compile_authorization_ir
 from ovk.core.source_profile_qualification import (
@@ -40,21 +38,26 @@ def test_support_contract_forces_review_on_unsupported() -> None:
     assert contract.compiler_binding.endswith("FastApiAstAuthorizationCompiler")
 
 
-def test_qualification_counts_are_derived_not_hand_typed() -> None:
+def test_qualification_counts_are_derived_but_not_execution_attested() -> None:
     payload = build_source_profile_qualification(REPO)
     assert payload["schema_version"] == "ovk.source_profile_qualification.v1"
     assert payload["maturity_contract"]["counts_are_hand_typed"] is False
     assert payload["maturity_contract"]["externally_calibrated_strict_locally_derivable"] is False
     fastapi = payload["profiles"]["authorization.fastapi.ast_v1"]
-    assert fastapi["qualification"]["support_contract_version"] == "1.0.0"
+    qualification = fastapi["qualification"]
+    contract = load_support_contract("authorization.fastapi.ast_v1", repo_root=REPO)
+    assert qualification["support_contract_version"] == contract.contract_version
     assert fastapi["evidence_count"] == len(fastapi["evidence"])
-    assert fastapi["qualification"]["positive_cases"] == sum(
+    assert qualification["positive_cases"] == sum(
         1 for item in fastapi["evidence"] if item["bucket"] == "positive"
     )
-    # Machine corpus meets WP-05 strict thresholds; external calibration remains non-local.
-    assert fastapi["qualification"]["strict_ready"] is True
-    assert fastapi["maturity"] == "source_profile_strict_eligible"
-    assert fastapi["maturity"] != "externally_calibrated_strict"
+    # Registry declarations establish a candidate corpus specification, not an
+    # observation that those tests succeeded on this candidate revision.
+    assert qualification["candidate_ready"] is True
+    assert qualification["execution_attested"] is False
+    assert qualification["strict_ready"] is False
+    assert "candidate_bound_execution_attestation" in qualification["unmet_strict_obligations"]
+    assert fastapi["maturity"] == "source_profile_candidate"
     assert all(
         row["maturity"] != "externally_calibrated_strict" for row in payload["profiles"].values()
     )
@@ -123,14 +126,15 @@ def test_conformance_matrix_declares_v3_normative() -> None:
     matrix = build_conformance_matrix(REPO)
     assert matrix["maturity_contract"]["normative_status_field"] == "conformance_status_v3"
     assert validate_matrix(matrix) == []
-    # Support contract version should appear on profile-backed rows when contracts exist.
     profile_rows = [
         row
         for row in matrix["templates"]
         if isinstance(row, dict) and row.get("source_profile_id") and row.get("source_profile_qualification")
     ]
     assert profile_rows
-    assert any(
-        (row.get("source_profile_qualification") or {}).get("support_contract_version") == "1.0.0"
-        for row in profile_rows
-    )
+    contracts = load_all_support_contracts(repo_root=REPO)
+    for row in profile_rows:
+        profile_id = row["source_profile_id"]
+        assert (row.get("source_profile_qualification") or {}).get("support_contract_version") == contracts[
+            profile_id
+        ].contract_version

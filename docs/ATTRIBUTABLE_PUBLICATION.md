@@ -1,191 +1,225 @@
-# Attributable Publication Checklist (Sprint 10 / OVK-PR9)
+# Attributable Publication Checklist
 
-Gate for publishing **`v1.3.0-rc.1`** and later promoting to **`v1.3.0`**.
-Authority: [DEEP_AUDIT_2026-07-23_R2.md](DEEP_AUDIT_2026-07-23_R2.md) 18-condition gate.
-Status dashboard: [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md). TCB: [TRUSTED_COMPUTING_BASE.md](TRUSTED_COMPUTING_BASE.md).
-Release procedure: [RELEASE.md](RELEASE.md). Consumer pins: [CONSUMER_VALIDATION_CHECKLIST.md](CONSUMER_VALIDATION_CHECKLIST.md).
+This document defines the evidence threshold for publishing **`v1.3.0-rc.1`** and for any later production promotion. The executable maintainer procedure is [RELEASE.md](RELEASE.md); this file is the corresponding trust checklist.
 
-## Terminology
+Authority surfaces:
 
-| Field | Use |
-|---|---|
-| `benchmark_source_sha` | FormalPR-Bench / badge measurement identity |
-| `verified_source_sha` | Complete observed required-workflow set only |
+- release procedure: [RELEASE.md](RELEASE.md)
+- current status: [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md)
+- trusted computing base: [TRUSTED_COMPUTING_BASE.md](TRUSTED_COMPUTING_BASE.md)
+- holdout governance: [FORMALPR_HOLDOUT_GOVERNANCE.md](FORMALPR_HOLDOUT_GOVERNANCE.md)
+- consumer evidence: [CONSUMER_VALIDATION_CHECKLIST.md](CONSUMER_VALIDATION_CHECKLIST.md)
 
-Never label a `[skip ci]` badge commit as verified. Never re-attribute `v1.2.1`
-Sigstore / consumer evidence to typed-control-plane commits. FormalPR-Bench and
-in-repo dogfood do not authorize `verified_source_sha`; that field is release-ledger only.
+## Authority model
 
-## In-repo readiness (OVK-PR9) — complete without live secrets
+Two source identities are intentionally distinct:
 
-Run these locally before asking maintainers for a tag:
+| Field | Meaning | Authority |
+|---|---|---|
+| `benchmark_source_sha` | Commit whose benchmark/badge artifacts were measured | Benchmark execution only |
+| `verified_source_sha` | Exact commit authorized for release after all required live provenance is independently checked | Release ledger only |
 
-```bash
-python scripts/check_release_metadata.py
-python scripts/render_capability_tables.py --check
-python scripts/render_tcb_doc.py --check
-python scripts/validate_capabilities.py
-python scripts/validate_adapter_conformance.py
-python scripts/verify_rc_dod.py
-python scripts/verify_rc_install.py          # Action SHA pins + package metadata
-python scripts/verify_rc_install.py --wheel  # outside-checkout wheel import
-ovk release-preflight
-```
+`verified_source_sha` is **not** a maintainer-entered status field. It must never be copied from a badge, PR run, benchmark result, holdout report, consumer fixture, or prose document. It is minted only by `scripts/verify_release_ledger_github.py` after full authorization succeeds.
 
-| Item | Status |
-|---|---|
-| Package / `__version__` / metadata = `1.3.0-rc.1` | Done in working tree |
-| Registry covers every public checker; `stable ⊆` conformant | Done (DoD script) |
-| Strict fail-closed lattice + evidence integrity suites present | Done (PR2+PR3) |
-| Evidence reconstructs controlling decision APIs | Done |
-| Bench version manifest + partition digests | Done (PR5) |
-| ≥2 pilot reports under `docs/pilots/` | Done (PR8; three published) |
-| TCB doc generated from registry + Action/App surfaces | Done |
-| Installable via pip wheel path **and** composite Action (SHA-pinned deps) | In-repo verified; PyPI/tag still live |
+The input ledger must remain unauthorized: `authorized=false`, `verified_source_sha=null`, `published=false`, `tag=null`. Offline structural validation cannot grant release authority.
 
-## Exact maintainer publication sequence (requires push + secrets)
+## Pre-tag engineering gate
 
-Replace `<SOURCE_SHA>` with a **non-`[skip ci]`** commit that carries this tree.
-Do **not** tag from a badge-only commit.
+Before creating an immutable tag, require the exact final candidate commit to pass the ordinary development matrix:
 
-### 1. Land source and observe required workflows
+- [ ] CI, including lint, unit/integration tests, release preflight, package smoke, Action dogfood, and template conformance;
+- [ ] Repro baseline on Linux/macOS/Windows × Python 3.10/3.12;
+- [ ] Native Backends Tier 1;
+- [ ] Native Backends Tier 1b;
+- [ ] package metadata, `ovk.__version__`, and release metadata agree;
+- [ ] generated capability tables, project status, benchmark registries, and TCB document are fresh;
+- [ ] FormalPR-Bench claims remain explicitly regression-only, not external calibration;
+- [ ] public documentation describes unsupported/experimental paths proportionately.
 
-```bash
-# After push to origin (this workspace does not push):
-git push origin HEAD:main   # or open/merge a PR — maintainer only
+These checks are necessary but **not sufficient** for publication. PR/push runs are development evidence and are not reused as final release authorization.
 
-# Confirm the commit message does NOT contain [skip ci]
-git log -1 --format=%B <SOURCE_SHA>
-```
+## Immutable candidate identity
 
-Required workflow names (collector): `CI`, `Native Tier 1`, `Release`, `Bench`
-(plus Action dogfood / wheel smoke as recorded in [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md)).
-
-```bash
-python scripts/collect_workflow_evidence.py \
-  --sha <SOURCE_SHA> \
-  --output .verification/workflow-evidence-<SOURCE_SHA>.json
-
-# Optional direct inspection:
-gh run list --repo fraware/open-verification-kernel --commit <SOURCE_SHA> --limit 30 \
-  --json databaseId,workflowName,status,conclusion,url,headSha
-```
-
-Only after the complete required set is green on `<SOURCE_SHA>`, set
-`verified_source_sha=<SOURCE_SHA>` in [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md)
-and paste run URLs / IDs. Until then cite `benchmark_source_sha` only.
-
-### 2. Signed immutable tag + GitHub Release
-
-Tag binding: Publish requires `github.event.release.tag_name` (without leading `v`)
-to equal `ovk.__version__` exactly — tag **`v1.3.0-rc.1`**, package **`1.3.0-rc.1`**.
-
-```bash
-git fetch origin
-git checkout <SOURCE_SHA>
-git tag -s v1.3.0-rc.1 <SOURCE_SHA>
-git push origin v1.3.0-rc.1
-
-gh release create v1.3.0-rc.1 \
-  --verify-tag \
-  --title "OVK v1.3.0-rc.1" \
-  --notes-file docs/RELEASE_NOTES_v1.3.0-rc.1.md
-```
-
-Do not move historical tags (`v1.2.1`, …).
-
-### 3. Sigstore / cosign (identity-bound)
-
-Protected Publish workflow (`.github/workflows/publish.yml`) keyless-signs distributions
-in the `sigstore` environment. Production verification identity for this RC:
+Create exactly one signed annotated tag for the frozen candidate. For this RC:
 
 ```text
-https://github.com/fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/v1.3.0-rc.1
+package version: 1.3.0-rc.1
+tag:             v1.3.0-rc.1
 ```
 
-OIDC issuer:
+Required properties:
+
+- [ ] tag is annotated, not lightweight;
+- [ ] GitHub reports the tag signature as verified;
+- [ ] tag points directly to one commit;
+- [ ] direct target equals the exact release candidate SHA;
+- [ ] tag version exactly matches package release metadata;
+- [ ] historical tags are not moved or re-attributed.
+
+The production Publish workflow must itself be dispatched on `refs/tags/<tag>`. Checking out a tag from a branch-bound workflow is not equivalent because the Sigstore workflow identity would remain branch-bound.
+
+## Seven required tag-bound release-evidence workflows
+
+Final authorization requires successful **`workflow_dispatch`** runs on the immutable tag for exactly these release surfaces:
+
+1. `CI`
+2. `Repro baseline`
+3. `Native Backends Tier 1`
+4. `Native Backends Tier 1b`
+5. `FormalPR-Holdout predict`
+6. `FormalPR-Holdout eval`
+7. `Consumer Pin Verification`
+
+The collector may draft candidate-bound observations, but it cannot authorize them. The network-backed authorizer independently re-fetches every selected run ID and checks repository, workflow name/path, event, candidate `head_sha`, completion state, and successful conclusion.
+
+## Holdout evidence boundary
+
+Prediction and evaluation remain label-separated.
+
+The prediction workflow:
+
+- [ ] runs without the holdout download credential;
+- [ ] emits label-free predictions only;
+- [ ] records `candidate_source_sha`;
+- [ ] emits a manifest binding the exact predictions SHA-256;
+- [ ] does not contain or mint `verified_source_sha`.
+
+The evaluation workflow:
+
+- [ ] consumes the prediction artifact from an explicit prior prediction **run ID**;
+- [ ] checks the prediction candidate identity before label access;
+- [ ] recomputes and matches the prediction-file SHA-256 against the prediction manifest;
+- [ ] verifies the frozen holdout release-asset SHA-256;
+- [ ] strips download credentials after acquisition;
+- [ ] emits aggregate-only public evidence;
+- [ ] binds candidate SHA, prediction digest, holdout-asset digest, holdout tag, and aggregate digest;
+- [ ] does not contain or mint `verified_source_sha`.
+
+A missing, malformed, substituted, expired, or mismatched artifact must fail authorization.
+
+## Independent consumer evidence
+
+Both required consumer repositories must provide candidate-bound evidence:
+
+- `fraware/ovk-consumer-fastapi-terraform`
+- `fraware/ovk-consumer-express-actions`
+
+For each consumer, require:
+
+- [ ] exact 40-hex OVK candidate pin;
+- [ ] no `uses: ./` substitution;
+- [ ] exact consumer checkout SHA;
+- [ ] retained workflow-file SHA-256 digests;
+- [ ] successful `Consumer Pin Verification` artifact from the tag-bound release-evidence run.
+
+Consumer evidence demonstrates that independent repositories pin the exact candidate. It does not by itself establish broad external calibration or production-stable accuracy.
+
+## Distribution authorization
+
+The release authorizer must build and bind exactly one wheel and one sdist. Authorization requires:
+
+- [ ] exact candidate repository/SHA identity;
+- [ ] complete live workflow provenance;
+- [ ] complete holdout artifact provenance;
+- [ ] complete consumer artifact provenance;
+- [ ] exact wheel filename and SHA-256;
+- [ ] exact sdist filename and SHA-256;
+- [ ] no P0 blocker recorded by the authorized ledger.
+
+After authorization, every later release job rechecks the local distribution bytes against the authorized ledger before signing, staging, or publishing them.
+
+## Sigstore identity
+
+The wheel, sdist, and authorized release ledger are keyless-signed and verified in the protected `sigstore` environment.
+
+Exact issuer:
 
 ```text
 https://token.actions.githubusercontent.com
 ```
 
-```bash
-# Watch the Publish run attached to the Release:
-gh run list --repo fraware/open-verification-kernel --workflow Publish.yml --limit 5
+Exact production identity pattern:
 
-# Consumer-side verify (after downloading wheel + *.cosign.bundle.json from the Release):
-export OVK_COSIGN_IDENTITY='https://github.com/fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/v1.3.0-rc.1'
-export OVK_COSIGN_ISSUER='https://token.actions.githubusercontent.com'
-cosign verify-blob \
-  --bundle path/to/artifact.cosign.bundle.json \
-  --certificate-identity "$OVK_COSIGN_IDENTITY" \
-  --certificate-oidc-issuer "$OVK_COSIGN_ISSUER" \
-  path/to/open_verification_kernel-1.3.0rc1-*.whl
+```text
+https://github.com/fraware/open-verification-kernel/.github/workflows/publish.yml@refs/tags/vX.Y.Z
 ```
 
-Optional dry-run (no PyPI; **not** a production pin — bound to branch ref, not the tag):
+Required evidence:
 
-```bash
-gh workflow run Publish.yml --ref main -f dry_run=true
-gh run watch
+- [ ] workflow is tag-ref bound;
+- [ ] exact certificate identity and issuer are used for verification;
+- [ ] same-workflow verification succeeds for every signed artifact;
+- [ ] mutated copies fail verification;
+- [ ] cosign bundles and signing summary are retained.
+
+Branch-bound Sigstore runs are not production release evidence.
+
+## Publication ordering
+
+A public GitHub Release must never be an input to authorization. The only permitted production order is:
+
+```text
+signed annotated tag
+  -> tag-bound release-evidence runs
+  -> live release-ledger authorization
+  -> exact distribution recheck
+  -> Sigstore sign / verify / tamper test
+  -> private GitHub Release draft
+  -> PyPI Trusted Publishing
+  -> independent exact PyPI filename + SHA-256 verification
+  -> make the existing GitHub Release public
 ```
 
-### 4. Consumer pin bumps (separate remotes; do not push from this workspace alone)
+Do **not** manually run `gh release create` before Publish. `.github/workflows/publish.yml` owns the draft/public transition.
 
-In-repo templates already target `v1.3.0-rc.1`
-([templates/consumer_validation.workflow.yml](templates/consumer_validation.workflow.yml),
-[examples/github_workflows/](../examples/github_workflows/)).
+## PyPI and recovery policy
 
-After the tag exists, in each consumer:
+PyPI uses OIDC Trusted Publishing in the protected `pypi` environment. Long-lived PyPI password/API-token authentication is not part of the production workflow.
 
-```bash
-# Example for fastapi consumer (repeat for express):
-gh api repos/fraware/ovk-consumer-fastapi-terraform/contents/.github/workflows/ \
-  --jq '.[].name'   # locate validation workflow
+Before publication, the only acceptable remote states are:
 
-# Bump uses: fraware/open-verification-kernel@v1.3.0-rc.1
-# and OVK_PACKAGE_VERSION: "1.3.0-rc.1" via PR, then:
-gh workflow run "OVK Consumer Validation" --repo fraware/ovk-consumer-fastapi-terraform
-gh workflow run "OVK Consumer Validation" --repo fraware/ovk-consumer-express-actions
+- `absent`: first publication may proceed;
+- `exact_match`: a recovery run may proceed because PyPI already exposes exactly the authorized filenames and SHA-256 values.
 
-gh run list --repo fraware/ovk-consumer-fastapi-terraform --limit 5
-gh run download <RUN_ID> --repo fraware/ovk-consumer-fastapi-terraform \
-  -n <evidence-artifact-name> -D ./consumer-evidence/fastapi/
-```
+`conflict` is fatal. Missing files, extra files, duplicate filenames, malformed digests, or any digest substitution fail closed. Blind `skip-existing` recovery is not permitted.
 
-Full checklist: [CONSUMER_VALIDATION_CHECKLIST.md](CONSUMER_VALIDATION_CHECKLIST.md).
+After Trusted Publishing, PyPI must be `exact_match`; `absent` is no longer acceptable. Only after that independent read-back succeeds may the GitHub Release transition from draft to public.
 
-### 5. Record status
+If PyPI succeeds and final GitHub publication fails, rerunning on the same immutable tag is permitted only after exact PyPI equality is re-established. If a GitHub Release for the tag is already public, Publish refuses to mutate it.
 
-Update [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md) with:
+## Claims allowed before and after authorization
 
-- `verified_source_sha`
-- CI / Native Tier 1 / Action dogfood / Publish workflow IDs + URLs
-- Sigstore identity string for `v1.3.0-rc.1`
-- Consumer pin SHAs / run URLs
+Before the ledger authorizes the candidate:
 
-## Pre-tag checklist (`v1.3.0-rc.1`) — remaining maintainer actions
+- benchmark artifacts may cite `benchmark_source_sha`;
+- development CI may be described as green on its exact SHA;
+- the package may be described as an engineering/release candidate;
+- `verified_source_sha` must remain unset;
+- the RC must not be described as an attributable published release.
 
-- [x] Adoption-surface PRs 1–9 landed in the working tree (in-repo)
-- [ ] Non-`[skip ci]` CI, native Tier 1, wheel smoke, Action dogfood, release preflight green on the tag source
-- [ ] Expanded FormalPR-Bench recorded with `benchmark_source_sha`
-- [ ] Template conformance v2 matrix regenerated from semantic statuses (as needed on release SHA)
-- [ ] Both consumers dispatched on immutable rc.1 pin (or audited commit); evidence downloaded and verified
-- [ ] Label-separated holdout aggregates retained when promoting beyond RC (predictions digest + eval workflow IDs)
-- [ ] Release artifacts signed; workflow IDs and digests recorded in [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md)
+After full authorization and publication:
 
-## Promote to `v1.3.0`
+- the authorized ledger may identify `verified_source_sha`;
+- the published wheel/sdist may be attributed to that exact source SHA and Sigstore identity;
+- benchmark scores remain internal-regression evidence unless separate external calibration has actually been completed.
 
-Only after:
+## Promotion beyond the RC
 
-- [ ] All 18 completion-gate conditions hold
-- [ ] P0 closure (R2 PRs 1–9) on the exact tag source
-- [ ] Consumer validation on the exact pin
-- [ ] Attributable holdout aggregates (predictions digest + eval)
-- [ ] Human pilot ledgers remain separate from automated fixtures
-- [ ] No re-attribution of `v1.2.1` Sigstore evidence to typed-control-plane commits
+Promotion to a production-stable `v1.3.0` claim additionally requires the project’s independent-validation conditions, including consumer/adjudication and governed holdout evidence. Automated fixtures, in-repository dogfood, or internal benchmark success must not be relabeled as independent human calibration.
 
-## Blocked without external access
+## Final maintainer checklist
 
-Live GitHub Actions run URLs, consumer repo pin PRs, protected Publish/Sigstore environments,
-and private holdout evaluation require maintainer credentials outside this working tree.
+- [ ] exact final candidate passes the complete development matrix;
+- [ ] signed annotated immutable tag exists and is GitHub-verified;
+- [ ] all seven required release-evidence workflows succeed as tag-bound `workflow_dispatch` runs;
+- [ ] label-free prediction → exact-run evaluation handoff is retained and digest-bound;
+- [ ] both consumer artifacts pin the exact candidate;
+- [ ] live authorizer produces an authorized v2 ledger and alone mints `verified_source_sha`;
+- [ ] wheel and sdist hashes equal the authorized ledger;
+- [ ] tag-bound Sigstore verification and tamper tests pass;
+- [ ] GitHub Release remains draft until PyPI exact verification succeeds;
+- [ ] PyPI exposes exactly the authorized distribution set;
+- [ ] public GitHub Release is made visible only after the previous condition;
+- [ ] release notes and status documents report only evidence actually obtained.
+
+For exact commands and recovery procedure, follow [RELEASE.md](RELEASE.md).

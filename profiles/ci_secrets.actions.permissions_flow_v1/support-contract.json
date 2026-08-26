@@ -1,16 +1,16 @@
 {
   "schema_version": "ovk.support_contract.v1",
   "profile_id": "ci_secrets.actions.permissions_flow_v1",
-  "contract_version": "1.0.0",
+  "contract_version": "1.1.0",
   "lane": "ci_secrets",
-  "proposition": "Workflow trust findings for secrets, write tokens, protected environments, and privileged OIDC are derived from YAML plus trusted acquisition materials; remote reusables require immutable 40-hex SHA pins.",
-  "guarantee_type": "workflow_trust_flow",
+  "proposition": "Workflow trust findings for secrets, token authority, protected environments, reusable workflows, and privileged OIDC are derived from workflow YAML plus separately trusted acquisition materials within the supported expression subset.",
+  "guarantee_type": "workflow_trust_flow_candidate",
   "compiler_binding": "ovk.compilers.github_actions.trust_flow:compile_workflow_trust",
   "supported_constructs": [
     "local_reusable_workflows",
     "remote_reusable_at_sha",
     "composite_local_recursion",
-    "finite_matrix_evaluation",
+    "finite_matrix_shape_evaluation",
     "job_permissions",
     "secrets_inherit",
     "id_token_write_as_privileged",
@@ -19,7 +19,8 @@
   "excluded_constructs": [
     "mutable_remote_refs",
     "yaml_self_asserted_protected_environment",
-    "unbounded_matrix_explosion"
+    "unbounded_matrix_explosion",
+    "matrix_dependent_trust_expressions_until_each_assignment_is_evaluated"
   ],
   "required_materials": [
     "workflow_yaml_or_document",
@@ -29,7 +30,8 @@
     "complete_requires": [
       "no_mutable_remote_refs",
       "protected_env_from_acquisition_when_claimed",
-      "matrix_finite"
+      "matrix_finite",
+      "no_unresolved_matrix_dependent_trust_expression"
     ],
     "unsupported_forces": "review"
   },
@@ -38,6 +40,8 @@
     "workflow_schema": "github-workflow"
   },
   "notes": [
-    "Protected environment facts require WP-01 acquisition artifacts; YAML cannot self-assert protection."
+    "Protected environment facts require authenticated acquisition artifacts; YAML cannot self-assert protection.",
+    "Finite matrix counting alone is not strict evidence when matrix values alter a trust-relevant expression.",
+    "This profile cannot be strict-eligible without candidate-bound executed qualification evidence."
   ]
 }

@@ -5,7 +5,7 @@ from __future__ import annotations
 from ovk.core.source_profiles import (
     is_known_source_profile,
     profiles_from_policy,
-    source_profile_strict_eligible,
+    source_profile_candidate_evidence_complete,
 )
 
 
@@ -14,14 +14,14 @@ def test_known_profiles() -> None:
     assert not is_known_source_profile("made.up.profile")
 
 
-def test_strict_eligible_requires_all_gates() -> None:
-    assert source_profile_strict_eligible(
+def test_candidate_evidence_requires_all_local_gates() -> None:
+    assert source_profile_candidate_evidence_complete(
         profile_id="authorization.fastapi.ast_v1",
         materials_trusted=True,
         coverage_complete=True,
         enforcement_test_present=True,
     )
-    assert not source_profile_strict_eligible(
+    assert not source_profile_candidate_evidence_complete(
         profile_id="authorization.fastapi.ast_v1",
         materials_trusted=False,
         coverage_complete=True,

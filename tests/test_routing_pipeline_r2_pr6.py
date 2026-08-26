@@ -9,8 +9,8 @@ from ovk.core.adapter_runtime import execute_obligations
 from ovk.core.kernel import execute_kernel
 from ovk.core.routing_pipeline import (
     build_authoritative_routing_plan,
-    route_compiled_obligation,
     compile_typed_obligation,
+    route_compiled_obligation,
 )
 from ovk.core.router import routing_decision_to_legacy_dict
 from ovk.mcp_server import select_backends
@@ -37,10 +37,14 @@ def test_compile_before_route_produces_single_routing_id() -> None:
         repo="example/repo",
         head_sha="abc",
     )
-    assert len(plan.routing_by_intent) == 1
-    routing = plan.routing_by_intent["no-admin-route-bypass"]
+    assert len(plan.routing_by_instance) == 1
+    routing = plan.routing_for(obligations[0])
+    typed = plan.typed_for(obligations[0])
+    assert routing is not None
+    assert typed is not None
     assert routing.routing_id
-    assert routing.obligation_id == plan.typed_obligations["no-admin-route-bypass"].obligation_id
+    assert routing.obligation_id == typed.obligation_id
+    assert plan.instances_for_intent("no-admin-route-bypass") == (plan.instance_key(obligations[0]),)
 
 
 def test_kernel_mcp_and_evidence_share_routing_id() -> None:

@@ -44,6 +44,30 @@ def _inputs() -> tuple[list[dict], AuthoritativeRoutingPlan]:
     return obligations, plan
 
 
+def _single_instance(obligations: list[dict], plan: AuthoritativeRoutingPlan) -> str:
+    """Return the instance identity for this fixture without falling back to intent identity."""
+    assert len(obligations) == 1
+    instance_id = plan.instance_key(obligations[0])
+    assert instance_id in plan.routing_by_instance
+    return instance_id
+
+
+def _plan_with_route(
+    plan: AuthoritativeRoutingPlan,
+    *,
+    instance_id: str,
+    route,
+) -> AuthoritativeRoutingPlan:
+    """Replace one route while preserving the plan's per-instance and intent bindings."""
+    routes = dict(plan.routing_by_instance)
+    routes[instance_id] = route
+    return AuthoritativeRoutingPlan(
+        typed_obligations=dict(plan.typed_obligations),
+        routing_by_instance=routes,
+        intent_by_instance=dict(plan.intent_by_instance),
+    )
+
+
 def test_execution_consumes_existing_plan_without_rerouting(monkeypatch: pytest.MonkeyPatch) -> None:
     import ovk.core.routing_pipeline as routing_pipeline
 
@@ -57,6 +81,7 @@ def test_execution_consumes_existing_plan_without_rerouting(monkeypatch: pytest.
 
     monkeypatch.setattr(routing_pipeline, "route_compiled_obligation", counted)
     obligations, plan = _inputs()
+    instance_id = _single_instance(obligations, plan)
     assert calls == 1
 
     evidence = execute_authoritative_plan(
@@ -69,17 +94,14 @@ def test_execution_consumes_existing_plan_without_rerouting(monkeypatch: pytest.
         policy=_auth_policy(),
     )
     assert calls == 1, "execution must consume the sealed plan, not route again"
-    assert evidence[0].routing_id == plan.routing_by_intent["no-admin-route-bypass"].routing_id
+    assert evidence[0].routing_id == plan.routing_by_instance[instance_id].routing_id
 
 
 def test_forged_obligation_binding_is_rejected_before_execution() -> None:
     obligations, plan = _inputs()
-    intent_id = "no-admin-route-bypass"
-    forged = plan.routing_by_intent[intent_id].model_copy(update={"obligation_id": "forged"})
-    forged_plan = AuthoritativeRoutingPlan(
-        typed_obligations=dict(plan.typed_obligations),
-        routing_by_intent={intent_id: forged},
-    )
+    instance_id = _single_instance(obligations, plan)
+    forged = plan.routing_by_instance[instance_id].model_copy(update={"obligation_id": "forged"})
+    forged_plan = _plan_with_route(plan, instance_id=instance_id, route=forged)
     with pytest.raises(AuthoritativePlanError, match="obligation_id mismatch"):
         validate_authoritative_plan(
             obligations,
@@ -91,12 +113,9 @@ def test_forged_obligation_binding_is_rejected_before_execution() -> None:
 
 def test_forged_policy_binding_is_rejected_before_execution() -> None:
     obligations, plan = _inputs()
-    intent_id = "no-admin-route-bypass"
-    forged = plan.routing_by_intent[intent_id].model_copy(update={"policy_digest": "forged-policy"})
-    forged_plan = AuthoritativeRoutingPlan(
-        typed_obligations=dict(plan.typed_obligations),
-        routing_by_intent={intent_id: forged},
-    )
+    instance_id = _single_instance(obligations, plan)
+    forged = plan.routing_by_instance[instance_id].model_copy(update={"policy_digest": "forged-policy"})
+    forged_plan = _plan_with_route(plan, instance_id=instance_id, route=forged)
     with pytest.raises(AuthoritativePlanError, match="policy_digest mismatch"):
         validate_authoritative_plan(
             obligations,
@@ -108,14 +127,11 @@ def test_forged_policy_binding_is_rejected_before_execution() -> None:
 
 def test_selected_backend_must_be_eligible_and_requested() -> None:
     obligations, plan = _inputs()
-    intent_id = "no-admin-route-bypass"
-    original = plan.routing_by_intent[intent_id]
+    instance_id = _single_instance(obligations, plan)
+    original = plan.routing_by_instance[instance_id]
     selected = original.selected[0].model_copy(update={"backend": "forged-backend"})
     forged = original.model_copy(update={"selected": [selected]})
-    forged_plan = AuthoritativeRoutingPlan(
-        typed_obligations=dict(plan.typed_obligations),
-        routing_by_intent={intent_id: forged},
-    )
+    forged_plan = _plan_with_route(plan, instance_id=instance_id, route=forged)
     with pytest.raises(AuthoritativePlanError, match="was not requested|was not eligible"):
         validate_authoritative_plan(
             obligations,
@@ -127,14 +143,11 @@ def test_selected_backend_must_be_eligible_and_requested() -> None:
 
 def test_selected_guarantee_must_match_eligible_candidate() -> None:
     obligations, plan = _inputs()
-    intent_id = "no-admin-route-bypass"
-    original = plan.routing_by_intent[intent_id]
+    instance_id = _single_instance(obligations, plan)
+    original = plan.routing_by_instance[instance_id]
     selected = original.selected[0].model_copy(update={"expected_guarantee": "forged-guarantee"})
     forged = original.model_copy(update={"selected": [selected]})
-    forged_plan = AuthoritativeRoutingPlan(
-        typed_obligations=dict(plan.typed_obligations),
-        routing_by_intent={intent_id: forged},
-    )
+    forged_plan = _plan_with_route(plan, instance_id=instance_id, route=forged)
     with pytest.raises(AuthoritativePlanError, match="selected guarantee mismatch"):
         validate_authoritative_plan(
             obligations,

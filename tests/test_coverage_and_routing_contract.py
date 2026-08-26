@@ -92,9 +92,10 @@ def test_enforced_incomplete_coverage_cannot_be_required_primary() -> None:
         repo="r",
         head_sha="h",
     )
-    typed = plan.typed_obligations["no-admin-route-bypass"]
+    instance_id = plan.instance_key(obligations[0])
+    typed = plan.typed_obligations[instance_id]
     assert typed.coverage.status != "complete"
-    routing = plan.routing_by_intent["no-admin-route-bypass"]
+    routing = plan.routing_by_instance[instance_id]
     assert not any(item.required for item in routing.selected)
 
 

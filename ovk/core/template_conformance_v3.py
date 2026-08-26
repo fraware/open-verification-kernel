@@ -48,15 +48,11 @@ _V2_COMPATIBILITY = {
     "deprecated": "deprecated",
     "catalog_only": "catalog_only",
     "executable_advisory": "executable_advisory",
-    # v2 had no candidate state. Down-projecting a candidate to advisory is the
-    # only conservative compatibility representation.
     "source_profile_candidate": "executable_advisory",
     "source_profile_strict_eligible": "source_profile_strict_eligible",
     "externally_calibrated_strict": "externally_calibrated_strict",
 }
 
-# Re-export legacy catalog helpers for callers that need raw template
-# classification. Maturity consumers should use build_conformance_matrix below.
 classify_template = legacy.classify_template
 domain_counts_markdown = legacy.domain_counts_markdown
 
@@ -75,20 +71,20 @@ def _sanitize_local_evidence(payload: dict[str, Any] | None) -> dict[str, Any] |
         return None
     sanitized = dict(payload)
     legacy_predicate = bool(sanitized.pop("strict_eligible", False))
-    sanitized["candidate_evidence_complete"] = legacy_predicate
+    candidate = bool(sanitized.get("candidate_evidence_complete", legacy_predicate))
+    sanitized["candidate_evidence_complete"] = candidate
     sanitized["evidence_scope"] = "local_profile_regression"
     sanitized["maturity_effect"] = "candidate_only"
     return sanitized
 
 
-def _qualification_for_row(row: dict[str, Any], *, repo_root: Path | None = None) -> SourceProfileQualification | None:
+def _qualification_for_row(
+    row: dict[str, Any], *, repo_root: Path | None = None
+) -> SourceProfileQualification | None:
     profile_id = row.get("source_profile_id")
     evidence = row.get("source_profile_evidence")
     if not profile_id or not isinstance(evidence, dict):
         return None
-    # Prefer machine qualification from the WP-05 artifact (corpus counts derived from
-    # named evidence entries). Local profile evidence alone never invents corpus counts
-    # and therefore cannot exceed source_profile_candidate.
     if repo_root is not None:
         from ovk.core.source_profile_qualification import qualification_from_artifact
 
@@ -104,7 +100,6 @@ def _qualification_for_row(row: dict[str, Any], *, repo_root: Path | None = None
         executable_path_complete=not bool(row.get("missing_executable_links")),
         compiler_binding_present=bool(links.get("neutral_compiler")),
     )
-    # Attach machine support-contract version when present; never invent corpus counts here.
     version = support_contract_version(str(profile_id), repo_root=repo_root)
     if version:
         return SourceProfileQualification(
@@ -143,8 +138,6 @@ def _project_row(row: dict[str, Any], *, repo_root: Path | None = None) -> dict[
         qualification,
         executable=_executable(row),
         deprecated=row.get("production_status") == "deprecated",
-        # External calibration is deliberately not inferred from template
-        # metadata or local generation.
         external_calibration=None,
     )
     projected["conformance_status_v3"] = status
@@ -158,7 +151,11 @@ def _project_row(row: dict[str, Any], *, repo_root: Path | None = None) -> dict[
 def build_conformance_matrix(repo_root: Path, templates_dir: Path | None = None) -> dict[str, Any]:
     """Build the normative v3 matrix from legacy catalog/link evidence."""
     raw = legacy.build_conformance_matrix(repo_root, templates_dir=templates_dir)
-    rows = [_project_row(row, repo_root=repo_root) for row in raw.get("templates") or [] if isinstance(row, dict)]
+    rows = [
+        _project_row(row, repo_root=repo_root)
+        for row in raw.get("templates") or []
+        if isinstance(row, dict)
+    ]
 
     top_evidence: dict[str, Any] = {}
     for intent_id, payload in sorted((raw.get("source_profile_evidence") or {}).items()):

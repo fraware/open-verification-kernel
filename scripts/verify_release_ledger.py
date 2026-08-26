@@ -1,5 +1,10 @@
 #!/usr/bin/env python
-"""Offline release-ledger verifier (WP-17). Never tags or publishes."""
+"""Offline release-ledger structural checker (WP-17).
+
+This command deliberately cannot authorize a release or mint
+``verified_source_sha`` because workflow provenance is not independently
+available offline. Use ``verify_release_ledger_github.py`` for authorization.
+"""
 
 from __future__ import annotations
 
@@ -12,20 +17,28 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ovk.core.release_ledger import verify_release_ledger, write_release_ledger  # noqa: E402
+from ovk.core.release_ledger import validate_release_ledger_structure  # noqa: E402
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Verify OVK release ledger offline")
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Validate OVK release-ledger structure offline (never authorizes)"
+    )
     parser.add_argument("--ledger", type=Path, required=True)
     parser.add_argument("--repo-root", type=Path, default=ROOT)
     parser.add_argument("--require-artifacts", action="store_true")
     parser.add_argument("--require-consumers", action="store_true")
     parser.add_argument("--require-holdout", action="store_true")
-    parser.add_argument("--write", type=Path, default=None)
-    args = parser.parse_args()
+    parser.add_argument(
+        "--write",
+        type=Path,
+        default=None,
+        help="Optional path for a normalized unauthorized ledger copy",
+    )
+    args = parser.parse_args(argv)
+
     payload = json.loads(args.ledger.read_text(encoding="utf-8"))
-    ok, failures, authorized = verify_release_ledger(
+    failures = validate_release_ledger_structure(
         payload,
         repo_root=args.repo_root.resolve(),
         require_artifacts=args.require_artifacts,
@@ -34,16 +47,29 @@ def main() -> int:
     )
     for failure in failures:
         print(failure, file=sys.stderr)
+    if failures:
+        return 1
+
+    output = json.loads(json.dumps(payload))
+    output["release_state"] = {
+        "authorized": False,
+        "verified_source_sha": None,
+        "tag": None,
+        "published": False,
+        "authorization_reason": "offline_structural_validation_only",
+    }
+    output["evidence"] = dict(output.get("evidence") or {})
+    output["evidence"]["workflow_provenance"] = None
     if args.write is not None:
         args.write.parent.mkdir(parents=True, exist_ok=True)
-        args.write.write_text(json.dumps(authorized, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    elif ok:
-        write_release_ledger(args.repo_root.resolve(), authorized)
-    if not ok:
-        return 1
+        args.write.write_text(
+            json.dumps(output, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
     print(
-        "authorized verified_source_sha="
-        f"{authorized['release_state']['verified_source_sha']} published=false tag=null"
+        "release ledger structurally valid; NOT authorized "
+        "(live GitHub workflow provenance required)"
     )
     return 0
 

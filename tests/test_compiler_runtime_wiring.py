@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 from ovk.adapters.authorization import build_authorization_registry
 from ovk.adapters.deployment import build_deployment_registry
 from ovk.core.adapter_runtime import execute_obligations
@@ -41,12 +40,12 @@ def users():
         "task": "bypass",
     }
     obligation = compile_authorization_obligation(data, repo="r", head_sha="h", base_sha="b")
-    assert obligation.compiler_id == "ovk.authorization.fastapi.v1"
+    expected_compiler = "ovk.authorization.fastapi.profile:authorization.fastapi.ast_v1"
+    assert obligation.compiler_id == expected_compiler
     assert obligation.coverage.status in {"complete", "partial"}
-    assert obligation.abstraction.get("source_compiler") == "ovk.authorization.fastapi.v1"
+    assert obligation.abstraction.get("source_compiler") == expected_compiler
     assert any(m.kind == "source_file" for m in obligation.materials)
 
-    # Obligation id must depend on compiled abstraction (compiler output is live).
     protected = compile_authorization_obligation(
         {
             "framework": "fastapi",
@@ -68,12 +67,11 @@ def users():
         policy={"routing": {"mode": "shadow", "enforced_lanes": ["authorization"], "prefer_deterministic": True}},
     )[0]
     assert evidence.routing_enforced is True
-    assert evidence.compiler and evidence.compiler["compiler_id"] == "ovk.authorization.fastapi.v1"
+    assert evidence.compiler and evidence.compiler["compiler_id"] == expected_compiler
     assert evidence.decision["merge_recommendation"] == "block"
 
 
 def test_incomplete_auth_abstraction_cannot_allow_under_strict() -> None:
-    # Head-only materials => unknown coverage; even a "safe" head cannot allow.
     head = """
 from fastapi import Depends, FastAPI
 def require_admin():
@@ -204,7 +202,6 @@ def test_deployment_github_environments_compiler() -> None:
     }
     obligation = compile_deployment_obligation(data, repo="r", head_sha="h")
     assert obligation.compiler_id == "ovk.deployment.github_environments.v1"
-    # Missing required reviewers on production path should surface as fail/review via state machine.
     registry = build_deployment_registry()
     budget = ExecutionBudget(
         total_wall_time_seconds=30,
@@ -233,7 +230,7 @@ def test_cbmc_registration_honest_without_project_grounding() -> None:
     assert obligation.coverage.status == "unknown"
     assert obligation.abstraction.get("project_grounded") is False
 
-    grounded = compile_cbmc_obligation(
+    harness_only = compile_cbmc_obligation(
         {
             "functions": [{"name": "foo", "file": "foo.c", "selected_reason": "changed"}],
             "harnesses": [
@@ -248,5 +245,30 @@ def test_cbmc_registration_honest_without_project_grounding() -> None:
         repo="r",
         head_sha="h",
     )
+    assert harness_only.compiler_id == "ovk.cbmc.harness_or_cdb.v1"
+    assert harness_only.coverage.status == "partial"
+    assert harness_only.abstraction.get("project_grounded") is False
+    assert harness_only.abstraction.get("guarantee_type") == "bounded_harness_model_check"
+
+    grounded = compile_cbmc_obligation(
+        {
+            "compile_commands_path": "build/compile_commands.json",
+            "source_roots": ["src"],
+            "functions": [{"name": "foo", "file": "src/foo.c", "selected_reason": "changed"}],
+            "harnesses": [
+                {
+                    "harness_id": "h1",
+                    "entry_function": "harness",
+                    "bound": 8,
+                    "includes_project_code": True,
+                    "traces_to_source_functions": ["foo"],
+                }
+            ],
+        },
+        repo="r",
+        head_sha="h",
+    )
     assert grounded.compiler_id == "ovk.cbmc.project_grounded.v1"
     assert grounded.coverage.status == "complete"
+    assert grounded.abstraction.get("project_grounded") is True
+    assert grounded.abstraction.get("guarantee_type") == "bounded_project_model_check"
