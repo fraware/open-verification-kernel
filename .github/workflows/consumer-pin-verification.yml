@@ -14,10 +14,12 @@ on:
         description: Ref for ovk-consumer-fastapi-terraform
         required: true
         default: main
+        type: string
       express_ref:
         description: Ref for ovk-consumer-express-actions
         required: true
         default: main
+        type: string
 
 permissions:
   contents: read
@@ -57,7 +59,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Assert immutable Action SHA pin (no uses: ./)
+      - name: "Assert immutable Action SHA pin (no uses: ./)"
         env:
           OVK_SHA: ${{ inputs.ovk_candidate_sha }}
         working-directory: consumer
