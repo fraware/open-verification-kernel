@@ -30,6 +30,7 @@ REPOSITORY = "fraware/open-verification-kernel"
 PRED_SHA = "1" * 64
 MANIFEST_FILE_SHA = "2" * 64
 AGG_SHA = "3" * 64
+HOLDOUT_ASSET_SHA = "a" * 64
 WHEEL_SHA = "4" * 64
 SDIST_SHA = "5" * 64
 HOLDOUT_TAG = "v0.1.0-synthetic"
@@ -105,6 +106,8 @@ def _workflow_artifact_resolver(
             "artifact_name": "formalpr-holdout-aggregates",
             "aggregate_sha256": AGG_SHA,
             "candidate_source_sha": SHA,
+            "predictions_sha256": PRED_SHA,
+            "holdout_asset_sha256": HOLDOUT_ASSET_SHA,
             "holdout_tag": HOLDOUT_TAG,
             "schema_valid": True,
             "verified_source_sha_present": False,
@@ -171,6 +174,7 @@ def test_full_provenance_hydrates_evidence_and_authorizes() -> None:
         "candidate_source_sha": SHA,
         "predictions_sha256": PRED_SHA,
         "aggregate_sha256": AGG_SHA,
+        "holdout_asset_sha256": HOLDOUT_ASSET_SHA,
         "holdout_tag": HOLDOUT_TAG,
     }
     assert {
@@ -355,6 +359,9 @@ def _valid_aggregate_payload() -> dict[str, Any]:
         "benchmark": "FormalPR-Holdout",
         "holdout_release_tag": HOLDOUT_TAG,
         "ovk_commit_sha": SHA,
+        "candidate_source_sha": SHA,
+        "predictions_sha256": PRED_SHA,
+        "holdout_asset_sha256": HOLDOUT_ASSET_SHA,
         "generated_at_unix_ms": 1,
         "cases_scored": 1,
         "lanes": {"authorization": metrics},
@@ -374,6 +381,8 @@ def test_holdout_aggregate_artifact_parser_validates_schema(tmp_path: Path) -> N
     observed = _inspect_holdout_aggregate(tmp_path)
     assert observed["aggregate_sha256"] == aggregate_sha
     assert observed["candidate_source_sha"] == SHA
+    assert observed["predictions_sha256"] == PRED_SHA
+    assert observed["holdout_asset_sha256"] == HOLDOUT_ASSET_SHA
     assert observed["holdout_tag"] == HOLDOUT_TAG
     assert observed["schema_valid"] is True
     assert observed["verified_source_sha_present"] is False
@@ -500,3 +509,24 @@ def test_consumer_workflow_records_immutable_checkout_source_sha() -> None:
     assert 'CONSUMER_SOURCE_SHA="$(git rev-parse HEAD)"' in text
     assert '"consumer_source_sha": consumer_source_sha' in text
     assert "if-no-files-found: error" in text
+
+def test_aggregate_prediction_digest_mismatch_cannot_authorize() -> None:
+    def mismatched_artifacts(repository: str, run_id: int, workflow: str) -> dict[str, Any]:
+        payload = dict(_workflow_artifact_resolver(repository, run_id, workflow))
+        if workflow == "FormalPR-Holdout eval":
+            payload["predictions_sha256"] = "f" * 64
+        return payload
+
+    ok, failures, checked = verify_release_ledger(
+        _draft(),
+        repo_root=REPO,
+        workflow_run_resolver=_live_run_resolver,
+        workflow_artifact_resolver=mismatched_artifacts,
+        release_artifact_resolver=_release_artifact_resolver,
+        expected_repository=REPOSITORY,
+        expected_candidate_sha=SHA,
+    )
+    assert ok is False
+    assert "holdout_aggregate_predictions_digest_mismatch" in failures
+    assert checked["release_state"]["authorized"] is False
+    assert checked["release_state"]["verified_source_sha"] is None

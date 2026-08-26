@@ -161,6 +161,7 @@ def build_release_ledger(
         "candidate_source_sha": candidate_sha,
         "predictions_sha256": None,
         "aggregate_sha256": None,
+        "holdout_asset_sha256": None,
         "holdout_tag": None,
     }
     artifact_payload = {
@@ -320,14 +321,14 @@ def validate_release_ledger_structure(
         failures.append("consumers_required")
 
     holdout = ledger.get("holdout") if isinstance(ledger.get("holdout"), dict) else {}
-    for key in ("predictions_sha256", "aggregate_sha256"):
+    for key in ("predictions_sha256", "aggregate_sha256", "holdout_asset_sha256"):
         value = holdout.get(key)
         if value is not None and not _valid_sha256(value):
             failures.append(f"holdout.{key} malformed")
     if require_holdout:
         if str(holdout.get("candidate_source_sha") or "").lower() != candidate:
             failures.append("holdout.candidate_source_sha mismatch")
-        for key in ("predictions_sha256", "aggregate_sha256"):
+        for key in ("predictions_sha256", "aggregate_sha256", "holdout_asset_sha256"):
             if not _valid_sha256(holdout.get(key)):
                 failures.append(f"holdout.{key} required")
 
@@ -599,6 +600,8 @@ def _verify_workflow_artifacts(
         if aggregate is not None:
             agg_sha = aggregate.get("aggregate_sha256")
             agg_candidate = str(aggregate.get("candidate_source_sha") or "").lower()
+            agg_predictions_sha = aggregate.get("predictions_sha256")
+            holdout_asset_sha = aggregate.get("holdout_asset_sha256")
             holdout_tag = str(aggregate.get("holdout_tag") or "")
             if aggregate.get("kind") != "holdout_aggregate.v1":
                 failures.append("holdout_aggregate_kind_invalid")
@@ -608,6 +611,12 @@ def _verify_workflow_artifacts(
                 failures.append("holdout_aggregate_sha256_invalid")
             if agg_candidate != candidate:
                 failures.append("holdout_aggregate_candidate_mismatch")
+            if not _valid_sha256(agg_predictions_sha):
+                failures.append("holdout_aggregate_predictions_sha256_invalid")
+            if pred_sha is not None and agg_predictions_sha != pred_sha:
+                failures.append("holdout_aggregate_predictions_digest_mismatch")
+            if not _valid_sha256(holdout_asset_sha):
+                failures.append("holdout_asset_sha256_invalid")
             if not holdout_tag:
                 failures.append("holdout_tag_missing")
             if aggregate.get("schema_valid") is not True:
@@ -616,6 +625,8 @@ def _verify_workflow_artifacts(
                 failures.append("holdout_aggregate_illegal_verified_source_sha")
         else:
             agg_sha = None
+            agg_predictions_sha = None
+            holdout_asset_sha = None
             holdout_tag = ""
 
         if predict is not None and aggregate is not None and _valid_sha256(pred_sha) and _valid_sha256(agg_sha):
@@ -640,6 +651,16 @@ def _verify_workflow_artifacts(
             )
             _preclaim_mismatch(
                 failures,
+                name="holdout.holdout_asset_sha256",
+                claimed=_normalized_optional_digest(claimed.get("holdout_asset_sha256")),
+                observed=(
+                    str(holdout_asset_sha).lower()
+                    if _valid_sha256(holdout_asset_sha)
+                    else holdout_asset_sha
+                ),
+            )
+            _preclaim_mismatch(
+                failures,
                 name="holdout.holdout_tag",
                 claimed=claimed.get("holdout_tag"),
                 observed=holdout_tag,
@@ -648,14 +669,17 @@ def _verify_workflow_artifacts(
                 "candidate_source_sha": candidate,
                 "predictions_sha256": str(pred_sha).lower(),
                 "aggregate_sha256": str(agg_sha).lower(),
+                "holdout_asset_sha256": str(holdout_asset_sha).lower(),
                 "holdout_tag": holdout_tag,
             }
             provenance["holdout"] = {
                 "predict_run_id": rows["FormalPR-Holdout predict"]["run_id"],
                 "eval_run_id": rows["FormalPR-Holdout eval"]["run_id"],
                 "predictions_sha256": str(pred_sha).lower(),
+                "aggregate_predictions_sha256": str(agg_predictions_sha).lower(),
                 "prediction_manifest_sha256": str(manifest_file_sha).lower(),
                 "aggregate_sha256": str(agg_sha).lower(),
+                "holdout_asset_sha256": str(holdout_asset_sha).lower(),
                 "holdout_tag": holdout_tag,
             }
 

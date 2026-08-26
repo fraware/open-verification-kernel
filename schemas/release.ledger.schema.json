@@ -214,6 +214,17 @@
           "pattern": "^[0-9a-f]{40}$",
           "type": "string"
         },
+        "holdout_asset_sha256": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "type": "string"
+            }
+          ]
+        },
         "holdout_tag": {
           "type": [
             "string",
@@ -236,7 +247,8 @@
         "candidate_source_sha",
         "predictions_sha256",
         "aggregate_sha256",
-        "holdout_tag"
+        "holdout_tag",
+        "holdout_asset_sha256"
       ],
       "type": "object"
     },

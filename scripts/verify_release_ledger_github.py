@@ -184,7 +184,9 @@ def _inspect_holdout_aggregate(root: Path) -> dict[str, Any]:
         "kind": "holdout_aggregate.v1",
         "artifact_name": "formalpr-holdout-aggregates",
         "aggregate_sha256": _sha256(aggregate_path),
-        "candidate_source_sha": str(aggregate.get("ovk_commit_sha") or "").lower(),
+        "candidate_source_sha": str(aggregate.get("candidate_source_sha") or "").lower(),
+        "predictions_sha256": str(aggregate.get("predictions_sha256") or "").lower(),
+        "holdout_asset_sha256": str(aggregate.get("holdout_asset_sha256") or "").lower(),
         "holdout_tag": str(aggregate.get("holdout_release_tag") or ""),
         "schema_valid": True,
         "verified_source_sha_present": (

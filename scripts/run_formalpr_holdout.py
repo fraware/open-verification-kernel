@@ -162,6 +162,9 @@ _REQUIRED_AGGREGATE_KEYS = (
     "benchmark",
     "holdout_release_tag",
     "ovk_commit_sha",
+    "candidate_source_sha",
+    "predictions_sha256",
+    "holdout_asset_sha256",
     "cases_scored",
     "lanes",
     "leakage_guard",
@@ -186,6 +189,16 @@ def validate_aggregate_schema(payload: dict[str, Any]) -> None:
         _fail("unexpected aggregate schema_version")
     if payload.get("benchmark") != "FormalPR-Holdout":
         _fail("unexpected aggregate benchmark")
+    candidate = str(payload.get("candidate_source_sha") or "").lower()
+    ovk_sha = str(payload.get("ovk_commit_sha") or "").lower()
+    if len(candidate) != 40 or any(char not in "0123456789abcdef" for char in candidate):
+        _fail("candidate_source_sha must be exact lowercase 40-hex")
+    if ovk_sha != candidate:
+        _fail("ovk_commit_sha must equal candidate_source_sha exactly")
+    for key in ("predictions_sha256", "holdout_asset_sha256"):
+        digest = str(payload.get(key) or "")
+        if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            _fail(f"{key} must be exact lowercase 64-hex")
     lanes = payload.get("lanes")
     if not isinstance(lanes, dict) or not lanes:
         _fail("aggregate lanes must be a non-empty object")
@@ -341,6 +354,9 @@ def run_harness(
     predictions: Path,
     holdout_tag: str,
     ovk_sha: str,
+    candidate_source_sha: str,
+    predictions_sha256: str,
+    holdout_asset_sha256: str,
     verified_sha: str | None,
     output: Path,
 ) -> dict[str, Any]:
@@ -392,6 +408,21 @@ def run_harness(
     if not output.is_file():
         _fail("evaluate.py did not produce aggregate output")
     payload = json.loads(output.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        _fail("evaluate.py aggregate output must be a JSON object")
+    if "verified_source_sha" in payload:
+        _fail("ordinary holdout evaluator must not emit verified_source_sha")
+    bindings = {
+        "candidate_source_sha": candidate_source_sha,
+        "ovk_commit_sha": candidate_source_sha,
+        "predictions_sha256": predictions_sha256,
+        "holdout_asset_sha256": holdout_asset_sha256,
+    }
+    for key, expected in bindings.items():
+        existing = payload.get(key)
+        if existing is not None and str(existing).lower() != expected:
+            _fail(f"evaluator {key} mismatch: observed={existing!r} expected={expected!r}")
+        payload[key] = expected
     assert_aggregate_safe(payload)
     return payload
 
@@ -480,14 +511,25 @@ def main(argv: list[str] | None = None) -> int:
                 dest=tmp_path / asset_name,
                 token=token,
             )
-        verify_asset_sha256(tarball, expected_digest)
+        holdout_asset_sha256 = verify_asset_sha256(tarball, expected_digest).lower()
         release_root = extract_tarball(tarball, tmp_path / "extract")
         # Predictions must be label-free before the evaluator sees them.
         pred_payload = json.loads(args.predictions.read_text(encoding="utf-8"))
         from scripts.digest_holdout_predictions import assert_predictions_label_free
 
         assert_predictions_label_free(pred_payload)
-        candidate_sha = args.candidate_source_sha or args.ovk_commit_sha
+        candidate_sha = str(args.candidate_source_sha or args.ovk_commit_sha).lower()
+        if len(candidate_sha) != 40 or any(
+            char not in "0123456789abcdef" for char in candidate_sha
+        ):
+            _fail("candidate source SHA must be exact lowercase 40-hex")
+        prediction_candidate = str(pred_payload.get("candidate_source_sha") or "").lower()
+        if prediction_candidate and prediction_candidate != candidate_sha:
+            _fail(
+                "prediction candidate_source_sha mismatch: "
+                f"predictions={prediction_candidate} expected={candidate_sha}"
+            )
+        predictions_sha256 = sha256_file(args.predictions).lower()
         if args.verified_source_sha:
             _fail(
                 "ordinary holdout must not set --verified-source-sha; "
@@ -498,15 +540,13 @@ def main(argv: list[str] | None = None) -> int:
             predictions=args.predictions,
             holdout_tag=args.tag,
             ovk_sha=candidate_sha,
+            candidate_source_sha=candidate_sha,
+            predictions_sha256=predictions_sha256,
+            holdout_asset_sha256=holdout_asset_sha256,
             verified_sha=None,
             output=tmp_path / "aggregate.json",
         )
-        # Normalize identity fields for ordinary holdout.
-        if isinstance(payload, dict):
-            payload = dict(payload)
-            payload["candidate_source_sha"] = candidate_sha
-            payload["ovk_commit_sha"] = candidate_sha
-            payload.pop("verified_source_sha", None)
+        validate_aggregate_schema(payload)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
