@@ -57,6 +57,14 @@ jobs:
           /tmp/ovk-release-wheel/bin/ovk init
           /tmp/ovk-release-wheel/bin/ovk doctor
           /tmp/ovk-release-wheel/bin/python -c 'from ovk import mcp_server; from ovk.core.templates_cli import list_templates; assert len(list_templates()) >= 100; assert len(mcp_server.list_capabilities()["capabilities"]) >= 10'
+      - name: Generate reproducible release SBOM
+        run: |
+          set -euo pipefail
+          python -m pip install 'cyclonedx-bom==7.3.1'
+          python scripts/generate_sbom.py \
+            --python /tmp/ovk-release-wheel/bin/python \
+            --output release/ovk-release-sbom.cdx.json \
+            --expected-generator-version 7.3.1
       - name: Upload built distributions
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -64,6 +72,13 @@ jobs:
           path: dist/*
           if-no-files-found: error
           retention-days: 30
+      - name: Upload release SBOM
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ovk-release-sbom
+          path: release/ovk-release-sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 90
 
   build-dry-run:
     if: github.event_name == 'workflow_dispatch'
@@ -82,6 +97,21 @@ jobs:
           python scripts/check_release_metadata.py
           python -m build
           twine check dist/*
+      - name: Smoke-test dry-run wheel
+        run: |
+          set -euo pipefail
+          WHEEL="$(realpath "$(ls dist/*.whl | head -n 1)")"
+          python -m venv /tmp/ovk-release-wheel
+          /tmp/ovk-release-wheel/bin/python -m pip install "$WHEEL"
+          /tmp/ovk-release-wheel/bin/ovk doctor
+      - name: Generate reproducible release SBOM
+        run: |
+          set -euo pipefail
+          python -m pip install 'cyclonedx-bom==7.3.1'
+          python scripts/generate_sbom.py \
+            --python /tmp/ovk-release-wheel/bin/python \
+            --output release/ovk-release-sbom.cdx.json \
+            --expected-generator-version 7.3.1
       - name: Upload built distributions
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -89,6 +119,13 @@ jobs:
           path: dist/*
           if-no-files-found: error
           retention-days: 14
+      - name: Upload release SBOM
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ovk-release-sbom
+          path: release/ovk-release-sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 30
 
   sigstore:
     name: Keyless Sigstore sign and verify
@@ -101,6 +138,7 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -111,6 +149,11 @@ jobs:
         with:
           name: ovk-dist
           path: dist
+      - name: Download release SBOM
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ovk-release-sbom
+          path: release
       - name: Install cosign
         uses: sigstore/cosign-installer@d7d6bc7722e3daa8354c50bcb52f4837da5e9b6a # v3.8.1
       - name: Resolve certificate identity
@@ -146,6 +189,7 @@ jobs:
           if [ "${{ steps.identity.outputs.immutable_tag }}" = "true" ]; then
             python scripts/sigstore_release.py \
               --dist-dir dist \
+              --extra release/ovk-release-sbom.cdx.json \
               --bundles-dir sigstore-bundles \
               --summary sigstore-bundles/ovk-sigstore-summary.json \
               --certificate-identity "${OVK_COSIGN_IDENTITY}" \
@@ -155,28 +199,37 @@ jobs:
           else
             python scripts/sigstore_release.py \
               --dist-dir dist \
+              --extra release/ovk-release-sbom.cdx.json \
               --bundles-dir sigstore-bundles \
               --summary sigstore-bundles/ovk-sigstore-summary.json \
               --certificate-identity "${OVK_COSIGN_IDENTITY}" \
               --certificate-oidc-issuer "${OVK_COSIGN_ISSUER}" \
               --git-ref "${GITHUB_REF}"
           fi
-      - name: Retain cosign bundles
+      - name: Attest release wheel SBOM
+        id: attest-sbom
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: dist/*.whl
+          sbom-path: release/ovk-release-sbom.cdx.json
+      - name: Retain signing and SBOM evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ovk-sigstore-bundles
           path: |
             sigstore-bundles/**
+            release/ovk-release-sbom.cdx.json
             dist/*
           if-no-files-found: error
           retention-days: 90
-      - name: Attach Sigstore bundles to GitHub Release
+      - name: Attach signing and SBOM evidence to GitHub Release
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh release upload "${{ github.event.release.tag_name }}" \
+            release/ovk-release-sbom.cdx.json \
             sigstore-bundles/*.json \
             --clobber
 
