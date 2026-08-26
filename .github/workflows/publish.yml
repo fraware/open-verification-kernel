@@ -1,191 +1,413 @@
 name: Publish
 
+# Production release state machine:
+# signed annotated tag -> exact candidate build -> live ledger authorization ->
+# Sigstore sign/verify -> draft GitHub Release -> PyPI exact publication ->
+# final GitHub Release publication. A public GitHub Release is never an input.
+
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: "Ignored for safety; workflow_dispatch never publishes to PyPI. Builds artifacts and exercises keyless Sigstore only."
+      tag:
+        description: Signed annotated release tag; dispatch this workflow on the same tag ref
+        required: true
+        type: string
+      publish:
+        description: Publish to PyPI and make the staged GitHub Release public
+        required: true
         type: boolean
-        default: true
+        default: false
+
+concurrency:
+  group: ovk-publish-${{ inputs.tag }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
 env:
   OVK_CERTIFICATE_OIDC_ISSUER: https://token.actions.githubusercontent.com
+  OVK_PYPI_PROJECT: open-verification-kernel
 
 jobs:
-  verify:
-    if: github.event_name == 'release'
+  authorize:
+    name: Authorize exact release candidate
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      candidate_sha: ${{ steps.candidate.outputs.sha }}
+      version: ${{ steps.metadata.outputs.version }}
+      pypi_version: ${{ steps.metadata.outputs.pypi_version }}
+      prerelease: ${{ steps.metadata.outputs.prerelease }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
-      - name: Install and verify release gates
+
+      - name: Require dispatch on the exact immutable tag ref
+        id: candidate
         env:
-          OVK_RELEASE_TAG: ${{ github.event.release.tag_name }}
+          OVK_RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          TAG="$OVK_RELEASE_TAG"
+          case "$TAG" in
+            v*) ;;
+            *) echo "release tag must start with v: $TAG" >&2; exit 1 ;;
+          esac
+          if [ "$GITHUB_REF" != "refs/tags/$TAG" ]; then
+            echo "Publish must be dispatched on refs/tags/$TAG; got $GITHUB_REF" >&2
+            exit 1
+          fi
+          case "$GITHUB_WORKFLOW_REF" in
+            *"@refs/tags/$TAG") ;;
+            *)
+              echo "workflow identity is not tag-bound: $GITHUB_WORKFLOW_REF" >&2
+              exit 1
+              ;;
+          esac
+          CANDIDATE="$(git rev-parse "${TAG}^{commit}")"
+          HEAD_SHA="$(git rev-parse HEAD)"
+          python - "$CANDIDATE" "$HEAD_SHA" <<'PY'
+          import re, sys
+          candidate, head = (value.lower() for value in sys.argv[1:])
+          if not re.fullmatch(r"[0-9a-f]{40}", candidate):
+              raise SystemExit(f"tag target is not exact 40-hex: {candidate!r}")
+          if head != candidate:
+              raise SystemExit(f"checkout does not equal tag target: head={head} tag={candidate}")
+          PY
+          echo "sha=$CANDIDATE" >> "$GITHUB_OUTPUT"
+          echo "Exact tag candidate: $CANDIDATE"
+
+      - name: Install release tooling
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
           python scripts/sync_package_data.py
-          pip install -e '.[dev]'
-          python scripts/check_release_metadata.py
-          python -c 'import os, ovk; tag=os.environ["OVK_RELEASE_TAG"]; n=tag[1:] if tag.startswith("v") else tag; raise SystemExit(0 if n==ovk.__version__ else f"release tag {tag!r} does not match package version {ovk.__version__!r}")'
-          pytest -q
-          ovk release-preflight
-          ovk pilot
-          ovk bench --expanded --leaderboard .verification/formal-pr-bench-leaderboard.json
-      - name: Build and inspect package
+          pip install --no-cache-dir -e '.[dev]' build twine packaging
+
+      - name: Validate release metadata and tag/version identity
+        id: metadata
+        env:
+          OVK_RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          pip install build twine
+          python scripts/check_release_metadata.py
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import os
+          from packaging.version import Version
+          from ovk.core.release_metadata import OVK_RELEASE_CANDIDATE
+
+          tag = os.environ["OVK_RELEASE_TAG"]
+          expected_tag = f"v{OVK_RELEASE_CANDIDATE}"
+          if tag != expected_tag:
+              raise SystemExit(
+                  f"release tag {tag!r} does not exactly match package release {expected_tag!r}"
+              )
+          parsed = Version(OVK_RELEASE_CANDIDATE)
+          print(f"version={OVK_RELEASE_CANDIDATE}")
+          print(f"pypi_version={parsed}")
+          print(f"prerelease={'true' if parsed.is_prerelease else 'false'}")
+          PY
+
+      - name: Verify signed annotated tag against candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+          OVK_RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          python scripts/verify_release_tag_github.py \
+            --repo "$GITHUB_REPOSITORY" \
+            --tag "$OVK_RELEASE_TAG" \
+            --expected-candidate-sha "$CANDIDATE_SHA"
+
+      - name: Build exact wheel and sdist
+        run: |
+          set -euo pipefail
+          rm -rf dist build
           python scripts/sync_package_data.py
           python -m build
           twine check dist/*
-      - name: Smoke-test release wheel
+          test "$(find dist -maxdepth 1 -type f -name '*.whl' | wc -l)" -eq 1
+          test "$(find dist -maxdepth 1 -type f -name '*.tar.gz' | wc -l)" -eq 1
+
+      - name: Smoke-test installed wheel outside checkout
         run: |
           set -euo pipefail
-          WHEEL="$(realpath "$(ls dist/*.whl | head -n 1)")"
+          WHEEL="$(realpath "$(find dist -maxdepth 1 -type f -name '*.whl' -print -quit)")"
+          rm -rf /tmp/ovk-release-wheel /tmp/ovk-release-consumer
           python -m venv /tmp/ovk-release-wheel
+          /tmp/ovk-release-wheel/bin/python -m pip install --upgrade pip
           /tmp/ovk-release-wheel/bin/python -m pip install "$WHEEL"
           mkdir -p /tmp/ovk-release-consumer
           cd /tmp/ovk-release-consumer
           /tmp/ovk-release-wheel/bin/ovk init
           /tmp/ovk-release-wheel/bin/ovk doctor
-          /tmp/ovk-release-wheel/bin/python -c 'from ovk import mcp_server; from ovk.core.templates_cli import list_templates; assert len(list_templates()) >= 100; assert len(mcp_server.list_capabilities()["capabilities"]) >= 10'
-      - name: Upload built distributions
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: ovk-dist
-          path: dist/*
-          if-no-files-found: error
-          retention-days: 30
+          /tmp/ovk-release-wheel/bin/python - <<'PY'
+          from ovk import mcp_server
+          from ovk.core.templates_cli import list_templates
+          assert len(list_templates()) >= 100
+          assert len(mcp_server.list_capabilities()["capabilities"]) >= 10
+          PY
 
-  build-dry-run:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.12"
-      - name: Build package for Sigstore dry-run
+      - name: Require release preflight on the candidate checkout
+        run: ovk release-preflight
+
+      - name: Collect only explicit release-evidence workflow runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
         run: |
           set -euo pipefail
-          python -m pip install --upgrade pip build twine
-          python scripts/sync_package_data.py
-          pip install -e '.[dev]'
-          python scripts/check_release_metadata.py
-          python -m build
-          twine check dist/*
-      - name: Upload built distributions
+          mkdir -p .verification
+          python scripts/collect_workflow_evidence.py \
+            --repo "$GITHUB_REPOSITORY" \
+            --sha "$CANDIDATE_SHA" \
+            --required-event workflow_dispatch \
+            --limit 100 \
+            --output .verification/workflow-evidence.json \
+            --ledger-output .verification/release-ledger.draft.json
+
+      - name: Independently authorize workflow, holdout, consumer, and distribution provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          python scripts/verify_release_ledger_github.py \
+            --ledger .verification/release-ledger.draft.json \
+            --repo-root . \
+            --dist-dir dist \
+            --expected-repository "$GITHUB_REPOSITORY" \
+            --expected-candidate-sha "$CANDIDATE_SHA" \
+            --write .verification/release-ledger.authorized.json
+
+      - name: Re-check the exact bytes authorized for publication
+        env:
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          python scripts/verify_authorized_release_inputs.py \
+            --ledger .verification/release-ledger.authorized.json \
+            --dist-dir dist \
+            --expected-repository "$GITHUB_REPOSITORY" \
+            --expected-candidate-sha "$CANDIDATE_SHA"
+
+      - name: Check PyPI pre-publication/recovery state
+        run: |
+          set -euo pipefail
+          python scripts/check_pypi_distribution_state.py \
+            --project "$OVK_PYPI_PROJECT" \
+            --version "${{ steps.metadata.outputs.pypi_version }}" \
+            --dist-dir dist \
+            --output .verification/pypi-state.pre.json
+
+      - name: Retain authorized candidate transaction inputs
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ovk-dist
-          path: dist/*
+          name: ovk-authorized-release-candidate
+          path: |
+            dist/**
+            .verification/workflow-evidence.json
+            .verification/release-ledger.draft.json
+            .verification/release-ledger.authorized.json
+            .verification/pypi-state.pre.json
           if-no-files-found: error
-          retention-days: 14
+          include-hidden-files: true
+          retention-days: 90
 
   sigstore:
-    name: Keyless Sigstore sign and verify
-    needs: [verify, build-dry-run]
-    if: |
-      always() &&
-      (needs.verify.result == 'success' || needs.build-dry-run.result == 'success')
+    name: Keyless Sigstore sign, verify, and tamper-test
+    needs: authorize
     runs-on: ubuntu-latest
     environment: sigstore
     permissions:
-      contents: write
+      contents: read
       id-token: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
-      - name: Download built distributions
+
+      - name: Download authorized candidate
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: ovk-dist
-          path: dist
-      - name: Install cosign
-        uses: sigstore/cosign-installer@d7d6bc7722e3daa8354c50bcb52f4837da5e9b6a # v3.8.1
-      - name: Resolve certificate identity
-        id: identity
-        run: |
-          set -euo pipefail
-          IDENTITY="https://github.com/${GITHUB_WORKFLOW_REF}"
-          echo "certificate_identity=${IDENTITY}" >> "$GITHUB_OUTPUT"
-          echo "Resolved certificate identity: ${IDENTITY}"
-          echo "OIDC issuer: ${OVK_CERTIFICATE_OIDC_ISSUER}"
-          case "${GITHUB_REF}" in
-            refs/tags/*)
-              echo "immutable_tag=true" >> "$GITHUB_OUTPUT"
-              ;;
-            *)
-              echo "immutable_tag=false" >> "$GITHUB_OUTPUT"
-              if [ "${{ github.event_name }}" = "release" ]; then
-                echo "Refusing release signing for non-tag ref ${GITHUB_REF}" >&2
-                exit 1
-              fi
-              echo "Dry-run / non-tag signing: identity is branch-bound, not a production pin."
-              ;;
-          esac
-      - name: Keyless sign, verify, and tamper-test
-        env:
-          OVK_SIGSTORE_SIGNING: "1"
-          OVK_COSIGN_IDENTITY: ${{ steps.identity.outputs.certificate_identity }}
-          OVK_COSIGN_ISSUER: ${{ env.OVK_CERTIFICATE_OIDC_ISSUER }}
+          name: ovk-authorized-release-candidate
+          path: .
+
+      - name: Install verifier and cosign
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          pip install -e '.[dev]'
-          if [ "${{ steps.identity.outputs.immutable_tag }}" = "true" ]; then
-            python scripts/sigstore_release.py \
-              --dist-dir dist \
-              --bundles-dir sigstore-bundles \
-              --summary sigstore-bundles/ovk-sigstore-summary.json \
-              --certificate-identity "${OVK_COSIGN_IDENTITY}" \
-              --certificate-oidc-issuer "${OVK_COSIGN_ISSUER}" \
-              --git-ref "${GITHUB_REF}" \
-              --require-immutable-tag
-          else
-            python scripts/sigstore_release.py \
-              --dist-dir dist \
-              --bundles-dir sigstore-bundles \
-              --summary sigstore-bundles/ovk-sigstore-summary.json \
-              --certificate-identity "${OVK_COSIGN_IDENTITY}" \
-              --certificate-oidc-issuer "${OVK_COSIGN_ISSUER}" \
-              --git-ref "${GITHUB_REF}"
-          fi
-      - name: Retain cosign bundles
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: ovk-sigstore-bundles
-          path: |
-            sigstore-bundles/**
-            dist/*
-          if-no-files-found: error
-          retention-days: 90
-      - name: Attach Sigstore bundles to GitHub Release
-        if: github.event_name == 'release'
+          pip install --no-cache-dir -e '.[dev]'
+
+      - uses: sigstore/cosign-installer@d7d6bc7722e3daa8354c50bcb52f4837da5e9b6a # v3.8.1
+
+      - name: Re-assert immutable tag identity and authorized bytes
         env:
-          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ needs.authorize.outputs.candidate_sha }}
+          OVK_RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          gh release upload "${{ github.event.release.tag_name }}" \
+          if [ "$GITHUB_REF" != "refs/tags/$OVK_RELEASE_TAG" ]; then
+            echo "Sigstore job is not running on the release tag ref: $GITHUB_REF" >&2
+            exit 1
+          fi
+          if [ "$(git rev-parse HEAD)" != "$CANDIDATE_SHA" ]; then
+            echo "Sigstore checkout candidate mismatch" >&2
+            exit 1
+          fi
+          python scripts/verify_authorized_release_inputs.py \
+            --ledger .verification/release-ledger.authorized.json \
+            --dist-dir dist \
+            --expected-repository "$GITHUB_REPOSITORY" \
+            --expected-candidate-sha "$CANDIDATE_SHA"
+
+      - name: Keyless sign exact distributions and authorized ledger
+        env:
+          CANDIDATE_SHA: ${{ needs.authorize.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          IDENTITY="https://github.com/${GITHUB_WORKFLOW_REF}"
+          case "$IDENTITY" in
+            *"@refs/tags/${{ inputs.tag }}") ;;
+            *) echo "certificate identity is not exact-tag bound: $IDENTITY" >&2; exit 1 ;;
+          esac
+          python scripts/sigstore_release.py \
+            --dist-dir dist \
+            --extra .verification/release-ledger.authorized.json \
+            --bundles-dir sigstore-bundles \
+            --summary sigstore-bundles/ovk-sigstore-summary.json \
+            --certificate-identity "$IDENTITY" \
+            --certificate-oidc-issuer "$OVK_CERTIFICATE_OIDC_ISSUER" \
+            --git-ref "$GITHUB_REF" \
+            --require-immutable-tag
+          python scripts/verify_authorized_release_inputs.py \
+            --ledger .verification/release-ledger.authorized.json \
+            --dist-dir dist \
+            --expected-repository "$GITHUB_REPOSITORY" \
+            --expected-candidate-sha "$CANDIDATE_SHA"
+
+      - name: Retain signed release transaction
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ovk-signed-release-candidate
+          path: |
+            dist/**
+            .verification/workflow-evidence.json
+            .verification/release-ledger.authorized.json
+            .verification/pypi-state.pre.json
+            sigstore-bundles/**
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 90
+
+  stage-github-release:
+    name: Stage private draft GitHub Release
+    if: inputs.publish == true
+    needs: [authorize, sigstore]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Download signed candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ovk-signed-release-candidate
+          path: .
+
+      - name: Install release verifier
+        run: |
+          python -m pip install --upgrade pip
+          pip install --no-cache-dir -e '.[dev]'
+
+      - name: Reverify signed tag and authorized distribution before staging
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ needs.authorize.outputs.candidate_sha }}
+          OVK_RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          python scripts/verify_release_tag_github.py \
+            --repo "$GITHUB_REPOSITORY" \
+            --tag "$OVK_RELEASE_TAG" \
+            --expected-candidate-sha "$CANDIDATE_SHA"
+          python scripts/verify_authorized_release_inputs.py \
+            --ledger .verification/release-ledger.authorized.json \
+            --dist-dir dist \
+            --expected-repository "$GITHUB_REPOSITORY" \
+            --expected-candidate-sha "$CANDIDATE_SHA"
+
+      - name: Create or recover draft release only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OVK_RELEASE_TAG: ${{ inputs.tag }}
+          PRERELEASE: ${{ needs.authorize.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          TAG="$OVK_RELEASE_TAG"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            IS_DRAFT="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)"
+            IS_PRERELEASE="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)"
+            if [ "$IS_DRAFT" != "true" ]; then
+              echo "Refusing to mutate an already-public GitHub Release for $TAG" >&2
+              exit 1
+            fi
+            if [ "$IS_PRERELEASE" != "$PRERELEASE" ]; then
+              echo "Existing draft prerelease state does not match package version" >&2
+              exit 1
+            fi
+            echo "Recovering existing draft release $TAG"
+          else
+            ARGS=(release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "$TAG" --generate-notes)
+            if [ "$PRERELEASE" = "true" ]; then
+              ARGS+=(--prerelease)
+            fi
+            gh "${ARGS[@]}"
+          fi
+          test "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = "true"
+
+      - name: Attach exact authorized artifacts while release remains draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OVK_RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release upload "$OVK_RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            dist/* \
+            .verification/release-ledger.authorized.json \
             sigstore-bundles/*.json \
             --clobber
+          test "$(gh release view "$OVK_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = "true"
 
-  publish:
-    needs: [verify, sigstore]
-    if: |
-      github.event_name == 'release' &&
-      needs.verify.result == 'success' &&
-      needs.sigstore.result == 'success'
+  publish-pypi:
+    name: Publish exact authorized files to PyPI
+    if: inputs.publish == true
+    needs: [authorize, sigstore, stage-github-release]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -193,12 +415,145 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - name: Download built distributions
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Download signed candidate
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: ovk-dist
-          path: dist
-      - name: Publish to PyPI (Trusted Publishing)
+          name: ovk-signed-release-candidate
+          path: .
+
+      - name: Install release verifier
+        run: |
+          python -m pip install --upgrade pip
+          pip install --no-cache-dir -e '.[dev]'
+
+      - name: Reverify exact authorized inputs and inspect PyPI state
+        id: pypi-state
+        env:
+          CANDIDATE_SHA: ${{ needs.authorize.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          python scripts/verify_authorized_release_inputs.py \
+            --ledger .verification/release-ledger.authorized.json \
+            --dist-dir dist \
+            --expected-repository "$GITHUB_REPOSITORY" \
+            --expected-candidate-sha "$CANDIDATE_SHA"
+          python scripts/check_pypi_distribution_state.py \
+            --project "$OVK_PYPI_PROJECT" \
+            --version "${{ needs.authorize.outputs.pypi_version }}" \
+            --dist-dir dist \
+            --output .verification/pypi-state.before-publish.json
+          STATE="$(python -c 'import json; print(json.load(open(".verification/pypi-state.before-publish.json"))["state"])')"
+          echo "state=$STATE" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to PyPI with Trusted Publishing
+        if: steps.pypi-state.outputs.state == 'absent'
         uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1 (release/v1)
+        with:
+          packages-dir: dist/
         # Trusted Publishing via id-token: write + protected `pypi` environment.
-        # Do not use PYPI_API_TOKEN password authentication.
+        # Password/token authentication and blind skip-existing recovery are forbidden.
+
+      - name: Require PyPI to expose the exact authorized files
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5 6; do
+            if python scripts/check_pypi_distribution_state.py \
+              --project "$OVK_PYPI_PROJECT" \
+              --version "${{ needs.authorize.outputs.pypi_version }}" \
+              --dist-dir dist \
+              --output .verification/pypi-state.after-publish.json \
+              --require-exact; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 6 ]; then
+              sleep 10
+            fi
+          done
+          echo "PyPI did not converge to the exact authorized distribution set" >&2
+          exit 1
+
+  publish-github-release:
+    name: Make GitHub Release public only after exact PyPI verification
+    if: inputs.publish == true
+    needs: [authorize, sigstore, stage-github-release, publish-pypi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Download signed candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ovk-signed-release-candidate
+          path: .
+
+      - name: Install final release verifier
+        run: |
+          python -m pip install --upgrade pip
+          pip install --no-cache-dir -e '.[dev]'
+
+      - name: Final independent pre-publication verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ needs.authorize.outputs.candidate_sha }}
+          OVK_RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          python scripts/verify_release_tag_github.py \
+            --repo "$GITHUB_REPOSITORY" \
+            --tag "$OVK_RELEASE_TAG" \
+            --expected-candidate-sha "$CANDIDATE_SHA"
+          python scripts/verify_authorized_release_inputs.py \
+            --ledger .verification/release-ledger.authorized.json \
+            --dist-dir dist \
+            --expected-repository "$GITHUB_REPOSITORY" \
+            --expected-candidate-sha "$CANDIDATE_SHA"
+          for attempt in 1 2 3; do
+            if python scripts/check_pypi_distribution_state.py \
+              --project "$OVK_PYPI_PROJECT" \
+              --version "${{ needs.authorize.outputs.pypi_version }}" \
+              --dist-dir dist \
+              --output .verification/pypi-state.final.json \
+              --require-exact; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "Final PyPI exact-state verification failed" >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          test "$(gh release view "$OVK_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = "true"
+
+      - name: Publish the previously staged GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OVK_RELEASE_TAG: ${{ inputs.tag }}
+          PRERELEASE: ${{ needs.authorize.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          RELEASE_ID="$(gh release view "$OVK_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json databaseId --jq .databaseId)"
+          test -n "$RELEASE_ID"
+          gh api \
+            --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -F draft=false \
+            -F prerelease="$PRERELEASE" >/dev/null
+          test "$(gh release view "$OVK_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = "false"
+          echo "Published GitHub Release $OVK_RELEASE_TAG after exact PyPI verification."
