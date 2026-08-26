@@ -1,11 +1,10 @@
 #!/usr/bin/env python
 """Check whether a PyPI version is absent or exactly matches local distributions.
 
-The release workflow uses this before Trusted Publishing. A previously published
-version is accepted only when PyPI exposes exactly the same wheel/sdist
-filenames and SHA-256 digests as the already-authorized local distributions.
-This makes recovery after a partial PyPI/GitHub publication failure idempotent
-without using an unsafe blind ``skip-existing`` policy.
+Before Trusted Publishing, ``absent`` or ``exact_match`` are safe states. After
+publication, callers use ``--require-exact`` so only an exact filename and
+SHA-256 match is accepted. This makes recovery after a partial PyPI/GitHub
+publication failure idempotent without a blind ``skip-existing`` policy.
 """
 
 from __future__ import annotations
@@ -96,6 +95,14 @@ def compare_pypi_payload(
     }
 
 
+def publication_state_allowed(result: Mapping[str, Any], *, require_exact: bool) -> bool:
+    """Return whether a PyPI state is safe for the requested release phase."""
+    state = result.get("state")
+    if require_exact:
+        return state == "exact_match"
+    return state in {"absent", "exact_match"}
+
+
 def inspect_pypi_state(
     *,
     project: str,
@@ -143,6 +150,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", required=True)
     parser.add_argument("--dist-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--require-exact",
+        action="store_true",
+        help="Require PyPI to contain exactly the local authorized wheel and sdist.",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -159,7 +171,9 @@ def main(argv: list[str] | None = None) -> int:
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     for failure in result.get("failures") or []:
         print(failure, file=sys.stderr)
-    if result.get("state") == "conflict":
+    if not publication_state_allowed(result, require_exact=args.require_exact):
+        if result.get("state") == "absent" and args.require_exact:
+            print("PyPI version is still absent but exact published state is required", file=sys.stderr)
         return 1
     print(f"PyPI state: {result['state']}")
     return 0
