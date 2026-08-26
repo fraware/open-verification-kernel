@@ -88,13 +88,13 @@ def test_write_release_ledger(tmp_path: Path) -> None:
         candidate_sha=SHA,
         workflow_evidence={"ok": True, "runs": _complete_runs()},
     )
-    # Write into temp by monkeypatching path via direct write
-    path = tmp_path / "release-ledger.json"
+    path = tmp_path / "input-ledger.json"
     path.write_text(json.dumps(ledger), encoding="utf-8")
     loaded = json.loads(path.read_text(encoding="utf-8"))
     ok, _, authorized = verify_release_ledger(loaded, repo_root=REPO)
     assert ok
-    out = write_release_ledger(REPO, authorized)
-    assert out.name == "release-ledger.json"
+    out = write_release_ledger(tmp_path, authorized)
+    assert out == tmp_path / ".verification" / "release-ledger.json"
     on_disk = json.loads(out.read_text(encoding="utf-8"))
     assert on_disk["release_state"]["verified_source_sha"] == SHA
+    assert not (REPO / ".verification" / "release-ledger.json").is_file() or REPO != tmp_path
