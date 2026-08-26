@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -50,21 +51,31 @@ def test_badge_does_not_auto_mint_verified_source_sha(monkeypatch) -> None:
 
 
 def test_project_status_and_claim_registry(tmp_path: Path) -> None:
+    """Generation must be testable without mutating release surfaces in the checkout."""
     from ovk.core.project_status import build_claim_registry, write_project_status_and_claims
 
-    claims = build_claim_registry(REPO)
+    fixture = tmp_path / "repo"
+    shutil.copytree(REPO / "profiles", fixture / "profiles")
+    (fixture / "docs").mkdir(parents=True)
+
+    real_status = REPO / "docs" / "STATUS.md"
+    real_status_before = real_status.read_bytes()
+
+    claims = build_claim_registry(fixture)
     assert claims["schema_version"] == "ovk.claim_registry.v1"
     assert claims["normative_maturity_field"] == "conformance_status_v3"
     assert any(c["claim_id"].startswith("profile:") for c in claims["claims"])
-    # Write into temp copies of required paths by using repo and accepting .verification write
-    _claims, status = write_project_status_and_claims(REPO, candidate_sha="b" * 40)
+
+    _claims, status = write_project_status_and_claims(fixture, candidate_sha="b" * 40)
     assert status["candidate_sha"] == "b" * 40
     assert status["maturity_contract"]["badge_may_set_verified_source_sha"] is False
-    assert (REPO / ".verification" / "project-status.json").is_file()
-    assert (REPO / ".verification" / "claim-registry.json").is_file()
-    status_md = (REPO / "docs" / "STATUS.md").read_text(encoding="utf-8")
+    assert (fixture / ".verification" / "project-status.json").is_file()
+    assert (fixture / ".verification" / "claim-registry.json").is_file()
+    status_md = (fixture / "docs" / "STATUS.md").read_text(encoding="utf-8")
     assert "conformance_status_v3" in status_md
     assert "v1.2.0" not in status_md.split("Generated")[0] or "Generated from" in status_md
+
+    assert real_status.read_bytes() == real_status_before, "tests must not mutate committed release status"
 
 
 def test_required_workflows_sha_pin_third_party_actions() -> None:
