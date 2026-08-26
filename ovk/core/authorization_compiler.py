@@ -17,9 +17,34 @@ from ovk.core.execution_models import (
 )
 from ovk.core.materials import material_reference_from_payload
 from ovk.core.models import RiskSeverity, VerificationSubject
+from ovk.core.source_profiles import is_known_source_profile
 
 COMPILER_ID = "ovk.authorization.neutral.v1"
 COMPILER_VERSION = "0.2.0"
+
+
+def _source_profile_request_issue(data: dict[str, Any]) -> str | None:
+    """Validate an explicit authorization source-profile request.
+
+    Profile identity is trust-critical metadata: an unknown or framework-
+    incompatible profile must not fall through to a different compiler while
+    retaining the requested profile name in evidence.
+    """
+    requested = str(data.get("source_profile_id") or data.get("source_profile") or "").strip()
+    framework = str(data.get("framework") or "").strip().lower()
+
+    if framework and framework not in {"fastapi", "express"}:
+        return f"unsupported_authorization_framework:{framework}"
+
+    if not requested:
+        return None
+    if not is_known_source_profile(requested) or not requested.startswith("authorization."):
+        return f"unknown_source_profile:{requested}"
+
+    expected_prefix = f"authorization.{framework}." if framework else None
+    if expected_prefix and not requested.startswith(expected_prefix):
+        return f"source_profile_framework_mismatch:{requested}:framework={framework}"
+    return None
 
 
 def compile_authorization_obligation(
@@ -41,22 +66,28 @@ def compile_authorization_obligation(
     least one route is present; ``partial`` when routes exist with warnings;
     ``unknown`` when the abstraction is missing or malformed.
 
+    Explicit source-profile identity is validated before source compilation.
+    Unknown or framework-incompatible profile requests fail closed into the
+    neutral path and cannot mint a profile-qualified compiler identity.
+
     Strict allow is blocked unless coverage is complete, or policy explicitly
     accepts partial coverage (``coverage.accept_partial_coverage``).
     """
     coverage_policy = coverage_policy_from_dict(policy)
-    source = compile_authorization_ir(
-        data,
-        repo=repo,
-        base_sha=base_sha,
-        head_sha=head_sha,
-        coverage_policy=coverage_policy,
-    )
+    profile_issue = _source_profile_request_issue(data)
+    source = None
+    if profile_issue is None:
+        source = compile_authorization_ir(
+            data,
+            repo=repo,
+            base_sha=base_sha,
+            head_sha=head_sha,
+            coverage_policy=coverage_policy,
+        )
 
     if source is not None:
         ir, coverage, compiler_id, materials = source
         lane_input = ir.to_lane_input()
-        # Preserve non-route metadata from the caller.
         for key in ("author_type", "agent", "task"):
             if key in data:
                 lane_input[key] = data[key]
@@ -113,8 +144,9 @@ def compile_authorization_obligation(
         )
         return provisional.model_copy(update={"obligation_id": compute_obligation_id(provisional)})
 
-    # Legacy pre-normalized route abstraction path.
-    issues = validate_authorization_input(data)
+    issues = list(validate_authorization_input(data))
+    if profile_issue is not None:
+        issues.insert(0, profile_issue)
     auth_obligation = build_authorization_obligation(data)
     abstraction = {
         "kind": "authorization_route_reachability",
