@@ -1,4 +1,9 @@
-"""Machine claim registry and project-status generation (WP-15)."""
+"""Machine claim registry and project-status generation (WP-15).
+
+Project status is a public claim surface. It therefore recomputes source-profile
+maturity from the current normative qualification contract and never trusts
+serialized summary labels such as ``maturity`` or ``strict_ready``.
+"""
 
 from __future__ import annotations
 
@@ -7,11 +12,13 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ovk.core.source_profile_maturity import qualification_from_dict
 from ovk.core.source_profiles import KNOWN_SOURCE_PROFILES
 from ovk.core.support_contracts import load_all_support_contracts
 
 CLAIM_REGISTRY_SCHEMA = "ovk.claim_registry.v1"
 PROJECT_STATUS_SCHEMA = "ovk.project_status.v1"
+QUALIFICATION_V1_SCHEMA = "ovk.source_profile_qualification.v1"
 
 
 def _sha256_file(path: Path) -> str | None:
@@ -73,26 +80,117 @@ def build_claim_registry(repo_root: Path) -> dict[str, Any]:
     }
 
 
+def _load_qualification_payload(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _normalized_profile_status(
+    *,
+    profile_id: str,
+    contract_version: str,
+    qualification_payload: dict[str, Any],
+    candidate_sha: str,
+) -> dict[str, Any]:
+    """Recompute one public maturity row from normative fields.
+
+    Qualification v1 is declaration-derived and has no candidate-bound execution
+    attestation contract. It may inform diagnostics, but it cannot authorize a
+    candidate-specific maturity promotion. In particular, stale or forged
+    serialized ``maturity``/``strict_ready`` values are ignored.
+    """
+    schema = qualification_payload.get("schema_version")
+    profiles = qualification_payload.get("profiles")
+    row = profiles.get(profile_id) if isinstance(profiles, dict) else None
+    qualification_dict = row.get("qualification") if isinstance(row, dict) else None
+
+    qualification_valid = False
+    candidate_ready = False
+    normative_strict_ready = False
+    reasons: list[str] = []
+
+    if isinstance(qualification_dict, dict):
+        try:
+            qualification = qualification_from_dict(qualification_dict)
+        except (TypeError, ValueError):
+            reasons.append("qualification_payload_invalid")
+        else:
+            if qualification.profile_id != profile_id:
+                reasons.append("qualification_profile_mismatch")
+            elif qualification.support_contract_version != contract_version:
+                reasons.append("qualification_support_contract_mismatch")
+            else:
+                qualification_valid = True
+                candidate_ready = qualification.candidate_ready()
+                normative_strict_ready = qualification.strict_ready()
+    else:
+        reasons.append("qualification_missing")
+
+    # v1 has no candidate identity or independently verified execution-attestation
+    # binding. Refuse all candidate-specific promotion from this schema even when
+    # its serialized qualification happens to satisfy today's numeric thresholds.
+    candidate_bound = False
+    if schema == QUALIFICATION_V1_SCHEMA:
+        reasons.append("qualification_v1_not_candidate_bound")
+    elif schema is None:
+        reasons.append("qualification_schema_missing")
+    else:
+        reasons.append(f"qualification_schema_not_authoritative:{schema}")
+
+    if candidate_sha == "unknown":
+        reasons.append("candidate_sha_unknown")
+
+    strict_ready = bool(
+        qualification_valid
+        and candidate_bound
+        and candidate_sha != "unknown"
+        and normative_strict_ready
+    )
+
+    # Candidate maturity is also candidate-specific. Until qualification has a
+    # verified candidate binding, the strongest public status is advisory.
+    maturity = "source_profile_strict_eligible" if strict_ready else "executable_advisory"
+
+    return {
+        "support_contract_version": contract_version,
+        "maturity": maturity,
+        "strict_ready": strict_ready,
+        "qualification_valid": qualification_valid,
+        "qualification_schema": schema,
+        "candidate_bound": candidate_bound,
+        "candidate_ready_unbound": candidate_ready,
+        "normative_strict_ready_unbound": normative_strict_ready,
+        "status_reasons": sorted(set(reasons)),
+    }
+
+
 def build_project_status(repo_root: Path, *, candidate_sha: str | None = None) -> dict[str, Any]:
-    """Generate machine status source for docs/badges."""
+    """Generate the machine status source for docs and badges.
+
+    The result is conservative by construction: source-profile maturity is
+    recomputed from the current dataclass contract, and unbound qualification
+    artifacts cannot promote a specific candidate.
+    """
     if candidate_sha is None:
-        # Prefer an explicit caller-provided candidate. Unknown is conservative
-        # when generating outside a repository-aware release workflow.
         candidate_sha = "unknown"
     contracts = load_all_support_contracts(repo_root=repo_root)
     qualification_path = repo_root / ".verification" / "source-profile-qualification.json"
-    qualification = {}
-    if qualification_path.is_file():
-        qualification = json.loads(qualification_path.read_text(encoding="utf-8")).get("profiles") or {}
+    qualification_payload = _load_qualification_payload(qualification_path)
 
-    profile_statuses = {}
-    for profile_id in sorted(KNOWN_SOURCE_PROFILES):
-        row = qualification.get(profile_id) if isinstance(qualification, dict) else None
-        profile_statuses[profile_id] = {
-            "support_contract_version": contracts[profile_id].contract_version,
-            "maturity": (row or {}).get("maturity", "unknown"),
-            "strict_ready": bool(((row or {}).get("qualification") or {}).get("strict_ready")),
-        }
+    profile_statuses = {
+        profile_id: _normalized_profile_status(
+            profile_id=profile_id,
+            contract_version=contracts[profile_id].contract_version,
+            qualification_payload=qualification_payload,
+            candidate_sha=candidate_sha,
+        )
+        for profile_id in sorted(KNOWN_SOURCE_PROFILES)
+    }
 
     conformance = repo_root / "docs" / "benchmarks" / "template-conformance.json"
     badge = repo_root / "docs" / "benchmarks" / "leaderboard-badge.json"
@@ -113,6 +211,7 @@ def build_project_status(repo_root: Path, *, candidate_sha: str | None = None) -
             "template_conformance_sha256": _sha256_file(conformance),
             "leaderboard_badge_sha256": _sha256_file(badge),
             "qualification_sha256": _sha256_file(qualification_path),
+            "qualification_schema": qualification_payload.get("schema_version"),
             "claim_registry_path": ".verification/claim-registry.json",
         },
         "open_blockers": [
@@ -131,6 +230,8 @@ def build_project_status(repo_root: Path, *, candidate_sha: str | None = None) -
             "normative_status_field": "conformance_status_v3",
             "production_status_is_maturity_synonym": False,
             "badge_may_set_verified_source_sha": False,
+            "serialized_maturity_is_authoritative": False,
+            "qualification_v1_can_authorize_candidate_promotion": False,
         },
     }
 
@@ -164,6 +265,7 @@ def write_project_status_and_claims(
         "Normative field: `conformance_status_v3`. `production_status` is legacy catalog metadata only.",
         "Local `source_profile_strict_eligible` is not `externally_calibrated_strict`.",
         "FormalPR-Bench is regression-only; `verified_source_sha` requires the release ledger.",
+        "Qualification v1 is declaration-derived and cannot authorize candidate-specific maturity.",
         "",
         "## Profile statuses",
         "",
@@ -171,7 +273,7 @@ def write_project_status_and_claims(
     for profile_id, row in status["profile_statuses"].items():
         lines.append(
             f"- `{profile_id}`: {row['maturity']} (contract {row['support_contract_version']}, "
-            f"strict_ready={row['strict_ready']})"
+            f"strict_ready={row['strict_ready']}, candidate_bound={row['candidate_bound']})"
         )
     lines.extend(["", "## Open blockers", ""])
     for blocker in status["open_blockers"][:20]:
