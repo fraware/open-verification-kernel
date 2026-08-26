@@ -1,0 +1,28 @@
+name: Final Consumer Verification Dispatch
+
+on:
+  push:
+    branches:
+      - release/rc1-pretag-candidate
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch merged-consumer pin verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${REPO}/actions/workflows/consumer-pin-verification.yml/dispatches" \
+            -f ref='main' \
+            -f inputs[ovk_candidate_sha]='b8d734f4a6a92a534aed87db91e12df16b718a9e' \
+            -f inputs[fastapi_ref]='main' \
+            -f inputs[express_ref]='main'
