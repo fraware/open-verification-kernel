@@ -1,4 +1,4 @@
-name: Final Consumer Verification Dispatch
+name: Final Frozen-Candidate Evidence Dispatch
 
 on:
   push:
@@ -13,16 +13,24 @@ jobs:
   dispatch:
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch merged-consumer pin verification
+      - name: Dispatch exact frozen-candidate evidence matrix
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          CANDIDATE_REF: evidence/final-candidate
+          CANDIDATE_SHA: b9234a81ca7b3efde7a695bd09d29f3361d4b4ce
         run: |
           set -euo pipefail
+          for workflow in ci.yml repro-baseline.yml native-backends-tier1.yml native-backends-tier1b.yml; do
+            gh api --method POST \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/${REPO}/actions/workflows/${workflow}/dispatches" \
+              -f ref="${CANDIDATE_REF}"
+          done
           gh api --method POST \
             -H "Accept: application/vnd.github+json" \
             "/repos/${REPO}/actions/workflows/consumer-pin-verification.yml/dispatches" \
-            -f ref='main' \
-            -f inputs[ovk_candidate_sha]='b8d734f4a6a92a534aed87db91e12df16b718a9e' \
+            -f ref="${CANDIDATE_REF}" \
+            -f inputs[ovk_candidate_sha]="${CANDIDATE_SHA}" \
             -f inputs[fastapi_ref]='main' \
             -f inputs[express_ref]='main'
