@@ -76,7 +76,6 @@ def build_claim_registry(repo_root: Path) -> dict[str, Any]:
 def build_project_status(repo_root: Path, *, candidate_sha: str | None = None) -> dict[str, Any]:
     """Generate machine status source for docs/badges."""
     if candidate_sha is None:
-        head = repo_root / ".git" / "HEAD"
         candidate_sha = "unknown"
         # Prefer explicit env-less placeholder; callers should pass GITHUB_SHA.
     contracts = load_all_support_contracts(repo_root=repo_root)
