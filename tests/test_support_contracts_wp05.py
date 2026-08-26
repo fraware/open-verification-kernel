@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from ovk.compilers.authorization import FastApiAstAuthorizationCompiler, materials_from_pair
 from ovk.core.compiler_bridge import compile_authorization_ir
 from ovk.core.source_profile_qualification import (
