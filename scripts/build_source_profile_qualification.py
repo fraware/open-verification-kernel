@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Build machine-derived .verification/source-profile-qualification.json."""
+"""Build or verify machine-derived source-profile qualification evidence."""
 
 from __future__ import annotations
 
@@ -19,6 +19,16 @@ from ovk.core.source_profile_qualification import (  # noqa: E402
 )
 
 
+def _print_summary(payload: dict, output: Path, *, mode: str) -> None:
+    print(
+        f"source-profile qualification {mode}: {len(payload.get('profiles') or {})} profiles -> {output}"
+    )
+    for profile_id, row in sorted((payload.get("profiles") or {}).items()):
+        maturity = row.get("maturity")
+        unmet = (row.get("qualification") or {}).get("unmet_strict_obligations") or []
+        print(f"  {profile_id}: {maturity} unmet={len(unmet)}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build source-profile qualification artifact")
     parser.add_argument("--repo-root", type=Path, default=ROOT)
@@ -26,31 +36,36 @@ def main() -> int:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Rebuild and require on-disk artifact to match (when present) plus schema validity",
+        help="Read-only verification: require the existing artifact to equal a fresh derivation",
     )
     args = parser.parse_args()
     repo_root = args.repo_root.resolve()
     output = (args.output or qualification_output_path(repo_root)).resolve()
 
-    payload = write_source_profile_qualification(repo_root, output)
-    print(
-        f"source-profile qualification: {len(payload.get('profiles') or {})} profiles -> {output}"
-    )
-    for profile_id, row in sorted((payload.get("profiles") or {}).items()):
-        maturity = row.get("maturity")
-        unmet = (row.get("qualification") or {}).get("unmet_strict_obligations") or []
-        print(f"  {profile_id}: {maturity} unmet={len(unmet)}")
-
     if args.check:
+        # A verification command must never repair the object it is supposed to
+        # judge. Rebuild in memory, read the existing artifact, and compare.
         expected = build_source_profile_qualification(repo_root)
-        on_disk = json.loads(output.read_text(encoding="utf-8"))
+        if not output.is_file():
+            print(f"source-profile qualification artifact missing: {output}", file=sys.stderr)
+            return 1
+        try:
+            on_disk = json.loads(output.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"source-profile qualification artifact unreadable: {exc}", file=sys.stderr)
+            return 1
         if on_disk != expected:
             print("source-profile-qualification.json is stale; regenerate", file=sys.stderr)
             return 1
         if on_disk.get("maturity_contract", {}).get("externally_calibrated_strict_locally_derivable"):
             print("externally_calibrated_strict must remain non-local", file=sys.stderr)
             return 1
+        _print_summary(on_disk, output, mode="verified")
         print("source-profile qualification gate passed")
+        return 0
+
+    payload = write_source_profile_qualification(repo_root, output)
+    _print_summary(payload, output, mode="built")
     return 0
 
 
