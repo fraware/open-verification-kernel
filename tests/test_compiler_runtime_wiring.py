@@ -41,9 +41,10 @@ def users():
         "task": "bypass",
     }
     obligation = compile_authorization_obligation(data, repo="r", head_sha="h", base_sha="b")
-    assert obligation.compiler_id == "ovk.authorization.fastapi.v1"
+    expected_compiler = "ovk.authorization.fastapi.profile:authorization.fastapi.ast_v1"
+    assert obligation.compiler_id == expected_compiler
     assert obligation.coverage.status in {"complete", "partial"}
-    assert obligation.abstraction.get("source_compiler") == "ovk.authorization.fastapi.v1"
+    assert obligation.abstraction.get("source_compiler") == expected_compiler
     assert any(m.kind == "source_file" for m in obligation.materials)
 
     # Obligation id must depend on compiled abstraction (compiler output is live).
@@ -68,7 +69,7 @@ def users():
         policy={"routing": {"mode": "shadow", "enforced_lanes": ["authorization"], "prefer_deterministic": True}},
     )[0]
     assert evidence.routing_enforced is True
-    assert evidence.compiler and evidence.compiler["compiler_id"] == "ovk.authorization.fastapi.v1"
+    assert evidence.compiler and evidence.compiler["compiler_id"] == expected_compiler
     assert evidence.decision["merge_recommendation"] == "block"
 
 
