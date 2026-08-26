@@ -9,13 +9,49 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 
 
+def _publish_workflow_text() -> str:
+    return (REPO / ".github" / "workflows" / "publish.yml").read_text(encoding="utf-8")
+
+
 def test_publish_uses_trusted_publishing_without_token() -> None:
-    text = (REPO / ".github" / "workflows" / "publish.yml").read_text(encoding="utf-8")
+    text = _publish_workflow_text()
     assert "password:" not in text
     assert "secrets.PYPI_API_TOKEN" not in text
     assert "id-token: write" in text
     assert "environment: pypi" in text
     assert "gh-action-pypi-publish" in text
+    assert "skip-existing" not in text
+
+
+def test_publish_requires_authorization_before_any_public_release() -> None:
+    text = _publish_workflow_text()
+    assert "release:\n    types: [published]" not in text
+    assert "workflow_dispatch:" in text
+    assert "verify_release_tag_github.py" in text
+    assert "collect_workflow_evidence.py" in text
+    assert "--required-event workflow_dispatch" in text
+    assert "verify_release_ledger_github.py" in text
+    assert "verify_authorized_release_inputs.py" in text
+    assert "check_pypi_distribution_state.py" in text
+    assert "--draft" in text
+    assert "Refusing to mutate an already-public GitHub Release" in text
+    assert "Make GitHub Release public only after exact PyPI verification" in text
+
+    ledger_index = text.index("verify_release_ledger_github.py")
+    draft_index = text.index("--draft", ledger_index)
+    pypi_index = text.index("gh-action-pypi-publish", draft_index)
+    public_index = text.index("-F draft=false", pypi_index)
+    assert ledger_index < draft_index < pypi_index < public_index
+
+
+def test_publish_is_tag_ref_bound_and_signs_authorized_ledger() -> None:
+    text = _publish_workflow_text()
+    assert 'if [ "$GITHUB_REF" != "refs/tags/$TAG" ]' in text
+    assert "workflow identity is not tag-bound" in text
+    assert "--require-immutable-tag" in text
+    assert "--extra .verification/release-ledger.authorized.json" in text
+    assert "release-ledger.authorized.json" in text
+    assert "published=false tag=null" not in text  # workflow consumes verifier output, never hand-mints it
 
 
 def test_backend_tools_lock_has_required_digests() -> None:
