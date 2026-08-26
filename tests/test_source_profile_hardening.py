@@ -13,7 +13,7 @@ from ovk.core.source_profile_evidence import (
     prove_k8s_controller_profile,
     prove_terraform_recursive_profile,
 )
-from ovk.core.source_profiles import compiler_binding_for, source_profile_strict_eligible
+from ovk.core.source_profiles import compiler_binding_for, source_profile_candidate_evidence_complete
 from ovk.core.template_conformance import EXECUTABLE_CATALOG, build_conformance_matrix
 
 
@@ -103,38 +103,38 @@ def test_profile_provers_and_bindings() -> None:
     repo = Path(__file__).resolve().parents[1]
     assert compiler_binding_for("authorization.fastapi.ast_v1")
     fastapi = prove_fastapi_ast_profile(repo, enforcement_test="tests/test_authorization_enforcement.py")
-    assert fastapi.as_dict()["strict_eligible"] is True
+    assert fastapi.as_dict()["candidate_evidence_complete"] is True
     tf = prove_terraform_recursive_profile(repo, enforcement_test="tests/test_remaining_lane_enforcement.py")
-    assert tf.as_dict()["strict_eligible"] is True
+    assert tf.as_dict()["candidate_evidence_complete"] is True
     k8s = prove_k8s_controller_profile(repo, enforcement_test="tests/test_remaining_lane_enforcement.py")
-    assert k8s.as_dict()["strict_eligible"] is True
+    assert k8s.as_dict()["candidate_evidence_complete"] is True
     actions = prove_actions_permissions_flow(repo, enforcement_test="tests/test_remaining_lane_enforcement.py")
-    assert actions.as_dict()["strict_eligible"] is True
+    assert actions.as_dict()["candidate_evidence_complete"] is True
 
 
-def test_template_v2_requires_semantic_evidence() -> None:
+def test_template_v2_projects_local_candidate_evidence_to_advisory() -> None:
     repo = Path(__file__).resolve().parents[1]
     matrix = build_conformance_matrix(repo)
     assert "source_profile_evidence" in matrix
     by_id = {row["intent_id"]: row for row in matrix["templates"]}
     auth = by_id["no-admin-route-bypass"]
-    assert auth["conformance_status_v2"] == "source_profile_strict_eligible"
-    assert auth["source_profile_evidence"]["strict_eligible"] is True
+    assert auth["conformance_status_v2"] == "executable_advisory"
+    assert auth["source_profile_evidence"]["candidate_evidence_complete"] is True
     self_protection = by_id["agent-cannot-disable-own-ci-gate"]
     assert self_protection["conformance_status_v2"] == "executable_advisory"
     deployment = by_id["no-skipped-approval-state"]
-    # Deployment remains advisory until an explicit trusted_profile material exists.
     assert deployment["conformance_status_v2"] == "executable_advisory"
     assert matrix["counts_by_status_v2"].get("externally_calibrated_strict", 0) == 0
+    assert matrix["counts_by_status_v2"].get("source_profile_strict_eligible", 0) == 0
 
 
 def test_collect_evidence_covers_catalog_profiles() -> None:
     repo = Path(__file__).resolve().parents[1]
     evidence = collect_source_profile_evidence(repo, catalog_by_intent=EXECUTABLE_CATALOG)
-    assert "no-admin-route-bypass" in evidence
-    assert source_profile_strict_eligible(
-        profile_id=evidence["no-admin-route-bypass"].profile_id,
-        materials_trusted=evidence["no-admin-route-bypass"].materials_trusted,
-        coverage_complete=evidence["no-admin-route-bypass"].coverage_complete,
-        enforcement_test_present=evidence["no-admin-route-bypass"].enforcement_test_present,
+    item = evidence["no-admin-route-bypass"]
+    assert source_profile_candidate_evidence_complete(
+        profile_id=item.profile_id,
+        materials_trusted=item.materials_trusted,
+        coverage_complete=item.coverage_complete,
+        enforcement_test_present=item.enforcement_test_present,
     )
