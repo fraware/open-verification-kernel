@@ -54,7 +54,11 @@ Required properties:
 - [ ] tag points directly to one commit;
 - [ ] direct target equals the exact release candidate SHA;
 - [ ] tag version exactly matches package release metadata;
-- [ ] historical tags are not moved or re-attributed.
+- [ ] historical tags are not moved or re-attributed;
+- [ ] live repository settings protect the release-tag namespace against update and deletion after tag creation;
+- [ ] `main` is protected against force-push and deletion by branch protection or an active equivalent ruleset.
+
+Ref protection is defense in depth, not a substitute for cryptographic identity checks. The release authorizer must still resolve and verify the annotated tag object and direct candidate target on every authorization run. Repository-setting evidence must be checked live; documentation cannot self-assert that the protection exists.
 
 The production Publish workflow must itself be dispatched on `refs/tags/<tag>`. Checking out a tag from a branch-bound workflow is not equivalent because the Sigstore workflow identity would remain branch-bound.
 
@@ -210,6 +214,7 @@ Promotion to a production-stable `v1.3.0` claim additionally requires the projec
 ## Final maintainer checklist
 
 - [ ] exact final candidate passes the complete development matrix;
+- [ ] `main` and the release-tag namespace have live verified ref protection;
 - [ ] signed annotated immutable tag exists and is GitHub-verified;
 - [ ] all seven required release-evidence workflows succeed as tag-bound `workflow_dispatch` runs;
 - [ ] label-free prediction → exact-run evaluation handoff is retained and digest-bound;
