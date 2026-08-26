@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence
@@ -126,8 +127,15 @@ def _is_python_ovk_worker(command: Sequence[str]) -> bool:
 
 
 def _memory_preexec(max_memory_mb: int):
-    """Return a POSIX pre-exec RLIMIT hook or None on unsupported platforms."""
-    if os.name != "posix" or max_memory_mb <= 0:
+    """Return the Linux RLIMIT_AS pre-exec hook, otherwise ``None``.
+
+    ``resource.RLIMIT_AS`` exists on some non-Linux POSIX platforms but is not
+    a portable address-space enforcement primitive for the Python worker. In
+    particular, lowering it in ``preexec_fn`` can fail before ``exec`` on macOS.
+    Do not claim the control unless this implementation has a supported Linux
+    enforcement path.
+    """
+    if os.name != "posix" or not sys.platform.startswith("linux") or max_memory_mb <= 0:
         return None
     try:
         import resource
@@ -147,11 +155,11 @@ class LocalSubprocessWorker:
     """Local worker with explicit truthful enforcement capabilities.
 
     Base ``run`` enforces timeout, cwd bounds, a minimal environment and output
-    caps. ``run_with_budget`` additionally applies a POSIX address-space limit
-    and, for OVK's Python evaluator process, enables audit-hook denial of network
-    access and filesystem writes. External native commands are rejected when a
-    requested isolation control cannot be enforced rather than being mislabeled
-    as isolated.
+    caps. ``run_with_budget`` additionally applies a Linux address-space limit
+    when available and, for OVK's Python evaluator process, enables audit-hook
+    denial of network access and filesystem writes. External native commands are
+    rejected when a requested isolation control cannot be enforced rather than
+    being mislabeled as isolated.
     """
 
     allowed_env_keys: frozenset[str] = field(
