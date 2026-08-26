@@ -14,12 +14,12 @@ Qualification v1 is declaration-derived and cannot authorize candidate-specific 
 
 ## Profile statuses
 
-- `authorization.express.ast_v1`: executable_advisory (contract 1.1.0, strict_ready=False, candidate_bound=False)
-- `authorization.fastapi.ast_v1`: executable_advisory (contract 1.0.0, strict_ready=False, candidate_bound=False)
-- `ci_secrets.actions.permissions_flow_v1`: executable_advisory (contract 1.0.0, strict_ready=False, candidate_bound=False)
-- `deployment.trusted_profile_v1`: executable_advisory (contract 1.0.0, strict_ready=False, candidate_bound=False)
-- `infrastructure.kubernetes.controller_reachability_v1`: executable_advisory (contract 1.0.0, strict_ready=False, candidate_bound=False)
-- `infrastructure.terraform.plan_recursive_v1`: executable_advisory (contract 1.0.0, strict_ready=False, candidate_bound=False)
+- `authorization.express.ast_v1`: executable_advisory (contract 1.2.0, strict_ready=False, candidate_bound=False)
+- `authorization.fastapi.ast_v1`: executable_advisory (contract 1.1.0, strict_ready=False, candidate_bound=False)
+- `ci_secrets.actions.permissions_flow_v1`: executable_advisory (contract 1.1.0, strict_ready=False, candidate_bound=False)
+- `deployment.trusted_profile_v1`: executable_advisory (contract 1.1.0, strict_ready=False, candidate_bound=False)
+- `infrastructure.kubernetes.controller_reachability_v1`: executable_advisory (contract 1.1.0, strict_ready=False, candidate_bound=False)
+- `infrastructure.terraform.plan_recursive_v1`: executable_advisory (contract 1.1.0, strict_ready=False, candidate_bound=False)
 
 ## Open blockers
 
