@@ -33,6 +33,7 @@ from ovk.core.assurance_ir import (
     AuthorizationGuard,
     BindingProjection,
     BindingRelation,
+    ContractUse,
     EffectRef,
     PrincipalRef,
     ProtectedEffect,
@@ -427,6 +428,7 @@ class FastApiDependencyEffectExtractor:
         guards: dict[str, AuthorizationGuard] = {}
         protected: dict[str, ProtectedEffect] = {}
         bindings: dict[str, ResourceBinding] = {}
+        contract_uses: dict[str, ContractUse] = {}
         paths: dict[str, SemanticPath] = {}
         unsupported: list[str] = []
         function_contracts = infer_function_contracts(materials)
@@ -631,6 +633,25 @@ class FastApiDependencyEffectExtractor:
                         origin=_origin(path, identity_node),
                     )
 
+                    contract_use_ids: list[str] = []
+                    if inferred_contract is not None:
+                        use_id = _semantic_id(
+                            "contract-use",
+                            (
+                                f"{path}:{handler.name}:{getattr(call, 'lineno', 0)}:"
+                                f"{inferred_contract.contract_id}:{acted_id}"
+                            ),
+                        )
+                        contract_uses[use_id] = ContractUse(
+                            use_id=use_id,
+                            contract_id=inferred_contract.contract_id,
+                            qualified_name=inferred_contract.qualified_name,
+                            resource_id=acted_id,
+                            established_attributes=sorted(contract_attribute_terms),
+                            origin=_origin(path, call),
+                        )
+                        contract_use_ids.append(use_id)
+
                     guard_ids: list[str] = []
                     binding_ids: list[str] = []
                     for dep_name, allowed_effects in profile.dependency_guard_effects.items():
@@ -721,6 +742,7 @@ class FastApiDependencyEffectExtractor:
                         guard_ids=sorted(guard_ids),
                         protected_effect_ids=[protected_id],
                         binding_ids=sorted(binding_ids),
+                        contract_use_ids=sorted(contract_use_ids),
                         origin=_origin(path, handler),
                     )
 
@@ -776,5 +798,6 @@ class FastApiDependencyEffectExtractor:
             resource_bindings=sorted(bindings.values(), key=lambda item: item.binding_id),
             resource_return_contracts=resource_return_contracts,
             function_contracts=function_contracts,
+            contract_uses=sorted(contract_uses.values(), key=lambda item: item.use_id),
             paths=sorted(paths.values(), key=lambda item: item.path_id),
         )
