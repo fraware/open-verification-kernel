@@ -23,7 +23,7 @@ from ovk.core.resource_identity import ResourceIdentityTerm
 
 CoverageStatus = Literal["complete", "partial", "unknown", "inapplicable"]
 BindingRelation = Literal["equal", "same_tenant", "custom"]
-BindingProjection = Literal["identity", "scope"]
+BindingProjection = Literal["identity", "scope", "attribute"]
 ContractTermKind = Literal["parameter", "return_attribute", "literal"]
 ContractRelation = Literal["eq", "non_null"]
 ClaimKind = Literal[
@@ -72,6 +72,7 @@ class ResourceRef(BaseModel):
     tenant_symbol: str | None = None
     identity_term: ResourceIdentityTerm | None = None
     scope_term: ResourceIdentityTerm | None = None
+    attribute_terms: dict[str, ResourceIdentityTerm] = Field(default_factory=dict)
     origin: SemanticOrigin | None = None
 
 
@@ -230,14 +231,26 @@ class ResourceBinding(BaseModel):
     relation: BindingRelation = "equal"
     authorized_projection: BindingProjection = "identity"
     acted_projection: BindingProjection = "identity"
+    authorized_attribute: str | None = None
+    acted_attribute: str | None = None
     predicate: str | None = None
     condition_ids: list[str] = Field(default_factory=list)
     origin: SemanticOrigin
 
     @model_validator(mode="after")
-    def _custom_requires_predicate(self) -> "ResourceBinding":
+    def _binding_shape(self) -> "ResourceBinding":
         if self.relation == "custom" and (self.predicate is None or not self.predicate.strip()):
             raise ValueError("custom resource binding requires predicate")
+        if self.authorized_projection == "attribute":
+            if self.authorized_attribute is None or not self.authorized_attribute.strip():
+                raise ValueError("authorized attribute projection requires authorized_attribute")
+        elif self.authorized_attribute is not None:
+            raise ValueError("authorized_attribute requires attribute projection")
+        if self.acted_projection == "attribute":
+            if self.acted_attribute is None or not self.acted_attribute.strip():
+                raise ValueError("acted attribute projection requires acted_attribute")
+        elif self.acted_attribute is not None:
+            raise ValueError("acted_attribute requires attribute projection")
         return self
 
 
