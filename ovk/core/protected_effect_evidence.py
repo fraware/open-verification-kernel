@@ -898,5 +898,5 @@ class ProtectedEffectEvidenceCache:
             policy_digest=policy_digest,
             current_fingerprint=current_execution_fingerprint,
             reuse_decision=decision,
-            signing_key=signing_key,
+            signing_key=signing_key if signing_key is not None else signature_key,
         )
