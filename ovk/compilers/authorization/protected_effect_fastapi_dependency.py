@@ -397,12 +397,14 @@ class FastApiDependencyEffectExtractor:
                         continue
 
                     identity_node = call.args[identity_index]
-                    identity_term = _symbol_term(identity_node)
-                    if identity_term is None:
-                        unsupported.append(
-                            f"{path}:{handler.name}:unsupported_sink_identity_expression:{sink_key}"
-                        )
-                        continue
+                    identity_term = None
+                    if profile.contract_identity_attribute_for_sink(sink_key) is None:
+                        identity_term = _symbol_term(identity_node)
+                        if identity_term is None:
+                            unsupported.append(
+                                f"{path}:{handler.name}:unsupported_sink_identity_expression:{sink_key}"
+                            )
+                            continue
 
                     scope_term: ResourceIdentityTerm | None = None
                     expected_contract_name = profile.contract_for_sink(sink_key)
