@@ -287,6 +287,30 @@ class _HandlerVisitor(ast.NodeVisitor):
     def visit_Lambda(self, node: ast.Lambda) -> None:
         self.unsupported.append("nested_callable_not_modeled:lambda")
 
+    def visit_BoolOp(self, node: ast.BoolOp) -> None:
+        self.unsupported.append("unsupported_control_flow:boolean_short_circuit")
+        self.generic_visit(node)
+
+    def visit_IfExp(self, node: ast.IfExp) -> None:
+        self.unsupported.append("unsupported_control_flow:conditional_expression")
+        self.generic_visit(node)
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        self.unsupported.append("unsupported_control_flow:list_comprehension")
+        self.generic_visit(node)
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        self.unsupported.append("unsupported_control_flow:set_comprehension")
+        self.generic_visit(node)
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        self.unsupported.append("unsupported_control_flow:dict_comprehension")
+        self.generic_visit(node)
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        self.unsupported.append("unsupported_control_flow:generator_expression")
+        self.generic_visit(node)
+
 
 class FastApiSemanticAssuranceCompiler:
     """Compile supported FastAPI handler semantics into Assurance IR."""
@@ -325,14 +349,16 @@ class FastApiSemanticAssuranceCompiler:
                 unknowns.append(f"{path}:syntax_error:{exc.msg}")
                 continue
 
-            prefixes = _router_prefixes(tree, path=path, unknowns=unknowns)
+            file_unknowns: list[str] = []
+            prefixes = _router_prefixes(tree, path=path, unknowns=file_unknowns)
             if any(
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
                 and node.func.attr == "include_router"
                 for node in ast.walk(tree)
             ):
-                unknowns.append(f"{path}:include_router_mount_not_modeled")
+                file_unknowns.append(f"{path}:include_router_mount_not_modeled")
+            unknowns.extend(file_unknowns)
 
             for handler in tree.body:
                 if not isinstance(handler, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -344,7 +370,7 @@ class FastApiSemanticAssuranceCompiler:
                     unknowns.append(f"{path}:{handler.name}:dynamic_route_path")
                     continue
                 method, route_path = route
-                handler_unknowns: list[str] = []
+                handler_unknowns: list[str] = list(file_unknowns)
 
                 route_principals = self._principals_from_handler(
                     handler,
@@ -557,7 +583,8 @@ class FastApiSemanticAssuranceCompiler:
             unknowns.append(f"{path}:{handler.name}:authorization_call_arity:{site.name}:{site.line}")
             return None
 
-        principal_expr = _expression(site.call.args[spec.principal_arg])
+        principal_node = site.call.args[spec.principal_arg]
+        principal_expr = _expression(principal_node)
         effect_name = _const_str(site.call.args[spec.effect_arg])
         if principal_expr is None:
             unknowns.append(f"{path}:{handler.name}:authorization_principal_unresolved:{site.name}:{site.line}")
@@ -566,15 +593,21 @@ class FastApiSemanticAssuranceCompiler:
             unknowns.append(f"{path}:{handler.name}:authorization_effect_unresolved:{site.name}:{site.line}")
             return None
 
+        principal_identity_safe = isinstance(principal_node, ast.Name)
+        if not principal_identity_safe:
+            unknowns.append(
+                f"{path}:{handler.name}:authorization_principal_expression_not_identity_safe:{site.name}:{site.line}"
+            )
         principal = self._principal(
             expression=principal_expr,
             kind="unknown",
             path=path,
             handler=handler,
-            node=site.call.args[spec.principal_arg],
+            node=principal_node,
             subject=subject,
             principals=principals,
-            coverage="complete",
+            coverage="complete" if principal_identity_safe else "partial",
+            identity_safe=principal_identity_safe,
         )
         resource = self._resource_from_argument(
             site.call,
@@ -619,9 +652,16 @@ class FastApiSemanticAssuranceCompiler:
         subject: VerificationSubject,
         principals: dict[str, PrincipalRef],
         coverage: Literal["complete", "partial"],
+        identity_safe: bool = True,
     ) -> PrincipalRef:
-        key = f"{path}:{handler.name}:{expression}"
-        principal_id = f"principal.{content_digest({'scope': key})[:16]}"
+        key: dict[str, object] = {
+            "path": path,
+            "handler": handler.name,
+            "expression": expression,
+        }
+        if not identity_safe:
+            key["site"] = [getattr(node, "lineno", None), getattr(node, "col_offset", None)]
+        principal_id = f"principal.{content_digest(key)[:16]}"
         current = principals.get(principal_id)
         if current is not None:
             if current.kind == "unknown" and kind != "unknown":
@@ -662,7 +702,24 @@ class FastApiSemanticAssuranceCompiler:
                 f"{path}:{handler.name}:{role}_resource_unresolved:{_qualified_name(call.func) or 'call'}:{getattr(call, 'lineno', 0)}"
             )
             return None
-        key = {"path": path, "handler": handler.name, "type": resource_type, "expression": expression}
+        identity_safe = isinstance(node, ast.Name)
+        if not identity_safe:
+            unknowns.append(
+                f"{path}:{handler.name}:{role}_resource_expression_not_identity_safe:"
+                f"{_qualified_name(call.func) or 'call'}:{getattr(call, 'lineno', 0)}"
+            )
+        key: dict[str, object] = {
+            "path": path,
+            "handler": handler.name,
+            "type": resource_type,
+            "expression": expression,
+        }
+        if not identity_safe:
+            key["site"] = [
+                role,
+                getattr(node, "lineno", None),
+                getattr(node, "col_offset", None),
+            ]
         resource_id = f"resource.{content_digest(key)[:16]}"
         current = resources.get(resource_id)
         if current is not None:
@@ -671,7 +728,12 @@ class FastApiSemanticAssuranceCompiler:
             resource_id=resource_id,
             resource_type=resource_type,
             expression=expression,
-            provenance=self._provenance(subject, path, node, coverage="complete"),
+            provenance=self._provenance(
+                subject,
+                path,
+                node,
+                coverage="complete" if identity_safe else "partial",
+            ),
         )
         resources[resource_id] = resource
         return resource
