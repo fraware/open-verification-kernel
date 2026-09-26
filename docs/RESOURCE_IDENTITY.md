@@ -50,3 +50,28 @@ This design keeps the source-extraction assumption visible:
     source semantics -> identity term -> resource-binding query
 
 Each arrow is a separate trust obligation.
+
+
+## Scope projections
+
+Resource identity and resource scope are separate projections.
+
+For a workspace-scoped object, the resource may carry:
+
+    identity_term = symbol("agent_id")
+    scope_term = symbol("workspace_id")
+
+A tenant-isolation binding can then require:
+
+    authorized.identity == acted.scope
+
+The binding records this explicitly:
+
+    relation = same_tenant
+    authorized_projection = identity
+    acted_projection = scope
+
+Profiles may also declare a loader's scope as unconstrained. This is an explicit
+over-approximation for a global lookup whose result is not scoped by the
+authorized tenant key. The extractor assigns a fresh symbolic scope term, which
+allows a solver to search for a cross-scope counterexample.
