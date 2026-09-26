@@ -11,11 +11,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.compilers.authorization.fastapi_route_summary import (
     CallSummary,
     RouteFileSummary,
 )
 from ovk.core.assurance_ir import (
+    AssuranceCoverage,
+    AssuranceExtractorIdentity,
+    AssuranceIR,
     AuthorizationGuard,
     ContractUse,
     EffectRef,
@@ -24,9 +28,11 @@ from ovk.core.assurance_ir import (
     ProtectedEffect,
     ResourceBinding,
     ResourceRef,
+    ResourceReturnContract,
     SemanticPath,
 )
 from ovk.core.bundle import content_digest
+from ovk.core.models import VerificationSubject
 from ovk.core.resource_identity import ResourceIdentityTerm
 
 
@@ -614,3 +620,148 @@ def fragment_dependencies_match(
         for name in fragment.contract_dependencies
     }
     return current == fragment.contract_dependencies
+
+
+
+_SUPPORTED_CONSTRUCTS = [
+    "static_fastapi_route_decorator",
+    "depends_or_security_default_parameter",
+    "straight_line_handler",
+    "configured_service_call_sink",
+    "configured_sink_scope_keyword",
+    "source_derived_resource_return_contract",
+    "typed_function_contract",
+    "return_attribute_projection",
+    "constructor_alias_to_service_method",
+]
+
+_PROFILE_ASSUMPTIONS = [
+    "Configured dependency guards authorize the declared route resource for the declared effects.",
+    "Configured service-call sinks faithfully identify protected effects.",
+    "Configured sink identity argument denotes the acted resource identity only when no source-derived identity contract is required.",
+    "Configured sink scope keyword denotes the acted resource scope when no source contract is required.",
+    "Source-derived function contracts are consumed only after resolving the configured service method.",
+    "Only profile-selected contract attributes become required identity/scope/binding proof obligations.",
+    "Conditional return contracts require the caller's non-null argument precondition to be established.",
+    "Missing scope under a resolved source contract is modeled as unconstrained.",
+    "Missing manually declared scope marked unconstrained is an explicit conservative over-approximation.",
+]
+
+
+def assemble_fastapi_assurance_ir(
+    *,
+    materials: AuthMaterials,
+    function_contracts: list[FunctionContract],
+    resource_return_contracts: list[ResourceReturnContract],
+    fragments: Mapping[str, FastApiFileSemanticFragment],
+    syntax_errors: Mapping[str, str] | None = None,
+    missing_route_summary_paths: list[str] | None = None,
+) -> AssuranceIR:
+    """Assemble complete Assurance IR from deterministic per-file fragments."""
+
+    principals: dict[str, PrincipalRef] = {}
+    resources: dict[str, ResourceRef] = {}
+    effects: dict[str, EffectRef] = {}
+    guards: dict[str, AuthorizationGuard] = {}
+    protected: dict[str, ProtectedEffect] = {}
+    bindings: dict[str, ResourceBinding] = {}
+    contract_uses: dict[str, ContractUse] = {}
+    paths: dict[str, SemanticPath] = {}
+    unsupported: list[str] = []
+
+    if not materials.has_head():
+        unsupported.append("head_materials_missing")
+
+    for path, message in sorted((syntax_errors or {}).items()):
+        unsupported.append(f"{path}:syntax_error:{message}")
+
+    for path in sorted(missing_route_summary_paths or []):
+        unsupported.append(f"{path}:route_summary_missing")
+
+    for path, fragment in sorted(fragments.items()):
+        if path != fragment.path:
+            raise ValueError(
+                f"fragment map path {path!r} does not match fragment path "
+                f"{fragment.path!r}"
+            )
+        unsupported.extend(fragment.unsupported_constructs)
+        for item in fragment.principals:
+            principals.setdefault(item.principal_id, item)
+        for item in fragment.resources:
+            resources[item.resource_id] = item
+        for item in fragment.effects:
+            effects.setdefault(item.effect_id, item)
+        for item in fragment.guards:
+            guards[item.guard_id] = item
+        for item in fragment.protected_effects:
+            protected[item.protected_effect_id] = item
+        for item in fragment.resource_bindings:
+            bindings[item.binding_id] = item
+        for item in fragment.contract_uses:
+            contract_uses[item.use_id] = item
+        for item in fragment.paths:
+            paths[item.path_id] = item
+
+    if not materials.has_head():
+        coverage_status = "unknown"
+        confidence = 0.0
+    elif unsupported:
+        coverage_status = "partial"
+        confidence = 0.5
+    else:
+        coverage_status = "complete"
+        confidence = 1.0
+
+    return AssuranceIR(
+        subject=VerificationSubject(
+            repo=materials.repo or "unknown/repo",
+            base_sha=materials.base_revision,
+            head_sha=materials.head_revision or "unknown",
+        ),
+        extractor=AssuranceExtractorIdentity(
+            extractor_id="assurance.fastapi.dependency_effects.ast_v1",
+            extractor_version="0.1.0",
+            source_profile_id="assurance.fastapi.dependency_effects.ast_v1",
+        ),
+        coverage=AssuranceCoverage(
+            status=coverage_status,
+            confidence=confidence,
+            supported_constructs=list(_SUPPORTED_CONSTRUCTS),
+            unsupported_constructs=sorted(set(unsupported)),
+            assumptions=list(_PROFILE_ASSUMPTIONS),
+        ),
+        principals=sorted(
+            principals.values(),
+            key=lambda item: item.principal_id,
+        ),
+        resources=sorted(
+            resources.values(),
+            key=lambda item: item.resource_id,
+        ),
+        effects=sorted(
+            effects.values(),
+            key=lambda item: item.effect_id,
+        ),
+        guards=sorted(
+            guards.values(),
+            key=lambda item: item.guard_id,
+        ),
+        protected_effects=sorted(
+            protected.values(),
+            key=lambda item: item.protected_effect_id,
+        ),
+        resource_bindings=sorted(
+            bindings.values(),
+            key=lambda item: item.binding_id,
+        ),
+        resource_return_contracts=resource_return_contracts,
+        function_contracts=function_contracts,
+        contract_uses=sorted(
+            contract_uses.values(),
+            key=lambda item: item.use_id,
+        ),
+        paths=sorted(
+            paths.values(),
+            key=lambda item: item.path_id,
+        ),
+    )
