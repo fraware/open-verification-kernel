@@ -229,8 +229,9 @@ def test_fresh_worker_unchanged_head_reuses_all_higher_level_state(
     assert second.semantic_summary_stats.hits == 5
     assert second.compilation.stats.recomposed_contract_count == 0
     assert second.compilation.stats.reused_composed_contract_count == 2
+    assert second.compilation.stats.semantic_fragment_file_count == 1
     assert second.compilation.stats.rebound_file_count == 0
-    assert second.compilation.stats.reused_fragment_count == 5
+    assert second.compilation.stats.reused_fragment_count == 1
 
 
 def test_fresh_worker_unrelated_change_recomputes_one_file_only(
@@ -266,8 +267,9 @@ def test_fresh_worker_unrelated_change_recomputes_one_file_only(
     assert second.semantic_summary_stats.hits == 4
     assert second.compilation.stats.recomposed_contract_count == 0
     assert second.compilation.stats.reused_composed_contract_count == 2
-    assert second.compilation.stats.rebound_file_count == 1
-    assert second.compilation.stats.reused_fragment_count == 4
+    assert second.compilation.stats.semantic_fragment_file_count == 1
+    assert second.compilation.stats.rebound_file_count == 0
+    assert second.compilation.stats.reused_fragment_count == 1
 
 
 def test_fresh_worker_contract_change_recomputes_dependency_closure(
@@ -309,8 +311,9 @@ def test_fresh_worker_contract_change_recomputes_dependency_closure(
     assert second.semantic_summary_stats.hits == 4
     assert second.compilation.stats.recomposed_contract_count == 2
     assert second.compilation.stats.contract_invalidated_name_count == 3
-    assert second.compilation.stats.rebound_file_count == 2
-    assert second.compilation.stats.reused_fragment_count == 3
+    assert second.compilation.stats.semantic_fragment_file_count == 1
+    assert second.compilation.stats.rebound_file_count == 1
+    assert second.compilation.stats.reused_fragment_count == 0
 
 
 def test_missing_repo_identity_disables_higher_level_state_persistence(
