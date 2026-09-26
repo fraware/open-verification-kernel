@@ -456,6 +456,8 @@ def load_persistent_semantic_summaries(
     misses = 0
     writes = 0
     parse_count = 0
+    fresh_valid_summaries = 0
+    reused_valid_summaries = 0
 
     for path, source in sorted(materials.head_files.items()):
         source_digest = content_digest(source)
@@ -475,6 +477,7 @@ def load_persistent_semantic_summaries(
                 assert route is not None
                 contract_summaries[path] = contract
                 route_summaries[path] = route
+                reused_valid_summaries += 1
             continue
 
         misses += 1
@@ -506,6 +509,7 @@ def load_persistent_semantic_summaries(
         )
         contract_summaries[path] = contract
         route_summaries[path] = route
+        fresh_valid_summaries += 1
         cache.put(
             path=path,
             source_digest=source_digest,
@@ -524,22 +528,8 @@ def load_persistent_semantic_summaries(
     contract_index = ContractSummaryIndex(
         summaries=contract_summaries,
         source_digests=digests,
-        fresh_summary_count=misses - len(
-            [
-                path
-                for path in syntax_errors
-                if path not in contract_summaries
-            ]
-        ),
-        reused_summary_count=len(contract_summaries) - (
-            misses - len(
-                [
-                    path
-                    for path in syntax_errors
-                    if path not in contract_summaries
-                ]
-            )
-        ),
+        fresh_summary_count=fresh_valid_summaries,
+        reused_summary_count=reused_valid_summaries,
     )
     route_index = RouteSummaryIndex(
         summaries=route_summaries,
