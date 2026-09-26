@@ -61,6 +61,26 @@ _CONTROL_FLOW = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try, ast.Match, a
 
 
 @dataclass(frozen=True)
+class ResourceScopeAssertionSemantics:
+    """Semantics for a configured fail-closed resource-scope assertion helper.
+
+    If a matching call returns normally, the source profile asserts that the
+    acted resource attribute argument equals the authorization resource
+    argument.
+    """
+
+    acted_scope_arg: int = 0
+    authorized_resource_arg: int = 1
+    acted_scope_attribute: str = "workspace_id"
+
+    def __post_init__(self) -> None:
+        if self.acted_scope_arg < 0 or self.authorized_resource_arg < 0:
+            raise ValueError("scope assertion argument indexes must be non-negative")
+        if not self.acted_scope_attribute.strip():
+            raise ValueError("scope assertion attribute must be non-empty")
+
+
+@dataclass(frozen=True)
 class FastApiDependencyEffectProfile:
     """Explicit semantics for dependency guards and protected service calls."""
 
@@ -68,6 +88,10 @@ class FastApiDependencyEffectProfile:
     sink_identity_args: dict[str, int] = field(default_factory=dict)
     sink_scope_keywords: dict[str, str] = field(default_factory=dict)
     sink_missing_scope_unconstrained: frozenset[str] = frozenset()
+    # Helper name -> explicit fail-closed resource-scope assertion semantics.
+    scope_assertions: dict[str, ResourceScopeAssertionSemantics] = field(
+        default_factory=dict
+    )
     # Sink key -> source-derived contract qualified name, e.g. AgentService.get.
     sink_contracts: dict[str, str] = field(default_factory=dict)
     # Sink key -> returned attribute whose equality contract denotes resource scope.
@@ -113,6 +137,17 @@ class FastApiDependencyEffectProfile:
 
     def missing_scope_is_unconstrained(self, sink_key: str) -> bool:
         return sink_key in self.sink_missing_scope_unconstrained
+
+    def scope_assertion_names(
+        self,
+        full_name: str,
+        leaf_name: str | None,
+    ) -> tuple[str, ResourceScopeAssertionSemantics] | None:
+        """Resolve explicitly configured scope-assertion semantics for a call."""
+        for key in (full_name, leaf_name):
+            if key and key in self.scope_assertions:
+                return key, self.scope_assertions[key]
+        return None
 
     def contract_for_sink(self, sink_key: str) -> str | None:
         return self.sink_contracts.get(sink_key)
