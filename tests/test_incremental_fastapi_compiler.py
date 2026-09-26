@@ -142,7 +142,8 @@ def test_initial_incremental_compile_matches_full_compile() -> None:
     assert result.ir.canonical_payload() == full.canonical_payload()
     assert result.state.assurance_ir_digest == full.assurance_ir_digest
     assert result.stats.total_route_summary_files == 4
-    assert result.stats.rebound_file_count == 4
+    assert result.stats.semantic_fragment_file_count == 1
+    assert result.stats.rebound_file_count == 1
     assert result.stats.reused_fragment_count == 0
 
 
@@ -159,8 +160,9 @@ def test_unchanged_head_reuses_every_semantic_fragment() -> None:
     full = _full(head, _profile())
 
     assert second.ir.canonical_payload() == full.canonical_payload()
+    assert second.stats.semantic_fragment_file_count == 1
     assert second.stats.rebound_file_count == 0
-    assert second.stats.reused_fragment_count == 4
+    assert second.stats.reused_fragment_count == 1
     assert second.stats.changed_contract_count == 0
 
 
@@ -177,8 +179,9 @@ def test_unrelated_file_change_rebinds_only_that_file_fragment() -> None:
     full = _full(head, _profile())
 
     assert second.ir.canonical_payload() == full.canonical_payload()
-    assert second.stats.rebound_file_count == 1
-    assert second.stats.reused_fragment_count == 3
+    assert second.stats.semantic_fragment_file_count == 1
+    assert second.stats.rebound_file_count == 0
+    assert second.stats.reused_fragment_count == 1
     assert second.stats.changed_contract_count == 0
 
 
@@ -204,8 +207,9 @@ def test_service_contract_change_rebinds_service_and_dependent_route_only() -> N
     assert second.ir.canonical_payload() == full.canonical_payload()
     assert second.ir.coverage.status == "partial"
     assert second.stats.changed_contract_names == ("AgentService.get",)
-    assert second.stats.rebound_file_count == 2
-    assert second.stats.reused_fragment_count == 2
+    assert second.stats.semantic_fragment_file_count == 1
+    assert second.stats.rebound_file_count == 1
+    assert second.stats.reused_fragment_count == 0
     assert any(
         "required_scope_postcondition_missing:AgentService.get:workspace_id"
         in item
@@ -226,7 +230,8 @@ def test_profile_change_rebinds_every_fragment_conservatively() -> None:
     full = _full(materials, changed_profile)
 
     assert second.ir.canonical_payload() == full.canonical_payload()
-    assert second.stats.rebound_file_count == 4
+    assert second.stats.semantic_fragment_file_count == 1
+    assert second.stats.rebound_file_count == 1
     assert second.stats.reused_fragment_count == 0
     assert [effect.name for effect in second.ir.effects] == [
         "workspace.agent.inspect"
@@ -247,8 +252,9 @@ def test_removed_file_is_reported_and_not_reused() -> None:
     full = _full(head, _profile())
 
     assert second.ir.canonical_payload() == full.canonical_payload()
-    assert second.stats.removed_fragment_count == 1
-    assert second.stats.reused_fragment_count == 3
+    assert second.stats.removed_fragment_count == 0
+    assert second.stats.semantic_fragment_file_count == 1
+    assert second.stats.reused_fragment_count == 1
     assert second.stats.rebound_file_count == 0
 
 
@@ -268,7 +274,7 @@ def test_fragment_reuse_is_bound_to_profile_and_contract_versions() -> None:
     )
 
     assert second.stats.rebound_file_count == 1
-    assert second.stats.reused_fragment_count == 3
+    assert second.stats.reused_fragment_count == 0
 
 
 
@@ -365,8 +371,9 @@ def test_incremental_composition_and_fragment_reuse_share_dependency_closure() -
     assert second.ir.canonical_payload() == second_full.canonical_payload()
     assert second.stats.recomposed_contract_count == 0
     assert second.stats.reused_composed_contract_count == 2
+    assert second.stats.semantic_fragment_file_count == 1
     assert second.stats.rebound_file_count == 0
-    assert second.stats.reused_fragment_count == 5
+    assert second.stats.reused_fragment_count == 1
 
     changed = _composed_materials(
         repo_attribute="tenant_id",
@@ -388,5 +395,6 @@ def test_incremental_composition_and_fragment_reuse_share_dependency_closure() -
     assert third.stats.contract_invalidated_name_count == 3
     assert third.stats.recomposed_contract_count == 2
     assert third.stats.reused_composed_contract_count == 0
-    assert third.stats.rebound_file_count == 2
-    assert third.stats.reused_fragment_count == 3
+    assert third.stats.semantic_fragment_file_count == 1
+    assert third.stats.rebound_file_count == 1
+    assert third.stats.reused_fragment_count == 0
