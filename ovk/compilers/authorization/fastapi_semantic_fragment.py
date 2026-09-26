@@ -152,24 +152,113 @@ def _instantiate_contract_attributes(
     return terms, omitted, unresolved
 
 
+@dataclass(frozen=True)
+class _ScopeAssertionResolution:
+    term: ResourceIdentityTerm | None = None
+    origin: SemanticOrigin | None = None
+    problem: str | None = None
+    contract_name: str | None = None
+    contract: FunctionContract | None = None
+    established_attribute: str | None = None
+
+
+def _scope_from_source_contract(
+    *,
+    assertion_call: CallSummary,
+    assertion_key: str,
+    semantics: Any,
+    expected_scope: str,
+    contracts_by_name: Mapping[str, FunctionContract],
+) -> _ScopeAssertionResolution:
+    """Instantiate a source-derived normal-return equality at one call site."""
+    contract_name = semantics.contract_qualified_name
+    if contract_name is None:
+        raise ValueError("source-contract scope resolution requires contract name")
+
+    contract = contracts_by_name.get(contract_name)
+    if contract is None:
+        return _ScopeAssertionResolution(
+            problem=f"required_scope_assertion_contract_missing:{contract_name}",
+            contract_name=contract_name,
+        )
+    if (
+        semantics.contract_source_path is not None
+        and contract.origin.path != semantics.contract_source_path
+    ):
+        return _ScopeAssertionResolution(
+            problem=(
+                "scope_assertion_contract_source_mismatch:"
+                f"{contract_name}:{contract.origin.path}"
+            ),
+            contract_name=contract_name,
+            contract=contract,
+        )
+
+    matches: list[ResourceIdentityTerm] = []
+    for predicate in contract.postconditions:
+        if (
+            predicate.relation != "eq"
+            or predicate.right is None
+            or predicate.left.kind != "parameter"
+            or predicate.right.kind != "parameter"
+            or predicate.left.name is None
+            or predicate.right.name is None
+        ):
+            continue
+        left = _actual_argument(
+            assertion_call,
+            parameter_name=predicate.left.name,
+            positional_parameters=contract.positional_parameters,
+        )
+        right = _actual_argument(
+            assertion_call,
+            parameter_name=predicate.right.name,
+            positional_parameters=contract.positional_parameters,
+        )
+        if left is None or right is None:
+            continue
+        if left.rendered == expected_scope and right.term is not None:
+            matches.append(right.term)
+        elif right.rendered == expected_scope and left.term is not None:
+            matches.append(left.term)
+
+    if not matches:
+        return _ScopeAssertionResolution(
+            problem=(
+                "scope_assertion_contract_does_not_establish_scope:"
+                f"{assertion_key}:{contract_name}"
+            ),
+            contract_name=contract_name,
+            contract=contract,
+        )
+
+    unique = {term.term_id: term for term in matches}
+    if len(unique) != 1:
+        return _ScopeAssertionResolution(
+            problem=f"ambiguous_scope_assertion_contract:{contract_name}",
+            contract_name=contract_name,
+            contract=contract,
+        )
+
+    return _ScopeAssertionResolution(
+        term=next(iter(unique.values())),
+        origin=assertion_call.origin,
+        contract_name=contract_name,
+        contract=contract,
+        established_attribute=semantics.acted_scope_attribute,
+    )
+
+
 def _prior_scope_assertion(
     *,
     handler: RouteHandlerSummary,
     sink_call: CallSummary,
     identity_expression: ExpressionSummary,
     profile: Any,
-) -> tuple[
-    ResourceIdentityTerm | None,
-    SemanticOrigin | None,
-    str | None,
-]:
-    """Resolve a configured fail-closed scope assertion before one sink.
-
-    Only assertions about the exact acted resource expression are relevant.
-    Distinct asserted authorization resources are treated as ambiguous instead
-    of selecting one silently.
-    """
-    matches: list[tuple[ResourceIdentityTerm, SemanticOrigin]] = []
+    contracts_by_name: Mapping[str, FunctionContract],
+) -> _ScopeAssertionResolution:
+    """Resolve a configured fail-closed scope assertion before one sink."""
+    matches: list[_ScopeAssertionResolution] = []
     expected_resource = identity_expression.rendered
 
     for assertion_call in handler.calls:
@@ -183,56 +272,71 @@ def _prior_scope_assertion(
             continue
 
         assertion_key, semantics = resolved
-        if len(assertion_call.positional_arguments) <= semantics.acted_scope_arg:
-            return (
-                None,
-                None,
-                f"unsupported_scope_assertion_signature:{assertion_key}",
-            )
-
-        acted_scope = assertion_call.positional_arguments[
-            semantics.acted_scope_arg
-        ]
         expected_scope = (
             f"{expected_resource}.{semantics.acted_scope_attribute}"
         )
-        if acted_scope.rendered != expected_scope:
+
+        if semantics.contract_qualified_name is not None:
+            resolution = _scope_from_source_contract(
+                assertion_call=assertion_call,
+                assertion_key=assertion_key,
+                semantics=semantics,
+                expected_scope=expected_scope,
+                contracts_by_name=contracts_by_name,
+            )
+            if resolution.problem is not None:
+                return resolution
+            if resolution.term is not None:
+                matches.append(resolution)
             continue
 
+        if len(assertion_call.positional_arguments) <= semantics.acted_scope_arg:
+            return _ScopeAssertionResolution(
+                problem=f"unsupported_scope_assertion_signature:{assertion_key}"
+            )
+        acted_scope = assertion_call.positional_arguments[
+            semantics.acted_scope_arg
+        ]
+        if acted_scope.rendered != expected_scope:
+            continue
         if (
             len(assertion_call.positional_arguments)
             <= semantics.authorized_resource_arg
         ):
-            return (
-                None,
-                None,
-                f"unsupported_scope_assertion_signature:{assertion_key}",
+            return _ScopeAssertionResolution(
+                problem=f"unsupported_scope_assertion_signature:{assertion_key}"
             )
-
         authorized_resource = assertion_call.positional_arguments[
             semantics.authorized_resource_arg
         ]
         if authorized_resource.term is None:
-            return (
-                None,
-                None,
-                "unsupported_scope_assertion_authorized_resource:"
-                f"{assertion_key}",
+            return _ScopeAssertionResolution(
+                problem=(
+                    "unsupported_scope_assertion_authorized_resource:"
+                    f"{assertion_key}"
+                )
             )
-
-        matches.append((authorized_resource.term, assertion_call.origin))
+        matches.append(
+            _ScopeAssertionResolution(
+                term=authorized_resource.term,
+                origin=assertion_call.origin,
+            )
+        )
 
     if not matches:
-        return None, None, None
+        return _ScopeAssertionResolution()
 
-    term_ids = {term.term_id for term, _origin in matches}
+    term_ids = {
+        resolution.term.term_id
+        for resolution in matches
+        if resolution.term is not None
+    }
     if len(term_ids) != 1:
-        return None, None, "ambiguous_scope_assertions"
+        return _ScopeAssertionResolution(problem="ambiguous_scope_assertions")
 
     # Calls are source ordered. Use the latest equivalent assertion as the
     # provenance point closest to the protected sink.
-    return matches[-1][0], matches[-1][1], None
-
+    return matches[-1]
 
 @dataclass(frozen=True)
 class FastApiFileSemanticFragment:
@@ -268,6 +372,8 @@ def profile_semantic_digest(profile: Any) -> str:
                 "acted_scope_arg": semantics.acted_scope_arg,
                 "authorized_resource_arg": semantics.authorized_resource_arg,
                 "acted_scope_attribute": semantics.acted_scope_attribute,
+                "contract_qualified_name": semantics.contract_qualified_name,
+                "contract_source_path": semantics.contract_source_path,
             }
             for key, semantics in sorted(profile.scope_assertions.items())
         },
@@ -489,25 +595,29 @@ def bind_route_file_summary(
                             f"required_sink_scope_missing:{sink_key}"
                         )
 
+            assertion_resolution = _ScopeAssertionResolution()
             if scope_term is None and profile.scope_assertions:
-                (
-                    asserted_scope,
-                    assertion_origin,
-                    assertion_problem,
-                ) = _prior_scope_assertion(
+                assertion_resolution = _prior_scope_assertion(
                     handler=handler,
                     sink_call=call,
                     identity_expression=identity_expression,
                     profile=profile,
+                    contracts_by_name=contracts_by_name,
                 )
-                if assertion_problem is not None:
+                if assertion_resolution.contract_name is not None:
+                    dependencies[assertion_resolution.contract_name] = (
+                        assertion_resolution.contract.contract_id
+                        if assertion_resolution.contract is not None
+                        else None
+                    )
+                if assertion_resolution.problem is not None:
                     unsupported.append(
                         f"{file_summary.path}:{handler.handler_name}:"
-                        f"{assertion_problem}"
+                        f"{assertion_resolution.problem}"
                     )
-                elif asserted_scope is not None:
-                    scope_term = asserted_scope
-                    scope_origin = assertion_origin
+                elif assertion_resolution.term is not None:
+                    scope_term = assertion_resolution.term
+                    scope_origin = assertion_resolution.origin
 
             if (
                 scope_term is None
@@ -549,6 +659,33 @@ def bind_route_file_summary(
             )
 
             contract_use_ids: list[str] = []
+            if (
+                assertion_resolution.contract is not None
+                and assertion_resolution.term is not None
+            ):
+                assertion_contract = assertion_resolution.contract
+                use_id = _semantic_id(
+                    "contract-use",
+                    (
+                        f"{file_summary.path}:{handler.handler_name}:"
+                        f"{call.line}:{assertion_contract.contract_id}:"
+                        f"{acted_id}:scope-assertion"
+                    ),
+                )
+                contract_uses[use_id] = ContractUse(
+                    use_id=use_id,
+                    contract_id=assertion_contract.contract_id,
+                    qualified_name=assertion_contract.qualified_name,
+                    resource_id=acted_id,
+                    established_attributes=[
+                        assertion_resolution.established_attribute
+                    ]
+                    if assertion_resolution.established_attribute is not None
+                    else [],
+                    origin=assertion_resolution.origin or call.origin,
+                )
+                contract_use_ids.append(use_id)
+
             if inferred_contract is not None:
                 use_id = _semantic_id(
                     "contract-use",
@@ -765,7 +902,7 @@ _PROFILE_ASSUMPTIONS = [
     "Configured service-call sinks faithfully identify protected effects.",
     "Configured sink identity argument denotes the acted resource identity only when no source-derived identity contract is required.",
     "Configured sink scope keyword denotes the acted resource scope when no source contract is required.",
-    "Configured resource-scope assertion helpers fail closed: normal continuation establishes equality between the configured acted-resource attribute and authorization-resource argument.",
+    "Configured resource-scope assertion helpers either use explicitly declared fail-closed semantics or consume a source-derived normal-return equality contract.",
     "Source-derived function contracts are consumed only after resolving the configured service method.",
     "Only profile-selected contract attributes become required identity/scope/binding proof obligations.",
     "Conditional return contracts require the caller's non-null argument precondition to be established.",
