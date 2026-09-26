@@ -141,6 +141,7 @@ CONTRACT_PROFILE = FastApiDependencyEffectProfile(
     sink_effects={"svc.get": "workspace.agent.read"},
     sink_identity_args={"svc.get": 0},
     sink_contracts={"svc.get": "AgentService.get"},
+    sink_contract_scope_attributes={"svc.get": "workspace_id"},
     dependency_guard_resources={"require_workspace_member": "workspace_id"},
     dependency_guard_effects={
         "require_workspace_member": ("workspace.agent.read",),
@@ -357,4 +358,101 @@ class AgentService:
         "sink_contract_target_unresolved:svc.get:AgentService.get" in item
         for item in ir.coverage.unsupported_constructs
     )
+    assert result.status == "unknown"
+
+
+
+IDENTITY_AND_SCOPE_PROFILE = FastApiDependencyEffectProfile(
+    sink_effects={"svc.get": "workspace.agent.read"},
+    sink_identity_args={"svc.get": 0},
+    sink_contracts={"svc.get": "AgentService.get"},
+    sink_contract_scope_attributes={"svc.get": "workspace_id"},
+    sink_contract_identity_attributes={"svc.get": "id"},
+    dependency_guard_resources={"require_workspace_member": "workspace_id"},
+    dependency_guard_effects={
+        "require_workspace_member": ("workspace.agent.read",),
+    },
+    principal_parameter="user",
+)
+
+
+def test_typed_contract_establishes_identity_and_scope_at_call_site() -> None:
+    route_source = """
+from fastapi import Depends, FastAPI
+app = FastAPI()
+
+@app.get("/workspaces/{workspace_id}/agents/{agent_id}")
+async def get_agent(
+    workspace_id: str,
+    agent_id: str,
+    user = Depends(require_workspace_member),
+):
+    svc = AgentService()
+    agent = await svc.get(agent_id, workspace_id=workspace_id)
+    return agent
+""".strip()
+    service_source = """
+class AgentService:
+    async def get(self, agent_id: str, *, workspace_id: str | None = None):
+        agent = await self._session.get(Agent, agent_id)
+        if agent.id != agent_id:
+            return None
+        if workspace_id is not None and agent.workspace_id != workspace_id:
+            return None
+        return agent
+""".strip()
+
+    ir = FastApiDependencyEffectExtractor().compile(
+        _interprocedural_materials(route_source, service_source),
+        IDENTITY_AND_SCOPE_PROFILE,
+    )
+    result = evaluate_protected_effect_integrity(ir)[0]
+
+    assert ir.coverage.status == "complete"
+    assert len(ir.function_contracts) == 1
+    acted = next(resource for resource in ir.resources if resource.symbol == "agent_id")
+    assert acted.identity_term is not None
+    assert acted.identity_term.value == "agent_id"
+    assert acted.scope_term is not None
+    assert acted.scope_term.value == "workspace_id"
+    assert result.status == "pass"
+
+
+def test_missing_required_identity_postcondition_forces_unknown() -> None:
+    route_source = """
+from fastapi import Depends, FastAPI
+app = FastAPI()
+
+@app.get("/workspaces/{workspace_id}/agents/{agent_id}")
+async def get_agent(
+    workspace_id: str,
+    agent_id: str,
+    user = Depends(require_workspace_member),
+):
+    svc = AgentService()
+    agent = await svc.get(agent_id, workspace_id=workspace_id)
+    return agent
+""".strip()
+    service_source = """
+class AgentService:
+    async def get(self, agent_id: str, *, workspace_id: str | None = None):
+        agent = await self._session.get(Agent, agent_id)
+        if workspace_id is not None and agent.workspace_id != workspace_id:
+            return None
+        return agent
+""".strip()
+
+    ir = FastApiDependencyEffectExtractor().compile(
+        _interprocedural_materials(route_source, service_source),
+        IDENTITY_AND_SCOPE_PROFILE,
+    )
+    result = evaluate_protected_effect_integrity(ir)[0]
+
+    assert ir.coverage.status == "partial"
+    assert any(
+        "required_identity_postcondition_missing:AgentService.get:id" in item
+        for item in ir.coverage.unsupported_constructs
+    )
+    acted = next(resource for resource in ir.resources if resource.symbol == "agent_id")
+    assert acted.identity_term is None
     assert result.status == "unknown"
