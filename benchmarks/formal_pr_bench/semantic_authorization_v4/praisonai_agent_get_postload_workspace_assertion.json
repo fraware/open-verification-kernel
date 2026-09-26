@@ -1,0 +1,63 @@
+{
+  "schema_version": "formal_pr_bench.semantic_authorization.v4",
+  "case_id": "praisonai_agent_get_postload_workspace_assertion",
+  "category": "semantic_authorization",
+  "framework": "fastapi",
+  "source_profile": "assurance.fastapi.dependency_effects.ast_v1",
+  "provenance_id": "praisonai_agent_get_postload_workspace_assertion",
+  "contamination_status": "public_development_case",
+  "theorem": {
+    "statement": "A resource disclosed by the protected response effect must belong to the workspace authorized by the route dependency.",
+    "authorization_resource": "workspace_id",
+    "acted_resource": "agent",
+    "acted_resource_scope": "agent.workspace_id",
+    "relation": "same_tenant"
+  },
+  "profile": {
+    "sink_effects": {
+      "AgentResponse.model_validate": "workspace.agent.read"
+    },
+    "sink_identity_args": {
+      "AgentResponse.model_validate": 0
+    },
+    "sink_missing_scope_unconstrained": [
+      "AgentResponse.model_validate"
+    ],
+    "scope_assertions": {
+      "ensure_resource_in_workspace": {
+        "acted_scope_arg": 0,
+        "authorized_resource_arg": 1,
+        "acted_scope_attribute": "workspace_id"
+      }
+    },
+    "dependency_guard_resources": {
+      "require_workspace_member": "workspace_id"
+    },
+    "dependency_guard_effects": {
+      "require_workspace_member": [
+        "workspace.agent.read"
+      ]
+    },
+    "principal_parameter": "user"
+  },
+  "variants": [
+    {
+      "id": "vulnerable",
+      "label": "historical vulnerable shape",
+      "expected_native_z3_status": "fail",
+      "source": "from fastapi import APIRouter, Depends, HTTPException\n\nrouter = APIRouter(prefix=\"/workspaces/{workspace_id}/agents\")\n\n@router.get(\"/{agent_id}\", response_model=AgentResponse)\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user: AuthIdentity = Depends(require_workspace_member),\n    session: AsyncSession = Depends(get_db),\n):\n    svc = AgentService(session)\n    agent = await svc.get(agent_id)\n    if agent is None:\n        raise HTTPException(status_code=404, detail=\"Agent not found\")\n    return AgentResponse.model_validate(agent)"
+    },
+    {
+      "id": "secure",
+      "label": "upstream repaired shape",
+      "expected_native_z3_status": "pass",
+      "source": "from fastapi import APIRouter, Depends, HTTPException\n\nrouter = APIRouter(prefix=\"/workspaces/{workspace_id}/agents\")\n\n@router.get(\"/{agent_id}\", response_model=AgentResponse)\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user: AuthIdentity = Depends(require_workspace_member),\n    session: AsyncSession = Depends(get_db),\n):\n    svc = AgentService(session)\n    agent = await svc.get(agent_id)\n    if agent is None:\n        raise HTTPException(status_code=404, detail=\"Agent not found\")\n    ensure_resource_in_workspace(agent.workspace_id, workspace_id, label=\"Agent\")\n    return AgentResponse.model_validate(agent)"
+    }
+  ],
+  "benchmark_contract": {
+    "secure_requires_complete_coverage": true,
+    "vulnerable_must_never_pass": true,
+    "native_z3_requires_counterexample": true,
+    "reduction_preserves_fix_mechanism": true
+  }
+}
