@@ -450,3 +450,70 @@ def test_unfingerprinted_evidence_is_sealed_but_never_reusable() -> None:
     )
     assert decision.eligible is False
     assert "missing_or_ambiguous_execution_fingerprint" in decision.reason_codes
+
+
+
+def test_signed_evidence_reuse_requires_correct_signature_key() -> None:
+    ir = _simple_ir()
+    evaluation = evaluate_protected_effect_integrity(ir)[0]
+    fingerprint = _fingerprint(evaluation)
+    signing_key = b"protected-effect-test-signing-key"
+    evidence = protected_effect_evaluation_to_evidence(
+        ir,
+        evaluation,
+        policy_digest="policy-a",
+        execution_fingerprint=fingerprint,
+        signing_key=signing_key,
+    )
+    assert evidence.signature is not None
+
+    accepted = evaluate_protected_effect_evidence_reuse(
+        evidence,
+        head_ir=_simple_ir(head_sha="head-b"),
+        protected_effect_id="pe:refund",
+        policy_digest="policy-a",
+        current_fingerprint=fingerprint,
+        reuse_policy=ProtectedEffectReusePolicy(require_signature=True),
+        signature_key=signing_key,
+    )
+    assert accepted.eligible is True
+
+    rejected = evaluate_protected_effect_evidence_reuse(
+        evidence,
+        head_ir=_simple_ir(head_sha="head-b"),
+        protected_effect_id="pe:refund",
+        policy_digest="policy-a",
+        current_fingerprint=fingerprint,
+        reuse_policy=ProtectedEffectReusePolicy(require_signature=True),
+        signature_key=b"wrong-key",
+    )
+    assert rejected.eligible is False
+    assert "invalid_signature" in rejected.reason_codes
+
+
+def test_semantic_cache_rejects_tampered_evidence_payload(tmp_path: Path) -> None:
+    import json
+
+    base = _simple_ir()
+    _, fingerprint, evidence = _evidence(base)
+    cache = ProtectedEffectEvidenceCache(HardenedResultCache(tmp_path))
+    cache.put(
+        ir=base,
+        protected_effect_id="pe:refund",
+        policy_digest="policy-a",
+        execution_fingerprint=fingerprint,
+        evidence=evidence,
+    )
+
+    path = next((tmp_path / "semantic-evidence").glob("*.json"))
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record["payload"]["backend_claims"][0]["status"] = "fail"
+    path.write_text(json.dumps(record), encoding="utf-8")
+
+    reused = cache.reuse_for_head(
+        head_ir=_simple_ir(head_sha="head-b"),
+        protected_effect_id="pe:refund",
+        policy_digest="policy-a",
+        current_fingerprint=fingerprint,
+    )
+    assert reused is None
