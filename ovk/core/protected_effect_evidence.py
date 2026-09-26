@@ -129,7 +129,7 @@ class ProtectedEffectReusePolicy(BaseModel):
 
     max_age_seconds: int = Field(default=86400, gt=0)
     clock_skew_seconds: int = Field(default=300, ge=0)
-    require_signature: bool = False
+    require_signature: bool = True
     revoked_evidence_digests: list[str] = Field(default_factory=list)
 
 
@@ -811,6 +811,8 @@ class ProtectedEffectEvidenceCache:
         policy_digest: str,
         execution_fingerprint: ProtectedEffectExecutionFingerprint,
         evidence: VerificationEvidence,
+        reuse_policy: ProtectedEffectReusePolicy | None = None,
+        signature_key: bytes | None = None,
     ) -> str:
         decision = evaluate_protected_effect_evidence_reuse(
             evidence,
@@ -818,6 +820,8 @@ class ProtectedEffectEvidenceCache:
             protected_effect_id=protected_effect_id,
             policy_digest=policy_digest,
             current_runtime_fingerprint=execution_fingerprint.runtime_fingerprint,
+            reuse_policy=reuse_policy,
+            signature_key=signature_key,
         )
         if not decision.eligible:
             raise ValueError(
