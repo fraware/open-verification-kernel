@@ -1,0 +1,50 @@
+{
+  "schema_version": "formal_pr_bench.provenance.v1",
+  "case_id": "praisonai_agent_get_postload_workspace_assertion",
+  "source_kind": "public_security_advisory_and_upstream_diff_reduction",
+  "source_repository": "MervinPraison/PraisonAI",
+  "advisory": {
+    "ghsa": "GHSA-h8q5-cp56-rr65",
+    "cve": "CVE-2026-47407",
+    "url": "https://github.com/advisories/GHSA-h8q5-cp56-rr65",
+    "published": "2026-05-19"
+  },
+  "upstream": {
+    "vulnerable_revision": "402d7ed9fc5926babaa70c97a6ee5353e3d0dd62",
+    "fixed_revision": "179cab02dbec0c1e9b601507a65908e079876004",
+    "merge_revision": "b0d8f777528f3253a0cfb0a3ef65455da6ae32f6",
+    "route_path": "src/praisonai-platform/praisonai_platform/api/routes/agents.py",
+    "helper_path": "src/praisonai-platform/praisonai_platform/api/deps.py",
+    "service_path": "src/praisonai-platform/praisonai_platform/services/agent_service.py",
+    "vulnerable_route_blob": "c833dc7fe69d2ba5d37ffed7f83b15e4ec77514b",
+    "fixed_route_blob": "10bfc244645b89191587740a54ba10ac579f2a00",
+    "fixed_helper_blob": "66463e945b5ba0417ea73967a7a1a36e10e74dfa",
+    "fixed_service_blob": "4a0b5ae84e70cb9485f088b4f0758db8cf15925b"
+  },
+  "reduction": {
+    "target_handler": "get_agent",
+    "preserved": [
+      "FastAPI route parameter workspace_id",
+      "Depends(require_workspace_member) authorization guard",
+      "AgentService(session) construction",
+      "unscoped await svc.get(agent_id) lookup",
+      "if agent is None: raise HTTPException(...) fail-fast guard",
+      "AgentResponse.model_validate(agent) response disclosure sink",
+      "fixed-version ensure_resource_in_workspace(agent.workspace_id, workspace_id, ...) assertion",
+      "relative ordering of lookup, null guard, ownership assertion, and disclosure"
+    ],
+    "omitted": [
+      "unrelated imports and route handlers",
+      "type definitions not required for AST extraction",
+      "response metadata unrelated to the authorization/resource relation"
+    ],
+    "semantic_delta": "The secure variant differs from the vulnerable variant only by the upstream ownership assertion immediately before response disclosure."
+  },
+  "evaluation_use": "public_development_regression",
+  "eligible_for_sealed_holdout": false,
+  "notes": [
+    "This case is public and must not be reported as sealed holdout evidence.",
+    "The benchmark preserves the actual route-level repair mechanism instead of replacing it with a workspace-scoped service-call pattern.",
+    "The configured assertion-helper semantics remain part of the declared source-profile trust basis in this tranche."
+  ]
+}
