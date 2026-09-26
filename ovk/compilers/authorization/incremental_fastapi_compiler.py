@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from ovk.compilers.authorization.fastapi_route_summary import RouteSummaryIndex
 from ovk.compilers.authorization.fastapi_semantic_fragment import (
