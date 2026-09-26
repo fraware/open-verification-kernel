@@ -66,14 +66,13 @@ class BindingCheckerFingerprint(BaseModel):
         return value
 
 
-class ProtectedEffectExecutionFingerprint(BaseModel):
-    """Trusted execution identity required for reusable Protected Effect evidence."""
+class ProtectedEffectRuntimeFingerprint(BaseModel):
+    """Execution environment identity known before a Protected Effect check runs."""
 
     environment_digest: str
     tool_digest: str
     worker_image_digest: str
     native_execution: bool
-    binding_checkers: list[BindingCheckerFingerprint] = Field(default_factory=list)
 
     @field_validator("environment_digest", "tool_digest", "worker_image_digest")
     @classmethod
@@ -82,6 +81,19 @@ class ProtectedEffectExecutionFingerprint(BaseModel):
         if not value:
             raise ValueError("execution fingerprint digests must be non-empty")
         return value
+
+    def canonical_payload(self) -> dict[str, Any]:
+        return self.model_dump(mode="json")
+
+    @property
+    def fingerprint_digest(self) -> str:
+        return content_digest(self.canonical_payload())
+
+
+class ProtectedEffectExecutionFingerprint(ProtectedEffectRuntimeFingerprint):
+    """Runtime identity plus checker engines actually observed during execution."""
+
+    binding_checkers: list[BindingCheckerFingerprint] = Field(default_factory=list)
 
     def canonical_payload(self) -> dict[str, Any]:
         payload = self.model_dump(mode="json")
@@ -99,6 +111,15 @@ class ProtectedEffectExecutionFingerprint(BaseModel):
     @property
     def fingerprint_digest(self) -> str:
         return content_digest(self.canonical_payload())
+
+    @property
+    def runtime_fingerprint(self) -> ProtectedEffectRuntimeFingerprint:
+        return ProtectedEffectRuntimeFingerprint(
+            environment_digest=self.environment_digest,
+            tool_digest=self.tool_digest,
+            worker_image_digest=self.worker_image_digest,
+            native_execution=self.native_execution,
+        )
 
 
 class ProtectedEffectReusePolicy(BaseModel):
@@ -118,7 +139,7 @@ class ProtectedEffectReuseDecision(BaseModel):
     evidence_digest: str | None = None
     protected_effect_id: str
     semantic_slice_digest: str
-    execution_fingerprint_digest: str
+    runtime_fingerprint_digest: str
 
 
 def _observed_binding_checkers(
@@ -430,6 +451,77 @@ def _single_artifact(
     return matches[0] if len(matches) == 1 else None
 
 
+def _parse_execution_fingerprint(
+    evidence: VerificationEvidence,
+) -> ProtectedEffectExecutionFingerprint | None:
+    artifact = _single_artifact(
+        evidence,
+        "protected_effect_execution_fingerprint",
+    )
+    if artifact is None:
+        return None
+    try:
+        fingerprint = ProtectedEffectExecutionFingerprint.model_validate(
+            {
+                "environment_digest": artifact.get("environment_digest"),
+                "tool_digest": artifact.get("tool_digest"),
+                "worker_image_digest": artifact.get("worker_image_digest"),
+                "native_execution": artifact.get("native_execution"),
+                "binding_checkers": artifact.get("binding_checkers") or [],
+            }
+        )
+    except Exception:
+        return None
+    if artifact.get("fingerprint_digest") != fingerprint.fingerprint_digest:
+        return None
+    return fingerprint
+
+
+def _binding_checkers_compatible_with_current_runtime(
+    checkers: list[BindingCheckerFingerprint],
+) -> bool:
+    """Validate stored checker engines against the checker stack installed now."""
+
+    from ovk.adapters.z3.resource_binding import (
+        RESOURCE_BINDING_CHECKER_ID,
+        RESOURCE_BINDING_CHECKER_VERSION,
+    )
+
+    for checker in checkers:
+        if checker.checker_id != RESOURCE_BINDING_CHECKER_ID:
+            return False
+        if checker.checker_version != RESOURCE_BINDING_CHECKER_VERSION:
+            return False
+
+        if checker.engine == "z3":
+            try:
+                import z3  # type: ignore
+            except Exception:
+                return False
+            if checker.tool_version != z3.get_version_string():
+                return False
+        elif checker.engine == "z3-unavailable":
+            try:
+                import z3  # type: ignore  # noqa: F401
+            except Exception:
+                pass
+            else:
+                return False
+            if checker.tool_version is not None:
+                return False
+        elif checker.engine in {
+            "structural",
+            "literal",
+            "unsupported",
+            "unavailable",
+        }:
+            if checker.tool_version is not None:
+                return False
+        else:
+            return False
+    return True
+
+
 def _parse_completed_at(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -448,7 +540,7 @@ def evaluate_protected_effect_evidence_reuse(
     head_ir: AssuranceIR,
     protected_effect_id: str,
     policy_digest: str,
-    current_fingerprint: ProtectedEffectExecutionFingerprint,
+    current_runtime_fingerprint: ProtectedEffectRuntimeFingerprint,
     reuse_policy: ProtectedEffectReusePolicy | None = None,
     signature_key: bytes | None = None,
     now: datetime | None = None,
@@ -532,33 +624,16 @@ def evaluate_protected_effect_evidence_reuse(
     if decision_state != "needs_review" or controlling_ids:
         reasons.append("prior_evidence_not_non_controlling")
 
-    fingerprint_artifact = _single_artifact(
-        evidence,
-        "protected_effect_execution_fingerprint",
-    )
-    if fingerprint_artifact is None:
-        reasons.append("missing_or_ambiguous_execution_fingerprint")
+    stored_fingerprint = _parse_execution_fingerprint(evidence)
+    if stored_fingerprint is None:
+        reasons.append("missing_or_invalid_execution_fingerprint")
     else:
-        try:
-            stored_fingerprint = ProtectedEffectExecutionFingerprint.model_validate(
-                {
-                    "environment_digest": fingerprint_artifact.get("environment_digest"),
-                    "tool_digest": fingerprint_artifact.get("tool_digest"),
-                    "worker_image_digest": fingerprint_artifact.get("worker_image_digest"),
-                    "native_execution": fingerprint_artifact.get("native_execution"),
-                    "binding_checkers": fingerprint_artifact.get("binding_checkers") or [],
-                }
-            )
-        except Exception:
-            reasons.append("invalid_execution_fingerprint")
-        else:
-            if stored_fingerprint != current_fingerprint:
-                reasons.append("execution_fingerprint_mismatch")
-            if (
-                fingerprint_artifact.get("fingerprint_digest")
-                != stored_fingerprint.fingerprint_digest
-            ):
-                reasons.append("execution_fingerprint_digest_mismatch")
+        if stored_fingerprint.runtime_fingerprint != current_runtime_fingerprint:
+            reasons.append("runtime_fingerprint_mismatch")
+        if not _binding_checkers_compatible_with_current_runtime(
+            stored_fingerprint.binding_checkers
+        ):
+            reasons.append("binding_checker_runtime_mismatch")
 
     return ProtectedEffectReuseDecision(
         eligible=not reasons,
@@ -566,7 +641,7 @@ def evaluate_protected_effect_evidence_reuse(
         evidence_digest=evidence_digest,
         protected_effect_id=protected_effect_id,
         semantic_slice_digest=current_semantic_digest,
-        execution_fingerprint_digest=current_fingerprint.fingerprint_digest,
+        runtime_fingerprint_digest=current_runtime_fingerprint.fingerprint_digest,
     )
 
 
@@ -575,7 +650,7 @@ def build_protected_effect_cache_components(
     ir: AssuranceIR,
     protected_effect_id: str,
     policy_digest: str,
-    execution_fingerprint: ProtectedEffectExecutionFingerprint,
+    runtime_fingerprint: ProtectedEffectRuntimeFingerprint,
 ) -> dict[str, Any]:
     """Cross-revision cache identity for one semantically stable protected effect."""
 
@@ -594,10 +669,10 @@ def build_protected_effect_cache_components(
         "checker_id": PROTECTED_EFFECT_CHECKER_ID,
         "checker_version": PROTECTED_EFFECT_CHECKER_VERSION,
         "guarantee_type": PROTECTED_EFFECT_GUARANTEE,
-        "environment_digest": execution_fingerprint.environment_digest,
-        "tool_digest": execution_fingerprint.tool_digest,
-        "worker_image_digest": execution_fingerprint.worker_image_digest,
-        "execution_fingerprint_digest": execution_fingerprint.fingerprint_digest,
+        "environment_digest": runtime_fingerprint.environment_digest,
+        "tool_digest": runtime_fingerprint.tool_digest,
+        "worker_image_digest": runtime_fingerprint.worker_image_digest,
+        "runtime_fingerprint_digest": runtime_fingerprint.fingerprint_digest,
         "namespace": NAMESPACE_SEMANTIC_EVIDENCE,
     }
 
@@ -740,7 +815,7 @@ class ProtectedEffectEvidenceCache:
             head_ir=ir,
             protected_effect_id=protected_effect_id,
             policy_digest=policy_digest,
-            current_fingerprint=execution_fingerprint,
+            current_runtime_fingerprint=execution_fingerprint.runtime_fingerprint,
         )
         if not decision.eligible:
             raise ValueError(
@@ -751,7 +826,7 @@ class ProtectedEffectEvidenceCache:
             ir=ir,
             protected_effect_id=protected_effect_id,
             policy_digest=policy_digest,
-            execution_fingerprint=execution_fingerprint,
+            runtime_fingerprint=execution_fingerprint.runtime_fingerprint,
         )
         return self.cache.put(
             components,
@@ -768,7 +843,7 @@ class ProtectedEffectEvidenceCache:
         head_ir: AssuranceIR,
         protected_effect_id: str,
         policy_digest: str,
-        current_fingerprint: ProtectedEffectExecutionFingerprint,
+        current_runtime_fingerprint: ProtectedEffectRuntimeFingerprint,
         reuse_policy: ProtectedEffectReusePolicy | None = None,
         signature_key: bytes | None = None,
         signing_key: bytes | None = None,
@@ -778,7 +853,7 @@ class ProtectedEffectEvidenceCache:
             ir=head_ir,
             protected_effect_id=protected_effect_id,
             policy_digest=policy_digest,
-            execution_fingerprint=current_fingerprint,
+            runtime_fingerprint=current_runtime_fingerprint,
         )
         entry = self.cache.get(components)
         if entry is None:
@@ -793,19 +868,29 @@ class ProtectedEffectEvidenceCache:
             head_ir=head_ir,
             protected_effect_id=protected_effect_id,
             policy_digest=policy_digest,
-            current_fingerprint=current_fingerprint,
+            current_runtime_fingerprint=current_runtime_fingerprint,
             reuse_policy=reuse_policy,
             signature_key=signature_key,
             now=now,
         )
         if not decision.eligible:
             return None
+        stored_fingerprint = _parse_execution_fingerprint(prior)
+        if stored_fingerprint is None:
+            return None
+        current_execution_fingerprint = ProtectedEffectExecutionFingerprint(
+            environment_digest=current_runtime_fingerprint.environment_digest,
+            tool_digest=current_runtime_fingerprint.tool_digest,
+            worker_image_digest=current_runtime_fingerprint.worker_image_digest,
+            native_execution=current_runtime_fingerprint.native_execution,
+            binding_checkers=stored_fingerprint.binding_checkers,
+        )
         return reissue_reused_protected_effect_evidence(
             prior,
             head_ir=head_ir,
             protected_effect_id=protected_effect_id,
             policy_digest=policy_digest,
-            current_fingerprint=current_fingerprint,
+            current_fingerprint=current_execution_fingerprint,
             reuse_decision=decision,
             signing_key=signing_key,
         )
