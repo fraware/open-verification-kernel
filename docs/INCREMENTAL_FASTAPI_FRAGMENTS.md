@@ -39,16 +39,19 @@ Unchanged head:
     N reusable file fragments
     0 rebound fragments
 
-One unrelated file changes:
+One unrelated non-route file changes:
 
-    N-1 reusable fragments
-    1 rebound fragment
+    route-bearing fragments remain reusable
+    0 rebound fragments
+
+Files with no recognized FastAPI route handlers do not materialize semantic
+fragments. They remain represented in source/contract summary state as needed.
 
 A service contract changes while its route source remains unchanged:
 
-    service file fragment rebounds because its source changed
+    no service fragment exists unless that file also contains a route
     consuming route fragment rebounds because contract_id changed
-    unrelated fragments are reused
+    unrelated route fragments are reused
 
 The route therefore observes the new service semantics even though its source
 and RouteFileSummary were unchanged.
