@@ -122,6 +122,8 @@ def protected_effect_evaluation_to_evidence(
         }
     )[:24]
 
+    subchecker_artifacts = _subchecker_artifacts(evaluation)
+
     generated_artifacts = [
         {
             "kind": "protected_effect_evaluation",
@@ -142,7 +144,7 @@ def protected_effect_evaluation_to_evidence(
                 "attested/calibrated for controlling merge decisions"
             ),
         },
-        *_subchecker_artifacts(evaluation),
+        *subchecker_artifacts,
     ]
 
     subject = {
@@ -237,6 +239,7 @@ def protected_effect_evaluation_to_evidence(
                     "checker_version": _CHECKER_VERSION,
                     "source_profile_id": source_profile_id,
                     "extractor": ir.extractor.model_dump(mode="json"),
+                    "subcheckers": subchecker_artifacts,
                 }
             )
         ),
