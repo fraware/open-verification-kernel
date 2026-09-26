@@ -180,7 +180,14 @@ def _evidence(ir: AssuranceIR, *, policy_digest: str = "policy-a"):
 
 def test_protected_effect_evidence_is_sealed_and_non_controlling() -> None:
     ir = _simple_ir()
-    evaluation, fingerprint, evidence = _evidence(ir)
+    evaluation = evaluate_protected_effect_integrity(ir)[0]
+    fingerprint = _fingerprint(evaluation)
+    evidence = protected_effect_evaluation_to_evidence(
+        ir,
+        evaluation,
+        policy_digest="policy-a",
+        execution_fingerprint=fingerprint,
+    )
 
     assert evaluation.status == "pass"
     assert evidence.evidence_digest
