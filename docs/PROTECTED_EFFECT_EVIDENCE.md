@@ -48,9 +48,13 @@ protected_effect_evidence_reuse_decision returns reusable only if:
 
 Every mismatch yields a named rejection reason.
 
-No timestamp expiry or revocation authority is implemented in v1. A deployment
-that needs those controls must add them before treating reuse as release
-authoritative.
+Optional freshness and revocation controls are supported by the reuse context.
+
+If max_age_seconds is supplied, now_iso must also be supplied and evidence older
+than the limit is rejected. A caller may also provide revoked_evidence_ids;
+matching evidence is rejected immediately. These controls are inputs to the
+reuse decision; OVK does not yet provide a networked revocation service or
+trusted time source.
 
 ## Boundary
 
