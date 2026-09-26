@@ -10,10 +10,12 @@ Cross-revision reuse is permitted only when a prior sealed PASS is:
 - bound to the same semantic support slice;
 - bound to the same policy digest;
 - produced by the same Protected Effect checker version; and
-- bound to an exactly matching execution fingerprint.
+- bound to an exactly matching runtime fingerprint; and
+- compatible with the checker engines recorded during the prior evaluation.
 
-The execution fingerprint includes environment, tool, worker-image identity, and
-the resource-binding checker engines actually observed during evaluation.
+Runtime identity is known before execution. Observed resource-binding checker
+engines are sealed into evidence and validated against the currently installed
+checker/tool versions after cache retrieval.
 """
 
 from __future__ import annotations
