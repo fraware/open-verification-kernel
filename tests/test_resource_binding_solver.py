@@ -273,3 +273,95 @@ def test_attribute_projection_binding_fails_for_different_parent_id() -> None:
 
     assert result["status"] == "fail"
     assert result["counterexample"]["acted_projection"] == "acted.attribute[project_id]"
+
+
+
+def test_structural_binding_result_reports_deterministic_checker_provenance() -> None:
+    ir = AssuranceIR(
+        subject=VerificationSubject(repo="example/app", base_sha="a", head_sha="b"),
+        extractor=AssuranceExtractorIdentity(
+            extractor_id="test.extractor",
+            extractor_version="0.1.0",
+        ),
+        coverage=AssuranceCoverage(status="complete", confidence=1.0),
+        resources=[
+            ResourceRef(
+                resource_id="r:authorized",
+                symbol="workspace_id",
+                identity_term=ResourceIdentityTerm.symbol("workspace_id"),
+                origin=_origin(),
+            ),
+            ResourceRef(
+                resource_id="r:acted",
+                symbol="agent_id",
+                scope_term=ResourceIdentityTerm.symbol("workspace_id"),
+                origin=_origin(),
+            ),
+        ],
+    )
+    binding = ResourceBinding(
+        binding_id="binding:workspace",
+        authorized_resource_id="r:authorized",
+        acted_resource_id="r:acted",
+        relation="same_tenant",
+        authorized_projection="identity",
+        acted_projection="scope",
+        origin=_origin(),
+    )
+
+    result = evaluate_resource_binding_with_z3(ir, binding)
+
+    assert result["status"] == "pass"
+    assert result["provenance"] == {
+        "checker_id": "ovk.resource_binding.deterministic.v1",
+        "checker_version": "0.1.0",
+        "native_execution": False,
+        "tool_version": None,
+    }
+
+
+def test_native_z3_binding_result_reports_solver_version_when_available() -> None:
+    import importlib.util
+
+    if importlib.util.find_spec("z3") is None:
+        pytest.skip("z3-solver not installed")
+
+    ir = AssuranceIR(
+        subject=VerificationSubject(repo="example/app", base_sha="a", head_sha="b"),
+        extractor=AssuranceExtractorIdentity(
+            extractor_id="test.extractor",
+            extractor_version="0.1.0",
+        ),
+        coverage=AssuranceCoverage(status="complete", confidence=1.0),
+        resources=[
+            ResourceRef(
+                resource_id="r:authorized",
+                symbol="workspace_id",
+                identity_term=ResourceIdentityTerm.symbol("workspace_id"),
+                origin=_origin(),
+            ),
+            ResourceRef(
+                resource_id="r:acted",
+                symbol="agent_id",
+                scope_term=ResourceIdentityTerm.symbol("other_workspace_id"),
+                origin=_origin(),
+            ),
+        ],
+    )
+    binding = ResourceBinding(
+        binding_id="binding:workspace",
+        authorized_resource_id="r:authorized",
+        acted_resource_id="r:acted",
+        relation="same_tenant",
+        authorized_projection="identity",
+        acted_projection="scope",
+        origin=_origin(),
+    )
+
+    result = evaluate_resource_binding_with_z3(ir, binding)
+
+    assert result["status"] == "fail"
+    assert result["provenance"]["checker_id"] == "ovk.resource_binding.z3.v1"
+    assert result["provenance"]["checker_version"] == "0.1.0"
+    assert result["provenance"]["native_execution"] is True
+    assert result["provenance"]["tool_version"]
