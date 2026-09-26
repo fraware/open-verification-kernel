@@ -1,0 +1,51 @@
+{
+  "schema_version": "formal_pr_bench.semantic_authorization.v1",
+  "case_id": "praisonai_cross_workspace_idor_reduced",
+  "category": "semantic_authorization",
+  "framework": "fastapi",
+  "provenance_id": "praisonai_cross_workspace_idor_reduced",
+  "public_contamination_risk": "high",
+  "property": "authorized workspace identity must equal acted resource scope",
+  "profile": {
+    "sink_effects": {
+      "read_agent": "workspace.agent.read"
+    },
+    "principal_parameter": "user",
+    "guard_functions": [
+      "authorize_workspace"
+    ],
+    "resource_loader_identity_args": {
+      "load_agent": 0,
+      "load_agent_in_workspace": 1
+    },
+    "resource_loader_scope_args": {
+      "load_agent_in_workspace": 0
+    },
+    "resource_loader_unconstrained_scopes": [
+      "load_agent"
+    ],
+    "sink_binding_relations": {
+      "read_agent": "same_tenant"
+    },
+    "sink_authorized_projections": {
+      "read_agent": "identity"
+    },
+    "sink_acted_projections": {
+      "read_agent": "scope"
+    }
+  },
+  "variants": [
+    {
+      "id": "vulnerable_global_lookup",
+      "source": "from fastapi import FastAPI\napp = FastAPI()\n\n@app.get(\"/workspaces/{workspace_id}/agents/{agent_id}\")\ndef get_agent(workspace_id: str, agent_id: str, user):\n    authorize_workspace(user, \"workspace.agent.read\", workspace_id)\n    agent = load_agent(agent_id)\n    read_agent(agent)\n",
+      "expected_resource_binding": "fail_when_z3_available",
+      "rationale": "Authorization is scoped to workspace_id while the loaded agent has unconstrained workspace scope."
+    },
+    {
+      "id": "secure_workspace_scoped_lookup",
+      "source": "from fastapi import FastAPI\napp = FastAPI()\n\n@app.get(\"/workspaces/{workspace_id}/agents/{agent_id}\")\ndef get_agent(workspace_id: str, agent_id: str, user):\n    authorize_workspace(user, \"workspace.agent.read\", workspace_id)\n    agent = load_agent_in_workspace(workspace_id, agent_id)\n    read_agent(agent)\n",
+      "expected_resource_binding": "pass",
+      "rationale": "The loader explicitly scopes the acted resource to the authorized workspace_id."
+    }
+  ]
+}
