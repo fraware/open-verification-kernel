@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from copy import deepcopy
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
