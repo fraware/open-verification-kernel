@@ -5,6 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ovk.compilers.authorization.fastapi_route_summary import RouteSummaryIndex
+from ovk.compilers.authorization.incremental_contract_composition import (
+    IncrementalContractCompositionState,
+    compose_function_contracts_incremental,
+)
 from ovk.compilers.authorization.fastapi_semantic_fragment import (
     FastApiFileSemanticFragment,
     assemble_fastapi_assurance_ir,
@@ -23,7 +27,6 @@ from ovk.compilers.authorization.python_ast_index import (
 from ovk.compilers.authorization.resource_return_contracts import (
     ContractSummaryIndex,
     contract_summary_index_matches_materials,
-    infer_function_contracts,
     infer_resource_return_contracts,
 )
 from ovk.core.assurance_ir import AssuranceIR
@@ -40,6 +43,7 @@ class IncrementalFastApiCompilationState:
     contract_versions: dict[str, str]
     fragments: dict[str, FastApiFileSemanticFragment]
     assurance_ir_digest: str
+    contract_composition_state: IncrementalContractCompositionState | None = None
 
 
 @dataclass(frozen=True)
@@ -52,6 +56,9 @@ class IncrementalFastApiCompilationStats:
     removed_fragment_count: int
     changed_contract_count: int
     changed_contract_names: tuple[str, ...] = ()
+    reused_composed_contract_count: int = 0
+    recomposed_contract_count: int = 0
+    contract_invalidated_name_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -129,10 +136,15 @@ def compile_incremental_fastapi_assurance(
         route_summary_index=route_summary_index,
     )
 
-    function_contracts = infer_function_contracts(
-        materials,
-        summary_index=contract_summary_index,
+    contract_composition = compose_function_contracts_incremental(
+        contract_summary_index,
+        previous_state=(
+            previous_state.contract_composition_state
+            if previous_state is not None
+            else None
+        ),
     )
+    function_contracts = contract_composition.contracts
     resource_return_contracts = infer_resource_return_contracts(
         materials,
         function_contracts=function_contracts,
@@ -213,6 +225,7 @@ def compile_incremental_fastapi_assurance(
         contract_versions=current_contract_versions,
         fragments=fragments,
         assurance_ir_digest=ir.assurance_ir_digest,
+        contract_composition_state=contract_composition.state,
     )
     return IncrementalFastApiCompilationResult(
         ir=ir,
@@ -224,5 +237,14 @@ def compile_incremental_fastapi_assurance(
             removed_fragment_count=removed,
             changed_contract_count=len(changed_contracts),
             changed_contract_names=tuple(sorted(changed_contracts)),
+            reused_composed_contract_count=(
+                contract_composition.stats.reused_composed_contract_count
+            ),
+            recomposed_contract_count=(
+                contract_composition.stats.recomposed_contract_count
+            ),
+            contract_invalidated_name_count=(
+                contract_composition.stats.invalidated_name_count
+            ),
         ),
     )
