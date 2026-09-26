@@ -63,7 +63,7 @@ A prior PASS is reusable only if all of the following hold:
 1. the evidence schema is supported;
 2. the integrity envelope is complete;
 3. the evidence digest verifies;
-4. a present signature verifies, and a signature is present when policy requires it;
+4. the evidence signature verifies; signature presence is required by the default reuse policy;
 5. the evidence digest is not revoked;
 6. the evidence is within the configured age horizon;
 7. repository identity matches;
@@ -77,6 +77,10 @@ A prior PASS is reusable only if all of the following hold:
 15. the stored observed checker engines remain compatible with the current checker/tool versions.
 
 Any failed condition makes reuse ineligible.
+
+The default reuse policy requires a signature. A trusted local deployment may
+explicitly set require_signature=false when the cache itself is inside an
+authenticated trusted boundary. This opt-out is never implicit.
 
 ## Hardened cache
 
