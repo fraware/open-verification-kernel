@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from ovk.compilers.authorization.material_loader import materials_from_pair
+from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.compilers.authorization.python_ast_index import (
     parse_head_python_materials,
 )
