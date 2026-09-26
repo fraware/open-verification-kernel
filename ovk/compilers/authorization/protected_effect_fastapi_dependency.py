@@ -596,32 +596,28 @@ class FastApiDependencyEffectExtractor:
         if not materials.has_head():
             unsupported.append("head_materials_missing")
 
-        for path, source in sorted(materials.head_files.items()):
+        for path, message in sorted(parsed.syntax_errors.items()):
+            unsupported.append(f"{path}:syntax_error:{message}")
+
+        for path in sorted(materials.head_files):
             if path in parsed.syntax_errors:
-                unsupported.append(
-                    f"{path}:syntax_error:{parsed.syntax_errors[path]}"
-                )
                 continue
-            tree = parsed.trees.get(path)
-            if tree is None:
-                unsupported.append(f"{path}:parsed_tree_missing")
-                continue
+            if path not in route_summaries.summaries:
+                unsupported.append(f"{path}:route_summary_missing")
 
-            for handler in tree.body:
-                if not isinstance(handler, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    continue
-                route = _route_decorator(handler)
-                if route is None:
-                    continue
-                method, route_path = route
-                if _has_control_flow(handler):
-                    unsupported.append(f"{path}:{handler.name}:control_flow_outside_profile")
+        for path, file_summary in sorted(route_summaries.summaries.items()):
+            for handler in file_summary.handlers:
+                method = handler.method
+                route_path = handler.route_path
+                if handler.has_control_flow:
+                    unsupported.append(
+                        f"{path}:{handler.handler_name}:control_flow_outside_profile"
+                    )
 
-                dependency_params = _dependency_parameters(handler)
-                dependency_by_name = {dep: (param, node) for param, dep, node in dependency_params}
-                constructor_aliases = _constructor_aliases(handler)
-                non_null_parameters = _provably_non_null_parameters(handler)
-                calls = _body_calls(handler)
+                dependency_by_name = {
+                    item.dependency_name: item
+                    for item in handler.dependencies
+                }
 
                 principal_symbol = profile.principal_parameter
                 principal_id = _semantic_id("principal", principal_symbol)
@@ -631,29 +627,34 @@ class FastApiDependencyEffectExtractor:
                         principal_id=principal_id,
                         symbol=principal_symbol,
                         principal_type="fastapi_dependency_result",
-                        origin=_origin(path, handler),
+                        origin=handler.origin,
                     ),
                 )
 
-                for call in calls:
-                    sink = profile.sink_effect(call)
+                for call in handler.calls:
+                    sink = profile.sink_effect_names(
+                        call.full_name,
+                        call.leaf_name,
+                    )
                     if sink is None:
                         continue
                     sink_key, effect_name = sink
                     identity_index = profile.identity_arg(sink_key)
-                    if len(call.args) <= identity_index:
+                    if len(call.positional_arguments) <= identity_index:
                         unsupported.append(
-                            f"{path}:{handler.name}:unsupported_sink_identity_signature:{sink_key}"
+                            f"{path}:{handler.handler_name}:"
+                            f"unsupported_sink_identity_signature:{sink_key}"
                         )
                         continue
 
-                    identity_node = call.args[identity_index]
+                    identity_expression = call.positional_arguments[identity_index]
                     identity_term = None
                     if profile.contract_identity_attribute_for_sink(sink_key) is None:
-                        identity_term = _symbol_term(identity_node)
+                        identity_term = identity_expression.term
                         if identity_term is None:
                             unsupported.append(
-                                f"{path}:{handler.name}:unsupported_sink_identity_expression:{sink_key}"
+                                f"{path}:{handler.handler_name}:"
+                                f"unsupported_sink_identity_expression:{sink_key}"
                             )
                             continue
 
@@ -662,13 +663,10 @@ class FastApiDependencyEffectExtractor:
                     expected_contract_name = profile.contract_for_sink(sink_key)
                     inferred_contract = None
                     if expected_contract_name is not None:
-                        resolved_name = _resolved_call_qualified_name(
-                            call,
-                            constructor_aliases,
-                        )
-                        if resolved_name != expected_contract_name:
+                        if call.resolved_qualified_name != expected_contract_name:
                             unsupported.append(
-                                f"{path}:{handler.name}:sink_contract_target_unresolved:"
+                                f"{path}:{handler.handler_name}:"
+                                f"sink_contract_target_unresolved:"
                                 f"{sink_key}:{expected_contract_name}"
                             )
                         else:
@@ -677,7 +675,8 @@ class FastApiDependencyEffectExtractor:
                             )
                             if inferred_contract is None:
                                 unsupported.append(
-                                    f"{path}:{handler.name}:required_sink_contract_missing:"
+                                    f"{path}:{handler.handler_name}:"
+                                    f"required_sink_contract_missing:"
                                     f"{expected_contract_name}"
                                 )
 
@@ -686,10 +685,9 @@ class FastApiDependencyEffectExtractor:
                             contract_attribute_terms,
                             omitted_contract_attributes,
                             unresolved_contract_attributes,
-                        ) = _instantiate_contract_attributes(
+                        ) = _instantiate_contract_attributes_from_summary(
                             call=call,
                             contract=inferred_contract,
-                            non_null_parameters=non_null_parameters,
                         )
 
                         scope_attribute = profile.contract_scope_attribute_for_sink(
@@ -702,18 +700,20 @@ class FastApiDependencyEffectExtractor:
                             )
                             if scope_post is None:
                                 unsupported.append(
-                                    f"{path}:{handler.name}:required_scope_postcondition_missing:"
+                                    f"{path}:{handler.handler_name}:"
+                                    f"required_scope_postcondition_missing:"
                                     f"{expected_contract_name}:{scope_attribute}"
                                 )
                             elif scope_attribute in contract_attribute_terms:
                                 scope_term = contract_attribute_terms[scope_attribute]
                             elif scope_attribute in omitted_contract_attributes:
                                 scope_term = ResourceIdentityTerm.symbol(
-                                    f"$scope:{path}:{handler.name}:{getattr(call, 'lineno', 0)}"
+                                    f"$scope:{path}:{handler.handler_name}:{call.line}"
                                 )
                             else:
                                 unsupported.append(
-                                    f"{path}:{handler.name}:contract_precondition_unproved:"
+                                    f"{path}:{handler.handler_name}:"
+                                    f"contract_precondition_unproved:"
                                     f"{expected_contract_name}:{scope_attribute}"
                                 )
 
@@ -727,53 +727,50 @@ class FastApiDependencyEffectExtractor:
                             )
                             if identity_post is None:
                                 unsupported.append(
-                                    f"{path}:{handler.name}:required_identity_postcondition_missing:"
+                                    f"{path}:{handler.handler_name}:"
+                                    f"required_identity_postcondition_missing:"
                                     f"{expected_contract_name}:{identity_attribute}"
                                 )
                             elif identity_attribute in contract_attribute_terms:
                                 identity_term = contract_attribute_terms[identity_attribute]
                             else:
                                 unsupported.append(
-                                    f"{path}:{handler.name}:required_identity_argument_or_precondition_unproved:"
+                                    f"{path}:{handler.handler_name}:"
+                                    f"required_identity_argument_or_precondition_unproved:"
                                     f"{expected_contract_name}:{identity_attribute}"
                                 )
 
-                        # Retain every instantiated typed postcondition, including
-                        # attributes not promoted to the identity/scope projections.
-                        for attribute in unresolved_contract_attributes:
-                            if (
-                                attribute
-                                in {
-                                    scope_attribute,
-                                    identity_attribute,
-                                }
-                            ):
-                                continue
-                            # Unused unresolved postconditions do not reduce coverage:
-                            # only properties selected by the profile become proof obligations.
+                        # Unselected unresolved contract attributes remain metadata
+                        # and do not reduce extraction coverage.
+                        _ = unresolved_contract_attributes
                     elif expected_contract_name is None:
                         scope_keyword = profile.scope_keyword(sink_key)
                         if scope_keyword is not None:
-                            scope_node = _keyword_value(call, scope_keyword)
-                            if scope_node is not None:
-                                scope_term = _symbol_term(scope_node)
+                            scope_expression = call.keyword(scope_keyword)
+                            if scope_expression is not None:
+                                scope_term = scope_expression.term
                                 if scope_term is None:
                                     unsupported.append(
-                                        f"{path}:{handler.name}:unsupported_sink_scope_expression:{sink_key}"
+                                        f"{path}:{handler.handler_name}:"
+                                        f"unsupported_sink_scope_expression:{sink_key}"
                                     )
                             elif profile.missing_scope_is_unconstrained(sink_key):
                                 scope_term = ResourceIdentityTerm.symbol(
-                                    f"$scope:{path}:{handler.name}:{getattr(call, 'lineno', 0)}"
+                                    f"$scope:{path}:{handler.handler_name}:{call.line}"
                                 )
                             else:
                                 unsupported.append(
-                                    f"{path}:{handler.name}:required_sink_scope_missing:{sink_key}"
+                                    f"{path}:{handler.handler_name}:"
+                                    f"required_sink_scope_missing:{sink_key}"
                                 )
 
                     effect_id = _semantic_id("effect", effect_name)
                     acted_id = _semantic_id(
                         "resource",
-                        f"{path}:{handler.name}:{getattr(call, 'lineno', 0)}:{ast.unparse(identity_node)}",
+                        (
+                            f"{path}:{handler.handler_name}:{call.line}:"
+                            f"{identity_expression.rendered}"
+                        ),
                     )
                     protected_id = _semantic_id(
                         "protected",
@@ -781,15 +778,19 @@ class FastApiDependencyEffectExtractor:
                     )
                     effects.setdefault(
                         effect_id,
-                        EffectRef(effect_id=effect_id, name=effect_name, origin=_origin(path, call)),
+                        EffectRef(
+                            effect_id=effect_id,
+                            name=effect_name,
+                            origin=call.origin,
+                        ),
                     )
                     resources[acted_id] = ResourceRef(
                         resource_id=acted_id,
-                        symbol=ast.unparse(identity_node),
+                        symbol=identity_expression.rendered,
                         identity_term=identity_term,
                         scope_term=scope_term,
                         attribute_terms=contract_attribute_terms,
-                        origin=_origin(path, identity_node),
+                        origin=identity_expression.origin,
                     )
 
                     contract_use_ids: list[str] = []
@@ -797,7 +798,7 @@ class FastApiDependencyEffectExtractor:
                         use_id = _semantic_id(
                             "contract-use",
                             (
-                                f"{path}:{handler.name}:{getattr(call, 'lineno', 0)}:"
+                                f"{path}:{handler.handler_name}:{call.line}:"
                                 f"{inferred_contract.contract_id}:{acted_id}"
                             ),
                         )
@@ -807,7 +808,7 @@ class FastApiDependencyEffectExtractor:
                             qualified_name=inferred_contract.qualified_name,
                             resource_id=acted_id,
                             established_attributes=sorted(contract_attribute_terms),
-                            origin=_origin(path, call),
+                            origin=call.origin,
                         )
                         contract_use_ids.append(use_id)
 
@@ -820,10 +821,10 @@ class FastApiDependencyEffectExtractor:
                         resource_symbol = profile.dependency_guard_resources.get(dep_name)
                         if dep_record is None or resource_symbol is None:
                             continue
-                        param_name, dep_node = dep_record
-                        if param_name != profile.principal_parameter:
+                        if dep_record.parameter_name != profile.principal_parameter:
                             unsupported.append(
-                                f"{path}:{handler.name}:dependency_principal_mismatch:{dep_name}"
+                                f"{path}:{handler.handler_name}:"
+                                f"dependency_principal_mismatch:{dep_name}"
                             )
                             continue
 
@@ -834,19 +835,22 @@ class FastApiDependencyEffectExtractor:
                                 resource_id=guard_resource_id,
                                 symbol=resource_symbol,
                                 identity_term=ResourceIdentityTerm.symbol(resource_symbol),
-                                origin=_origin(path, dep_node),
+                                origin=dep_record.origin,
                             ),
                         )
                         guard_id = _semantic_id(
                             "guard",
-                            f"{path}:{handler.name}:{dep_name}:{effect_name}:{resource_symbol}",
+                            (
+                                f"{path}:{handler.handler_name}:{dep_name}:"
+                                f"{effect_name}:{resource_symbol}"
+                            ),
                         )
                         guards[guard_id] = AuthorizationGuard(
                             guard_id=guard_id,
                             principal_id=principal_id,
                             effect_id=effect_id,
                             resource_id=guard_resource_id,
-                            origin=_origin(path, dep_node),
+                            origin=dep_record.origin,
                         )
                         guard_ids.append(guard_id)
 
@@ -880,7 +884,7 @@ class FastApiDependencyEffectExtractor:
                             acted_projection=acted_projection,
                             authorized_attribute=authorized_attribute,
                             acted_attribute=acted_attribute,
-                            origin=_origin(path, call),
+                            origin=call.origin,
                         )
                         binding_ids.append(binding_id)
 
@@ -889,11 +893,14 @@ class FastApiDependencyEffectExtractor:
                         principal_id=principal_id,
                         effect_id=effect_id,
                         resource_id=acted_id,
-                        origin=_origin(path, call),
+                        origin=call.origin,
                     )
                     path_id = _semantic_id(
                         "path",
-                        f"{method}:{route_path}:{handler.name}:{protected_id}",
+                        (
+                            f"{method}:{route_path}:"
+                            f"{handler.handler_name}:{protected_id}"
+                        ),
                     )
                     paths[path_id] = SemanticPath(
                         path_id=path_id,
@@ -902,7 +909,7 @@ class FastApiDependencyEffectExtractor:
                         protected_effect_ids=[protected_id],
                         binding_ids=sorted(binding_ids),
                         contract_use_ids=sorted(contract_use_ids),
-                        origin=_origin(path, handler),
+                        origin=handler.origin,
                     )
 
         if not materials.has_head():
