@@ -7,6 +7,13 @@ from ovk.compilers.authorization.express import ExpressAuthorizationCompiler
 from ovk.compilers.authorization.express_ast import ExpressAstAuthorizationCompiler
 from ovk.compilers.authorization.fastapi import FastApiAuthorizationCompiler
 from ovk.compilers.authorization.fastapi_ast import FastApiAstAuthorizationCompiler
+from ovk.compilers.authorization.fastapi_semantic import (
+    AuthorizationCallSpec,
+    FastApiSemanticAssuranceCompiler,
+    FastApiSemanticConfig,
+    PrincipalDependencySpec,
+    ProtectedSinkSpec,
+)
 from ovk.compilers.authorization.ir import AuthorizationIR
 from ovk.compilers.authorization.material_loader import (
     AuthMaterials,
@@ -16,12 +23,17 @@ from ovk.compilers.authorization.material_loader import (
 
 __all__ = [
     "AuthMaterials",
+    "AuthorizationCallSpec",
     "AuthorizationIR",
     "CoveragePolicy",
     "ExpressAstAuthorizationCompiler",
     "ExpressAuthorizationCompiler",
     "FastApiAstAuthorizationCompiler",
     "FastApiAuthorizationCompiler",
+    "FastApiSemanticAssuranceCompiler",
+    "FastApiSemanticConfig",
+    "PrincipalDependencySpec",
+    "ProtectedSinkSpec",
     "assess_coverage",
     "load_materials_from_dirs",
     "materials_from_pair",

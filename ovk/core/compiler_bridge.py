@@ -19,6 +19,8 @@ from ovk.compilers.authorization import (
     ExpressAuthorizationCompiler,
     FastApiAstAuthorizationCompiler,
     FastApiAuthorizationCompiler,
+    FastApiSemanticAssuranceCompiler,
+    FastApiSemanticConfig,
     assess_coverage,
     materials_from_pair,
 )
@@ -129,6 +131,30 @@ def extract_auth_materials(
             head_revision=head_sha,
         )
     return None
+
+
+def compile_fastapi_assurance_ir(
+    data: dict[str, Any],
+    *,
+    repo: str | None = None,
+    base_sha: str | None = None,
+    head_sha: str | None = None,
+):
+    """Compile explicit FastAPI semantic-assurance config into Assurance IR.
+
+    This is an opt-in bridge only. It does not alter existing authorization
+    routing or strictness. Missing semantic-assurance config or source materials
+    returns None; invalid config raises validation errors rather than degrading
+    to a weaker implicit interpretation.
+    """
+    semantic_config = data.get("semantic_assurance")
+    if not isinstance(semantic_config, dict):
+        return None
+    materials = extract_auth_materials(data, repo=repo, base_sha=base_sha, head_sha=head_sha)
+    if materials is None:
+        return None
+    config = FastApiSemanticConfig.model_validate(semantic_config)
+    return FastApiSemanticAssuranceCompiler(config).compile(materials)
 
 
 def compile_authorization_ir(
