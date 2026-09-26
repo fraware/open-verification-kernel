@@ -280,6 +280,12 @@ def _legacy_resource_return_contract(
     ):
         return None
 
+    # Compatibility is intentionally limited to the original semantic scope.
+    # Generic parent/ownership attributes remain typed FunctionContract data and
+    # are never relabeled as a tenant/workspace return-scope contract.
+    if post.left.name not in {"workspace_id", "tenant_id"}:
+        return None
+
     requires_non_null = any(
         predicate.relation == "non_null"
         and predicate.left.kind == "parameter"
