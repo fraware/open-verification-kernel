@@ -14,7 +14,9 @@ from typing import Any, Mapping
 from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.compilers.authorization.fastapi_route_summary import (
     CallSummary,
+    ExpressionSummary,
     RouteFileSummary,
+    RouteHandlerSummary,
 )
 from ovk.core.assurance_ir import (
     AssuranceCoverage,
@@ -29,6 +31,7 @@ from ovk.core.assurance_ir import (
     ResourceBinding,
     ResourceRef,
     ResourceReturnContract,
+    SemanticOrigin,
     SemanticPath,
 )
 from ovk.core.bundle import content_digest
@@ -149,6 +152,88 @@ def _instantiate_contract_attributes(
     return terms, omitted, unresolved
 
 
+def _prior_scope_assertion(
+    *,
+    handler: RouteHandlerSummary,
+    sink_call: CallSummary,
+    identity_expression: ExpressionSummary,
+    profile: Any,
+) -> tuple[
+    ResourceIdentityTerm | None,
+    SemanticOrigin | None,
+    str | None,
+]:
+    """Resolve a configured fail-closed scope assertion before one sink.
+
+    Only assertions about the exact acted resource expression are relevant.
+    Distinct asserted authorization resources are treated as ambiguous instead
+    of selecting one silently.
+    """
+    matches: list[tuple[ResourceIdentityTerm, SemanticOrigin]] = []
+    expected_resource = identity_expression.rendered
+
+    for assertion_call in handler.calls:
+        if assertion_call.line >= sink_call.line:
+            continue
+        resolved = profile.scope_assertion_names(
+            assertion_call.full_name,
+            assertion_call.leaf_name,
+        )
+        if resolved is None:
+            continue
+
+        assertion_key, semantics = resolved
+        if len(assertion_call.positional_arguments) <= semantics.acted_scope_arg:
+            return (
+                None,
+                None,
+                f"unsupported_scope_assertion_signature:{assertion_key}",
+            )
+
+        acted_scope = assertion_call.positional_arguments[
+            semantics.acted_scope_arg
+        ]
+        expected_scope = (
+            f"{expected_resource}.{semantics.acted_scope_attribute}"
+        )
+        if acted_scope.rendered != expected_scope:
+            continue
+
+        if (
+            len(assertion_call.positional_arguments)
+            <= semantics.authorized_resource_arg
+        ):
+            return (
+                None,
+                None,
+                f"unsupported_scope_assertion_signature:{assertion_key}",
+            )
+
+        authorized_resource = assertion_call.positional_arguments[
+            semantics.authorized_resource_arg
+        ]
+        if authorized_resource.term is None:
+            return (
+                None,
+                None,
+                "unsupported_scope_assertion_authorized_resource:"
+                f"{assertion_key}",
+            )
+
+        matches.append((authorized_resource.term, assertion_call.origin))
+
+    if not matches:
+        return None, None, None
+
+    term_ids = {term.term_id for term, _origin in matches}
+    if len(term_ids) != 1:
+        return None, None, "ambiguous_scope_assertions"
+
+    # Calls are source ordered. Use the latest equivalent assertion as the
+    # provenance point closest to the protected sink.
+    return matches[-1][0], matches[-1][1], None
+
+
 @dataclass(frozen=True)
 class FastApiFileSemanticFragment:
     """Semantic objects produced by one source file under one binding context."""
@@ -178,6 +263,14 @@ def profile_semantic_digest(profile: Any) -> str:
         "sink_missing_scope_unconstrained": sorted(
             profile.sink_missing_scope_unconstrained
         ),
+        "scope_assertions": {
+            key: {
+                "acted_scope_arg": semantics.acted_scope_arg,
+                "authorized_resource_arg": semantics.authorized_resource_arg,
+                "acted_scope_attribute": semantics.acted_scope_attribute,
+            }
+            for key, semantics in sorted(profile.scope_assertions.items())
+        },
         "sink_contracts": dict(sorted(profile.sink_contracts.items())),
         "sink_contract_scope_attributes": dict(
             sorted(profile.sink_contract_scope_attributes.items())
@@ -283,6 +376,7 @@ def bind_route_file_summary(
                     continue
 
             scope_term: ResourceIdentityTerm | None = None
+            scope_origin: SemanticOrigin | None = None
             contract_attribute_terms: dict[str, ResourceIdentityTerm] = {}
             expected_contract_name = profile.contract_for_sink(sink_key)
             inferred_contract: FunctionContract | None = None
@@ -335,11 +429,13 @@ def bind_route_file_summary(
                         )
                     elif scope_attribute in contract_attribute_terms:
                         scope_term = contract_attribute_terms[scope_attribute]
+                        scope_origin = call.origin
                     elif scope_attribute in omitted_contract_attributes:
                         scope_term = ResourceIdentityTerm.symbol(
                             f"$scope:{file_summary.path}:"
                             f"{handler.handler_name}:{call.line}"
                         )
+                        scope_origin = call.origin
                     else:
                         unsupported.append(
                             f"{file_summary.path}:{handler.handler_name}:"
@@ -385,16 +481,43 @@ def bind_route_file_summary(
                                 f"{file_summary.path}:{handler.handler_name}:"
                                 f"unsupported_sink_scope_expression:{sink_key}"
                             )
-                    elif profile.missing_scope_is_unconstrained(sink_key):
-                        scope_term = ResourceIdentityTerm.symbol(
-                            f"$scope:{file_summary.path}:"
-                            f"{handler.handler_name}:{call.line}"
-                        )
-                    else:
+                        else:
+                            scope_origin = call.origin
+                    elif not profile.missing_scope_is_unconstrained(sink_key):
                         unsupported.append(
                             f"{file_summary.path}:{handler.handler_name}:"
                             f"required_sink_scope_missing:{sink_key}"
                         )
+
+            if scope_term is None and profile.scope_assertions:
+                (
+                    asserted_scope,
+                    assertion_origin,
+                    assertion_problem,
+                ) = _prior_scope_assertion(
+                    handler=handler,
+                    sink_call=call,
+                    identity_expression=identity_expression,
+                    profile=profile,
+                )
+                if assertion_problem is not None:
+                    unsupported.append(
+                        f"{file_summary.path}:{handler.handler_name}:"
+                        f"{assertion_problem}"
+                    )
+                elif asserted_scope is not None:
+                    scope_term = asserted_scope
+                    scope_origin = assertion_origin
+
+            if (
+                scope_term is None
+                and profile.missing_scope_is_unconstrained(sink_key)
+            ):
+                scope_term = ResourceIdentityTerm.symbol(
+                    f"$scope:{file_summary.path}:"
+                    f"{handler.handler_name}:{call.line}"
+                )
+                scope_origin = call.origin
 
             effect_id = _semantic_id("effect", effect_name)
             acted_id = _semantic_id(
@@ -537,7 +660,7 @@ def bind_route_file_summary(
                     acted_projection=acted_projection,
                     authorized_attribute=authorized_attribute,
                     acted_attribute=acted_attribute,
-                    origin=call.origin,
+                    origin=scope_origin or call.origin,
                 )
                 binding_ids.append(binding_id)
 
@@ -627,7 +750,9 @@ _SUPPORTED_CONSTRUCTS = [
     "static_fastapi_route_decorator",
     "depends_or_security_default_parameter",
     "straight_line_handler",
+    "fail_fast_none_guard",
     "configured_service_call_sink",
+    "configured_fail_closed_resource_scope_assertion",
     "configured_sink_scope_keyword",
     "source_derived_resource_return_contract",
     "typed_function_contract",
@@ -640,6 +765,7 @@ _PROFILE_ASSUMPTIONS = [
     "Configured service-call sinks faithfully identify protected effects.",
     "Configured sink identity argument denotes the acted resource identity only when no source-derived identity contract is required.",
     "Configured sink scope keyword denotes the acted resource scope when no source contract is required.",
+    "Configured resource-scope assertion helpers fail closed: normal continuation establishes equality between the configured acted-resource attribute and authorization-resource argument.",
     "Source-derived function contracts are consumed only after resolving the configured service method.",
     "Only profile-selected contract attributes become required identity/scope/binding proof obligations.",
     "Conditional return contracts require the caller's non-null argument precondition to be established.",
