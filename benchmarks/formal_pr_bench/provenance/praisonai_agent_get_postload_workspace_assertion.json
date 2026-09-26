@@ -46,5 +46,6 @@
     "This case is public and must not be reported as sealed holdout evidence.",
     "The benchmark preserves the actual route-level repair mechanism instead of replacing it with a workspace-scoped service-call pattern.",
     "The configured assertion-helper semantics remain part of the declared source-profile trust basis in this tranche."
-  ]
+  ],
+  "contamination_status": "public_development_case"
 }
