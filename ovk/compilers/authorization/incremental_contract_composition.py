@@ -326,23 +326,6 @@ def compose_function_contracts_incremental(
         key=lambda item: item.contract_id,
     )
 
-    # A defensive equivalence fallback protects the optimization from any
-    # unmodeled order-sensitive edge case. This comparison is intentionally kept
-    # during the v1 incremental rollout; benchmarks account for it separately.
-    full = compose_function_contracts(summary_index)
-    if [item.model_dump(mode="json") for item in contracts] != [
-        item.model_dump(mode="json") for item in full
-    ]:
-        return _full_result(
-            summary_index,
-            direct=direct,
-            candidates=candidates,
-            fingerprints=fingerprints,
-            dependencies=dependencies,
-            previous_state=previous_state,
-            fallback=True,
-        )
-
     current_names = set(contracts_by_name)
     previous_names = set(previous_state.contracts)
     return IncrementalContractCompositionResult(
