@@ -1,0 +1,14 @@
+{
+  "schema_version": "formal_pr_bench.case_provenance.v1",
+  "case_id": "incremental_fastapi_ast_reuse_scaling",
+  "source": "authored synthetic development benchmark",
+  "source_repository": "fraware/open-verification-kernel",
+  "date": "2026-09-26",
+  "derivation": "authored_incremental_extraction_work_count_benchmark",
+  "partition": "development",
+  "template_dev": true,
+  "fixture": "benchmarks/formal_pr_bench/incremental_extraction_v1/scaling_workloads.json",
+  "category": "incremental_extraction",
+  "contamination_risk": "low_authored_synthetic",
+  "notes": "Measures deterministic AST parse work and observational wall-clock fields. Not a production throughput benchmark or protected holdout."
+}

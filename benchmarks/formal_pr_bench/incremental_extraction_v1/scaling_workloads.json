@@ -1,0 +1,51 @@
+{
+  "schema_version": "ovk.incremental_extraction_scaling.v1",
+  "benchmark_id": "fastapi_ast_reuse_scaling",
+  "partition": "development",
+  "claim_scope": "deterministic parse-work regression; wall-clock fields are observational only",
+  "mutation": "change exactly one source file",
+  "sizes": [
+    1,
+    4,
+    16,
+    64,
+    256
+  ],
+  "expected": [
+    {
+      "source_files": 1,
+      "base_fresh_parses": 1,
+      "cold_head_fresh_parses": 1,
+      "warm_head_fresh_parses": 1,
+      "warm_head_reused": 0
+    },
+    {
+      "source_files": 4,
+      "base_fresh_parses": 4,
+      "cold_head_fresh_parses": 4,
+      "warm_head_fresh_parses": 1,
+      "warm_head_reused": 3
+    },
+    {
+      "source_files": 16,
+      "base_fresh_parses": 16,
+      "cold_head_fresh_parses": 16,
+      "warm_head_fresh_parses": 1,
+      "warm_head_reused": 15
+    },
+    {
+      "source_files": 64,
+      "base_fresh_parses": 64,
+      "cold_head_fresh_parses": 64,
+      "warm_head_fresh_parses": 1,
+      "warm_head_reused": 63
+    },
+    {
+      "source_files": 256,
+      "base_fresh_parses": 256,
+      "cold_head_fresh_parses": 256,
+      "warm_head_fresh_parses": 1,
+      "warm_head_reused": 255
+    }
+  ]
+}
