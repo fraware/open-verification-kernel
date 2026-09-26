@@ -1,0 +1,50 @@
+{
+  "schema_version": "formal_pr_bench.incremental_contract_composition_scaling.v1",
+  "benchmark_id": "incremental_contract_composition_scaling_v1",
+  "claim_scope": "deterministic contract-composition work regression; wall-clock fields are observational only",
+  "width_cases": [
+    8,
+    64,
+    256
+  ],
+  "depth_cases": [
+    1,
+    4,
+    16
+  ],
+  "depth_unrelated_chains": 32,
+  "expected_width": {
+    "8": {
+      "recomposed": 2,
+      "invalidated": 3,
+      "reused_composed": 7
+    },
+    "64": {
+      "recomposed": 2,
+      "invalidated": 3,
+      "reused_composed": 63
+    },
+    "256": {
+      "recomposed": 2,
+      "invalidated": 3,
+      "reused_composed": 255
+    }
+  },
+  "expected_depth": {
+    "1": {
+      "recomposed": 1,
+      "invalidated": 2,
+      "reused_composed": 32
+    },
+    "4": {
+      "recomposed": 4,
+      "invalidated": 5,
+      "reused_composed": 32
+    },
+    "16": {
+      "recomposed": 16,
+      "invalidated": 17,
+      "reused_composed": 32
+    }
+  }
+}
