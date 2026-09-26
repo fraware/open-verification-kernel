@@ -1,0 +1,45 @@
+{
+  "schema_version": "ovk.incremental_assurance_scaling.v1",
+  "benchmark_id": "incremental_protected_effect_warm_cache_scaling",
+  "partition": "development",
+  "metric": "fresh_protected_effect_evaluator_invocations",
+  "claim_scope": "work-count regression only; no wall-clock performance claim",
+  "mutation": "change exactly one protected resource identity term",
+  "cache_regime": "warm authenticated semantic-evidence cache seeded from base revision",
+  "sizes": [
+    1,
+    4,
+    16,
+    64
+  ],
+  "expected": [
+    {
+      "protected_effects": 1,
+      "cold_fresh_checks": 1,
+      "warm_fresh_checks": 1,
+      "warm_reused_checks": 0,
+      "avoided_fraction": 0
+    },
+    {
+      "protected_effects": 4,
+      "cold_fresh_checks": 4,
+      "warm_fresh_checks": 1,
+      "warm_reused_checks": 3,
+      "avoided_fraction": 0.75
+    },
+    {
+      "protected_effects": 16,
+      "cold_fresh_checks": 16,
+      "warm_fresh_checks": 1,
+      "warm_reused_checks": 15,
+      "avoided_fraction": 0.9375
+    },
+    {
+      "protected_effects": 64,
+      "cold_fresh_checks": 64,
+      "warm_fresh_checks": 1,
+      "warm_reused_checks": 63,
+      "avoided_fraction": 0.984375
+    }
+  ]
+}
