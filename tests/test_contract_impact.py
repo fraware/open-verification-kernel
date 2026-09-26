@@ -331,3 +331,104 @@ class AgentService:
     assert impact.affected_paths == [path.path_id]
     assert impact.affected_protected_effects == path.protected_effect_ids
     assert impact.affected_bindings == path.binding_ids
+
+
+
+def _compile_workspace_chain(service_source: str) -> AssuranceIR:
+    route_source = """
+from fastapi import Depends, FastAPI
+app = FastAPI()
+
+@app.get("/workspaces/{workspace_id}/agents/{agent_id}")
+async def get_agent(
+    workspace_id: str,
+    agent_id: str,
+    user = Depends(require_workspace_member),
+):
+    svc = AgentService()
+    agent = await svc.get(agent_id, workspace_id=workspace_id)
+    return agent
+""".strip()
+    materials = AuthMaterials(
+        base_files={
+            "routes/agents.py": route_source,
+            "services/agent_service.py": service_source,
+        },
+        head_files={
+            "routes/agents.py": route_source,
+            "services/agent_service.py": service_source,
+        },
+        repo="example/platform",
+        base_revision="base",
+        head_revision="head",
+    )
+    profile = FastApiDependencyEffectProfile(
+        sink_effects={"svc.get": "workspace.agent.read"},
+        sink_identity_args={"svc.get": 0},
+        sink_contracts={"svc.get": "AgentService.get"},
+        sink_contract_scope_attributes={"svc.get": "workspace_id"},
+        dependency_guard_resources={"require_workspace_member": "workspace_id"},
+        dependency_guard_effects={
+            "require_workspace_member": ("workspace.agent.read",),
+        },
+        principal_parameter="user",
+    )
+    return FastApiDependencyEffectExtractor().compile(materials, profile)
+
+
+def test_semantic_weakening_in_repository_invalidates_unchanged_route() -> None:
+    secure_source = """
+class AgentRepository:
+    async def get(self, agent_id: str, *, workspace_id: str | None = None):
+        agent = await load_agent(agent_id)
+        if workspace_id is not None and agent.workspace_id != workspace_id:
+            return None
+        return agent
+
+class AgentService:
+    def __init__(self):
+        self._repo = AgentRepository()
+
+    async def get(self, agent_id: str, *, workspace_id: str | None = None):
+        return await self._repo.get(agent_id, workspace_id=workspace_id)
+""".strip()
+
+    weakened_source = """
+class AgentRepository:
+    async def get(self, agent_id: str, *, workspace_id: str | None = None):
+        agent = await load_agent(agent_id)
+        return agent
+
+class AgentService:
+    def __init__(self):
+        self._repo = AgentRepository()
+
+    async def get(self, agent_id: str, *, workspace_id: str | None = None):
+        return await self._repo.get(agent_id, workspace_id=workspace_id)
+""".strip()
+
+    base = _compile_workspace_chain(secure_source)
+    head = _compile_workspace_chain(weakened_source)
+
+    base_names = {contract.qualified_name for contract in base.function_contracts}
+    head_names = {contract.qualified_name for contract in head.function_contracts}
+    assert {"AgentRepository.get", "AgentService.get"} <= base_names
+    assert "AgentRepository.get" not in head_names
+    assert "AgentService.get" not in head_names
+    assert base.coverage.status == "complete"
+    assert head.coverage.status == "partial"
+
+    impact = compute_contract_delta_impact(base, head)
+
+    assert impact.delta.removed == [
+        "AgentRepository.get",
+        "AgentService.get",
+    ]
+    assert impact.head.unresolved_seeds == [
+        "AgentRepository.get",
+        "AgentService.get",
+    ]
+    assert len(base.contract_uses) == 1
+    assert base.contract_uses[0].use_id in impact.affected_contract_uses
+    assert base.paths[0].path_id in impact.affected_paths
+    assert base.paths[0].protected_effect_ids[0] in impact.affected_protected_effects
