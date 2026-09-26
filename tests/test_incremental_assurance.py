@@ -22,6 +22,7 @@ from ovk.core.assurance_ir import (
     SemanticPath,
 )
 from ovk.core.incremental_assurance import (
+    evaluate_incremental_reverification,
     plan_incremental_assurance,
     protected_effect_semantic_digest,
 )
@@ -360,3 +361,34 @@ class AgentService:
     assert effect_id in plan.contract_affected_effects
     assert "contract_dependency_changed" in plan.reverify_reasons[effect_id]
     assert "semantic_slice_changed" in plan.reverify_reasons[effect_id]
+
+
+
+def test_incremental_evaluation_runs_only_selected_effects_and_binds_head_digest() -> None:
+    base = _two_effect_ir()
+    head = deepcopy(base)
+    invoice = next(
+        resource for resource in head.resources if resource.resource_id == "r:invoice"
+    )
+    invoice.identity_term = ResourceIdentityTerm.symbol("body.invoice_id")
+
+    plan = plan_incremental_assurance(base, head)
+    results = evaluate_incremental_reverification(head, plan)
+
+    assert plan.reverify_effects == ["pe:refund"]
+    assert [result.protected_effect_id for result in results] == ["pe:refund"]
+
+    different_head = deepcopy(head)
+    different_head.resources[0].identity_term = ResourceIdentityTerm.symbol("other.invoice_id")
+
+    with pytest.raises(ValueError, match="head digest does not match"):
+        evaluate_incremental_reverification(different_head, plan)
+
+
+def test_incremental_evaluation_is_empty_when_all_semantics_are_reusable() -> None:
+    base = _two_effect_ir()
+    head = deepcopy(base)
+    plan = plan_incremental_assurance(base, head)
+
+    assert plan.reverify_effects == []
+    assert evaluate_incremental_reverification(head, plan) == []
