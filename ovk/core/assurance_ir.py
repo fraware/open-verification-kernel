@@ -23,6 +23,7 @@ from ovk.core.resource_identity import ResourceIdentityTerm
 
 CoverageStatus = Literal["complete", "partial", "unknown", "inapplicable"]
 BindingRelation = Literal["equal", "same_tenant", "custom"]
+BindingProjection = Literal["identity", "scope"]
 ClaimKind = Literal[
     "protected_effect_integrity",
     "authorization",
@@ -68,6 +69,7 @@ class ResourceRef(BaseModel):
     resource_type: str | None = None
     tenant_symbol: str | None = None
     identity_term: ResourceIdentityTerm | None = None
+    scope_term: ResourceIdentityTerm | None = None
     origin: SemanticOrigin | None = None
 
 
@@ -132,6 +134,8 @@ class ResourceBinding(BaseModel):
     authorized_resource_id: str
     acted_resource_id: str
     relation: BindingRelation = "equal"
+    authorized_projection: BindingProjection = "identity"
+    acted_projection: BindingProjection = "identity"
     predicate: str | None = None
     condition_ids: list[str] = Field(default_factory=list)
     origin: SemanticOrigin
