@@ -21,6 +21,12 @@ import ast
 from dataclasses import dataclass, field
 
 from ovk.compilers.authorization.base import normalize_path
+from ovk.compilers.authorization.fastapi_route_summary import (
+    CallSummary,
+    RouteSummaryIndex,
+    build_route_summary_index,
+    route_summary_index_matches_materials,
+)
 from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.compilers.authorization.python_ast_index import (
     ParsedPythonMaterials,
@@ -89,13 +95,21 @@ class FastApiDependencyEffectProfile:
 
     principal_parameter: str = "user"
 
-    def sink_effect(self, call: ast.Call) -> tuple[str, str] | None:
-        full = ast.unparse(call.func)
-        leaf = _name_of(call.func)
-        for key in (full, leaf):
+    def sink_effect_names(
+        self,
+        full_name: str,
+        leaf_name: str | None,
+    ) -> tuple[str, str] | None:
+        for key in (full_name, leaf_name):
             if key and key in self.sink_effects:
                 return key, self.sink_effects[key]
         return None
+
+    def sink_effect(self, call: ast.Call) -> tuple[str, str] | None:
+        return self.sink_effect_names(
+            ast.unparse(call.func),
+            _name_of(call.func),
+        )
 
     def identity_arg(self, sink_key: str) -> int:
         return int(self.sink_identity_args.get(sink_key, 0))
@@ -422,6 +436,82 @@ def _instantiate_contract_attributes(
     return terms, omitted, unresolved
 
 
+def _summary_actual_argument_for_parameter(
+    call: CallSummary,
+    *,
+    parameter_name: str,
+    contract_parameter_order: list[str],
+):
+    keyword = call.keyword(parameter_name)
+    if keyword is not None:
+        return keyword
+    if parameter_name not in contract_parameter_order:
+        return None
+    index = contract_parameter_order.index(parameter_name)
+    if len(call.positional_arguments) <= index:
+        return None
+    return call.positional_arguments[index]
+
+
+def _instantiate_contract_attributes_from_summary(
+    *,
+    call: CallSummary,
+    contract,
+) -> tuple[dict[str, ResourceIdentityTerm], set[str], set[str]]:
+    terms: dict[str, ResourceIdentityTerm] = {}
+    omitted: set[str] = set()
+    unresolved: set[str] = set()
+
+    for predicate in contract.postconditions:
+        if (
+            predicate.relation != "eq"
+            or predicate.right is None
+            or predicate.left.kind != "return_attribute"
+            or predicate.left.name is None
+            or predicate.right.kind not in {"parameter", "literal"}
+            or (
+                predicate.right.kind == "parameter"
+                and predicate.right.name is None
+            )
+            or (
+                predicate.right.kind == "literal"
+                and predicate.right.value is None
+            )
+        ):
+            continue
+
+        attribute = predicate.left.name
+        if predicate.right.kind == "literal":
+            assert predicate.right.value is not None
+            terms[attribute] = ResourceIdentityTerm.literal(
+                predicate.right.value
+            )
+            continue
+
+        parameter = predicate.right.name
+        assert parameter is not None
+        argument = _summary_actual_argument_for_parameter(
+            call,
+            parameter_name=parameter,
+            contract_parameter_order=contract.positional_parameters,
+        )
+        if argument is None:
+            omitted.add(attribute)
+            continue
+        if (
+            _requires_non_null_parameter(contract, parameter)
+            and not argument.provably_non_null
+        ):
+            unresolved.add(attribute)
+            continue
+        if argument.term is None:
+            unresolved.add(attribute)
+            continue
+        terms[attribute] = argument.term
+
+    return terms, omitted, unresolved
+
+
 class FastApiDependencyEffectExtractor:
     """Compile the dependency-guard/service-effect FastAPI subset to Assurance IR."""
 
@@ -434,6 +524,7 @@ class FastApiDependencyEffectExtractor:
         *,
         parsed_index: ParsedPythonMaterials | None = None,
         contract_summary_index: ContractSummaryIndex | None = None,
+        route_summary_index: RouteSummaryIndex | None = None,
     ) -> AssuranceIR:
         subject = VerificationSubject(
             repo=materials.repo or "unknown/repo",
@@ -477,6 +568,22 @@ class FastApiDependencyEffectExtractor:
             materials,
             summary_index=contract_summaries,
         )
+
+        if route_summary_index is None:
+            route_summaries = build_route_summary_index(
+                materials,
+                parsed_trees=parsed.trees,
+                source_digests=parsed.source_digests,
+            )
+        else:
+            if not route_summary_index_matches_materials(
+                route_summary_index,
+                materials,
+            ):
+                raise ValueError(
+                    "route summary index does not match supplied head materials"
+                )
+            route_summaries = route_summary_index
         resource_return_contracts = infer_resource_return_contracts(
             materials,
             function_contracts=function_contracts,
