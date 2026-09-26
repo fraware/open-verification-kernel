@@ -265,3 +265,70 @@ def test_fail_result_is_sealed_but_not_reusable_as_pass_evidence() -> None:
 
     assert decision.reusable is False
     assert decision.reason == "prior_evidence_not_pass"
+
+
+
+def test_revoked_evidence_is_rejected() -> None:
+    ir = _ir()
+    _, evidence = _signed_evidence(ir)
+    context = _context(ir).model_copy(
+        update={"revoked_evidence_ids": [evidence.evidence_id]}
+    )
+
+    decision = protected_effect_evidence_reuse_decision(
+        evidence,
+        context,
+        signing_key=SIGNING_KEY,
+    )
+
+    assert decision.reusable is False
+    assert decision.reason == "evidence_revoked"
+
+
+def test_expired_evidence_is_rejected_and_fresh_evidence_is_accepted() -> None:
+    ir = _ir()
+    _, evidence = _signed_evidence(ir)
+    assert evidence.completed_at is not None
+
+    completed = evidence.completed_at
+    from datetime import datetime, timedelta
+
+    completed_dt = datetime.fromisoformat(completed.replace("Z", "+00:00"))
+    fresh_now = (completed_dt + timedelta(seconds=30)).isoformat().replace("+00:00", "Z")
+    stale_now = (completed_dt + timedelta(seconds=300)).isoformat().replace("+00:00", "Z")
+
+    fresh = _context(ir).model_copy(
+        update={"now_iso": fresh_now, "max_age_seconds": 60}
+    )
+    stale = _context(ir).model_copy(
+        update={"now_iso": stale_now, "max_age_seconds": 60}
+    )
+
+    assert protected_effect_evidence_reuse_decision(
+        evidence,
+        fresh,
+        signing_key=SIGNING_KEY,
+    ).reusable is True
+
+    expired = protected_effect_evidence_reuse_decision(
+        evidence,
+        stale,
+        signing_key=SIGNING_KEY,
+    )
+    assert expired.reusable is False
+    assert expired.reason == "evidence_expired"
+
+
+def test_requested_freshness_without_clock_context_fails_closed() -> None:
+    ir = _ir()
+    _, evidence = _signed_evidence(ir)
+    context = _context(ir).model_copy(update={"max_age_seconds": 60})
+
+    decision = protected_effect_evidence_reuse_decision(
+        evidence,
+        context,
+        signing_key=SIGNING_KEY,
+    )
+
+    assert decision.reusable is False
+    assert decision.reason == "freshness_context_incomplete"
