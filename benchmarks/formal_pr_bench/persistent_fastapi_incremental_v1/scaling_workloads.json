@@ -1,0 +1,66 @@
+{
+  "schema_version": "formal_pr_bench.persistent_fastapi_incremental_scaling.v1",
+  "benchmark_id": "persistent_fastapi_incremental_scaling_v1",
+  "claim_scope": "deterministic fresh-worker semantic work regression; wall-clock fields are observational only",
+  "sizes": [
+    8,
+    64,
+    256
+  ],
+  "expected": {
+    "8": {
+      "unchanged": {
+        "fresh_parses": 0,
+        "recomposed": 0,
+        "rebound": 0
+      },
+      "unrelated_change": {
+        "fresh_parses": 1,
+        "recomposed": 0,
+        "rebound": 1
+      },
+      "contract_change": {
+        "fresh_parses": 1,
+        "recomposed": 2,
+        "invalidated": 3,
+        "rebound": 2
+      }
+    },
+    "64": {
+      "unchanged": {
+        "fresh_parses": 0,
+        "recomposed": 0,
+        "rebound": 0
+      },
+      "unrelated_change": {
+        "fresh_parses": 1,
+        "recomposed": 0,
+        "rebound": 1
+      },
+      "contract_change": {
+        "fresh_parses": 1,
+        "recomposed": 2,
+        "invalidated": 3,
+        "rebound": 2
+      }
+    },
+    "256": {
+      "unchanged": {
+        "fresh_parses": 0,
+        "recomposed": 0,
+        "rebound": 0
+      },
+      "unrelated_change": {
+        "fresh_parses": 1,
+        "recomposed": 0,
+        "rebound": 1
+      },
+      "contract_change": {
+        "fresh_parses": 1,
+        "recomposed": 2,
+        "invalidated": 3,
+        "rebound": 2
+      }
+    }
+  }
+}

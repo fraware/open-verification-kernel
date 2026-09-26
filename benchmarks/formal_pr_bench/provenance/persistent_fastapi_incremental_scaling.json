@@ -1,0 +1,14 @@
+{
+  "schema_version": "formal_pr_bench.case_provenance.v1",
+  "case_id": "persistent_fastapi_incremental_scaling_v1",
+  "source": "authored synthetic development benchmark",
+  "source_repository": "fraware/open-verification-kernel",
+  "date": "2026-09-26",
+  "derivation": "fresh_worker_persistent_dependency_closure_scaling",
+  "partition": "development",
+  "template_dev": true,
+  "fixture": "benchmarks/formal_pr_bench/persistent_fastapi_incremental_v1/scaling_workloads.json",
+  "category": "performance_regression",
+  "contamination_risk": "low_authored_synthetic",
+  "notes": "Deterministic work-count benchmark. Wall-clock values are observational only."
+}
