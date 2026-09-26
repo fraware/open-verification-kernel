@@ -175,3 +175,83 @@ def refund(invoice_id: str, user, other_invoice_id: str):
     assert by_symbol["other_invoice"].identity_term is not None
     assert by_symbol["invoice"].identity_term.value == "invoice_id"
     assert by_symbol["other_invoice"].identity_term.value == "other_invoice_id"
+
+
+
+def test_scoped_loader_projects_workspace_scope() -> None:
+    profile = ProtectedEffectProfile(
+        sink_effects={"read_agent": "workspace.agent.read"},
+        guard_functions=frozenset({"authorize_workspace"}),
+        resource_loader_identity_args={"load_agent_in_workspace": 1},
+        resource_loader_scope_args={"load_agent_in_workspace": 0},
+        sink_binding_relations={"read_agent": "same_tenant"},
+        sink_acted_projections={"read_agent": "scope"},
+    )
+    source = """
+from fastapi import FastAPI
+app = FastAPI()
+
+@app.get("/workspaces/{workspace_id}/agents/{agent_id}")
+def get_agent(workspace_id: str, agent_id: str, user):
+    authorize_workspace(user, "workspace.agent.read", workspace_id)
+    agent = load_agent_in_workspace(workspace_id, agent_id)
+    read_agent(agent)
+""".strip()
+    materials = materials_from_pair(
+        path="app.py",
+        base_source=source,
+        head_source=source,
+        repo="example/workspaces",
+        base_revision="a",
+        head_revision="b",
+    )
+
+    ir = FastApiProtectedEffectExtractor().compile(materials, profile)
+
+    agent = next(resource for resource in ir.resources if resource.symbol == "agent")
+    assert agent.identity_term is not None
+    assert agent.identity_term.value == "agent_id"
+    assert agent.scope_term is not None
+    assert agent.scope_term.value == "workspace_id"
+    binding = ir.resource_bindings[0]
+    assert binding.relation == "same_tenant"
+    assert binding.authorized_projection == "identity"
+    assert binding.acted_projection == "scope"
+
+
+def test_unscoped_loader_gets_explicit_unconstrained_scope() -> None:
+    profile = ProtectedEffectProfile(
+        sink_effects={"read_agent": "workspace.agent.read"},
+        guard_functions=frozenset({"authorize_workspace"}),
+        resource_loader_identity_args={"load_agent": 0},
+        resource_loader_unconstrained_scopes=frozenset({"load_agent"}),
+        sink_binding_relations={"read_agent": "same_tenant"},
+        sink_acted_projections={"read_agent": "scope"},
+    )
+    source = """
+from fastapi import FastAPI
+app = FastAPI()
+
+@app.get("/workspaces/{workspace_id}/agents/{agent_id}")
+def get_agent(workspace_id: str, agent_id: str, user):
+    authorize_workspace(user, "workspace.agent.read", workspace_id)
+    agent = load_agent(agent_id)
+    read_agent(agent)
+""".strip()
+    materials = materials_from_pair(
+        path="app.py",
+        base_source=source,
+        head_source=source,
+        repo="example/workspaces",
+        base_revision="a",
+        head_revision="b",
+    )
+
+    ir = FastApiProtectedEffectExtractor().compile(materials, profile)
+
+    agent = next(resource for resource in ir.resources if resource.symbol == "agent")
+    assert agent.scope_term is not None
+    assert agent.scope_term.kind == "symbol"
+    assert agent.scope_term.value == "$scope:agent"
+    binding = ir.resource_bindings[0]
+    assert binding.relation == "same_tenant"
