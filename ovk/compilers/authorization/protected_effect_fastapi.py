@@ -20,8 +20,6 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass, field
-from typing import Any
-
 from ovk.compilers.authorization.base import normalize_path
 from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.core.assurance_ir import (
