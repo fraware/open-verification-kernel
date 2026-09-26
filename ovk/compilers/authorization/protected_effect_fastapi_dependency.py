@@ -22,6 +22,9 @@ from dataclasses import dataclass, field
 
 from ovk.compilers.authorization.base import normalize_path
 from ovk.compilers.authorization.material_loader import AuthMaterials
+from ovk.compilers.authorization.resource_return_contracts import (
+    infer_resource_return_contracts,
+)
 from ovk.core.assurance_ir import (
     AssuranceCoverage,
     AssuranceExtractorIdentity,
@@ -53,6 +56,8 @@ class FastApiDependencyEffectProfile:
     sink_identity_args: dict[str, int] = field(default_factory=dict)
     sink_scope_keywords: dict[str, str] = field(default_factory=dict)
     sink_missing_scope_unconstrained: frozenset[str] = frozenset()
+    # Sink key -> source-derived contract qualified name, e.g. AgentService.get.
+    sink_contracts: dict[str, str] = field(default_factory=dict)
 
     # Dependency name -> handler parameter holding the authorized resource key.
     dependency_guard_resources: dict[str, str] = field(default_factory=dict)
@@ -77,6 +82,9 @@ class FastApiDependencyEffectProfile:
 
     def missing_scope_is_unconstrained(self, sink_key: str) -> bool:
         return sink_key in self.sink_missing_scope_unconstrained
+
+    def contract_for_sink(self, sink_key: str) -> str | None:
+        return self.sink_contracts.get(sink_key)
 
 
 def _name_of(node: ast.AST | None) -> str | None:
@@ -182,6 +190,72 @@ def _symbol_term(node: ast.AST) -> ResourceIdentityTerm | None:
     return None
 
 
+def _constructor_aliases(
+    handler: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for statement in handler.body:
+        if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+            continue
+        target = statement.targets[0]
+        if not isinstance(target, ast.Name) or not isinstance(statement.value, ast.Call):
+            continue
+        constructor = _name_of(statement.value.func)
+        if constructor:
+            aliases[target.id] = constructor
+    return aliases
+
+
+def _resolved_call_qualified_name(
+    call: ast.Call,
+    constructor_aliases: dict[str, str],
+) -> str | None:
+    if not isinstance(call.func, ast.Attribute):
+        return None
+
+    receiver = call.func.value
+    if isinstance(receiver, ast.Name):
+        constructor = constructor_aliases.get(receiver.id)
+        if constructor:
+            return f"{constructor}.{call.func.attr}"
+
+    if isinstance(receiver, ast.Call):
+        constructor = _name_of(receiver.func)
+        if constructor:
+            return f"{constructor}.{call.func.attr}"
+    return None
+
+
+def _annotation_excludes_none(annotation: ast.AST | None) -> bool:
+    if annotation is None:
+        return False
+    rendered = ast.unparse(annotation)
+    return "None" not in rendered and "Optional" not in rendered
+
+
+def _provably_non_null_parameters(
+    handler: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> set[str]:
+    result: set[str] = set()
+    positional = list(handler.args.posonlyargs) + list(handler.args.args)
+    default_count = len(handler.args.defaults)
+    required_positional = positional[:-default_count] if default_count else positional
+    for arg in required_positional:
+        if _annotation_excludes_none(arg.annotation):
+            result.add(arg.arg)
+
+    for arg, default in zip(handler.args.kwonlyargs, handler.args.kw_defaults):
+        if default is None and _annotation_excludes_none(arg.annotation):
+            result.add(arg.arg)
+    return result
+
+
+def _expr_provably_non_null(node: ast.AST, non_null_parameters: set[str]) -> bool:
+    if isinstance(node, ast.Constant):
+        return node.value is not None
+    return isinstance(node, ast.Name) and node.id in non_null_parameters
+
+
 class FastApiDependencyEffectExtractor:
     """Compile the dependency-guard/service-effect FastAPI subset to Assurance IR."""
 
@@ -205,6 +279,11 @@ class FastApiDependencyEffectExtractor:
         bindings: dict[str, ResourceBinding] = {}
         paths: dict[str, SemanticPath] = {}
         unsupported: list[str] = []
+        resource_return_contracts = infer_resource_return_contracts(materials)
+        contracts_by_name = {
+            contract.qualified_name: contract
+            for contract in resource_return_contracts
+        }
 
         if not materials.has_head():
             unsupported.append("head_materials_missing")
@@ -228,6 +307,8 @@ class FastApiDependencyEffectExtractor:
 
                 dependency_params = _dependency_parameters(handler)
                 dependency_by_name = {dep: (param, node) for param, dep, node in dependency_params}
+                constructor_aliases = _constructor_aliases(handler)
+                non_null_parameters = _provably_non_null_parameters(handler)
                 calls = _body_calls(handler)
 
                 principal_symbol = profile.principal_parameter
@@ -263,23 +344,71 @@ class FastApiDependencyEffectExtractor:
                         continue
 
                     scope_term: ResourceIdentityTerm | None = None
-                    scope_keyword = profile.scope_keyword(sink_key)
-                    if scope_keyword is not None:
-                        scope_node = _keyword_value(call, scope_keyword)
-                        if scope_node is not None:
-                            scope_term = _symbol_term(scope_node)
-                            if scope_term is None:
+                    expected_contract_name = profile.contract_for_sink(sink_key)
+                    inferred_contract = None
+                    if expected_contract_name is not None:
+                        resolved_name = _resolved_call_qualified_name(
+                            call,
+                            constructor_aliases,
+                        )
+                        if resolved_name != expected_contract_name:
+                            unsupported.append(
+                                f"{path}:{handler.name}:sink_contract_target_unresolved:"
+                                f"{sink_key}:{expected_contract_name}"
+                            )
+                        else:
+                            inferred_contract = contracts_by_name.get(
+                                expected_contract_name
+                            )
+                            if inferred_contract is None:
                                 unsupported.append(
-                                    f"{path}:{handler.name}:unsupported_sink_scope_expression:{sink_key}"
+                                    f"{path}:{handler.name}:required_sink_contract_missing:"
+                                    f"{expected_contract_name}"
                                 )
-                        elif profile.missing_scope_is_unconstrained(sink_key):
+
+                    if inferred_contract is not None:
+                        scope_keyword = inferred_contract.return_scope_parameter
+                        scope_node = _keyword_value(call, scope_keyword)
+                        if scope_node is None:
                             scope_term = ResourceIdentityTerm.symbol(
                                 f"$scope:{path}:{handler.name}:{getattr(call, 'lineno', 0)}"
                             )
-                        else:
-                            unsupported.append(
-                                f"{path}:{handler.name}:required_sink_scope_missing:{sink_key}"
+                        elif (
+                            inferred_contract.requires_non_null_argument
+                            and not _expr_provably_non_null(
+                                scope_node,
+                                non_null_parameters,
                             )
+                        ):
+                            unsupported.append(
+                                f"{path}:{handler.name}:contract_precondition_unproved:"
+                                f"{expected_contract_name}:{scope_keyword}"
+                            )
+                        else:
+                            scope_term = _symbol_term(scope_node)
+                            if scope_term is None:
+                                unsupported.append(
+                                    f"{path}:{handler.name}:unsupported_contract_scope_expression:"
+                                    f"{expected_contract_name}"
+                                )
+                    else:
+                        scope_keyword = profile.scope_keyword(sink_key)
+                        if scope_keyword is not None:
+                            scope_node = _keyword_value(call, scope_keyword)
+                            if scope_node is not None:
+                                scope_term = _symbol_term(scope_node)
+                                if scope_term is None:
+                                    unsupported.append(
+                                        f"{path}:{handler.name}:unsupported_sink_scope_expression:{sink_key}"
+                                    )
+                            elif profile.missing_scope_is_unconstrained(sink_key):
+                                scope_term = ResourceIdentityTerm.symbol(
+                                    f"$scope:{path}:{handler.name}:{getattr(call, 'lineno', 0)}"
+                                )
+                            else:
+                                unsupported.append(
+                                    f"{path}:{handler.name}:required_sink_scope_missing:{sink_key}"
+                                )
 
                     effect_id = _semantic_id("effect", effect_name)
                     acted_id = _semantic_id(
@@ -402,14 +531,19 @@ class FastApiDependencyEffectExtractor:
                     "straight_line_handler",
                     "configured_service_call_sink",
                     "configured_sink_scope_keyword",
+                    "source_derived_resource_return_contract",
+                    "constructor_alias_to_service_method",
                 ],
                 unsupported_constructs=sorted(set(unsupported)),
                 assumptions=[
                     "Configured dependency guards authorize the declared route resource for the declared effects.",
                     "Configured service-call sinks faithfully identify protected effects.",
                     "Configured sink identity argument denotes the acted resource identity.",
-                    "Configured sink scope keyword denotes the acted resource scope.",
-                    "Missing scope marked unconstrained is an explicit conservative over-approximation.",
+                    "Configured sink scope keyword denotes the acted resource scope when no source contract is required.",
+                    "Source-derived return contracts are consumed only after resolving the configured service method.",
+                    "Conditional return contracts require the caller's non-null argument precondition to be established.",
+                    "Missing scope under a resolved source contract is modeled as unconstrained.",
+                    "Missing manually declared scope marked unconstrained is an explicit conservative over-approximation.",
                 ],
             ),
             principals=sorted(principals.values(), key=lambda item: item.principal_id),
@@ -418,5 +552,6 @@ class FastApiDependencyEffectExtractor:
             guards=sorted(guards.values(), key=lambda item: item.guard_id),
             protected_effects=sorted(protected.values(), key=lambda item: item.protected_effect_id),
             resource_bindings=sorted(bindings.values(), key=lambda item: item.binding_id),
+            resource_return_contracts=resource_return_contracts,
             paths=sorted(paths.values(), key=lambda item: item.path_id),
         )
