@@ -36,6 +36,10 @@ class ResourceBindingEvidence(BaseModel):
     status: EvaluationStatus
     reason: str
     counterexample: dict[str, Any] | None = None
+    checker_id: str | None = None
+    checker_version: str | None = None
+    engine: str | None = None
+    tool_version: str | None = None
 
 
 class ProtectedEffectIntegrityEvaluation(BaseModel):
@@ -84,12 +88,17 @@ def _resolve_resource_check(
         status = str(raw.get("status", "unknown"))
         if status not in {"pass", "fail", "unknown"}:
             status = "unknown"
+        checker = raw.get("checker") if isinstance(raw.get("checker"), dict) else {}
         evidence.append(
             ResourceBindingEvidence(
                 binding_id=binding_id,
                 status=status,
                 reason=str(raw.get("reason", "resource-binding evaluator returned no reason")),
                 counterexample=raw.get("counterexample"),
+                checker_id=checker.get("checker_id"),
+                checker_version=checker.get("checker_version"),
+                engine=checker.get("engine"),
+                tool_version=checker.get("tool_version"),
             )
         )
 
