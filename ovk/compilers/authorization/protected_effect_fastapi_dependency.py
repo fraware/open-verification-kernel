@@ -28,6 +28,7 @@ from ovk.compilers.authorization.fastapi_route_summary import (
     route_summary_index_matches_materials,
 )
 from ovk.compilers.authorization.fastapi_semantic_fragment import (
+    assemble_fastapi_assurance_ir,
     bind_route_file_summary,
 )
 from ovk.compilers.authorization.material_loader import AuthMaterials
@@ -44,23 +45,13 @@ from ovk.compilers.authorization.resource_return_contracts import (
     infer_resource_return_contracts,
 )
 from ovk.core.assurance_ir import (
-    AssuranceCoverage,
-    AssuranceExtractorIdentity,
     AssuranceIR,
-    AuthorizationGuard,
     BindingProjection,
     BindingRelation,
-    ContractUse,
-    EffectRef,
-    PrincipalRef,
-    ProtectedEffect,
-    ResourceBinding,
-    ResourceRef,
     SemanticOrigin,
-    SemanticPath,
 )
 from ovk.core.bundle import content_digest
-from ovk.core.models import SourceRange, VerificationSubject
+from ovk.core.models import SourceRange
 from ovk.core.resource_identity import ResourceIdentityTerm
 
 
@@ -529,20 +520,6 @@ class FastApiDependencyEffectExtractor:
         contract_summary_index: ContractSummaryIndex | None = None,
         route_summary_index: RouteSummaryIndex | None = None,
     ) -> AssuranceIR:
-        subject = VerificationSubject(
-            repo=materials.repo or "unknown/repo",
-            base_sha=materials.base_revision,
-            head_sha=materials.head_revision or "unknown",
-        )
-        principals: dict[str, PrincipalRef] = {}
-        resources: dict[str, ResourceRef] = {}
-        effects: dict[str, EffectRef] = {}
-        guards: dict[str, AuthorizationGuard] = {}
-        protected: dict[str, ProtectedEffect] = {}
-        bindings: dict[str, ResourceBinding] = {}
-        contract_uses: dict[str, ContractUse] = {}
-        paths: dict[str, SemanticPath] = {}
-        unsupported: list[str] = []
         if parsed_index is None:
             parsed = parse_head_python_materials(materials)
         else:
@@ -551,6 +528,7 @@ class FastApiDependencyEffectExtractor:
                     "parsed Python index does not match supplied head materials"
                 )
             parsed = parsed_index
+
         if contract_summary_index is None:
             contract_summaries = build_contract_summary_index(
                 materials,
@@ -571,6 +549,14 @@ class FastApiDependencyEffectExtractor:
             materials,
             summary_index=contract_summaries,
         )
+        resource_return_contracts = infer_resource_return_contracts(
+            materials,
+            function_contracts=function_contracts,
+        )
+        contracts_by_name = {
+            contract.qualified_name: contract
+            for contract in function_contracts
+        }
 
         if route_summary_index is None:
             route_summaries = build_route_summary_index(
@@ -587,104 +573,27 @@ class FastApiDependencyEffectExtractor:
                     "route summary index does not match supplied head materials"
                 )
             route_summaries = route_summary_index
-        resource_return_contracts = infer_resource_return_contracts(
-            materials,
-            function_contracts=function_contracts,
-        )
-        contracts_by_name = {
-            contract.qualified_name: contract
-            for contract in function_contracts
-        }
 
-        if not materials.has_head():
-            unsupported.append("head_materials_missing")
-
-        for path, message in sorted(parsed.syntax_errors.items()):
-            unsupported.append(f"{path}:syntax_error:{message}")
-
-        for path in sorted(materials.head_files):
-            if path in parsed.syntax_errors:
-                continue
-            if path not in route_summaries.summaries:
-                unsupported.append(f"{path}:route_summary_missing")
-
-        for path, file_summary in sorted(route_summaries.summaries.items()):
-            fragment = bind_route_file_summary(
-                file_summary,
+        fragments = {
+            path: bind_route_file_summary(
+                summary,
                 profile=profile,
                 contracts_by_name=contracts_by_name,
             )
-            unsupported.extend(fragment.unsupported_constructs)
+            for path, summary in sorted(route_summaries.summaries.items())
+        }
+        missing_route_summaries = [
+            path
+            for path in sorted(materials.head_files)
+            if path not in parsed.syntax_errors
+            and path not in route_summaries.summaries
+        ]
 
-            for item in fragment.principals:
-                principals.setdefault(item.principal_id, item)
-            for item in fragment.resources:
-                resources[item.resource_id] = item
-            for item in fragment.effects:
-                effects.setdefault(item.effect_id, item)
-            for item in fragment.guards:
-                guards[item.guard_id] = item
-            for item in fragment.protected_effects:
-                protected[item.protected_effect_id] = item
-            for item in fragment.resource_bindings:
-                bindings[item.binding_id] = item
-            for item in fragment.contract_uses:
-                contract_uses[item.use_id] = item
-            for item in fragment.paths:
-                paths[item.path_id] = item
-
-        if not materials.has_head():
-            coverage_status = "unknown"
-            confidence = 0.0
-        elif unsupported:
-            coverage_status = "partial"
-            confidence = 0.5
-        else:
-            coverage_status = "complete"
-            confidence = 1.0
-
-        return AssuranceIR(
-            subject=subject,
-            extractor=AssuranceExtractorIdentity(
-                extractor_id=_SOURCE_PROFILE_ID,
-                extractor_version="0.1.0",
-                source_profile_id=_SOURCE_PROFILE_ID,
-            ),
-            coverage=AssuranceCoverage(
-                status=coverage_status,
-                confidence=confidence,
-                supported_constructs=[
-                    "static_fastapi_route_decorator",
-                    "depends_or_security_default_parameter",
-                    "straight_line_handler",
-                    "configured_service_call_sink",
-                    "configured_sink_scope_keyword",
-                    "source_derived_resource_return_contract",
-                    "typed_function_contract",
-                    "return_attribute_projection",
-                    "constructor_alias_to_service_method",
-                ],
-                unsupported_constructs=sorted(set(unsupported)),
-                assumptions=[
-                    "Configured dependency guards authorize the declared route resource for the declared effects.",
-                    "Configured service-call sinks faithfully identify protected effects.",
-                    "Configured sink identity argument denotes the acted resource identity only when no source-derived identity contract is required.",
-                    "Configured sink scope keyword denotes the acted resource scope when no source contract is required.",
-                    "Source-derived function contracts are consumed only after resolving the configured service method.",
-                    "Only profile-selected contract attributes become required identity/scope/binding proof obligations.",
-                    "Conditional return contracts require the caller's non-null argument precondition to be established.",
-                    "Missing scope under a resolved source contract is modeled as unconstrained.",
-                    "Missing manually declared scope marked unconstrained is an explicit conservative over-approximation.",
-                ],
-            ),
-            principals=sorted(principals.values(), key=lambda item: item.principal_id),
-            resources=sorted(resources.values(), key=lambda item: item.resource_id),
-            effects=sorted(effects.values(), key=lambda item: item.effect_id),
-            guards=sorted(guards.values(), key=lambda item: item.guard_id),
-            protected_effects=sorted(protected.values(), key=lambda item: item.protected_effect_id),
-            resource_bindings=sorted(bindings.values(), key=lambda item: item.binding_id),
-            resource_return_contracts=resource_return_contracts,
+        return assemble_fastapi_assurance_ir(
+            materials=materials,
             function_contracts=function_contracts,
-            contract_uses=sorted(contract_uses.values(), key=lambda item: item.use_id),
-            paths=sorted(paths.values(), key=lambda item: item.path_id),
+            resource_return_contracts=resource_return_contracts,
+            fragments=fragments,
+            syntax_errors=parsed.syntax_errors,
+            missing_route_summary_paths=missing_route_summaries,
         )
