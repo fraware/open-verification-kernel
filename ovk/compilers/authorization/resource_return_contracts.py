@@ -121,6 +121,126 @@ def _scope_mismatch(test: ast.AST, returned_name: str) -> tuple[str, str] | None
     return None
 
 
+def _supported_string_identity_annotation(annotation: ast.AST | None) -> bool:
+    """Return whether an annotation is inside the v1 string-ID equality model."""
+    if annotation is None:
+        return False
+    rendered = ast.unparse(annotation).replace(" ", "")
+    return rendered in {
+        "str",
+        "str|None",
+        "None|str",
+        "Optional[str]",
+        "typing.Optional[str]",
+    }
+
+
+def _docstring_statement(statement: ast.stmt) -> bool:
+    return (
+        isinstance(statement, ast.Expr)
+        and isinstance(statement.value, ast.Constant)
+        and isinstance(statement.value.value, str)
+    )
+
+
+def _fail_closed_parameter_equality(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> tuple[str, str, ast.If] | None:
+    """Infer normal-return parameter equality from one rejecting inequality guard.
+
+    Supported source shape is an optional docstring followed by exactly one
+    `if left != right: raise ...` guard. Normal continuation establishes
+    equality. Restricting both parameters to string-ID annotations avoids
+    assuming equality semantics for arbitrary user-defined objects.
+    """
+    executable = [
+        statement
+        for statement in function.body
+        if not _docstring_statement(statement)
+    ]
+    if len(executable) != 1:
+        return None
+
+    guard = executable[0]
+    if (
+        not isinstance(guard, ast.If)
+        or guard.orelse
+        or len(guard.body) != 1
+        or not isinstance(guard.body[0], ast.Raise)
+    ):
+        return None
+
+    test = guard.test
+    if (
+        not isinstance(test, ast.Compare)
+        or len(test.ops) != 1
+        or not isinstance(test.ops[0], ast.NotEq)
+        or len(test.comparators) != 1
+        or not isinstance(test.left, ast.Name)
+        or not isinstance(test.comparators[0], ast.Name)
+    ):
+        return None
+
+    annotations = {
+        arg.arg: arg.annotation
+        for arg in (
+            list(function.args.posonlyargs)
+            + list(function.args.args)
+            + list(function.args.kwonlyargs)
+        )
+    }
+    left = test.left.id
+    right = test.comparators[0].id
+    if left not in annotations or right not in annotations:
+        return None
+    if not _supported_string_identity_annotation(annotations[left]):
+        return None
+    if not _supported_string_identity_annotation(annotations[right]):
+        return None
+    return left, right, guard
+
+
+def _infer_fail_closed_parameter_equality_contract(
+    *,
+    path: str,
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> FunctionContract | None:
+    """Infer a source-grounded equality contract for a narrow fail-closed helper."""
+    equality = _fail_closed_parameter_equality(function)
+    if equality is None:
+        return None
+    left, right, guard = equality
+
+    positional_parameters = [
+        arg.arg
+        for arg in (list(function.args.posonlyargs) + list(function.args.args))
+    ]
+    postcondition = ContractPredicate(
+        relation="eq",
+        left=ContractTerm.parameter(left),
+        right=ContractTerm.parameter(right),
+    )
+    contract_id = (
+        "contract:"
+        + content_digest(
+            {
+                "qualified_name": function.name,
+                "positional_parameters": positional_parameters,
+                "preconditions": [],
+                "postconditions": [postcondition.model_dump(mode="json")],
+                "path": path,
+            }
+        )[:16]
+    )
+    return FunctionContract(
+        contract_id=contract_id,
+        qualified_name=function.name,
+        positional_parameters=positional_parameters,
+        preconditions=[],
+        postconditions=[postcondition],
+        origin=_origin(path, guard),
+    )
+
 def _top_level_success_return(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
 ) -> tuple[int, str] | None:
@@ -666,6 +786,15 @@ def summarize_contract_file(
     forwarding: list[ForwardingContractCandidate] = []
 
     for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            contract = _infer_fail_closed_parameter_equality_contract(
+                path=path,
+                function=node,
+            )
+            if contract is not None:
+                direct.append(contract)
+            continue
+
         if not isinstance(node, ast.ClassDef):
             continue
         for statement in node.body:
