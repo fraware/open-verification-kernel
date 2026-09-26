@@ -22,6 +22,9 @@ from dataclasses import dataclass, field
 
 from ovk.compilers.authorization.base import normalize_path
 from ovk.compilers.authorization.material_loader import AuthMaterials
+from ovk.compilers.authorization.python_ast_index import (
+    parse_head_python_materials,
+)
 from ovk.compilers.authorization.resource_return_contracts import (
     infer_function_contracts,
     infer_resource_return_contracts,
@@ -438,8 +441,15 @@ class FastApiDependencyEffectExtractor:
         contract_uses: dict[str, ContractUse] = {}
         paths: dict[str, SemanticPath] = {}
         unsupported: list[str] = []
-        function_contracts = infer_function_contracts(materials)
-        resource_return_contracts = infer_resource_return_contracts(materials)
+        parsed = parse_head_python_materials(materials)
+        function_contracts = infer_function_contracts(
+            materials,
+            parsed_trees=parsed.trees,
+        )
+        resource_return_contracts = infer_resource_return_contracts(
+            materials,
+            function_contracts=function_contracts,
+        )
         contracts_by_name = {
             contract.qualified_name: contract
             for contract in function_contracts
@@ -449,10 +459,14 @@ class FastApiDependencyEffectExtractor:
             unsupported.append("head_materials_missing")
 
         for path, source in sorted(materials.head_files.items()):
-            try:
-                tree = ast.parse(source, filename=path)
-            except SyntaxError as exc:
-                unsupported.append(f"{path}:syntax_error:{exc.msg}")
+            if path in parsed.syntax_errors:
+                unsupported.append(
+                    f"{path}:syntax_error:{parsed.syntax_errors[path]}"
+                )
+                continue
+            tree = parsed.trees.get(path)
+            if tree is None:
+                unsupported.append(f"{path}:parsed_tree_missing")
                 continue
 
             for handler in tree.body:
