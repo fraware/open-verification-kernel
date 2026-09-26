@@ -14,7 +14,7 @@ It does not emit an OVK merge recommendation.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Iterable, Literal
 
 from pydantic import BaseModel, Field
 
@@ -158,11 +158,42 @@ def evaluate_protected_effect_integrity(
     ir: AssuranceIR,
     *,
     resource_binding_evaluator: BindingEvaluator = evaluate_resource_binding_with_z3,
+    protected_effect_ids: Iterable[str] | None = None,
 ) -> list[ProtectedEffectIntegrityEvaluation]:
-    """Evaluate all protected effects represented by an Assurance IR."""
+    """Evaluate all or an explicit subset of protected effects.
+
+    The historical default evaluates every represented protected effect.
+    Incremental callers may supply stable protected-effect IDs. Unknown requested
+    IDs fail closed instead of being silently ignored.
+    """
+
+    requested: set[str] | None = None
+    if protected_effect_ids is not None:
+        requested = {
+            effect_id.strip()
+            for effect_id in protected_effect_ids
+            if effect_id.strip()
+        }
+        known = {
+            effect.protected_effect_id
+            for effect in ir.protected_effects
+        }
+        unknown = requested - known
+        if unknown:
+            raise ValueError(
+                "unknown protected effect ids: " + ", ".join(sorted(unknown))
+            )
+
+    obligations = compile_protected_effect_integrity(ir)
+    if requested is not None:
+        obligations = [
+            obligation
+            for obligation in obligations
+            if obligation.protected_effect_id in requested
+        ]
 
     results: list[ProtectedEffectIntegrityEvaluation] = []
-    for obligation in compile_protected_effect_integrity(ir):
+    for obligation in obligations:
         checks: list[IntegrityCheck] = []
         resource_evidence: list[ResourceBindingEvidence] = []
 
