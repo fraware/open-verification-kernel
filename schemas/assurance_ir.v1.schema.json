@@ -120,6 +120,9 @@
     },
     "function_contracts": {
       "type": "array"
+    },
+    "contract_uses": {
+      "type": "array"
     }
   },
   "additionalProperties": false
