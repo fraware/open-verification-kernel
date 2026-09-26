@@ -72,12 +72,27 @@ class ResourceScopeAssertionSemantics:
     acted_scope_arg: int = 0
     authorized_resource_arg: int = 1
     acted_scope_attribute: str = "workspace_id"
+    # Optional source-derived proof obligation for the helper itself. When set,
+    # the route binder consumes the named FunctionContract instead of trusting
+    # the positional assertion semantics above.
+    contract_qualified_name: str | None = None
+    contract_source_path: str | None = None
 
     def __post_init__(self) -> None:
         if self.acted_scope_arg < 0 or self.authorized_resource_arg < 0:
             raise ValueError("scope assertion argument indexes must be non-negative")
         if not self.acted_scope_attribute.strip():
             raise ValueError("scope assertion attribute must be non-empty")
+        if self.contract_qualified_name is not None:
+            if not self.contract_qualified_name.strip():
+                raise ValueError("scope assertion contract name must be non-empty")
+        if self.contract_source_path is not None:
+            if not self.contract_source_path.strip():
+                raise ValueError("scope assertion contract path must be non-empty")
+            if self.contract_qualified_name is None:
+                raise ValueError(
+                    "scope assertion contract path requires a contract name"
+                )
 
 
 @dataclass(frozen=True)
