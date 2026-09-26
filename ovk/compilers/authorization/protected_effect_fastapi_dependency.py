@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from ovk.compilers.authorization.base import normalize_path
 from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.compilers.authorization.resource_return_contracts import (
+    infer_function_contracts,
     infer_resource_return_contracts,
 )
 from ovk.core.assurance_ir import (
@@ -58,6 +59,10 @@ class FastApiDependencyEffectProfile:
     sink_missing_scope_unconstrained: frozenset[str] = frozenset()
     # Sink key -> source-derived contract qualified name, e.g. AgentService.get.
     sink_contracts: dict[str, str] = field(default_factory=dict)
+    # Sink key -> returned attribute whose equality contract denotes resource scope.
+    sink_contract_scope_attributes: dict[str, str] = field(default_factory=dict)
+    # Sink key -> returned attribute whose equality contract denotes resource identity.
+    sink_contract_identity_attributes: dict[str, str] = field(default_factory=dict)
 
     # Dependency name -> handler parameter holding the authorized resource key.
     dependency_guard_resources: dict[str, str] = field(default_factory=dict)
@@ -85,6 +90,12 @@ class FastApiDependencyEffectProfile:
 
     def contract_for_sink(self, sink_key: str) -> str | None:
         return self.sink_contracts.get(sink_key)
+
+    def contract_scope_attribute_for_sink(self, sink_key: str) -> str | None:
+        return self.sink_contract_scope_attributes.get(sink_key)
+
+    def contract_identity_attribute_for_sink(self, sink_key: str) -> str | None:
+        return self.sink_contract_identity_attributes.get(sink_key)
 
 
 def _name_of(node: ast.AST | None) -> str | None:
@@ -256,6 +267,55 @@ def _expr_provably_non_null(node: ast.AST, non_null_parameters: set[str]) -> boo
     return isinstance(node, ast.Name) and node.id in non_null_parameters
 
 
+def _actual_argument_for_parameter(
+    call: ast.Call,
+    *,
+    parameter_name: str,
+    contract_parameter_order: list[str],
+) -> ast.AST | None:
+    keyword = _keyword_value(call, parameter_name)
+    if keyword is not None:
+        return keyword
+    if parameter_name not in contract_parameter_order:
+        return None
+    index = contract_parameter_order.index(parameter_name)
+    if len(call.args) <= index:
+        return None
+    return call.args[index]
+
+
+def _typed_contract_projection(
+    *,
+    contract,
+    return_attribute: str,
+):
+    """Return the unique eq(return.<attr>, parameter) postcondition."""
+
+    matches = []
+    for predicate in contract.postconditions:
+        if (
+            predicate.relation == "eq"
+            and predicate.right is not None
+            and predicate.left.kind == "return_attribute"
+            and predicate.left.name == return_attribute
+            and predicate.right.kind == "parameter"
+            and predicate.right.name is not None
+        ):
+            matches.append(predicate)
+    if len(matches) != 1:
+        return None
+    return matches[0]
+
+
+def _requires_non_null_parameter(contract, parameter_name: str) -> bool:
+    return any(
+        predicate.relation == "non_null"
+        and predicate.left.kind == "parameter"
+        and predicate.left.name == parameter_name
+        for predicate in contract.preconditions
+    )
+
+
 class FastApiDependencyEffectExtractor:
     """Compile the dependency-guard/service-effect FastAPI subset to Assurance IR."""
 
@@ -279,10 +339,11 @@ class FastApiDependencyEffectExtractor:
         bindings: dict[str, ResourceBinding] = {}
         paths: dict[str, SemanticPath] = {}
         unsupported: list[str] = []
+        function_contracts = infer_function_contracts(materials)
         resource_return_contracts = infer_resource_return_contracts(materials)
         contracts_by_name = {
             contract.qualified_name: contract
-            for contract in resource_return_contracts
+            for contract in function_contracts
         }
 
         if not materials.has_head():
@@ -367,30 +428,86 @@ class FastApiDependencyEffectExtractor:
                                 )
 
                     if inferred_contract is not None:
-                        scope_keyword = inferred_contract.return_scope_parameter
-                        scope_node = _keyword_value(call, scope_keyword)
-                        if scope_node is None:
-                            scope_term = ResourceIdentityTerm.symbol(
-                                f"$scope:{path}:{handler.name}:{getattr(call, 'lineno', 0)}"
+                        scope_attribute = profile.contract_scope_attribute_for_sink(
+                            sink_key
+                        )
+                        if scope_attribute is not None:
+                            scope_post = _typed_contract_projection(
+                                contract=inferred_contract,
+                                return_attribute=scope_attribute,
                             )
-                        elif (
-                            inferred_contract.requires_non_null_argument
-                            and not _expr_provably_non_null(
-                                scope_node,
-                                non_null_parameters,
-                            )
-                        ):
-                            unsupported.append(
-                                f"{path}:{handler.name}:contract_precondition_unproved:"
-                                f"{expected_contract_name}:{scope_keyword}"
-                            )
-                        else:
-                            scope_term = _symbol_term(scope_node)
-                            if scope_term is None:
+                            if scope_post is None or scope_post.right is None:
                                 unsupported.append(
-                                    f"{path}:{handler.name}:unsupported_contract_scope_expression:"
-                                    f"{expected_contract_name}"
+                                    f"{path}:{handler.name}:required_scope_postcondition_missing:"
+                                    f"{expected_contract_name}:{scope_attribute}"
                                 )
+                            else:
+                                scope_parameter = scope_post.right.name
+                                assert scope_parameter is not None
+                                scope_node = _keyword_value(call, scope_parameter)
+                                if scope_node is None:
+                                    scope_term = ResourceIdentityTerm.symbol(
+                                        f"$scope:{path}:{handler.name}:{getattr(call, 'lineno', 0)}"
+                                    )
+                                elif (
+                                    _requires_non_null_parameter(
+                                        inferred_contract,
+                                        scope_parameter,
+                                    )
+                                    and not _expr_provably_non_null(
+                                        scope_node,
+                                        non_null_parameters,
+                                    )
+                                ):
+                                    unsupported.append(
+                                        f"{path}:{handler.name}:contract_precondition_unproved:"
+                                        f"{expected_contract_name}:{scope_parameter}"
+                                    )
+                                else:
+                                    scope_term = _symbol_term(scope_node)
+                                    if scope_term is None:
+                                        unsupported.append(
+                                            f"{path}:{handler.name}:unsupported_contract_scope_expression:"
+                                            f"{expected_contract_name}"
+                                        )
+
+                        identity_attribute = (
+                            profile.contract_identity_attribute_for_sink(sink_key)
+                        )
+                        if identity_attribute is not None:
+                            identity_post = _typed_contract_projection(
+                                contract=inferred_contract,
+                                return_attribute=identity_attribute,
+                            )
+                            if identity_post is None or identity_post.right is None:
+                                unsupported.append(
+                                    f"{path}:{handler.name}:required_identity_postcondition_missing:"
+                                    f"{expected_contract_name}:{identity_attribute}"
+                                )
+                            else:
+                                identity_parameter = identity_post.right.name
+                                assert identity_parameter is not None
+                                identity_node_from_contract = _actual_argument_for_parameter(
+                                    call,
+                                    parameter_name=identity_parameter,
+                                    contract_parameter_order=[],
+                                )
+                                if identity_node_from_contract is None:
+                                    unsupported.append(
+                                        f"{path}:{handler.name}:required_identity_argument_missing:"
+                                        f"{expected_contract_name}:{identity_parameter}"
+                                    )
+                                else:
+                                    identity_from_contract = _symbol_term(
+                                        identity_node_from_contract
+                                    )
+                                    if identity_from_contract is None:
+                                        unsupported.append(
+                                            f"{path}:{handler.name}:unsupported_contract_identity_expression:"
+                                            f"{expected_contract_name}"
+                                        )
+                                    else:
+                                        identity_term = identity_from_contract
                     elif expected_contract_name is None:
                         scope_keyword = profile.scope_keyword(sink_key)
                         if scope_keyword is not None:
@@ -553,5 +670,6 @@ class FastApiDependencyEffectExtractor:
             protected_effects=sorted(protected.values(), key=lambda item: item.protected_effect_id),
             resource_bindings=sorted(bindings.values(), key=lambda item: item.binding_id),
             resource_return_contracts=resource_return_contracts,
+            function_contracts=function_contracts,
             paths=sorted(paths.values(), key=lambda item: item.path_id),
         )
