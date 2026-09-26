@@ -1,0 +1,422 @@
+"""FastAPI dependency-to-effect Assurance IR profile.
+
+This additive profile models a common production FastAPI authorization shape:
+
+    user = Depends(require_workspace_member)
+    ...
+    await svc.get(resource_id, workspace_id=workspace_id)
+
+The dependency is an authorization decision over a declared route resource.
+A configured service call is the protected effect. The profile can require the
+acted resource's scope to equal the resource authorized by the dependency.
+
+The profile is intentionally narrow and advisory. Unsupported control flow,
+dynamic routes, unsupported dependency forms, or unresolved sink signatures
+lower extraction coverage instead of being silently ignored.
+"""
+
+from __future__ import annotations
+
+import ast
+from dataclasses import dataclass, field
+
+from ovk.compilers.authorization.base import normalize_path
+from ovk.compilers.authorization.material_loader import AuthMaterials
+from ovk.core.assurance_ir import (
+    AssuranceCoverage,
+    AssuranceExtractorIdentity,
+    AssuranceIR,
+    AuthorizationGuard,
+    EffectRef,
+    PrincipalRef,
+    ProtectedEffect,
+    ResourceBinding,
+    ResourceRef,
+    SemanticOrigin,
+    SemanticPath,
+)
+from ovk.core.bundle import content_digest
+from ovk.core.models import SourceRange, VerificationSubject
+from ovk.core.resource_identity import ResourceIdentityTerm
+
+
+_SOURCE_PROFILE_ID = "assurance.fastapi.dependency_effects.ast_v1"
+_HTTP_METHODS = frozenset({"get", "post", "put", "patch", "delete", "options", "head"})
+_CONTROL_FLOW = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try, ast.Match, ast.With, ast.AsyncWith)
+
+
+@dataclass(frozen=True)
+class FastApiDependencyEffectProfile:
+    """Explicit semantics for dependency guards and protected service calls."""
+
+    sink_effects: dict[str, str]
+    sink_identity_args: dict[str, int] = field(default_factory=dict)
+    sink_scope_keywords: dict[str, str] = field(default_factory=dict)
+    sink_missing_scope_unconstrained: frozenset[str] = frozenset()
+
+    # Dependency name -> handler parameter holding the authorized resource key.
+    dependency_guard_resources: dict[str, str] = field(default_factory=dict)
+    # Dependency name -> effect names the dependency authorizes in this profile.
+    dependency_guard_effects: dict[str, tuple[str, ...]] = field(default_factory=dict)
+
+    principal_parameter: str = "user"
+
+    def sink_effect(self, call: ast.Call) -> tuple[str, str] | None:
+        full = ast.unparse(call.func)
+        leaf = _name_of(call.func)
+        for key in (full, leaf):
+            if key and key in self.sink_effects:
+                return key, self.sink_effects[key]
+        return None
+
+    def identity_arg(self, sink_key: str) -> int:
+        return int(self.sink_identity_args.get(sink_key, 0))
+
+    def scope_keyword(self, sink_key: str) -> str | None:
+        return self.sink_scope_keywords.get(sink_key)
+
+    def missing_scope_is_unconstrained(self, sink_key: str) -> bool:
+        return sink_key in self.sink_missing_scope_unconstrained
+
+
+def _name_of(node: ast.AST | None) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def _const_str(node: ast.AST | None) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
+def _origin(path: str, node: ast.AST) -> SemanticOrigin:
+    return SemanticOrigin(
+        path=path,
+        extractor_id=_SOURCE_PROFILE_ID,
+        extractor_version="0.1.0",
+        source_range=SourceRange(
+            path=path,
+            start_line=getattr(node, "lineno", None),
+            end_line=getattr(node, "end_lineno", getattr(node, "lineno", None)),
+        ),
+    )
+
+
+def _semantic_id(prefix: str, value: str) -> str:
+    return f"{prefix}:{content_digest(value)[:16]}"
+
+
+def _route_decorator(node: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[str, str] | None:
+    for decorator in node.decorator_list:
+        if not isinstance(decorator, ast.Call) or not isinstance(decorator.func, ast.Attribute):
+            continue
+        method = decorator.func.attr.lower()
+        if method not in _HTTP_METHODS or not decorator.args:
+            continue
+        route = _const_str(decorator.args[0])
+        if route is None:
+            continue
+        return method.upper(), normalize_path("", route)
+    return None
+
+
+def _has_control_flow(handler: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    return any(isinstance(node, _CONTROL_FLOW) for statement in handler.body for node in ast.walk(statement))
+
+
+def _body_calls(handler: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.Call]:
+    calls = [
+        node
+        for statement in handler.body
+        for node in ast.walk(statement)
+        if isinstance(node, ast.Call)
+    ]
+    return sorted(calls, key=lambda item: (getattr(item, "lineno", 0), getattr(item, "col_offset", 0)))
+
+
+def _depends_name(node: ast.AST | None) -> str | None:
+    if not isinstance(node, ast.Call) or _name_of(node.func) not in {"Depends", "Security"}:
+        return None
+    if not node.args:
+        return None
+    return _name_of(node.args[0])
+
+
+def _dependency_parameters(
+    handler: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> list[tuple[str, str, ast.AST]]:
+    """Return (parameter_name, dependency_name, source_node)."""
+
+    found: list[tuple[str, str, ast.AST]] = []
+    positional = list(handler.args.posonlyargs) + list(handler.args.args)
+    defaults = list(handler.args.defaults)
+    if defaults:
+        for arg, default in zip(positional[-len(defaults):], defaults):
+            dep = _depends_name(default)
+            if dep:
+                found.append((arg.arg, dep, default))
+
+    for arg, default in zip(handler.args.kwonlyargs, handler.args.kw_defaults):
+        dep = _depends_name(default)
+        if dep:
+            found.append((arg.arg, dep, default))
+    return found
+
+
+def _keyword_value(call: ast.Call, name: str) -> ast.AST | None:
+    for keyword in call.keywords:
+        if keyword.arg == name:
+            return keyword.value
+    return None
+
+
+def _symbol_term(node: ast.AST) -> ResourceIdentityTerm | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, (str, int, bool)):
+        return ResourceIdentityTerm.literal(str(node.value))
+    if isinstance(node, (ast.Name, ast.Attribute, ast.Subscript)):
+        return ResourceIdentityTerm.symbol(ast.unparse(node))
+    return None
+
+
+class FastApiDependencyEffectExtractor:
+    """Compile the dependency-guard/service-effect FastAPI subset to Assurance IR."""
+
+    source_profile_id = _SOURCE_PROFILE_ID
+
+    def compile(
+        self,
+        materials: AuthMaterials,
+        profile: FastApiDependencyEffectProfile,
+    ) -> AssuranceIR:
+        subject = VerificationSubject(
+            repo=materials.repo or "unknown/repo",
+            base_sha=materials.base_revision,
+            head_sha=materials.head_revision or "unknown",
+        )
+        principals: dict[str, PrincipalRef] = {}
+        resources: dict[str, ResourceRef] = {}
+        effects: dict[str, EffectRef] = {}
+        guards: dict[str, AuthorizationGuard] = {}
+        protected: dict[str, ProtectedEffect] = {}
+        bindings: dict[str, ResourceBinding] = {}
+        paths: dict[str, SemanticPath] = {}
+        unsupported: list[str] = []
+
+        if not materials.has_head():
+            unsupported.append("head_materials_missing")
+
+        for path, source in sorted(materials.head_files.items()):
+            try:
+                tree = ast.parse(source, filename=path)
+            except SyntaxError as exc:
+                unsupported.append(f"{path}:syntax_error:{exc.msg}")
+                continue
+
+            for handler in tree.body:
+                if not isinstance(handler, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                route = _route_decorator(handler)
+                if route is None:
+                    continue
+                method, route_path = route
+                if _has_control_flow(handler):
+                    unsupported.append(f"{path}:{handler.name}:control_flow_outside_profile")
+
+                dependency_params = _dependency_parameters(handler)
+                dependency_by_name = {dep: (param, node) for param, dep, node in dependency_params}
+                calls = _body_calls(handler)
+
+                principal_symbol = profile.principal_parameter
+                principal_id = _semantic_id("principal", principal_symbol)
+                principals.setdefault(
+                    principal_id,
+                    PrincipalRef(
+                        principal_id=principal_id,
+                        symbol=principal_symbol,
+                        principal_type="fastapi_dependency_result",
+                        origin=_origin(path, handler),
+                    ),
+                )
+
+                for call in calls:
+                    sink = profile.sink_effect(call)
+                    if sink is None:
+                        continue
+                    sink_key, effect_name = sink
+                    identity_index = profile.identity_arg(sink_key)
+                    if len(call.args) <= identity_index:
+                        unsupported.append(
+                            f"{path}:{handler.name}:unsupported_sink_identity_signature:{sink_key}"
+                        )
+                        continue
+
+                    identity_node = call.args[identity_index]
+                    identity_term = _symbol_term(identity_node)
+                    if identity_term is None:
+                        unsupported.append(
+                            f"{path}:{handler.name}:unsupported_sink_identity_expression:{sink_key}"
+                        )
+                        continue
+
+                    scope_term: ResourceIdentityTerm | None = None
+                    scope_keyword = profile.scope_keyword(sink_key)
+                    if scope_keyword is not None:
+                        scope_node = _keyword_value(call, scope_keyword)
+                        if scope_node is not None:
+                            scope_term = _symbol_term(scope_node)
+                            if scope_term is None:
+                                unsupported.append(
+                                    f"{path}:{handler.name}:unsupported_sink_scope_expression:{sink_key}"
+                                )
+                        elif profile.missing_scope_is_unconstrained(sink_key):
+                            scope_term = ResourceIdentityTerm.symbol(
+                                f"$scope:{path}:{handler.name}:{getattr(call, 'lineno', 0)}"
+                            )
+                        else:
+                            unsupported.append(
+                                f"{path}:{handler.name}:required_sink_scope_missing:{sink_key}"
+                            )
+
+                    effect_id = _semantic_id("effect", effect_name)
+                    acted_id = _semantic_id(
+                        "resource",
+                        f"{path}:{handler.name}:{getattr(call, 'lineno', 0)}:{ast.unparse(identity_node)}",
+                    )
+                    protected_id = _semantic_id(
+                        "protected",
+                        f"{acted_id}:{effect_name}",
+                    )
+                    effects.setdefault(
+                        effect_id,
+                        EffectRef(effect_id=effect_id, name=effect_name, origin=_origin(path, call)),
+                    )
+                    resources[acted_id] = ResourceRef(
+                        resource_id=acted_id,
+                        symbol=ast.unparse(identity_node),
+                        identity_term=identity_term,
+                        scope_term=scope_term,
+                        origin=_origin(path, identity_node),
+                    )
+
+                    guard_ids: list[str] = []
+                    binding_ids: list[str] = []
+                    for dep_name, allowed_effects in profile.dependency_guard_effects.items():
+                        if effect_name not in allowed_effects:
+                            continue
+                        dep_record = dependency_by_name.get(dep_name)
+                        resource_symbol = profile.dependency_guard_resources.get(dep_name)
+                        if dep_record is None or resource_symbol is None:
+                            continue
+                        param_name, dep_node = dep_record
+                        if param_name != profile.principal_parameter:
+                            unsupported.append(
+                                f"{path}:{handler.name}:dependency_principal_mismatch:{dep_name}"
+                            )
+                            continue
+
+                        guard_resource_id = _semantic_id("resource", resource_symbol)
+                        resources.setdefault(
+                            guard_resource_id,
+                            ResourceRef(
+                                resource_id=guard_resource_id,
+                                symbol=resource_symbol,
+                                identity_term=ResourceIdentityTerm.symbol(resource_symbol),
+                                origin=_origin(path, dep_node),
+                            ),
+                        )
+                        guard_id = _semantic_id(
+                            "guard",
+                            f"{path}:{handler.name}:{dep_name}:{effect_name}:{resource_symbol}",
+                        )
+                        guards[guard_id] = AuthorizationGuard(
+                            guard_id=guard_id,
+                            principal_id=principal_id,
+                            effect_id=effect_id,
+                            resource_id=guard_resource_id,
+                            origin=_origin(path, dep_node),
+                        )
+                        guard_ids.append(guard_id)
+
+                        binding_id = _semantic_id(
+                            "binding",
+                            f"{guard_id}:{guard_resource_id}:{acted_id}:same_tenant:identity:scope",
+                        )
+                        bindings[binding_id] = ResourceBinding(
+                            binding_id=binding_id,
+                            authorized_resource_id=guard_resource_id,
+                            acted_resource_id=acted_id,
+                            relation="same_tenant",
+                            authorized_projection="identity",
+                            acted_projection="scope",
+                            origin=_origin(path, call),
+                        )
+                        binding_ids.append(binding_id)
+
+                    protected[protected_id] = ProtectedEffect(
+                        protected_effect_id=protected_id,
+                        principal_id=principal_id,
+                        effect_id=effect_id,
+                        resource_id=acted_id,
+                        origin=_origin(path, call),
+                    )
+                    path_id = _semantic_id(
+                        "path",
+                        f"{method}:{route_path}:{handler.name}:{protected_id}",
+                    )
+                    paths[path_id] = SemanticPath(
+                        path_id=path_id,
+                        entrypoint=f"{method} {route_path}",
+                        guard_ids=sorted(guard_ids),
+                        protected_effect_ids=[protected_id],
+                        binding_ids=sorted(binding_ids),
+                        origin=_origin(path, handler),
+                    )
+
+        if not materials.has_head():
+            coverage_status = "unknown"
+            confidence = 0.0
+        elif unsupported:
+            coverage_status = "partial"
+            confidence = 0.5
+        else:
+            coverage_status = "complete"
+            confidence = 1.0
+
+        return AssuranceIR(
+            subject=subject,
+            extractor=AssuranceExtractorIdentity(
+                extractor_id=_SOURCE_PROFILE_ID,
+                extractor_version="0.1.0",
+                source_profile_id=_SOURCE_PROFILE_ID,
+            ),
+            coverage=AssuranceCoverage(
+                status=coverage_status,
+                confidence=confidence,
+                supported_constructs=[
+                    "static_fastapi_route_decorator",
+                    "depends_or_security_default_parameter",
+                    "straight_line_handler",
+                    "configured_service_call_sink",
+                    "configured_sink_scope_keyword",
+                ],
+                unsupported_constructs=sorted(set(unsupported)),
+                assumptions=[
+                    "Configured dependency guards authorize the declared route resource for the declared effects.",
+                    "Configured service-call sinks faithfully identify protected effects.",
+                    "Configured sink identity argument denotes the acted resource identity.",
+                    "Configured sink scope keyword denotes the acted resource scope.",
+                    "Missing scope marked unconstrained is an explicit conservative over-approximation.",
+                ],
+            ),
+            principals=sorted(principals.values(), key=lambda item: item.principal_id),
+            resources=sorted(resources.values(), key=lambda item: item.resource_id),
+            effects=sorted(effects.values(), key=lambda item: item.effect_id),
+            guards=sorted(guards.values(), key=lambda item: item.guard_id),
+            protected_effects=sorted(protected.values(), key=lambda item: item.protected_effect_id),
+            resource_bindings=sorted(bindings.values(), key=lambda item: item.binding_id),
+            paths=sorted(paths.values(), key=lambda item: item.path_id),
+        )
