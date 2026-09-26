@@ -399,6 +399,7 @@ def test_hardened_cache_reissues_new_head_evidence_without_rerunning_checker(
     assert reused.subject["head_sha"] == "head-b"
     assert reused.evidence_digest != evidence.evidence_digest
     assert verify_evidence_digest(reused)
+    assert reused.signature is not None
     assert reused.backend_claims[0].status.value == "pass"
     assert reused.backend_claims[0].required is False
     reuse_artifact = next(
