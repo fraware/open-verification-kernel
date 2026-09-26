@@ -237,10 +237,334 @@ def _infer_method_contract(
     )
 
 
-def infer_function_contracts(materials: AuthMaterials) -> list[FunctionContract]:
-    """Infer all v1 typed function contracts from the head revision."""
+def _unwrap_call(node: ast.AST | None) -> ast.Call | None:
+    if isinstance(node, ast.Await):
+        node = node.value
+    return node if isinstance(node, ast.Call) else None
 
-    contracts: list[FunctionContract] = []
+
+def _class_member_aliases(class_node: ast.ClassDef) -> dict[str, str]:
+    """Map self.<field> to constructor class for simple __init__ assignments."""
+
+    aliases: dict[str, str] = {}
+    for statement in class_node.body:
+        if not isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if statement.name != "__init__":
+            continue
+        for body_statement in statement.body:
+            if not isinstance(body_statement, (ast.Assign, ast.AnnAssign)):
+                continue
+            if isinstance(body_statement, ast.Assign):
+                if len(body_statement.targets) != 1:
+                    continue
+                target = body_statement.targets[0]
+                value = body_statement.value
+            else:
+                target = body_statement.target
+                value = body_statement.value
+            if (
+                not isinstance(target, ast.Attribute)
+                or not isinstance(target.value, ast.Name)
+                or target.value.id != "self"
+                or value is None
+            ):
+                continue
+            call = _unwrap_call(value)
+            if call is None:
+                continue
+            constructor = call.func
+            if isinstance(constructor, ast.Name):
+                aliases[target.attr] = constructor.id
+            elif isinstance(constructor, ast.Attribute):
+                aliases[target.attr] = constructor.attr
+    return aliases
+
+
+def _local_constructor_aliases(
+    method: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for statement in method.body:
+        if not isinstance(statement, (ast.Assign, ast.AnnAssign)):
+            continue
+        if isinstance(statement, ast.Assign):
+            if len(statement.targets) != 1:
+                continue
+            target = statement.targets[0]
+            value = statement.value
+        else:
+            target = statement.target
+            value = statement.value
+        if not isinstance(target, ast.Name) or value is None:
+            continue
+        call = _unwrap_call(value)
+        if call is None:
+            continue
+        if isinstance(call.func, ast.Name):
+            aliases[target.id] = call.func.id
+        elif isinstance(call.func, ast.Attribute):
+            aliases[target.id] = call.func.attr
+    return aliases
+
+
+def _resolve_forwarded_qualified_name(
+    call: ast.Call,
+    *,
+    local_aliases: dict[str, str],
+    member_aliases: dict[str, str],
+) -> str | None:
+    if not isinstance(call.func, ast.Attribute):
+        return None
+
+    receiver = call.func.value
+    if isinstance(receiver, ast.Name):
+        constructor = local_aliases.get(receiver.id)
+        if constructor is not None:
+            return f"{constructor}.{call.func.attr}"
+
+    if (
+        isinstance(receiver, ast.Attribute)
+        and isinstance(receiver.value, ast.Name)
+        and receiver.value.id == "self"
+    ):
+        constructor = member_aliases.get(receiver.attr)
+        if constructor is not None:
+            return f"{constructor}.{call.func.attr}"
+
+    direct_constructor = _unwrap_call(receiver)
+    if direct_constructor is not None:
+        if isinstance(direct_constructor.func, ast.Name):
+            return f"{direct_constructor.func.id}.{call.func.attr}"
+        if isinstance(direct_constructor.func, ast.Attribute):
+            return f"{direct_constructor.func.attr}.{call.func.attr}"
+    return None
+
+
+def _forwarded_return_call(
+    method: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> ast.Call | None:
+    """Return the unique forwarded call for a narrow wrapper method."""
+
+    if any(
+        isinstance(item, _UNSUPPORTED_CONTROL_FLOW)
+        for statement in method.body
+        for item in ast.walk(statement)
+    ):
+        return None
+
+    top_returns = [
+        (index, statement)
+        for index, statement in enumerate(method.body)
+        if isinstance(statement, ast.Return)
+    ]
+    if len(top_returns) != 1:
+        return None
+    return_index, return_statement = top_returns[0]
+    if return_statement.value is None or _is_none(return_statement.value):
+        return None
+
+    direct = _unwrap_call(return_statement.value)
+    if direct is not None:
+        return direct
+
+    if not isinstance(return_statement.value, ast.Name) or return_index == 0:
+        return None
+    result_name = return_statement.value.id
+    previous = method.body[return_index - 1]
+    if isinstance(previous, ast.Assign):
+        if (
+            len(previous.targets) != 1
+            or not isinstance(previous.targets[0], ast.Name)
+            or previous.targets[0].id != result_name
+        ):
+            return None
+        return _unwrap_call(previous.value)
+    if isinstance(previous, ast.AnnAssign):
+        if not isinstance(previous.target, ast.Name) or previous.target.id != result_name:
+            return None
+        return _unwrap_call(previous.value)
+    return None
+
+
+def _method_positional_parameters(
+    method: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> list[str]:
+    return [
+        arg.arg
+        for arg in (list(method.args.posonlyargs) + list(method.args.args))
+        if arg.arg not in {"self", "cls"}
+    ]
+
+
+def _call_argument_for_parameter(
+    call: ast.Call,
+    *,
+    parameter_name: str,
+    callee_positional_parameters: list[str],
+) -> ast.AST | None:
+    for keyword in call.keywords:
+        if keyword.arg == parameter_name:
+            return keyword.value
+    if parameter_name not in callee_positional_parameters:
+        return None
+    index = callee_positional_parameters.index(parameter_name)
+    if len(call.args) <= index:
+        return None
+    return call.args[index]
+
+
+def _substitute_term_into_wrapper(
+    term: ContractTerm,
+    *,
+    call: ast.Call,
+    callee: FunctionContract,
+    wrapper_parameters: set[str],
+) -> ContractTerm | None:
+    if term.kind == "return_attribute":
+        return term.model_copy(deep=True)
+    if term.kind == "literal":
+        return term.model_copy(deep=True)
+    if term.kind != "parameter" or term.name is None:
+        return None
+
+    argument = _call_argument_for_parameter(
+        call,
+        parameter_name=term.name,
+        callee_positional_parameters=callee.positional_parameters,
+    )
+    if argument is None:
+        return None
+    if isinstance(argument, ast.Name) and argument.id in wrapper_parameters:
+        return ContractTerm.parameter(argument.id)
+    if isinstance(argument, ast.Constant) and argument.value is not None:
+        return ContractTerm.literal(str(argument.value))
+    return None
+
+
+def _compose_forwarded_contract(
+    *,
+    path: str,
+    class_node: ast.ClassDef,
+    method: ast.FunctionDef | ast.AsyncFunctionDef,
+    known_contracts: dict[str, FunctionContract],
+) -> FunctionContract | None:
+    call = _forwarded_return_call(method)
+    if call is None:
+        return None
+
+    qualified_callee = _resolve_forwarded_qualified_name(
+        call,
+        local_aliases=_local_constructor_aliases(method),
+        member_aliases=_class_member_aliases(class_node),
+    )
+    if qualified_callee is None:
+        return None
+    callee = known_contracts.get(qualified_callee)
+    if callee is None:
+        return None
+
+    wrapper_parameters = _function_parameters(method)
+    preconditions: list[ContractPredicate] = []
+    postconditions: list[ContractPredicate] = []
+
+    for predicate in callee.preconditions:
+        left = _substitute_term_into_wrapper(
+            predicate.left,
+            call=call,
+            callee=callee,
+            wrapper_parameters=wrapper_parameters,
+        )
+        right = (
+            _substitute_term_into_wrapper(
+                predicate.right,
+                call=call,
+                callee=callee,
+                wrapper_parameters=wrapper_parameters,
+            )
+            if predicate.right is not None
+            else None
+        )
+        if left is None or (predicate.right is not None and right is None):
+            return None
+        # A non-null literal discharges a callee non_null precondition.
+        if predicate.relation == "non_null" and left.kind == "literal":
+            continue
+        preconditions.append(
+            ContractPredicate(
+                relation=predicate.relation,
+                left=left,
+                right=right,
+            )
+        )
+
+    for predicate in callee.postconditions:
+        left = _substitute_term_into_wrapper(
+            predicate.left,
+            call=call,
+            callee=callee,
+            wrapper_parameters=wrapper_parameters,
+        )
+        right = (
+            _substitute_term_into_wrapper(
+                predicate.right,
+                call=call,
+                callee=callee,
+                wrapper_parameters=wrapper_parameters,
+            )
+            if predicate.right is not None
+            else None
+        )
+        if left is None or (predicate.right is not None and right is None):
+            return None
+        postconditions.append(
+            ContractPredicate(
+                relation=predicate.relation,
+                left=left,
+                right=right,
+            )
+        )
+
+    if not postconditions:
+        return None
+
+    qualified_name = f"{class_node.name}.{method.name}"
+    positional_parameters = _method_positional_parameters(method)
+    contract_id = (
+        "contract:"
+        + content_digest(
+            {
+                "qualified_name": qualified_name,
+                "composed_from": callee.contract_id,
+                "positional_parameters": positional_parameters,
+                "preconditions": [
+                    predicate.model_dump(mode="json") for predicate in preconditions
+                ],
+                "postconditions": [
+                    predicate.model_dump(mode="json") for predicate in postconditions
+                ],
+                "path": path,
+            }
+        )[:16]
+    )
+    return FunctionContract(
+        contract_id=contract_id,
+        qualified_name=qualified_name,
+        positional_parameters=positional_parameters,
+        preconditions=preconditions,
+        postconditions=postconditions,
+        origin=_origin(path, call),
+    )
+
+
+def infer_function_contracts(materials: AuthMaterials) -> list[FunctionContract]:
+    """Infer direct and forwarding-composed typed contracts to a fixed point."""
+
+    methods: list[
+        tuple[str, ast.ClassDef, ast.FunctionDef | ast.AsyncFunctionDef]
+    ] = []
+    contracts_by_name: dict[str, FunctionContract] = {}
+
     for path, source in sorted(materials.head_files.items()):
         try:
             tree = ast.parse(source, filename=path)
@@ -252,14 +576,37 @@ def infer_function_contracts(materials: AuthMaterials) -> list[FunctionContract]
             for statement in node.body:
                 if not isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     continue
+                methods.append((path, node, statement))
                 contract = _infer_method_contract(
                     path=path,
                     class_name=node.name,
                     method=statement,
                 )
                 if contract is not None:
-                    contracts.append(contract)
-    return sorted(contracts, key=lambda item: item.contract_id)
+                    contracts_by_name[contract.qualified_name] = contract
+
+    # Composition is monotone: only methods without contracts are filled, and
+    # each round may expose another forwarding wrapper. Bound rounds by method
+    # count to prevent accidental cycles from looping indefinitely.
+    for _round in range(len(methods)):
+        added = False
+        for path, class_node, method in methods:
+            qualified_name = f"{class_node.name}.{method.name}"
+            if qualified_name in contracts_by_name:
+                continue
+            composed = _compose_forwarded_contract(
+                path=path,
+                class_node=class_node,
+                method=method,
+                known_contracts=contracts_by_name,
+            )
+            if composed is not None:
+                contracts_by_name[qualified_name] = composed
+                added = True
+        if not added:
+            break
+
+    return sorted(contracts_by_name.values(), key=lambda item: item.contract_id)
 
 
 def _legacy_resource_return_contract(
