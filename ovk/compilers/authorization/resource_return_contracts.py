@@ -176,45 +176,64 @@ def _infer_method_contract(
         requires_non_null = _contains_non_null_guard(statement.test, parameter)
         candidates.append((scope_attribute, parameter, requires_non_null, statement))
 
-    if len(candidates) != 1:
+    if not candidates:
         return None
 
-    scope_attribute, parameter, requires_non_null, guard = candidates[0]
+    # One method may establish several return relations, such as
+    # return.id == agent_id and return.workspace_id == workspace_id.
+    unique_pairs = {(attribute, parameter) for attribute, parameter, _, _ in candidates}
+    if len(unique_pairs) != len(candidates):
+        return None
+
     qualified_name = f"{class_name}.{method.name}"
+    positional_parameters = [
+        arg.arg
+        for arg in (list(method.args.posonlyargs) + list(method.args.args))
+        if arg.arg not in {"self", "cls"}
+    ]
+
+    preconditions = []
+    postconditions = []
+    for attribute, parameter, requires_non_null, _guard in candidates:
+        if requires_non_null:
+            predicate = ContractPredicate(
+                relation="non_null",
+                left=ContractTerm.parameter(parameter),
+            )
+            if predicate not in preconditions:
+                preconditions.append(predicate)
+        postconditions.append(
+            ContractPredicate(
+                relation="eq",
+                left=ContractTerm.return_attribute(attribute),
+                right=ContractTerm.parameter(parameter),
+            )
+        )
+
     contract_id = (
         "contract:"
         + content_digest(
             {
                 "qualified_name": qualified_name,
-                "return_scope_parameter": parameter,
-                "return_scope_attribute": scope_attribute,
-                "requires_non_null_argument": requires_non_null,
+                "positional_parameters": positional_parameters,
+                "preconditions": [
+                    predicate.model_dump(mode="json") for predicate in preconditions
+                ],
+                "postconditions": [
+                    predicate.model_dump(mode="json") for predicate in postconditions
+                ],
                 "path": path,
             }
         )[:16]
     )
-    preconditions = []
-    if requires_non_null:
-        preconditions.append(
-            ContractPredicate(
-                relation="non_null",
-                left=ContractTerm.parameter(parameter),
-            )
-        )
-
-    postconditions = [
-        ContractPredicate(
-            relation="eq",
-            left=ContractTerm.return_attribute(scope_attribute),
-            right=ContractTerm.parameter(parameter),
-        )
-    ]
+    origin_node = min(candidates, key=lambda item: getattr(item[3], "lineno", 0))[3]
     return FunctionContract(
         contract_id=contract_id,
         qualified_name=qualified_name,
+        positional_parameters=positional_parameters,
         preconditions=preconditions,
         postconditions=postconditions,
-        origin=_origin(path, guard),
+        origin=_origin(path, origin_node),
     )
 
 
