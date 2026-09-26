@@ -52,6 +52,9 @@ def evaluate_deterministic(evaluator_id: str, payload: dict[str, Any]) -> dict[s
 
 
 def _evaluate_authorization_deterministic(payload: dict[str, Any]) -> dict[str, Any]:
+    if str(payload.get("property_kind") or "") == "protected_effect_integrity":
+        return _evaluate_protected_effect_integrity(payload)
+
     data = dict(payload.get("input") or {})
     issues = validate_authorization_input(data)
     if issues:
@@ -80,6 +83,162 @@ def _evaluate_authorization_deterministic(payload: dict[str, Any]) -> dict[str, 
             ),
             "models": counterexamples,
             "counterexamples": counterexamples,
+        },
+    }
+
+
+def _evaluate_protected_effect_integrity(payload: dict[str, Any]) -> dict[str, Any]:
+    """Evaluate the bounded protected-effect abstraction.
+
+    PASS is available only for complete source-profile coverage, a preceding
+    approved guard, and equal principal/effect/resource bindings. Missing
+    guards are concrete violations in that supported straight-line model.
+    Partial coverage or unresolved bindings remain UNKNOWN.
+    """
+    data = dict(payload.get("input") or {})
+    coverage = dict(payload.get("coverage") or {})
+    if data.get("kind") != "protected_effect_integrity":
+        return {
+            "termination": "invalid_output",
+            "exit_code": 1,
+            "raw_result": {
+                "status": "unknown",
+                "reason": "protected-effect abstraction missing or malformed",
+                "counterexamples": [
+                    {
+                        "summary": "Protected-effect integrity abstraction is missing or malformed.",
+                        "failure_mode": "invalid_protected_effect_abstraction",
+                    }
+                ],
+            },
+        }
+
+    if coverage.get("status") != "complete":
+        unsupported = list(coverage.get("unsupported_constructs") or [])
+        return {
+            "termination": "completed",
+            "exit_code": 0,
+            "raw_result": {
+                "status": "unknown",
+                "reason": "source-profile coverage is not complete",
+                "counterexamples": [
+                    {
+                        "summary": "Protected-effect integrity cannot be established with incomplete semantic coverage.",
+                        "failure_mode": "incomplete_semantic_coverage",
+                        "unsupported_constructs": unsupported,
+                    }
+                ],
+            },
+        }
+
+    guard_requirement = data.get("guard_requirement")
+    guard_refs = (
+        list(guard_requirement.get("guard_refs") or [])
+        if isinstance(guard_requirement, dict)
+        else []
+    )
+    if not guard_refs:
+        return {
+            "termination": "completed",
+            "exit_code": 0,
+            "raw_result": {
+                "status": "fail",
+                "reason": "protected effect has no accepted preceding authorization guard",
+                "counterexamples": [
+                    {
+                        "summary": "Protected effect is reachable on the supported path without an accepted authorization guard.",
+                        "failure_mode": "missing_authorization_guard",
+                        "path_id": data.get("path_id"),
+                        "entrypoint": data.get("entrypoint"),
+                    }
+                ],
+            },
+        }
+
+    raw_bindings = data.get("binding_requirements")
+    if not isinstance(raw_bindings, list) or not raw_bindings:
+        return {
+            "termination": "completed",
+            "exit_code": 0,
+            "raw_result": {
+                "status": "unknown",
+                "reason": "binding requirements are missing",
+                "counterexamples": [
+                    {
+                        "summary": "Principal/effect/resource binding requirements are missing.",
+                        "failure_mode": "missing_semantic_bindings",
+                    }
+                ],
+            },
+        }
+
+    bindings = [item for item in raw_bindings if isinstance(item, dict)]
+    required_kinds = {"principal", "effect", "resource"}
+    present_kinds = {str(item.get("kind")) for item in bindings}
+    missing_kinds = sorted(required_kinds - present_kinds)
+    if missing_kinds:
+        return {
+            "termination": "completed",
+            "exit_code": 0,
+            "raw_result": {
+                "status": "unknown",
+                "reason": "binding requirements are incomplete",
+                "counterexamples": [
+                    {
+                        "summary": "Protected-effect binding requirements are incomplete.",
+                        "failure_mode": "missing_semantic_bindings",
+                        "missing_kinds": missing_kinds,
+                    }
+                ],
+            },
+        }
+
+    distinct = [item for item in bindings if item.get("declared_relation") == "distinct"]
+    if distinct:
+        item = distinct[0]
+        return {
+            "termination": "completed",
+            "exit_code": 0,
+            "raw_result": {
+                "status": "fail",
+                "reason": "authorization and performed-effect bindings are distinct",
+                "counterexamples": [
+                    {
+                        "summary": f"{item.get('kind', 'semantic')} authorized and performed identities are distinct.",
+                        "failure_mode": "protected_effect_binding_mismatch",
+                        "kind": item.get("kind"),
+                        "left_ref": item.get("left_ref"),
+                        "right_ref": item.get("right_ref"),
+                    }
+                ],
+            },
+        }
+
+    unresolved = [item for item in bindings if item.get("declared_relation") != "equal"]
+    if unresolved:
+        return {
+            "termination": "completed",
+            "exit_code": 0,
+            "raw_result": {
+                "status": "unknown",
+                "reason": "semantic binding could not be established",
+                "counterexamples": [
+                    {
+                        "summary": "Authorization and performed-effect identity could not be established.",
+                        "failure_mode": "unresolved_semantic_binding",
+                        "bindings": unresolved,
+                    }
+                ],
+            },
+        }
+
+    return {
+        "termination": "completed",
+        "exit_code": 0,
+        "raw_result": {
+            "status": "pass",
+            "reason": "complete supported path has an accepted guard with equal principal/effect/resource bindings",
+            "counterexamples": [],
         },
     }
 

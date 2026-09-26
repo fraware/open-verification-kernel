@@ -57,7 +57,7 @@ class AuthorizationDeterministicAdapter:
             ),
             input_languages=["json"],
             supported_domains=["authorization"],
-            supported_property_kinds=["access_control", "safety", "invariant"],
+            supported_property_kinds=["access_control", "safety", "invariant", "protected_effect_integrity"],
             assumptions=[
                 "Route reachability abstraction is supplied by the neutral compiler.",
             ],
@@ -86,6 +86,19 @@ class AuthorizationDeterministicAdapter:
                 estimated_wall_time_seconds=1.0,
                 estimated_memory_mb=64,
                 reasons=["not an authorization obligation"],
+            )
+        if obligation.property_kind not in set(self.manifest().supported_property_kinds):
+            return BackendCapabilityAssessment(
+                backend=self.backend_id,
+                support="unsupported",
+                score=0.0,
+                guarantee_type="deterministic_witness",
+                material_requirements_met=bool(obligation.materials),
+                coverage_requirements_met=False,
+                native_available=False,
+                estimated_wall_time_seconds=1.0,
+                estimated_memory_mb=64,
+                reasons=[f"unsupported authorization property kind: {obligation.property_kind}"],
             )
         denied = set(context.budget.denied_backends if context.budget else [])
         allowed = set(context.budget.allowed_backends) if context.budget and context.budget.allowed_backends else None
@@ -124,7 +137,12 @@ class AuthorizationDeterministicAdapter:
         routing: RoutingDecision,
     ) -> BackendObligation:
         data = _authorization_input(obligation)
-        payload = {"input": data, "mode": "deterministic"}
+        payload = {
+            "input": data,
+            "mode": "deterministic",
+            "property_kind": obligation.property_kind,
+            "coverage": obligation.coverage.model_dump(mode="json"),
+        }
         provisional = BackendObligation(
             backend_obligation_id="pending",
             obligation_id=obligation.obligation_id,
@@ -184,13 +202,30 @@ class AuthorizationDeterministicAdapter:
                 status = VerificationStatus(status_text)
             except ValueError:
                 status = VerificationStatus.UNKNOWN
+        is_protected_effect = backend_obligation.payload.get("property_kind") == "protected_effect_integrity"
+        assumptions = (
+            [
+                "Result is conditional on the declared protected sinks, authorization-call signatures, "
+                "principal dependencies, and complete supported source profile."
+            ]
+            if is_protected_effect
+            else ["Deterministic witness translation; no native SMT solver."]
+        )
+        limits = (
+            [
+                "Protected-effect pass is bounded to the supported source abstraction; "
+                "unsupported semantics remain unknown."
+            ]
+            if is_protected_effect
+            else ["Weaker than z3-native smt_refutation_search."]
+        )
         return NormalizedBackendResult(
             attempt_id="pending",
             backend=self.backend_id,
             status=status,
             guarantee_type=backend_obligation.expected_guarantee,
-            assumptions=["Deterministic witness translation; no native SMT solver."],
-            limits=["Weaker than z3-native smt_refutation_search."],
+            assumptions=assumptions,
+            limits=limits,
             counterexamples=list(raw.raw_result.get("counterexamples") or raw.raw_result.get("models") or []),
             generated_artifacts=[
                 {
@@ -203,10 +238,21 @@ class AuthorizationDeterministicAdapter:
 
     def explain(self, result: NormalizedBackendResult) -> HumanExplanation:
         if result.counterexamples:
+            failure_mode = str(result.counterexamples[0].get("failure_mode", "admin_route_bypass"))
+            repair_hints = {
+                "missing_authorization_guard": "Add an approved authorization guard before the protected effect.",
+                "protected_effect_binding_mismatch": "Align the principal, effect, and resource used for authorization and execution.",
+                "unresolved_semantic_binding": "Make the authorization-to-effect identity binding explicit or simplify the supported path.",
+                "incomplete_semantic_coverage": "Resolve or model the unsupported source semantics before enforcing this guarantee.",
+                "missing_semantic_bindings": "Provide complete principal, effect, and resource bindings.",
+            }
             return HumanExplanation(
                 summary=str(result.counterexamples[0].get("summary", "Authorization violation.")),
-                repair_hint="Restore admin-only protection on the reported route.",
-                failure_mode=str(result.counterexamples[0].get("failure_mode", "admin_route_bypass")),
+                repair_hint=repair_hints.get(
+                    failure_mode,
+                    "Restore admin-only protection on the reported route.",
+                ),
+                failure_mode=failure_mode,
             )
         if result.status == VerificationStatus.PASS:
             return HumanExplanation(
