@@ -106,3 +106,84 @@ def test_distinct_symbolic_keys_are_refutable_when_z3_is_available() -> None:
         assert result["counterexample"]["authorized_term"]["value"] == "invoice_id"
         assert result["counterexample"]["acted_term"]["value"] == "other_invoice_id"
         assert result["counterexample"]["symbol_assignment"]
+
+
+
+def test_same_tenant_binding_can_compare_authorized_identity_to_acted_scope() -> None:
+    ir = AssuranceIR(
+        subject=VerificationSubject(repo="example/workspaces", base_sha="a", head_sha="b"),
+        extractor=AssuranceExtractorIdentity(
+            extractor_id="test.extractor",
+            extractor_version="0.1.0",
+        ),
+        coverage=AssuranceCoverage(status="complete", confidence=1.0),
+        resources=[
+            ResourceRef(
+                resource_id="r:workspace",
+                symbol="workspace_id",
+                identity_term=ResourceIdentityTerm.literal("workspace-a"),
+                origin=_origin(),
+            ),
+            ResourceRef(
+                resource_id="r:agent",
+                symbol="agent",
+                identity_term=ResourceIdentityTerm.literal("agent-17"),
+                scope_term=ResourceIdentityTerm.literal("workspace-a"),
+                origin=_origin(),
+            ),
+        ],
+    )
+    binding = ResourceBinding(
+        binding_id="binding:workspace-agent",
+        authorized_resource_id="r:workspace",
+        acted_resource_id="r:agent",
+        relation="same_tenant",
+        authorized_projection="identity",
+        acted_projection="scope",
+        origin=_origin(),
+    )
+
+    result = evaluate_resource_binding_with_z3(ir, binding)
+
+    assert result["status"] == "pass"
+
+
+def test_cross_tenant_binding_fails_on_distinct_literal_scopes() -> None:
+    ir = AssuranceIR(
+        subject=VerificationSubject(repo="example/workspaces", base_sha="a", head_sha="b"),
+        extractor=AssuranceExtractorIdentity(
+            extractor_id="test.extractor",
+            extractor_version="0.1.0",
+        ),
+        coverage=AssuranceCoverage(status="complete", confidence=1.0),
+        resources=[
+            ResourceRef(
+                resource_id="r:workspace",
+                symbol="workspace_id",
+                identity_term=ResourceIdentityTerm.literal("workspace-a"),
+                origin=_origin(),
+            ),
+            ResourceRef(
+                resource_id="r:agent",
+                symbol="agent",
+                identity_term=ResourceIdentityTerm.literal("agent-17"),
+                scope_term=ResourceIdentityTerm.literal("workspace-b"),
+                origin=_origin(),
+            ),
+        ],
+    )
+    binding = ResourceBinding(
+        binding_id="binding:workspace-agent",
+        authorized_resource_id="r:workspace",
+        acted_resource_id="r:agent",
+        relation="same_tenant",
+        authorized_projection="identity",
+        acted_projection="scope",
+        origin=_origin(),
+    )
+
+    result = evaluate_resource_binding_with_z3(ir, binding)
+
+    assert result["status"] == "fail"
+    assert result["counterexample"]["authorized_value"] == "workspace-a"
+    assert result["counterexample"]["acted_value"] == "workspace-b"
