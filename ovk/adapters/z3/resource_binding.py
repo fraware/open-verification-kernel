@@ -1,47 +1,75 @@
 """Resource-binding evaluation over restricted identity terms.
 
-The evaluator proves or refutes equality only inside the explicit v1 identity
-model. It does not infer semantics for arbitrary source expressions.
+The evaluator proves or refutes projection equality only inside the explicit v1
+identity model. It does not infer semantics for arbitrary source expressions.
+
+A ResourceBinding names which projection of each resource participates:
+- identity: the resource key itself;
+- scope: the tenant/workspace/security-domain key attached to that resource.
 
 Result semantics:
-- pass: equality is established in the v1 model;
+- pass: required projection equality is established in the v1 model;
 - fail: a counterexample to required equality is satisfiable;
-- unknown: the IR lacks modeled identity or the required solver is unavailable.
+- unknown: modeled projections or the required solver are unavailable.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from ovk.core.assurance_ir import AssuranceIR, ResourceBinding
+from ovk.core.assurance_ir import AssuranceIR, ResourceBinding, ResourceRef
 from ovk.core.resource_identity import ResourceIdentityTerm
 
 
-def _resource_map(ir: AssuranceIR):
+def _resource_map(ir: AssuranceIR) -> dict[str, ResourceRef]:
     return {resource.resource_id: resource for resource in ir.resources}
 
 
-def _literal_result(left: ResourceIdentityTerm, right: ResourceIdentityTerm) -> dict[str, Any]:
+def _projection(resource: ResourceRef, name: str) -> ResourceIdentityTerm | None:
+    if name == "identity":
+        return resource.identity_term
+    if name == "scope":
+        return resource.scope_term
+    return None
+
+
+def _literal_result(
+    left: ResourceIdentityTerm,
+    right: ResourceIdentityTerm,
+    *,
+    left_label: str,
+    right_label: str,
+) -> dict[str, Any]:
     if left.value == right.value:
         return {
             "status": "pass",
-            "reason": "resource identity literals are equal",
+            "reason": f"{left_label} and {right_label} literals are equal",
             "counterexample": None,
         }
     return {
         "status": "fail",
-        "reason": "resource identity literals differ",
-        "counterexample": {"authorized_identity": left.value, "acted_identity": right.value},
+        "reason": f"{left_label} and {right_label} literals differ",
+        "counterexample": {
+            "authorized_projection": left_label,
+            "acted_projection": right_label,
+            "authorized_value": left.value,
+            "acted_value": right.value,
+        },
     }
 
 
 def evaluate_resource_binding_with_z3(ir: AssuranceIR, binding: ResourceBinding) -> dict[str, Any]:
-    """Evaluate one equality binding under the restricted v1 identity model."""
+    """Evaluate one equality-style resource binding under the v1 identity model.
 
-    if binding.relation != "equal":
+    Both equal and same_tenant reduce to equality between explicitly selected
+    projections. The semantic difference is carried by the binding relation and
+    by which projections the compiler selected.
+    """
+
+    if binding.relation not in {"equal", "same_tenant"}:
         return {
             "status": "unknown",
-            "reason": f"resource-binding relation {binding.relation!r} is outside v1 equality semantics",
+            "reason": f"resource-binding relation {binding.relation!r} is outside v1 solver semantics",
             "counterexample": None,
         }
 
@@ -55,24 +83,35 @@ def evaluate_resource_binding_with_z3(ir: AssuranceIR, binding: ResourceBinding)
             "counterexample": None,
         }
 
-    left = authorized.identity_term
-    right = acted.identity_term
+    left = _projection(authorized, binding.authorized_projection)
+    right = _projection(acted, binding.acted_projection)
     if left is None or right is None:
         return {
             "status": "unknown",
-            "reason": "resource identity term is missing",
+            "reason": (
+                "required resource projection is missing: "
+                f"authorized.{binding.authorized_projection} vs acted.{binding.acted_projection}"
+            ),
             "counterexample": None,
         }
+
+    left_label = f"authorized.{binding.authorized_projection}"
+    right_label = f"acted.{binding.acted_projection}"
 
     if left == right:
         return {
             "status": "pass",
-            "reason": "resource identity terms are structurally identical",
+            "reason": f"{left_label} and {right_label} terms are structurally identical",
             "counterexample": None,
         }
 
     if left.kind == "literal" and right.kind == "literal":
-        return _literal_result(left, right)
+        return _literal_result(
+            left,
+            right,
+            left_label=left_label,
+            right_label=right_label,
+        )
 
     try:
         import z3  # type: ignore
@@ -101,7 +140,10 @@ def evaluate_resource_binding_with_z3(ir: AssuranceIR, binding: ResourceBinding)
     if result == z3.unsat:
         return {
             "status": "pass",
-            "reason": "no counterexample to required resource equality exists in the v1 identity model",
+            "reason": (
+                "no counterexample to required projection equality exists "
+                "in the v1 resource model"
+            ),
             "counterexample": None,
         }
     if result == z3.unknown:
@@ -119,8 +161,11 @@ def evaluate_resource_binding_with_z3(ir: AssuranceIR, binding: ResourceBinding)
 
     return {
         "status": "fail",
-        "reason": "counterexample to required resource equality is satisfiable",
+        "reason": "counterexample to required resource projection equality is satisfiable",
         "counterexample": {
+            "relation": binding.relation,
+            "authorized_projection": binding.authorized_projection,
+            "acted_projection": binding.acted_projection,
             "authorized_term": left.model_dump(mode="json"),
             "acted_term": right.model_dump(mode="json"),
             "symbol_assignment": assignment,
