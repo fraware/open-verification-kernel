@@ -368,8 +368,15 @@ def _instantiate_contract_attributes(
             or predicate.right is None
             or predicate.left.kind != "return_attribute"
             or predicate.left.name is None
-            or predicate.right.kind != "parameter"
-            or predicate.right.name is None
+            or predicate.right.kind not in {"parameter", "literal"}
+            or (
+                predicate.right.kind == "parameter"
+                and predicate.right.name is None
+            )
+            or (
+                predicate.right.kind == "literal"
+                and predicate.right.value is None
+            )
         ):
             continue
 
