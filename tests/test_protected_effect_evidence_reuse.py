@@ -326,7 +326,7 @@ def test_reuse_rejects_tampered_revoked_expired_and_signature_required_evidence(
         head_ir=ir,
         protected_effect_id="pe:refund",
         policy_digest="policy-a",
-        current_fingerprint=fingerprint,
+        current_runtime_fingerprint=fingerprint.runtime_fingerprint,
         reuse_policy=ProtectedEffectReusePolicy(max_age_seconds=60),
         now=completed + timedelta(seconds=61),
     )
@@ -338,7 +338,7 @@ def test_reuse_rejects_tampered_revoked_expired_and_signature_required_evidence(
         head_ir=ir,
         protected_effect_id="pe:refund",
         policy_digest="policy-a",
-        current_fingerprint=fingerprint,
+        current_runtime_fingerprint=fingerprint.runtime_fingerprint,
         reuse_policy=ProtectedEffectReusePolicy(require_signature=True),
     )
     assert signature_required.eligible is False
@@ -368,7 +368,7 @@ def test_hardened_cache_reissues_new_head_evidence_without_rerunning_checker(
         head_ir=head,
         protected_effect_id="pe:refund",
         policy_digest="policy-a",
-        current_fingerprint=fingerprint,
+        current_runtime_fingerprint=fingerprint.runtime_fingerprint,
     )
 
     assert reused is not None
@@ -408,7 +408,7 @@ def test_hardened_cache_misses_on_semantic_policy_or_fingerprint_change(
         head_ir=semantic_change,
         protected_effect_id="pe:refund",
         policy_digest="policy-a",
-        current_fingerprint=fingerprint,
+        current_runtime_fingerprint=fingerprint.runtime_fingerprint,
     ) is None
 
     unchanged = _simple_ir(head_sha="head-b")
@@ -416,7 +416,7 @@ def test_hardened_cache_misses_on_semantic_policy_or_fingerprint_change(
         head_ir=unchanged,
         protected_effect_id="pe:refund",
         policy_digest="policy-b",
-        current_fingerprint=fingerprint,
+        current_runtime_fingerprint=fingerprint.runtime_fingerprint,
     ) is None
     assert cache.reuse_for_head(
         head_ir=unchanged,
@@ -445,7 +445,7 @@ def test_unfingerprinted_evidence_is_sealed_but_never_reusable() -> None:
         head_ir=ir,
         protected_effect_id="pe:refund",
         policy_digest="policy-a",
-        current_fingerprint=fingerprint,
+        current_runtime_fingerprint=fingerprint.runtime_fingerprint,
     )
     assert decision.eligible is False
     assert "missing_or_invalid_execution_fingerprint" in decision.reason_codes
@@ -471,7 +471,7 @@ def test_signed_evidence_reuse_requires_correct_signature_key() -> None:
         head_ir=_simple_ir(head_sha="head-b"),
         protected_effect_id="pe:refund",
         policy_digest="policy-a",
-        current_fingerprint=fingerprint,
+        current_runtime_fingerprint=fingerprint.runtime_fingerprint,
         reuse_policy=ProtectedEffectReusePolicy(require_signature=True),
         signature_key=signing_key,
     )
@@ -482,7 +482,7 @@ def test_signed_evidence_reuse_requires_correct_signature_key() -> None:
         head_ir=_simple_ir(head_sha="head-b"),
         protected_effect_id="pe:refund",
         policy_digest="policy-a",
-        current_fingerprint=fingerprint,
+        current_runtime_fingerprint=fingerprint.runtime_fingerprint,
         reuse_policy=ProtectedEffectReusePolicy(require_signature=True),
         signature_key=b"wrong-key",
     )
@@ -513,6 +513,6 @@ def test_semantic_cache_rejects_tampered_evidence_payload(tmp_path: Path) -> Non
         head_ir=_simple_ir(head_sha="head-b"),
         protected_effect_id="pe:refund",
         policy_digest="policy-a",
-        current_fingerprint=fingerprint,
+        current_runtime_fingerprint=fingerprint.runtime_fingerprint,
     )
     assert reused is None
