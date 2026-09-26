@@ -490,7 +490,7 @@ class FastApiDependencyEffectExtractor:
                                 identity_node_from_contract = _actual_argument_for_parameter(
                                     call,
                                     parameter_name=identity_parameter,
-                                    contract_parameter_order=[],
+                                    contract_parameter_order=inferred_contract.positional_parameters,
                                 )
                                 if identity_node_from_contract is None:
                                     unsupported.append(
