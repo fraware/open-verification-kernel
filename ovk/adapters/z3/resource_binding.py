@@ -21,6 +21,27 @@ from ovk.core.assurance_ir import AssuranceIR, ResourceBinding, ResourceRef
 from ovk.core.resource_identity import ResourceIdentityTerm
 
 
+_DETERMINISTIC_CHECKER_ID = "ovk.resource_binding.deterministic.v1"
+_DETERMINISTIC_CHECKER_VERSION = "0.1.0"
+_Z3_CHECKER_ID = "ovk.resource_binding.z3.v1"
+_Z3_CHECKER_VERSION = "0.1.0"
+
+
+def _provenance(
+    *,
+    checker_id: str,
+    checker_version: str,
+    native_execution: bool,
+    tool_version: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "checker_id": checker_id,
+        "checker_version": checker_version,
+        "native_execution": native_execution,
+        "tool_version": tool_version,
+    }
+
+
 def _resource_map(ir: AssuranceIR) -> dict[str, ResourceRef]:
     return {resource.resource_id: resource for resource in ir.resources}
 
@@ -51,10 +72,20 @@ def _literal_result(
             "status": "pass",
             "reason": f"{left_label} and {right_label} literals are equal",
             "counterexample": None,
+            "provenance": _provenance(
+                checker_id=_DETERMINISTIC_CHECKER_ID,
+                checker_version=_DETERMINISTIC_CHECKER_VERSION,
+                native_execution=False,
+            ),
         }
     return {
         "status": "fail",
         "reason": f"{left_label} and {right_label} literals differ",
+        "provenance": _provenance(
+            checker_id=_DETERMINISTIC_CHECKER_ID,
+            checker_version=_DETERMINISTIC_CHECKER_VERSION,
+            native_execution=False,
+        ),
         "counterexample": {
             "authorized_projection": left_label,
             "acted_projection": right_label,
@@ -77,6 +108,11 @@ def evaluate_resource_binding_with_z3(ir: AssuranceIR, binding: ResourceBinding)
             "status": "unknown",
             "reason": f"resource-binding relation {binding.relation!r} is outside v1 solver semantics",
             "counterexample": None,
+            "provenance": _provenance(
+                checker_id=_DETERMINISTIC_CHECKER_ID,
+                checker_version=_DETERMINISTIC_CHECKER_VERSION,
+                native_execution=False,
+            ),
         }
 
     resources = _resource_map(ir)
@@ -87,6 +123,11 @@ def evaluate_resource_binding_with_z3(ir: AssuranceIR, binding: ResourceBinding)
             "status": "unknown",
             "reason": "resource binding references an unknown resource",
             "counterexample": None,
+            "provenance": _provenance(
+                checker_id=_DETERMINISTIC_CHECKER_ID,
+                checker_version=_DETERMINISTIC_CHECKER_VERSION,
+                native_execution=False,
+            ),
         }
 
     left = _projection(
@@ -107,6 +148,11 @@ def evaluate_resource_binding_with_z3(ir: AssuranceIR, binding: ResourceBinding)
                 f"authorized.{binding.authorized_projection} vs acted.{binding.acted_projection}"
             ),
             "counterexample": None,
+            "provenance": _provenance(
+                checker_id=_DETERMINISTIC_CHECKER_ID,
+                checker_version=_DETERMINISTIC_CHECKER_VERSION,
+                native_execution=False,
+            ),
         }
 
     left_label = (
@@ -125,6 +171,11 @@ def evaluate_resource_binding_with_z3(ir: AssuranceIR, binding: ResourceBinding)
             "status": "pass",
             "reason": f"{left_label} and {right_label} terms are structurally identical",
             "counterexample": None,
+            "provenance": _provenance(
+                checker_id=_DETERMINISTIC_CHECKER_ID,
+                checker_version=_DETERMINISTIC_CHECKER_VERSION,
+                native_execution=False,
+            ),
         }
 
     if left.kind == "literal" and right.kind == "literal":
@@ -142,7 +193,24 @@ def evaluate_resource_binding_with_z3(ir: AssuranceIR, binding: ResourceBinding)
             "status": "unknown",
             "reason": "z3-solver is not installed",
             "counterexample": None,
+            "provenance": _provenance(
+                checker_id=_Z3_CHECKER_ID,
+                checker_version=_Z3_CHECKER_VERSION,
+                native_execution=False,
+            ),
         }
+
+    z3_version = (
+        z3.get_version_string()
+        if hasattr(z3, "get_version_string")
+        else str(getattr(z3, "__version__", "unknown"))
+    )
+    z3_provenance = _provenance(
+        checker_id=_Z3_CHECKER_ID,
+        checker_version=_Z3_CHECKER_VERSION,
+        native_execution=True,
+        tool_version=z3_version,
+    )
 
     symbols: dict[str, Any] = {}
 
@@ -167,12 +235,14 @@ def evaluate_resource_binding_with_z3(ir: AssuranceIR, binding: ResourceBinding)
                 "in the v1 resource model"
             ),
             "counterexample": None,
+            "provenance": z3_provenance,
         }
     if result == z3.unknown:
         return {
             "status": "unknown",
             "reason": solver.reason_unknown(),
             "counterexample": None,
+            "provenance": z3_provenance,
         }
 
     model = solver.model()
@@ -184,6 +254,7 @@ def evaluate_resource_binding_with_z3(ir: AssuranceIR, binding: ResourceBinding)
     return {
         "status": "fail",
         "reason": "counterexample to required resource projection equality is satisfiable",
+        "provenance": z3_provenance,
         "counterexample": {
             "relation": binding.relation,
             "authorized_projection": binding.authorized_projection,
