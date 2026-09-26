@@ -456,3 +456,105 @@ class AgentService:
     acted = next(resource for resource in ir.resources if resource.symbol == "agent_id")
     assert acted.identity_term is None
     assert result.status == "unknown"
+
+
+
+PROJECT_PARENT_PROFILE = FastApiDependencyEffectProfile(
+    sink_effects={"svc.get": "project.document.read"},
+    sink_identity_args={"svc.get": 0},
+    sink_contracts={"svc.get": "DocumentService.get"},
+    sink_binding_relations={"svc.get": "equal"},
+    sink_binding_authorized_projections={"svc.get": "identity"},
+    sink_binding_acted_projections={"svc.get": "attribute"},
+    sink_binding_acted_attributes={"svc.get": "project_id"},
+    dependency_guard_resources={"require_project_member": "project_id"},
+    dependency_guard_effects={
+        "require_project_member": ("project.document.read",),
+    },
+    principal_parameter="user",
+)
+
+
+def test_generic_contract_binds_authorized_parent_to_return_attribute() -> None:
+    route_source = """
+from fastapi import Depends, FastAPI
+app = FastAPI()
+
+@app.get("/projects/{project_id}/documents/{document_id}")
+async def get_document(
+    project_id: str,
+    document_id: str,
+    user = Depends(require_project_member),
+):
+    svc = DocumentService()
+    document = await svc.get(document_id, project_id=project_id)
+    return document
+""".strip()
+    service_source = """
+class DocumentService:
+    async def get(self, document_id: str, *, project_id: str):
+        document = await load_document(document_id)
+        if document.project_id != project_id:
+            return None
+        return document
+""".strip()
+
+    ir = FastApiDependencyEffectExtractor().compile(
+        _interprocedural_materials(route_source, service_source),
+        PROJECT_PARENT_PROFILE,
+    )
+    result = evaluate_protected_effect_integrity(ir)[0]
+
+    assert ir.coverage.status == "complete"
+    assert len(ir.function_contracts) == 1
+    acted = next(
+        resource for resource in ir.resources if resource.symbol == "document_id"
+    )
+    assert acted.attribute_terms["project_id"].value == "project_id"
+    binding = ir.resource_bindings[0]
+    assert binding.acted_projection == "attribute"
+    assert binding.acted_attribute == "project_id"
+    assert result.status == "pass"
+
+
+def test_generic_parent_binding_refutes_wrong_parent_argument() -> None:
+    route_source = """
+from fastapi import Depends, FastAPI
+app = FastAPI()
+
+@app.get("/projects/{project_id}/documents/{document_id}")
+async def get_document(
+    project_id: str,
+    other_project_id: str,
+    document_id: str,
+    user = Depends(require_project_member),
+):
+    svc = DocumentService()
+    document = await svc.get(document_id, project_id=other_project_id)
+    return document
+""".strip()
+    service_source = """
+class DocumentService:
+    async def get(self, document_id: str, *, project_id: str):
+        document = await load_document(document_id)
+        if document.project_id != project_id:
+            return None
+        return document
+""".strip()
+
+    ir = FastApiDependencyEffectExtractor().compile(
+        _interprocedural_materials(route_source, service_source),
+        PROJECT_PARENT_PROFILE,
+    )
+    result = evaluate_protected_effect_integrity(ir)[0]
+
+    assert ir.coverage.status == "complete"
+    acted = next(
+        resource for resource in ir.resources if resource.symbol == "document_id"
+    )
+    assert acted.attribute_terms["project_id"].value == "other_project_id"
+    assert result.status in {"fail", "unknown"}
+    if result.status == "fail":
+        evidence = result.resource_binding_evidence[0]
+        assert evidence.counterexample is not None
+        assert evidence.counterexample["acted_attribute"] == "project_id"
