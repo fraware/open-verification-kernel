@@ -188,6 +188,7 @@ class FunctionContract(BaseModel):
 
     contract_id: str
     qualified_name: str
+    positional_parameters: list[str] = Field(default_factory=list)
     preconditions: list[ContractPredicate] = Field(default_factory=list)
     postconditions: list[ContractPredicate] = Field(default_factory=list)
     origin: SemanticOrigin
