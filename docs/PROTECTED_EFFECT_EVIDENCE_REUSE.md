@@ -35,20 +35,26 @@ slice produces a cache miss.
 
 ## Execution identity
 
-Reusable evidence additionally requires a complete execution fingerprint:
+Reusable evidence binds two related provenance layers.
+
+The pre-execution runtime fingerprint contains:
 
 - environment digest;
 - tool digest;
 - worker image digest;
-- native-execution flag;
-- exact resource-binding checker identities;
-- checker versions;
-- engine names;
-- engine tool versions when present.
+- native-execution flag.
 
-The binding-checker list is derived from the actual evaluation and compared
-against the declared fingerprint before evidence is sealed. A caller cannot label
-a Z3 evaluation as a purely structural check.
+The sealed execution fingerprint adds the exact resource-binding checker
+identities, checker versions, engine names, and engine tool versions actually
+observed during evaluation.
+
+The binding-checker list is derived from the evaluation and compared against the
+declared execution record before evidence is sealed. A caller cannot label a Z3
+evaluation as a purely structural check.
+
+During reuse, cache lookup uses only the runtime identity known before execution.
+After retrieval, OVK validates the stored observed checker list against the
+currently installed checker version and, for Z3 evidence, the current Z3 version.
 
 ## Reuse eligibility
 
@@ -67,7 +73,8 @@ A prior PASS is reusable only if all of the following hold:
 11. Protected Effect checker ID/version match;
 12. the claim is a single shadow PASS with the expected guarantee type;
 13. the prior decision is non-controlling;
-14. the execution fingerprint matches exactly.
+14. the pre-execution runtime fingerprint matches exactly;
+15. the stored observed checker engines remain compatible with the current checker/tool versions.
 
 Any failed condition makes reuse ineligible.
 
@@ -87,7 +94,7 @@ The cross-revision cache key contains:
 - environment digest;
 - tool digest;
 - worker image digest;
-- execution-fingerprint digest.
+- runtime-fingerprint digest.
 
 HardenedResultCache still validates the key-components digest and payload digest
 on every read and applies its TTL.
