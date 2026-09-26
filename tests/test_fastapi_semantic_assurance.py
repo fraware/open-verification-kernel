@@ -200,3 +200,27 @@ app.include_router(router, prefix="/billing")
     assert any("include_router_mount_not_modeled" in item for item in ir.unknowns)
     # The local route is still extracted, but global mounting is not claimed.
     assert ir.semantic_paths[0].entrypoint == "POST /refund"
+    assert ir.semantic_paths[0].provenance.coverage == "partial"
+
+
+def test_repeated_call_expression_does_not_imply_resource_identity() -> None:
+    ir = _compile(
+        """
+from fastapi import APIRouter, Depends
+
+router = APIRouter()
+
+@router.post("/refund")
+def refund(user = Depends(current_user)):
+    authorize(user, "billing.invoice.refund", load_invoice("x"))
+    issue_refund(load_invoice("x"))
+"""
+    )
+
+    assert any("resource_expression_not_identity_safe" in item for item in ir.unknowns)
+    resource_binding = next(item for item in ir.bindings if item.kind == "resource")
+    assert resource_binding.relation == "unknown"
+    assert resource_binding.left_ref != resource_binding.right_ref
+
+    obligation = compile_protected_effect_integrity(ir)[0]
+    assert obligation.coverage.status == "partial"
