@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ovk.core.bundle import content_digest
 from ovk.core.models import SourceRange, VerificationSubject
+from ovk.core.resource_identity import ResourceIdentityTerm
 
 
 CoverageStatus = Literal["complete", "partial", "unknown", "inapplicable"]
@@ -66,6 +67,7 @@ class ResourceRef(BaseModel):
     symbol: str
     resource_type: str | None = None
     tenant_symbol: str | None = None
+    identity_term: ResourceIdentityTerm | None = None
     origin: SemanticOrigin | None = None
 
 
