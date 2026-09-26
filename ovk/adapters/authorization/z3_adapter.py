@@ -91,6 +91,19 @@ class Z3NativeAuthorizationAdapter:
                 estimated_memory_mb=256,
                 reasons=["not an authorization obligation"],
             )
+        if obligation.property_kind not in set(self.manifest().supported_property_kinds):
+            return BackendCapabilityAssessment(
+                backend=self.backend_id,
+                support="unsupported",
+                score=0.0,
+                guarantee_type="smt_refutation_search",
+                material_requirements_met=bool(obligation.materials),
+                coverage_requirements_met=False,
+                native_available=z3_available(),
+                estimated_wall_time_seconds=5.0,
+                estimated_memory_mb=256,
+                reasons=[f"unsupported authorization property kind: {obligation.property_kind}"],
+            )
         denied = set(context.budget.denied_backends if context.budget else [])
         allowed = set(context.budget.allowed_backends) if context.budget and context.budget.allowed_backends else None
         native = z3_available()
