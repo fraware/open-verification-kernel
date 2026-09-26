@@ -1,0 +1,56 @@
+{
+  "schema_version": "ovk.incremental_semantic_summary_scaling.v1",
+  "benchmark_id": "fastapi_semantic_summary_reuse_scaling",
+  "partition": "development",
+  "claim_scope": "deterministic per-file semantic-summary work regression; wall-clock fields are observational only",
+  "mutation": "change exactly one service file from workspace_id postcondition to tenant_id postcondition",
+  "sizes": [
+    2,
+    4,
+    16,
+    64,
+    256
+  ],
+  "expected": [
+    {
+      "source_files": 2,
+      "warm_fresh_parses": 1,
+      "warm_fresh_contract_summaries": 1,
+      "warm_fresh_route_summaries": 1,
+      "warm_reused_contract_summaries": 1,
+      "warm_reused_route_summaries": 1
+    },
+    {
+      "source_files": 4,
+      "warm_fresh_parses": 1,
+      "warm_fresh_contract_summaries": 1,
+      "warm_fresh_route_summaries": 1,
+      "warm_reused_contract_summaries": 3,
+      "warm_reused_route_summaries": 3
+    },
+    {
+      "source_files": 16,
+      "warm_fresh_parses": 1,
+      "warm_fresh_contract_summaries": 1,
+      "warm_fresh_route_summaries": 1,
+      "warm_reused_contract_summaries": 15,
+      "warm_reused_route_summaries": 15
+    },
+    {
+      "source_files": 64,
+      "warm_fresh_parses": 1,
+      "warm_fresh_contract_summaries": 1,
+      "warm_fresh_route_summaries": 1,
+      "warm_reused_contract_summaries": 63,
+      "warm_reused_route_summaries": 63
+    },
+    {
+      "source_files": 256,
+      "warm_fresh_parses": 1,
+      "warm_fresh_contract_summaries": 1,
+      "warm_fresh_route_summaries": 1,
+      "warm_reused_contract_summaries": 255,
+      "warm_reused_route_summaries": 255
+    }
+  ]
+}

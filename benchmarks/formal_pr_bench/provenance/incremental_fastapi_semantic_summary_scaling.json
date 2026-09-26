@@ -1,0 +1,14 @@
+{
+  "schema_version": "formal_pr_bench.case_provenance.v1",
+  "case_id": "incremental_fastapi_semantic_summary_scaling",
+  "source": "authored synthetic development benchmark",
+  "source_repository": "fraware/open-verification-kernel",
+  "date": "2026-09-26",
+  "derivation": "authored_incremental_semantic_summary_work_count_benchmark",
+  "partition": "development",
+  "template_dev": true,
+  "fixture": "benchmarks/formal_pr_bench/incremental_semantic_summary_v1/scaling_workloads.json",
+  "category": "incremental_extraction",
+  "contamination_risk": "low_authored_synthetic",
+  "notes": "Measures deterministic per-file AST/contract/route summary work and semantic rebinding. Wall-clock values are observational only. Not a protected holdout."
+}
