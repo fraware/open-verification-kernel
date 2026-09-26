@@ -207,7 +207,7 @@ def test_literal_binding_evidence_records_observed_checker_provenance() -> None:
     assert evaluation.status == "pass"
     assert len(evaluation.resource_binding_evidence) == 1
     binding = evaluation.resource_binding_evidence[0]
-    assert binding.engine == "literal"
+    assert binding.engine == "structural"
     assert binding.checker_id == "ovk.resource_binding.v1"
     assert binding.checker_version == "0.2.0"
 
@@ -216,7 +216,7 @@ def test_literal_binding_evidence_records_observed_checker_provenance() -> None:
         BindingCheckerFingerprint(
             checker_id="ovk.resource_binding.v1",
             checker_version="0.2.0",
-            engine="literal",
+            engine="structural",
         )
     ]
 
