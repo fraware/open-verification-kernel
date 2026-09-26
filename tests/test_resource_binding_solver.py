@@ -77,8 +77,8 @@ def test_distinct_literal_resource_identities_fail_without_solver_dependency() -
     result = evaluate_resource_binding_with_z3(ir, binding)
 
     assert result["status"] == "fail"
-    assert result["counterexample"]["authorized_identity"] == "invoice-17"
-    assert result["counterexample"]["acted_identity"] == "invoice-18"
+    assert result["counterexample"]["authorized_value"] == "invoice-17"
+    assert result["counterexample"]["acted_value"] == "invoice-18"
 
 
 def test_missing_resource_identity_is_unknown() -> None:
