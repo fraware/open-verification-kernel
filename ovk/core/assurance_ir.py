@@ -127,6 +127,25 @@ class ProtectedEffect(BaseModel):
     origin: SemanticOrigin
 
 
+class ResourceReturnContract(BaseModel):
+    """Source-derived postcondition for a function returning a resource."""
+
+    contract_id: str
+    qualified_name: str
+    return_scope_parameter: str
+    return_scope_attribute: str
+    requires_non_null_argument: bool = True
+    origin: SemanticOrigin
+
+    @field_validator("qualified_name", "return_scope_parameter", "return_scope_attribute")
+    @classmethod
+    def _contract_fields_non_empty(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("resource return contract fields must be non-empty")
+        return value
+
+
 class ResourceBinding(BaseModel):
     """Required relationship between authorized and acted-upon resources."""
 
@@ -210,6 +229,7 @@ class AssuranceIR(BaseModel):
     guards: list[AuthorizationGuard] = Field(default_factory=list)
     protected_effects: list[ProtectedEffect] = Field(default_factory=list)
     resource_bindings: list[ResourceBinding] = Field(default_factory=list)
+    resource_return_contracts: list[ResourceReturnContract] = Field(default_factory=list)
     paths: list[SemanticPath] = Field(default_factory=list)
     claims: list[AssuranceClaim] = Field(default_factory=list)
     assumptions: dict[str, str] = Field(default_factory=dict)
@@ -226,6 +246,7 @@ class AssuranceIR(BaseModel):
             "guards": "guard_id",
             "protected_effects": "protected_effect_id",
             "resource_bindings": "binding_id",
+            "resource_return_contracts": "contract_id",
             "paths": "path_id",
             "claims": "claim_id",
         }
