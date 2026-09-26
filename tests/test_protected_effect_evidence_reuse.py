@@ -247,7 +247,7 @@ def test_same_semantics_across_head_sha_is_reusable() -> None:
         head_ir=head,
         protected_effect_id="pe:refund",
         policy_digest="policy-a",
-        current_fingerprint=fingerprint,
+        current_runtime_fingerprint=fingerprint.runtime_fingerprint,
     )
 
     assert decision.eligible is True
@@ -258,7 +258,7 @@ def test_same_semantics_across_head_sha_is_reusable() -> None:
     ("mutation", "expected_reason"),
     [
         ("policy", "policy_digest_mismatch"),
-        ("fingerprint", "execution_fingerprint_mismatch"),
+        ("fingerprint", "runtime_fingerprint_mismatch"),
         ("semantic", "semantic_slice_mismatch"),
     ],
 )
@@ -267,12 +267,12 @@ def test_reuse_rejects_identity_mismatches(mutation: str, expected_reason: str) 
     _, fingerprint, evidence = _evidence(base)
     head = _simple_ir(head_sha="head-b")
     policy_digest = "policy-a"
-    current_fingerprint = fingerprint
+    current_runtime_fingerprint = fingerprint.runtime_fingerprint
 
     if mutation == "policy":
         policy_digest = "policy-b"
     elif mutation == "fingerprint":
-        current_fingerprint = fingerprint.model_copy(
+        current_runtime_fingerprint = fingerprint.runtime_fingerprint.model_copy(
             update={"tool_digest": "different-tool"}
         )
     elif mutation == "semantic":
@@ -283,7 +283,7 @@ def test_reuse_rejects_identity_mismatches(mutation: str, expected_reason: str) 
         head_ir=head,
         protected_effect_id="pe:refund",
         policy_digest=policy_digest,
-        current_fingerprint=current_fingerprint,
+        current_runtime_fingerprint=current_runtime_fingerprint,
     )
 
     assert decision.eligible is False
@@ -303,7 +303,7 @@ def test_reuse_rejects_tampered_revoked_expired_and_signature_required_evidence(
         head_ir=ir,
         protected_effect_id="pe:refund",
         policy_digest="policy-a",
-        current_fingerprint=fingerprint,
+        current_runtime_fingerprint=fingerprint.runtime_fingerprint,
     )
     assert tampered_decision.eligible is False
     assert "invalid_evidence_digest" in tampered_decision.reason_codes
@@ -313,7 +313,7 @@ def test_reuse_rejects_tampered_revoked_expired_and_signature_required_evidence(
         head_ir=ir,
         protected_effect_id="pe:refund",
         policy_digest="policy-a",
-        current_fingerprint=fingerprint,
+        current_runtime_fingerprint=fingerprint.runtime_fingerprint,
         reuse_policy=ProtectedEffectReusePolicy(
             revoked_evidence_digests=[evidence.evidence_digest],
         ),
@@ -422,7 +422,7 @@ def test_hardened_cache_misses_on_semantic_policy_or_fingerprint_change(
         head_ir=unchanged,
         protected_effect_id="pe:refund",
         policy_digest="policy-a",
-        current_fingerprint=fingerprint.model_copy(
+        current_runtime_fingerprint=fingerprint.runtime_fingerprint.model_copy(
             update={"environment_digest": "env-other"}
         ),
     ) is None
@@ -448,7 +448,7 @@ def test_unfingerprinted_evidence_is_sealed_but_never_reusable() -> None:
         current_fingerprint=fingerprint,
     )
     assert decision.eligible is False
-    assert "missing_or_ambiguous_execution_fingerprint" in decision.reason_codes
+    assert "missing_or_invalid_execution_fingerprint" in decision.reason_codes
 
 
 
