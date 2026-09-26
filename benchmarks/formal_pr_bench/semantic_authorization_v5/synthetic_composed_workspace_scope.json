@@ -1,0 +1,45 @@
+{
+  "schema_version": "formal_pr_bench.semantic_authorization.v5",
+  "case_id": "synthetic_composed_workspace_scope",
+  "category": "semantic_authorization",
+  "framework": "fastapi",
+  "provenance_id": "synthetic_composed_workspace_scope",
+  "public_contamination_risk": "low_authored_synthetic",
+  "property": "workspace authorization survives service-to-repository contract composition",
+  "profile": {
+    "sink_effects": {
+      "svc.get": "workspace.agent.read"
+    },
+    "sink_identity_args": {
+      "svc.get": 0
+    },
+    "sink_contracts": {
+      "svc.get": "AgentService.get"
+    },
+    "sink_contract_scope_attributes": {
+      "svc.get": "workspace_id"
+    },
+    "dependency_guard_resources": {
+      "require_workspace_member": "workspace_id"
+    },
+    "dependency_guard_effects": {
+      "require_workspace_member": [
+        "workspace.agent.read"
+      ]
+    },
+    "principal_parameter": "user"
+  },
+  "service_source": "class AgentRepository:\n    async def get(self, agent_id: str, *, workspace_id: str | None = None):\n        agent = await load_agent(agent_id)\n        if workspace_id is not None and agent.workspace_id != workspace_id:\n            return None\n        return agent\n\nclass AgentService:\n    def __init__(self):\n        self._repo = AgentRepository()\n\n    async def get(self, agent_id: str, *, workspace_id: str | None = None):\n        return await self._repo.get(agent_id, workspace_id=workspace_id)\n",
+  "variants": [
+    {
+      "id": "secure_composed_scope",
+      "route_source": "from fastapi import Depends, FastAPI\napp = FastAPI()\n\n@app.get(\"/workspaces/{workspace_id}/agents/{agent_id}\")\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user = Depends(require_workspace_member),\n):\n    svc = AgentService()\n    agent = await svc.get(agent_id, workspace_id=workspace_id)\n    return agent\n",
+      "expected_semantic_status": "pass"
+    },
+    {
+      "id": "missing_scope_at_route",
+      "route_source": "from fastapi import Depends, FastAPI\napp = FastAPI()\n\n@app.get(\"/workspaces/{workspace_id}/agents/{agent_id}\")\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user = Depends(require_workspace_member),\n):\n    svc = AgentService()\n    agent = await svc.get(agent_id)\n    return agent\n",
+      "expected_semantic_status": "fail_when_z3_available"
+    }
+  ]
+}
