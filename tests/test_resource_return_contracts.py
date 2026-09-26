@@ -520,3 +520,94 @@ class DocumentService:
         item.model_dump(mode="json")
         for item in from_api
     ]
+
+
+def test_infers_fail_closed_free_function_parameter_equality() -> None:
+    source = """
+from typing import Optional
+
+def ensure_resource_in_workspace(
+    resource_workspace_id: str | None,
+    workspace_id: str,
+    *,
+    label: str = "Resource",
+) -> None:
+    """Reject cross-workspace access."""
+    if resource_workspace_id != workspace_id:
+        raise RuntimeError(label)
+""".strip()
+
+    contracts = infer_function_contracts(_materials(source))
+    by_name = {contract.qualified_name: contract for contract in contracts}
+
+    contract = by_name["ensure_resource_in_workspace"]
+    assert contract.origin.path == "services/agent_service.py"
+    assert contract.positional_parameters == [
+        "resource_workspace_id",
+        "workspace_id",
+    ]
+    assert contract.preconditions == []
+    assert len(contract.postconditions) == 1
+    post = contract.postconditions[0]
+    assert post.relation == "eq"
+    assert post.left.kind == "parameter"
+    assert post.left.name == "resource_workspace_id"
+    assert post.right is not None
+    assert post.right.kind == "parameter"
+    assert post.right.name == "workspace_id"
+
+
+def test_fail_closed_equality_accepts_optional_string_annotation() -> None:
+    source = """
+from typing import Optional
+
+def ensure_resource_in_workspace(
+    resource_workspace_id: Optional[str],
+    workspace_id: str,
+) -> None:
+    if resource_workspace_id != workspace_id:
+        raise RuntimeError()
+""".strip()
+
+    contracts = infer_function_contracts(_materials(source))
+    assert {
+        contract.qualified_name for contract in contracts
+    } == {"ensure_resource_in_workspace"}
+
+
+def test_does_not_infer_parameter_equality_without_terminating_raise() -> None:
+    source = """
+def ensure_resource_in_workspace(
+    resource_workspace_id: str | None,
+    workspace_id: str,
+) -> None:
+    if resource_workspace_id != workspace_id:
+        audit(resource_workspace_id, workspace_id)
+""".strip()
+
+    assert infer_function_contracts(_materials(source)) == []
+
+
+def test_does_not_infer_parameter_equality_with_extra_executable_behavior() -> None:
+    source = """
+def ensure_resource_in_workspace(
+    resource_workspace_id: str | None,
+    workspace_id: str,
+) -> None:
+    audit(workspace_id)
+    if resource_workspace_id != workspace_id:
+        raise RuntimeError()
+""".strip()
+
+    assert infer_function_contracts(_materials(source)) == []
+
+
+def test_does_not_infer_parameter_equality_for_arbitrary_object_types() -> None:
+    source = """
+def ensure_same_scope(left: Scope, right: Scope) -> None:
+    if left != right:
+        raise RuntimeError()
+""".strip()
+
+    assert infer_function_contracts(_materials(source)) == []
+
