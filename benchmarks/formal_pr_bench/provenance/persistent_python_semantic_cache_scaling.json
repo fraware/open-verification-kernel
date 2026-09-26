@@ -1,0 +1,14 @@
+{
+  "schema_version": "formal_pr_bench.case_provenance.v1",
+  "case_id": "persistent_python_semantic_cache_scaling",
+  "source": "authored synthetic development benchmark",
+  "source_repository": "fraware/open-verification-kernel",
+  "date": "2026-09-26",
+  "derivation": "authored_fresh_worker_persistent_semantic_cache_benchmark",
+  "partition": "development",
+  "template_dev": true,
+  "fixture": "benchmarks/formal_pr_bench/persistent_semantic_cache_v1/scaling_workloads.json",
+  "category": "incremental_extraction",
+  "contamination_risk": "low_authored_synthetic",
+  "notes": "Measures deterministic cross-worker cache hit/parse counts. Wall-clock values are observational only. Not a protected holdout."
+}

@@ -1,0 +1,50 @@
+{
+  "schema_version": "ovk.persistent_semantic_cache_scaling.v1",
+  "benchmark_id": "persistent_python_semantic_cache_scaling",
+  "partition": "development",
+  "claim_scope": "deterministic fresh-worker parse/summary work regression; wall-clock fields are observational only",
+  "sizes": [
+    2,
+    4,
+    16,
+    64,
+    256
+  ],
+  "expected": [
+    {
+      "source_files": 2,
+      "unchanged_hits": 2,
+      "unchanged_parses": 0,
+      "changed_hits": 1,
+      "changed_parses": 1
+    },
+    {
+      "source_files": 4,
+      "unchanged_hits": 4,
+      "unchanged_parses": 0,
+      "changed_hits": 3,
+      "changed_parses": 1
+    },
+    {
+      "source_files": 16,
+      "unchanged_hits": 16,
+      "unchanged_parses": 0,
+      "changed_hits": 15,
+      "changed_parses": 1
+    },
+    {
+      "source_files": 64,
+      "unchanged_hits": 64,
+      "unchanged_parses": 0,
+      "changed_hits": 63,
+      "changed_parses": 1
+    },
+    {
+      "source_files": 256,
+      "unchanged_hits": 256,
+      "unchanged_parses": 0,
+      "changed_hits": 255,
+      "changed_parses": 1
+    }
+  ]
+}
