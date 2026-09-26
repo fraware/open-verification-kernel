@@ -36,6 +36,19 @@ def _provenance(path: str, start: int = 1, end: int = 4) -> SourceProvenance:
     )
 
 
+def _claim(**extra) -> AssuranceClaim:
+    return AssuranceClaim(
+        claim_id="claim.refund.authorization",
+        property_kind="protected_effect_integrity",
+        statement="Refunds must use the same principal, effect, and invoice resource that were authorized.",
+        origin="human",
+        semantic_refs=[],
+        acceptable_guarantees=["smt_refutation_search"],
+        provenance=_provenance(".verification/intents/refund.yml"),
+        **extra,
+    )
+
+
 def _ir() -> AssuranceIR:
     principal = PrincipalRef(
         principal_id="principal.current_user",
@@ -94,24 +107,19 @@ def _ir() -> AssuranceIR:
         call_chain=["refund", "authorize", "issue_refund"],
         provenance=_provenance("app/routes/refund.py", 7, 13),
     )
-    claim = AssuranceClaim(
-        claim_id="claim.refund.authorization",
-        property_kind="protected_effect_integrity",
-        statement="Refunds must use the same principal, effect, and invoice resource that were authorized.",
-        origin="human",
-        approval_status="approved",
-        semantic_refs=[
-            principal.principal_id,
-            effect.effect_id,
-            authorized_resource.resource_id,
-            performed_resource.resource_id,
-            guard.guard_id,
-            protected.protected_effect_id,
-            binding.binding_id,
-            path.path_id,
-        ],
-        acceptable_guarantees=["smt_refutation_search"],
-        provenance=_provenance(".verification/intents/refund.yml"),
+    claim = _claim().model_copy(
+        update={
+            "semantic_refs": [
+                principal.principal_id,
+                effect.effect_id,
+                authorized_resource.resource_id,
+                performed_resource.resource_id,
+                guard.guard_id,
+                protected.protected_effect_id,
+                binding.binding_id,
+                path.path_id,
+            ]
+        }
     )
     return AssuranceIR(
         subject=_subject(),
@@ -131,6 +139,13 @@ def test_assurance_ir_round_trip() -> None:
     ir = _ir()
     payload = ir.model_dump(mode="json")
     assert AssuranceIR.model_validate(payload).model_dump(mode="json") == payload
+
+
+def test_claim_cannot_self_assert_approval() -> None:
+    payload = _claim().model_dump(mode="json")
+    payload["approval_status"] = "approved"
+    with pytest.raises(ValidationError, match="approval_status"):
+        AssuranceClaim.model_validate(payload)
 
 
 def test_digest_is_order_insensitive_for_set_like_collections() -> None:
