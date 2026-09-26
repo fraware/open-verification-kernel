@@ -23,7 +23,9 @@ from dataclasses import dataclass, field
 from ovk.compilers.authorization.base import normalize_path
 from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.compilers.authorization.python_ast_index import (
+    ParsedPythonMaterials,
     parse_head_python_materials,
+    parsed_index_matches_materials,
 )
 from ovk.compilers.authorization.resource_return_contracts import (
     infer_function_contracts,
@@ -426,6 +428,8 @@ class FastApiDependencyEffectExtractor:
         self,
         materials: AuthMaterials,
         profile: FastApiDependencyEffectProfile,
+        *,
+        parsed_index: ParsedPythonMaterials | None = None,
     ) -> AssuranceIR:
         subject = VerificationSubject(
             repo=materials.repo or "unknown/repo",
@@ -441,7 +445,14 @@ class FastApiDependencyEffectExtractor:
         contract_uses: dict[str, ContractUse] = {}
         paths: dict[str, SemanticPath] = {}
         unsupported: list[str] = []
-        parsed = parse_head_python_materials(materials)
+        if parsed_index is None:
+            parsed = parse_head_python_materials(materials)
+        else:
+            if not parsed_index_matches_materials(parsed_index, materials):
+                raise ValueError(
+                    "parsed Python index does not match supplied head materials"
+                )
+            parsed = parsed_index
         function_contracts = infer_function_contracts(
             materials,
             parsed_trees=parsed.trees,
