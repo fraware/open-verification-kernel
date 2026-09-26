@@ -35,6 +35,9 @@ class ResourceBindingEvidence(BaseModel):
     binding_id: str
     status: EvaluationStatus
     reason: str
+    checker_id: str | None = None
+    checker_version: str | None = None
+    native_execution: bool | None = None
     counterexample: dict[str, Any] | None = None
 
 
@@ -89,6 +92,9 @@ def _resolve_resource_check(
                 binding_id=binding_id,
                 status=status,
                 reason=str(raw.get("reason", "resource-binding evaluator returned no reason")),
+                checker_id=raw.get("checker_id"),
+                checker_version=raw.get("checker_version"),
+                native_execution=raw.get("native_execution"),
                 counterexample=raw.get("counterexample"),
             )
         )
