@@ -10,6 +10,7 @@ from ovk.compilers.authorization.fastapi_semantic import (
     ProtectedSinkSpec,
 )
 from ovk.compilers.authorization.material_loader import AuthMaterials
+from ovk.core.compiler_bridge import compile_fastapi_assurance_ir
 from ovk.core.protected_effect_integrity import compile_protected_effect_integrity
 
 
@@ -224,3 +225,47 @@ def refund(user = Depends(current_user)):
 
     obligation = compile_protected_effect_integrity(ir)[0]
     assert obligation.coverage.status == "partial"
+
+
+def test_opt_in_compiler_bridge_preserves_explicit_config_boundary() -> None:
+    source = """
+from fastapi import APIRouter, Depends
+
+router = APIRouter()
+
+@router.post("/refund")
+def refund(user = Depends(current_user)):
+    invoice = load_invoice("x")
+    authorize(user, "billing.invoice.refund", invoice)
+    issue_refund(invoice)
+"""
+    data = {
+        "framework": "fastapi",
+        "materials": {
+            "path": "app.py",
+            "base_source": source,
+            "head_source": source,
+        },
+        "semantic_assurance": _config().model_dump(mode="json"),
+    }
+
+    ir = compile_fastapi_assurance_ir(
+        data,
+        repo="example/payments",
+        base_sha="base123",
+        head_sha="head456",
+    )
+    assert ir is not None
+    assert len(ir.semantic_paths) == 1
+
+    without_opt_in = dict(data)
+    without_opt_in.pop("semantic_assurance")
+    assert (
+        compile_fastapi_assurance_ir(
+            without_opt_in,
+            repo="example/payments",
+            base_sha="base123",
+            head_sha="head456",
+        )
+        is None
+    )
