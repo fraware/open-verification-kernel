@@ -68,17 +68,20 @@ For an unchanged five-file workload after a worker restart:
     recomposed contracts = 0
     rebound route fragments = 0
 
-For one unrelated changed file:
+For one unrelated non-route changed file:
 
     fresh parses = 1
     recomposed contracts = 0
-    rebound fragments = 1
+    rebound fragments = 0
 
 For a low-level repository contract change:
 
     fresh parses = 1
     recomposed contracts = affected forwarding closure
-    rebound fragments = changed source file + consuming routes
+    rebound fragments = consuming routes only
+
+Repository/service files with no recognized FastAPI route handlers do not occupy
+the semantic fragment cache.
 
 ## Concurrency and stale state
 
