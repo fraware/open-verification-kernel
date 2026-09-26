@@ -35,6 +35,10 @@ class ResourceBindingEvidence(BaseModel):
     binding_id: str
     status: EvaluationStatus
     reason: str
+    checker_id: str | None = None
+    checker_version: str | None = None
+    native_execution: bool | None = None
+    tool_version: str | None = None
     counterexample: dict[str, Any] | None = None
 
 
@@ -84,11 +88,34 @@ def _resolve_resource_check(
         status = str(raw.get("status", "unknown"))
         if status not in {"pass", "fail", "unknown"}:
             status = "unknown"
+        provenance = raw.get("provenance")
+        if not isinstance(provenance, dict):
+            provenance = {}
         evidence.append(
             ResourceBindingEvidence(
                 binding_id=binding_id,
                 status=status,
                 reason=str(raw.get("reason", "resource-binding evaluator returned no reason")),
+                checker_id=(
+                    str(provenance["checker_id"])
+                    if provenance.get("checker_id")
+                    else None
+                ),
+                checker_version=(
+                    str(provenance["checker_version"])
+                    if provenance.get("checker_version")
+                    else None
+                ),
+                native_execution=(
+                    bool(provenance["native_execution"])
+                    if "native_execution" in provenance
+                    else None
+                ),
+                tool_version=(
+                    str(provenance["tool_version"])
+                    if provenance.get("tool_version")
+                    else None
+                ),
                 counterexample=raw.get("counterexample"),
             )
         )
