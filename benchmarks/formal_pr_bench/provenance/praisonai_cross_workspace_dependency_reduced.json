@@ -1,0 +1,18 @@
+{
+  "schema_version": "formal_pr_bench.case_provenance.v1",
+  "case_id": "praisonai_cross_workspace_dependency_reduced",
+  "source": "https://github.com/advisories/GHSA-h8q5-cp56-rr65",
+  "source_repository": "MervinPraison/praisonai-platform",
+  "source_advisory": "GHSA-h8q5-cp56-rr65",
+  "source_cve": "CVE-2026-47407",
+  "upstream_fixed_reference": "dd533be61bfd4795dedc228cbdd9c52a81526985",
+  "date": "2026-09-26",
+  "derivation": "reduced_public_advisory_matching_fixed_dependency_service_shape",
+  "partition": "development",
+  "template_dev": true,
+  "fixture": "benchmarks/formal_pr_bench/semantic_authorization_v2/praisonai_cross_workspace_dependency_reduced.json",
+  "category": "semantic_authorization",
+  "license": "Apache-2.0",
+  "contamination_risk": "high_public_advisory",
+  "notes": "Authored reduction of the public FastAPI dependency/service-call pattern. The secure variant mirrors the fixed shape user=Depends(require_workspace_member) plus svc.get(agent_id, workspace_id=workspace_id). No upstream source file is copied."
+}
