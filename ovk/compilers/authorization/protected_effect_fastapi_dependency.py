@@ -28,6 +28,9 @@ from ovk.compilers.authorization.python_ast_index import (
     parsed_index_matches_materials,
 )
 from ovk.compilers.authorization.resource_return_contracts import (
+    ContractSummaryIndex,
+    build_contract_summary_index,
+    contract_summary_index_matches_materials,
     infer_function_contracts,
     infer_resource_return_contracts,
 )
@@ -430,6 +433,7 @@ class FastApiDependencyEffectExtractor:
         profile: FastApiDependencyEffectProfile,
         *,
         parsed_index: ParsedPythonMaterials | None = None,
+        contract_summary_index: ContractSummaryIndex | None = None,
     ) -> AssuranceIR:
         subject = VerificationSubject(
             repo=materials.repo or "unknown/repo",
@@ -453,9 +457,25 @@ class FastApiDependencyEffectExtractor:
                     "parsed Python index does not match supplied head materials"
                 )
             parsed = parsed_index
+        if contract_summary_index is None:
+            contract_summaries = build_contract_summary_index(
+                materials,
+                parsed_trees=parsed.trees,
+                source_digests=parsed.source_digests,
+            )
+        else:
+            if not contract_summary_index_matches_materials(
+                contract_summary_index,
+                materials,
+            ):
+                raise ValueError(
+                    "contract summary index does not match supplied head materials"
+                )
+            contract_summaries = contract_summary_index
+
         function_contracts = infer_function_contracts(
             materials,
-            parsed_trees=parsed.trees,
+            summary_index=contract_summaries,
         )
         resource_return_contracts = infer_resource_return_contracts(
             materials,
