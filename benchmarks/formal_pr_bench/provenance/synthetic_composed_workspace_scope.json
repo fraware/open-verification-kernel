@@ -1,0 +1,14 @@
+{
+  "schema_version": "formal_pr_bench.case_provenance.v1",
+  "case_id": "synthetic_composed_workspace_scope",
+  "source": "authored synthetic development case",
+  "source_repository": "fraware/open-verification-kernel",
+  "date": "2026-09-26",
+  "derivation": "authored_fixed_point_contract_composition_regression",
+  "partition": "development",
+  "template_dev": true,
+  "fixture": "benchmarks/formal_pr_bench/semantic_authorization_v5/synthetic_composed_workspace_scope.json",
+  "category": "semantic_authorization",
+  "contamination_risk": "low_authored_synthetic",
+  "notes": "Validates route -> service -> repository contract composition. Not held out."
+}
