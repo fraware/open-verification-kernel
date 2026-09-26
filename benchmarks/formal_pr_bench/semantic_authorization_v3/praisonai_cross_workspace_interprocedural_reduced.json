@@ -1,0 +1,44 @@
+{
+  "schema_version": "formal_pr_bench.semantic_authorization.v3",
+  "case_id": "praisonai_cross_workspace_interprocedural_reduced",
+  "category": "semantic_authorization",
+  "framework": "fastapi",
+  "provenance_id": "praisonai_cross_workspace_interprocedural_reduced",
+  "public_contamination_risk": "high",
+  "property": "authorized workspace identity must equal the scope guaranteed for the returned resource",
+  "profile": {
+    "sink_effects": {
+      "svc.get": "workspace.agent.read"
+    },
+    "sink_identity_args": {
+      "svc.get": 0
+    },
+    "sink_contracts": {
+      "svc.get": "AgentService.get"
+    },
+    "dependency_guard_resources": {
+      "require_workspace_member": "workspace_id"
+    },
+    "dependency_guard_effects": {
+      "require_workspace_member": [
+        "workspace.agent.read"
+      ]
+    },
+    "principal_parameter": "user"
+  },
+  "service_source": "class AgentService:\n    async def get(self, agent_id: str, *, workspace_id: str | None = None):\n        agent = await self._session.get(Agent, agent_id)\n        if agent is None:\n            return None\n        if workspace_id is not None and agent.workspace_id != workspace_id:\n            return None\n        return agent\n",
+  "variants": [
+    {
+      "id": "vulnerable_route_omits_scope",
+      "route_source": "from fastapi import Depends, FastAPI\napp = FastAPI()\n\n@app.get(\"/workspaces/{workspace_id}/agents/{agent_id}\")\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user = Depends(require_workspace_member),\n):\n    svc = AgentService()\n    agent = await svc.get(agent_id)\n    return agent\n",
+      "expected_semantic_status": "fail_when_z3_available",
+      "rationale": "The service contract guarantees workspace equality only when workspace_id is supplied; the route omits it."
+    },
+    {
+      "id": "secure_route_passes_scope",
+      "route_source": "from fastapi import Depends, FastAPI\napp = FastAPI()\n\n@app.get(\"/workspaces/{workspace_id}/agents/{agent_id}\")\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user = Depends(require_workspace_member),\n):\n    svc = AgentService()\n    agent = await svc.get(agent_id, workspace_id=workspace_id)\n    return agent\n",
+      "expected_semantic_status": "pass",
+      "rationale": "The required non-null route workspace is passed to a service method whose source-derived postcondition enforces returned-resource scope equality."
+    }
+  ]
+}
