@@ -1,0 +1,46 @@
+{
+  "schema_version": "formal_pr_bench.semantic_authorization.v2",
+  "case_id": "praisonai_cross_workspace_dependency_reduced",
+  "category": "semantic_authorization",
+  "framework": "fastapi",
+  "provenance_id": "praisonai_cross_workspace_dependency_reduced",
+  "public_contamination_risk": "high",
+  "property": "workspace authorized by FastAPI dependency must equal acted resource scope",
+  "profile": {
+    "sink_effects": {
+      "svc.get": "workspace.agent.read"
+    },
+    "sink_identity_args": {
+      "svc.get": 0
+    },
+    "sink_scope_keywords": {
+      "svc.get": "workspace_id"
+    },
+    "sink_missing_scope_unconstrained": [
+      "svc.get"
+    ],
+    "dependency_guard_resources": {
+      "require_workspace_member": "workspace_id"
+    },
+    "dependency_guard_effects": {
+      "require_workspace_member": [
+        "workspace.agent.read"
+      ]
+    },
+    "principal_parameter": "user"
+  },
+  "variants": [
+    {
+      "id": "vulnerable_unscoped_service_lookup",
+      "source": "from fastapi import Depends, FastAPI\napp = FastAPI()\n\n@app.get(\"/workspaces/{workspace_id}/agents/{agent_id}\")\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user = Depends(require_workspace_member),\n):\n    svc = AgentService()\n    agent = await svc.get(agent_id)\n    return agent\n",
+      "expected_semantic_status": "fail_when_z3_available",
+      "rationale": "The dependency authorizes workspace_id while the service lookup omits workspace scope."
+    },
+    {
+      "id": "secure_workspace_scoped_service_lookup",
+      "source": "from fastapi import Depends, FastAPI\napp = FastAPI()\n\n@app.get(\"/workspaces/{workspace_id}/agents/{agent_id}\")\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user = Depends(require_workspace_member),\n):\n    svc = AgentService()\n    agent = await svc.get(agent_id, workspace_id=workspace_id)\n    return agent\n",
+      "expected_semantic_status": "pass",
+      "rationale": "The service lookup scopes the acted resource to the same workspace authorized by the dependency."
+    }
+  ]
+}
