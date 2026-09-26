@@ -83,7 +83,7 @@ def test_public_case_is_content_bound_to_upstream_route_versions() -> None:
     provenance = json.loads(PROVENANCE_PATH.read_text(encoding="utf-8"))
 
     assert provenance["case_id"] == _load_case()["case_id"]
-    assert provenance["contamination_status"] if "contamination_status" in provenance else True
+    assert provenance["contamination_status"] == "public_development_case"
     assert provenance["eligible_for_sealed_holdout"] is False
     assert (
         provenance["upstream"]["vulnerable_revision"]
