@@ -37,6 +37,7 @@ from ovk.core.assurance_ir import (
 )
 from ovk.core.bundle import content_digest
 from ovk.core.models import SourceRange, VerificationSubject
+from ovk.core.resource_identity import ResourceIdentityTerm
 
 
 _SOURCE_PROFILE_ID = "assurance.fastapi.protected_effects.ast_v1"
@@ -55,9 +56,14 @@ class ProtectedEffectProfile:
     guard_effect_arg: int = 1
     guard_resource_arg: int = 2
     sink_resource_args: dict[str, int] = field(default_factory=dict)
+    resource_loader_identity_args: dict[str, int] = field(default_factory=dict)
 
     def resource_arg_for_sink(self, sink_name: str) -> int:
         return int(self.sink_resource_args.get(sink_name, 0))
+
+    def identity_arg_for_loader(self, loader_name: str) -> int | None:
+        value = self.resource_loader_identity_args.get(loader_name)
+        return None if value is None else int(value)
 
 
 def _name_of(node: ast.AST | None) -> str | None:
@@ -122,6 +128,69 @@ def _has_control_flow(handler: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     return any(isinstance(node, _CONTROL_FLOW) for statement in handler.body for node in ast.walk(statement))
 
 
+def _identity_term_for_expr(
+    node: ast.AST,
+    aliases: dict[str, ResourceIdentityTerm],
+) -> ResourceIdentityTerm | None:
+    if isinstance(node, ast.Name) and node.id in aliases:
+        return aliases[node.id]
+    if isinstance(node, ast.Constant) and isinstance(node.value, (str, int, bool)):
+        return ResourceIdentityTerm.literal(str(node.value))
+    if isinstance(node, (ast.Name, ast.Attribute, ast.Subscript)):
+        return ResourceIdentityTerm.symbol(_expr(node))
+    return None
+
+
+def _resource_aliases(
+    handler: ast.FunctionDef | ast.AsyncFunctionDef,
+    profile: ProtectedEffectProfile,
+    *,
+    path: str,
+    unsupported: list[str],
+) -> dict[str, ResourceIdentityTerm]:
+    aliases: dict[str, ResourceIdentityTerm] = {}
+
+    for statement in handler.body:
+        target: ast.AST | None = None
+        value: ast.AST | None = None
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            target = statement.targets[0]
+            value = statement.value
+        elif isinstance(statement, ast.AnnAssign):
+            target = statement.target
+            value = statement.value
+
+        if not isinstance(target, ast.Name) or value is None:
+            continue
+
+        if isinstance(value, ast.Call):
+            loader_name = _name_of(value.func)
+            if loader_name is None:
+                continue
+            identity_arg = profile.identity_arg_for_loader(loader_name)
+            if identity_arg is None:
+                continue
+            if len(value.args) <= identity_arg:
+                unsupported.append(
+                    f"{path}:{handler.name}:unsupported_resource_loader_signature:{loader_name}"
+                )
+                continue
+            identity_term = _identity_term_for_expr(value.args[identity_arg], aliases)
+            if identity_term is None:
+                unsupported.append(
+                    f"{path}:{handler.name}:unsupported_resource_identity_expression:{loader_name}"
+                )
+                continue
+            aliases[target.id] = identity_term
+            continue
+
+        identity_term = _identity_term_for_expr(value, aliases)
+        if identity_term is not None:
+            aliases[target.id] = identity_term
+
+    return aliases
+
+
 class FastApiProtectedEffectExtractor:
     """Extract source-grounded protected effects from the supported FastAPI subset."""
 
@@ -176,6 +245,12 @@ class FastApiProtectedEffectExtractor:
                     ),
                 )
 
+                resource_aliases = _resource_aliases(
+                    handler,
+                    profile,
+                    path=path,
+                    unsupported=unsupported,
+                )
                 calls = _top_level_calls(handler)
                 guard_records: list[tuple[int, str, str, str]] = []
                 # (line, guard_id, effect_name, resource_id)
@@ -214,11 +289,16 @@ class FastApiProtectedEffectExtractor:
                             origin=_origin(path, call.args[profile.guard_principal_arg]),
                         ),
                     )
+                    guard_identity = _identity_term_for_expr(
+                        call.args[profile.guard_resource_arg],
+                        resource_aliases,
+                    )
                     resources.setdefault(
                         guard_resource_id,
                         ResourceRef(
                             resource_id=guard_resource_id,
                             symbol=resource_symbol,
+                            identity_term=guard_identity,
                             origin=_origin(path, call.args[profile.guard_resource_arg]),
                         ),
                     )
@@ -254,11 +334,16 @@ class FastApiProtectedEffectExtractor:
                         f"{path}:{handler.name}:{sink_line}:{effect_name}:{resource_symbol}",
                     )
 
+                    acted_identity = _identity_term_for_expr(
+                        call.args[resource_index],
+                        resource_aliases,
+                    )
                     resources.setdefault(
                         acted_resource_id,
                         ResourceRef(
                             resource_id=acted_resource_id,
                             symbol=resource_symbol,
+                            identity_term=acted_identity,
                             origin=_origin(path, call.args[resource_index]),
                         ),
                     )
@@ -341,11 +426,13 @@ class FastApiProtectedEffectExtractor:
                     "straight_line_handler",
                     "configured_positional_authorization_call",
                     "configured_positional_protected_sink",
+                    "declared_identity_preserving_resource_loader",
                 ],
                 unsupported_constructs=sorted(set(unsupported)),
                 assumptions=[
                     "Configured guard functions are authorization decisions.",
                     "Configured sink functions faithfully identify protected effects.",
+                    "Configured resource loaders preserve resource identity through their declared key argument.",
                     "Lexical ordering is used only inside the straight-line v1 handler subset.",
                 ],
             ),
