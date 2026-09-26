@@ -51,10 +51,16 @@ def _literal_result(
             "status": "pass",
             "reason": f"{left_label} and {right_label} literals are equal",
             "counterexample": None,
+            "checker_id": "deterministic.resource_binding.v1",
+            "checker_version": "0.1.0",
+            "native_execution": False,
         }
     return {
         "status": "fail",
         "reason": f"{left_label} and {right_label} literals differ",
+        "checker_id": "deterministic.resource_binding.v1",
+        "checker_version": "0.1.0",
+        "native_execution": False,
         "counterexample": {
             "authorized_projection": left_label,
             "acted_projection": right_label,
@@ -125,6 +131,9 @@ def evaluate_resource_binding_with_z3(ir: AssuranceIR, binding: ResourceBinding)
             "status": "pass",
             "reason": f"{left_label} and {right_label} terms are structurally identical",
             "counterexample": None,
+            "checker_id": "deterministic.resource_binding.v1",
+            "checker_version": "0.1.0",
+            "native_execution": False,
         }
 
     if left.kind == "literal" and right.kind == "literal":
@@ -142,6 +151,9 @@ def evaluate_resource_binding_with_z3(ir: AssuranceIR, binding: ResourceBinding)
             "status": "unknown",
             "reason": "z3-solver is not installed",
             "counterexample": None,
+            "checker_id": "z3",
+            "checker_version": None,
+            "native_execution": False,
         }
 
     symbols: dict[str, Any] = {}
@@ -155,6 +167,7 @@ def evaluate_resource_binding_with_z3(ir: AssuranceIR, binding: ResourceBinding)
     left_expr = encode(left)
     right_expr = encode(right)
 
+    checker_version = z3.get_version_string()
     solver = z3.Solver()
     solver.add(left_expr != right_expr)
     result = solver.check()
@@ -167,12 +180,18 @@ def evaluate_resource_binding_with_z3(ir: AssuranceIR, binding: ResourceBinding)
                 "in the v1 resource model"
             ),
             "counterexample": None,
+            "checker_id": "z3",
+            "checker_version": checker_version,
+            "native_execution": True,
         }
     if result == z3.unknown:
         return {
             "status": "unknown",
             "reason": solver.reason_unknown(),
             "counterexample": None,
+            "checker_id": "z3",
+            "checker_version": checker_version,
+            "native_execution": True,
         }
 
     model = solver.model()
@@ -184,6 +203,9 @@ def evaluate_resource_binding_with_z3(ir: AssuranceIR, binding: ResourceBinding)
     return {
         "status": "fail",
         "reason": "counterexample to required resource projection equality is satisfiable",
+        "checker_id": "z3",
+        "checker_version": checker_version,
+        "native_execution": True,
         "counterexample": {
             "relation": binding.relation,
             "authorized_projection": binding.authorized_projection,
