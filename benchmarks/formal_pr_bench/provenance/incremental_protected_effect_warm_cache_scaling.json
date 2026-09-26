@@ -1,0 +1,14 @@
+{
+  "schema_version": "formal_pr_bench.case_provenance.v1",
+  "case_id": "incremental_protected_effect_warm_cache_scaling",
+  "source": "authored synthetic development benchmark",
+  "source_repository": "fraware/open-verification-kernel",
+  "date": "2026-09-26",
+  "derivation": "authored_incremental_assurance_work_count_scaling",
+  "partition": "development",
+  "template_dev": true,
+  "fixture": "benchmarks/formal_pr_bench/incremental_assurance_v1/scaling_workloads.json",
+  "category": "incremental_assurance",
+  "contamination_risk": "low_authored_synthetic",
+  "notes": "Measures fresh checker work count under cold versus warm authenticated cache. Not a latency benchmark and not a protected holdout."
+}
