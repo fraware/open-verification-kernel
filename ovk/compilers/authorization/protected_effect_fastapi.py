@@ -10,7 +10,8 @@ Supported v1 pattern:
 - configured authorization calls with positional
   (principal, effect_name, resource) arguments;
 - configured protected sink calls whose resource is a positional argument;
-- straight-line handler bodies.
+- straight-line handler bodies;
+- repository-declared resource loader identity and scope semantics.
 
 Control-flow constructs, dynamic routes, non-literal guard effects, unresolved
 call signatures, and syntax errors are recorded as unsupported semantics.
@@ -20,6 +21,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass, field
+
 from ovk.compilers.authorization.base import normalize_path
 from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.core.assurance_ir import (
@@ -27,6 +29,8 @@ from ovk.core.assurance_ir import (
     AssuranceExtractorIdentity,
     AssuranceIR,
     AuthorizationGuard,
+    BindingProjection,
+    BindingRelation,
     EffectRef,
     PrincipalRef,
     ProtectedEffect,
@@ -46,6 +50,14 @@ _CONTROL_FLOW = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try, ast.Match, a
 
 
 @dataclass(frozen=True)
+class ResourceAlias:
+    """Modeled identity and scope for one local resource variable."""
+
+    identity_term: ResourceIdentityTerm | None = None
+    scope_term: ResourceIdentityTerm | None = None
+
+
+@dataclass(frozen=True)
 class ProtectedEffectProfile:
     """Repository-local extraction policy for the narrow FastAPI profile."""
 
@@ -56,7 +68,17 @@ class ProtectedEffectProfile:
     guard_effect_arg: int = 1
     guard_resource_arg: int = 2
     sink_resource_args: dict[str, int] = field(default_factory=dict)
+
+    # Loader semantics are explicit profile assumptions. A loader absent from
+    # these maps receives no modeled identity/scope semantics.
     resource_loader_identity_args: dict[str, int] = field(default_factory=dict)
+    resource_loader_scope_args: dict[str, int] = field(default_factory=dict)
+    resource_loader_unconstrained_scopes: frozenset[str] = frozenset()
+
+    # Per-sink binding semantics. Default is resource identity equality.
+    sink_binding_relations: dict[str, BindingRelation] = field(default_factory=dict)
+    sink_authorized_projections: dict[str, BindingProjection] = field(default_factory=dict)
+    sink_acted_projections: dict[str, BindingProjection] = field(default_factory=dict)
 
     def resource_arg_for_sink(self, sink_name: str) -> int:
         return int(self.sink_resource_args.get(sink_name, 0))
@@ -64,6 +86,22 @@ class ProtectedEffectProfile:
     def identity_arg_for_loader(self, loader_name: str) -> int | None:
         value = self.resource_loader_identity_args.get(loader_name)
         return None if value is None else int(value)
+
+    def scope_arg_for_loader(self, loader_name: str) -> int | None:
+        value = self.resource_loader_scope_args.get(loader_name)
+        return None if value is None else int(value)
+
+    def unconstrained_scope_for_loader(self, loader_name: str) -> bool:
+        return loader_name in self.resource_loader_unconstrained_scopes
+
+    def binding_relation_for_sink(self, sink_name: str) -> BindingRelation:
+        return self.sink_binding_relations.get(sink_name, "equal")
+
+    def authorized_projection_for_sink(self, sink_name: str) -> BindingProjection:
+        return self.sink_authorized_projections.get(sink_name, "identity")
+
+    def acted_projection_for_sink(self, sink_name: str) -> BindingProjection:
+        return self.sink_acted_projections.get(sink_name, "identity")
 
 
 def _name_of(node: ast.AST | None) -> str | None:
@@ -88,7 +126,7 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id=_SOURCE_PROFILE_ID,
-        extractor_version="0.1.0",
+        extractor_version="0.2.0",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -128,12 +166,15 @@ def _has_control_flow(handler: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     return any(isinstance(node, _CONTROL_FLOW) for statement in handler.body for node in ast.walk(statement))
 
 
-def _identity_term_for_expr(
+def _term_for_expr(
     node: ast.AST,
-    aliases: dict[str, ResourceIdentityTerm],
+    aliases: dict[str, ResourceAlias],
+    *,
+    projection: BindingProjection,
 ) -> ResourceIdentityTerm | None:
     if isinstance(node, ast.Name) and node.id in aliases:
-        return aliases[node.id]
+        alias = aliases[node.id]
+        return alias.identity_term if projection == "identity" else alias.scope_term
     if isinstance(node, ast.Constant) and isinstance(node.value, (str, int, bool)):
         return ResourceIdentityTerm.literal(str(node.value))
     if isinstance(node, (ast.Name, ast.Attribute, ast.Subscript)):
@@ -147,8 +188,8 @@ def _resource_aliases(
     *,
     path: str,
     unsupported: list[str],
-) -> dict[str, ResourceIdentityTerm]:
-    aliases: dict[str, ResourceIdentityTerm] = {}
+) -> dict[str, ResourceAlias]:
+    aliases: dict[str, ResourceAlias] = {}
 
     for statement in handler.body:
         target: ast.AST | None = None
@@ -167,26 +208,65 @@ def _resource_aliases(
             loader_name = _name_of(value.func)
             if loader_name is None:
                 continue
+
             identity_arg = profile.identity_arg_for_loader(loader_name)
-            if identity_arg is None:
+            scope_arg = profile.scope_arg_for_loader(loader_name)
+            unconstrained_scope = profile.unconstrained_scope_for_loader(loader_name)
+            if identity_arg is None and scope_arg is None and not unconstrained_scope:
                 continue
-            if len(value.args) <= identity_arg:
-                unsupported.append(
-                    f"{path}:{handler.name}:unsupported_resource_loader_signature:{loader_name}"
-                )
-                continue
-            identity_term = _identity_term_for_expr(value.args[identity_arg], aliases)
-            if identity_term is None:
-                unsupported.append(
-                    f"{path}:{handler.name}:unsupported_resource_identity_expression:{loader_name}"
-                )
-                continue
-            aliases[target.id] = identity_term
+
+            identity_term: ResourceIdentityTerm | None = None
+            scope_term: ResourceIdentityTerm | None = None
+
+            if identity_arg is not None:
+                if len(value.args) <= identity_arg:
+                    unsupported.append(
+                        f"{path}:{handler.name}:unsupported_resource_loader_identity_signature:{loader_name}"
+                    )
+                else:
+                    identity_term = _term_for_expr(
+                        value.args[identity_arg],
+                        aliases,
+                        projection="identity",
+                    )
+                    if identity_term is None:
+                        unsupported.append(
+                            f"{path}:{handler.name}:unsupported_resource_identity_expression:{loader_name}"
+                        )
+
+            if scope_arg is not None:
+                if len(value.args) <= scope_arg:
+                    unsupported.append(
+                        f"{path}:{handler.name}:unsupported_resource_loader_scope_signature:{loader_name}"
+                    )
+                else:
+                    scope_term = _term_for_expr(
+                        value.args[scope_arg],
+                        aliases,
+                        projection="identity",
+                    )
+                    if scope_term is None:
+                        unsupported.append(
+                            f"{path}:{handler.name}:unsupported_resource_scope_expression:{loader_name}"
+                        )
+            elif unconstrained_scope:
+                # This is an explicit over-approximation: the loader is declared
+                # capable of returning a resource from any scope.
+                scope_term = ResourceIdentityTerm.symbol(f"$scope:{target.id}")
+
+            aliases[target.id] = ResourceAlias(
+                identity_term=identity_term,
+                scope_term=scope_term,
+            )
             continue
 
-        identity_term = _identity_term_for_expr(value, aliases)
+        if isinstance(value, ast.Name) and value.id in aliases:
+            aliases[target.id] = aliases[value.id]
+            continue
+
+        identity_term = _term_for_expr(value, aliases, projection="identity")
         if identity_term is not None:
-            aliases[target.id] = identity_term
+            aliases[target.id] = ResourceAlias(identity_term=identity_term)
 
     return aliases
 
@@ -277,7 +357,10 @@ class FastApiProtectedEffectExtractor:
                     effect_id = _semantic_id("effect", effect_name)
                     guard_id = _semantic_id(
                         "guard",
-                        f"{path}:{handler.name}:{getattr(call, 'lineno', 0)}:{principal_symbol}:{effect_name}:{resource_symbol}",
+                        (
+                            f"{path}:{handler.name}:{getattr(call, 'lineno', 0)}:"
+                            f"{principal_symbol}:{effect_name}:{resource_symbol}"
+                        ),
                     )
 
                     principals.setdefault(
@@ -289,9 +372,15 @@ class FastApiProtectedEffectExtractor:
                             origin=_origin(path, call.args[profile.guard_principal_arg]),
                         ),
                     )
-                    guard_identity = _identity_term_for_expr(
+                    guard_identity = _term_for_expr(
                         call.args[profile.guard_resource_arg],
                         resource_aliases,
+                        projection="identity",
+                    )
+                    guard_scope = _term_for_expr(
+                        call.args[profile.guard_resource_arg],
+                        resource_aliases,
+                        projection="scope",
                     )
                     resources.setdefault(
                         guard_resource_id,
@@ -299,6 +388,7 @@ class FastApiProtectedEffectExtractor:
                             resource_id=guard_resource_id,
                             symbol=resource_symbol,
                             identity_term=guard_identity,
+                            scope_term=guard_scope,
                             origin=_origin(path, call.args[profile.guard_resource_arg]),
                         ),
                     )
@@ -334,9 +424,15 @@ class FastApiProtectedEffectExtractor:
                         f"{path}:{handler.name}:{sink_line}:{effect_name}:{resource_symbol}",
                     )
 
-                    acted_identity = _identity_term_for_expr(
+                    acted_identity = _term_for_expr(
                         call.args[resource_index],
                         resource_aliases,
+                        projection="identity",
+                    )
+                    acted_scope = _term_for_expr(
+                        call.args[resource_index],
+                        resource_aliases,
+                        projection="scope",
                     )
                     resources.setdefault(
                         acted_resource_id,
@@ -344,6 +440,7 @@ class FastApiProtectedEffectExtractor:
                             resource_id=acted_resource_id,
                             symbol=resource_symbol,
                             identity_term=acted_identity,
+                            scope_term=acted_scope,
                             origin=_origin(path, call.args[resource_index]),
                         ),
                     )
@@ -357,7 +454,6 @@ class FastApiProtectedEffectExtractor:
                     ]
                     matching_guard_ids = [record[1] for record in matching_guards]
 
-                    # Prefer the principal actually used by the latest matching guard.
                     effect_principal_id = principal_id
                     if matching_guards:
                         latest_guard = guards[matching_guards[-1][1]]
@@ -371,19 +467,34 @@ class FastApiProtectedEffectExtractor:
                         origin=_origin(path, call),
                     )
 
+                    relation = profile.binding_relation_for_sink(sink_name)
+                    authorized_projection = profile.authorized_projection_for_sink(sink_name)
+                    acted_projection = profile.acted_projection_for_sink(sink_name)
+
                     binding_ids: list[str] = []
                     for _, guard_id, _, authorized_resource_id in matching_guards:
-                        if authorized_resource_id == acted_resource_id:
+                        trivial_identity = (
+                            relation == "equal"
+                            and authorized_projection == "identity"
+                            and acted_projection == "identity"
+                            and authorized_resource_id == acted_resource_id
+                        )
+                        if trivial_identity:
                             continue
                         binding_id = _semantic_id(
                             "binding",
-                            f"{guard_id}:{authorized_resource_id}:{acted_resource_id}:equal",
+                            (
+                                f"{guard_id}:{authorized_resource_id}:{acted_resource_id}:"
+                                f"{relation}:{authorized_projection}:{acted_projection}"
+                            ),
                         )
                         bindings[binding_id] = ResourceBinding(
                             binding_id=binding_id,
                             authorized_resource_id=authorized_resource_id,
                             acted_resource_id=acted_resource_id,
-                            relation="equal",
+                            relation=relation,
+                            authorized_projection=authorized_projection,
+                            acted_projection=acted_projection,
                             origin=_origin(path, call),
                         )
                         binding_ids.append(binding_id)
@@ -415,7 +526,7 @@ class FastApiProtectedEffectExtractor:
             subject=subject,
             extractor=AssuranceExtractorIdentity(
                 extractor_id=_SOURCE_PROFILE_ID,
-                extractor_version="0.1.0",
+                extractor_version="0.2.0",
                 source_profile_id=_SOURCE_PROFILE_ID,
             ),
             coverage=AssuranceCoverage(
@@ -427,12 +538,15 @@ class FastApiProtectedEffectExtractor:
                     "configured_positional_authorization_call",
                     "configured_positional_protected_sink",
                     "declared_identity_preserving_resource_loader",
+                    "declared_scope_preserving_resource_loader",
+                    "declared_unconstrained_resource_scope",
                 ],
                 unsupported_constructs=sorted(set(unsupported)),
                 assumptions=[
                     "Configured guard functions are authorization decisions.",
                     "Configured sink functions faithfully identify protected effects.",
-                    "Configured resource loaders preserve resource identity through their declared key argument.",
+                    "Configured loader identity/scope semantics are trusted profile assumptions.",
+                    "Unconstrained loader scope is an explicit conservative over-approximation.",
                     "Lexical ordering is used only inside the straight-line v1 handler subset.",
                 ],
             ),
