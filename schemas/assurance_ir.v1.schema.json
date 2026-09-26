@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-verification-kernel.dev/schemas/assurance_ir.v1.schema.json",
+  "title": "OVK Assurance IR v1",
+  "description": "Descriptive semantic interchange object between source extraction and verification-obligation compilation.",
+  "type": "object",
+  "required": ["schema_version", "subject", "extractor", "coverage"],
+  "properties": {
+    "schema_version": {"const": "ovk.assurance_ir.v1"},
+    "subject": {"type": "object"},
+    "extractor": {
+      "type": "object",
+      "required": ["extractor_id", "extractor_version"],
+      "properties": {
+        "extractor_id": {"type": "string", "minLength": 1},
+        "extractor_version": {"type": "string", "minLength": 1},
+        "source_profile_id": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "coverage": {
+      "type": "object",
+      "required": ["status", "confidence"],
+      "properties": {
+        "status": {"enum": ["complete", "partial", "unknown", "inapplicable"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "supported_constructs": {"type": "array", "items": {"type": "string"}},
+        "unsupported_constructs": {"type": "array", "items": {"type": "string"}},
+        "assumptions": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "principals": {"type": "array"},
+    "resources": {"type": "array"},
+    "effects": {"type": "array"},
+    "conditions": {"type": "array"},
+    "guards": {"type": "array"},
+    "protected_effects": {"type": "array"},
+    "resource_bindings": {"type": "array"},
+    "paths": {"type": "array"},
+    "claims": {"type": "array"},
+    "assumptions": {"type": "object", "additionalProperties": {"type": "string"}}
+  },
+  "additionalProperties": false
+}
