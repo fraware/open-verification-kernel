@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from ovk.adapters.authorization.deterministic_adapter import AuthorizationDeterministicAdapter
 from ovk.adapters.authorization.z3_adapter import Z3NativeAuthorizationAdapter
 from ovk.compilers.authorization.fastapi_semantic import (
@@ -14,7 +16,6 @@ from ovk.compilers.authorization.fastapi_semantic import (
 from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.core.deterministic_evaluators import evaluate_deterministic
 from ovk.core.execution_models import ExecutionContext
-from ovk.core.models import VerificationStatus
 from ovk.core.protected_effect_integrity import compile_protected_effect_integrity
 
 
@@ -174,8 +175,13 @@ def refund(user = Depends(current_user)):
     issue_refund(invoice)
 """
     )
-    # The isolated evaluator contract is tested directly above. Here we also
-    # assert the adapter's normalized semantics stay fail-closed for unknowns.
     adapter = AuthorizationDeterministicAdapter()
+    backend_obligation = adapter.compile(
+        obligation,
+        SimpleNamespace(routing_id="routing-test"),  # type: ignore[arg-type]
+    )
+
     assert "protected_effect_integrity" in adapter.manifest().supported_property_kinds
-    assert VerificationStatus.UNKNOWN.value == "unknown"
+    assert backend_obligation.payload["property_kind"] == "protected_effect_integrity"
+    assert backend_obligation.payload["coverage"]["status"] == "complete"
+    assert backend_obligation.payload["input"]["kind"] == "protected_effect_integrity"
