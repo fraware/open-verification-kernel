@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ovk.core.bundle import content_digest
 from ovk.core.models import SourceRange, VerificationSubject
@@ -18,7 +18,6 @@ from ovk.core.models import SourceRange, VerificationSubject
 CoverageStatus = Literal["complete", "partial", "unknown", "inapplicable"]
 PrincipalKind = Literal["human", "service", "agent", "anonymous", "unknown"]
 ClaimOrigin = Literal["human", "repository", "policy", "imported", "ai_candidate"]
-ApprovalStatus = Literal["approved", "candidate", "rejected", "unknown"]
 BindingKind = Literal["principal", "effect", "resource"]
 BindingRelation = Literal["equal", "derived_equal", "distinct", "unknown"]
 
@@ -139,11 +138,18 @@ class SemanticPath(BaseModel):
 
 
 class AssuranceClaim(BaseModel):
+    """Semantic claim candidate.
+
+    Approval is intentionally absent. Repository/PR-controlled claim content
+    cannot authorize itself; trusted approval is separate external evidence.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     claim_id: str
     property_kind: str
     statement: str
     origin: ClaimOrigin
-    approval_status: ApprovalStatus = "candidate"
     semantic_refs: list[str] = Field(default_factory=list)
     acceptable_guarantees: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
