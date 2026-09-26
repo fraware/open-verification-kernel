@@ -195,6 +195,8 @@ def protected_effect_evidence_reuse_decision(
         return EvidenceReuseDecision(reusable=False, reason="unsupported_evidence_schema")
     if not verify_evidence_digest(evidence):
         return EvidenceReuseDecision(reusable=False, reason="invalid_evidence_digest")
+    if evidence.signature is None:
+        return EvidenceReuseDecision(reusable=False, reason="unsigned_evidence")
     if not verify_evidence_signature(evidence, key=signing_key):
         return EvidenceReuseDecision(reusable=False, reason="invalid_evidence_signature")
 
