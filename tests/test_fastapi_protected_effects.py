@@ -12,6 +12,7 @@ PROFILE = ProtectedEffectProfile(
     sink_effects={"issue_refund": "billing.invoice.refund"},
     principal_parameter="user",
     guard_functions=frozenset({"authorize"}),
+    resource_loader_identity_args={"load_invoice": 0},
 )
 
 
@@ -131,3 +132,46 @@ def refund(invoice_id: str, user, action: str):
     assert ir.coverage.status == "partial"
     assert len(ir.guards) == 0
     assert any("dynamic_guard_effect" in item for item in ir.coverage.unsupported_constructs)
+
+
+
+def test_declared_loader_projects_resource_identity_from_key() -> None:
+    source = """
+from fastapi import FastAPI
+app = FastAPI()
+
+@app.post("/invoices/{invoice_id}/refund")
+def refund(invoice_id: str, user):
+    invoice = load_invoice(invoice_id)
+    authorize(user, "billing.invoice.refund", invoice)
+    issue_refund(invoice)
+""".strip()
+
+    ir = _compile(source)
+    invoice = next(resource for resource in ir.resources if resource.symbol == "invoice")
+
+    assert invoice.identity_term is not None
+    assert invoice.identity_term.kind == "symbol"
+    assert invoice.identity_term.value == "invoice_id"
+
+
+def test_distinct_loader_keys_are_preserved_as_distinct_identity_terms() -> None:
+    source = """
+from fastapi import FastAPI
+app = FastAPI()
+
+@app.post("/invoices/{invoice_id}/refund")
+def refund(invoice_id: str, user, other_invoice_id: str):
+    invoice = load_invoice(invoice_id)
+    other_invoice = load_invoice(other_invoice_id)
+    authorize(user, "billing.invoice.refund", invoice)
+    issue_refund(other_invoice)
+""".strip()
+
+    ir = _compile(source)
+    by_symbol = {resource.symbol: resource for resource in ir.resources}
+
+    assert by_symbol["invoice"].identity_term is not None
+    assert by_symbol["other_invoice"].identity_term is not None
+    assert by_symbol["invoice"].identity_term.value == "invoice_id"
+    assert by_symbol["other_invoice"].identity_term.value == "other_invoice_id"
