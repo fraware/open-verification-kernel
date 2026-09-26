@@ -391,7 +391,7 @@ class FastApiDependencyEffectExtractor:
                                     f"{path}:{handler.name}:unsupported_contract_scope_expression:"
                                     f"{expected_contract_name}"
                                 )
-                    else:
+                    elif expected_contract_name is None:
                         scope_keyword = profile.scope_keyword(sink_key)
                         if scope_keyword is not None:
                             scope_node = _keyword_value(call, scope_keyword)
