@@ -255,3 +255,28 @@ def plan_incremental_assurance(
         contract_affected_effects=sorted(contract_affected),
         reverify_reasons=reasons,
     )
+
+
+
+def evaluate_incremental_reverification(
+    head: AssuranceIR,
+    plan: IncrementalAssurancePlan,
+):
+    """Evaluate only effects selected by a plan bound to this exact head IR.
+
+    This executes fresh semantic verification for reverify_effects. It does not
+    load or bless cached evidence for semantic_reuse_candidates.
+    """
+
+    if head.assurance_ir_digest != plan.head_assurance_ir_digest:
+        raise ValueError(
+            "incremental assurance plan head digest does not match supplied Assurance IR"
+        )
+
+    # Local import avoids coupling contract-impact construction to solver modules.
+    from ovk.core.protected_effect_evaluation import evaluate_protected_effect_integrity
+
+    return evaluate_protected_effect_integrity(
+        head,
+        protected_effect_ids=plan.reverify_effects,
+    )
