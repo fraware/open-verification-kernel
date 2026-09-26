@@ -16,6 +16,11 @@ from ovk.core.contract_impact import (
     compute_contract_impact,
     diff_function_contracts,
 )
+from ovk.compilers.authorization.material_loader import AuthMaterials
+from ovk.compilers.authorization.protected_effect_fastapi_dependency import (
+    FastApiDependencyEffectExtractor,
+    FastApiDependencyEffectProfile,
+)
 from ovk.core.models import VerificationSubject
 
 
@@ -241,3 +246,88 @@ def test_version_change_propagates_through_composed_contract_graph() -> None:
     ]
     assert impact.affected_contract_uses == ["use:agent"]
     assert impact.affected_protected_effects == ["effect:agent-read"]
+
+
+
+def test_extractor_records_composed_dependency_and_exact_route_impact() -> None:
+    route_source = """
+from fastapi import Depends, FastAPI
+app = FastAPI()
+
+@app.get("/workspaces/{workspace_id}/agents/{agent_id}")
+async def get_agent(
+    workspace_id: str,
+    agent_id: str,
+    user = Depends(require_workspace_member),
+):
+    svc = AgentService()
+    agent = await svc.get(agent_id, workspace_id=workspace_id)
+    return agent
+""".strip()
+    service_source = """
+class AgentRepository:
+    async def get(self, agent_id: str, *, workspace_id: str | None = None):
+        agent = await load_agent(agent_id)
+        if workspace_id is not None and agent.workspace_id != workspace_id:
+            return None
+        return agent
+
+class AgentService:
+    def __init__(self):
+        self._repo = AgentRepository()
+
+    async def get(self, agent_id: str, *, workspace_id: str | None = None):
+        return await self._repo.get(agent_id, workspace_id=workspace_id)
+""".strip()
+    materials = AuthMaterials(
+        base_files={
+            "routes/agents.py": route_source,
+            "services/agent_service.py": service_source,
+        },
+        head_files={
+            "routes/agents.py": route_source,
+            "services/agent_service.py": service_source,
+        },
+        repo="example/platform",
+        base_revision="base",
+        head_revision="head",
+    )
+    profile = FastApiDependencyEffectProfile(
+        sink_effects={"svc.get": "workspace.agent.read"},
+        sink_identity_args={"svc.get": 0},
+        sink_contracts={"svc.get": "AgentService.get"},
+        sink_contract_scope_attributes={"svc.get": "workspace_id"},
+        dependency_guard_resources={"require_workspace_member": "workspace_id"},
+        dependency_guard_effects={
+            "require_workspace_member": ("workspace.agent.read",),
+        },
+        principal_parameter="user",
+    )
+
+    ir = FastApiDependencyEffectExtractor().compile(materials, profile)
+    by_name = {contract.qualified_name: contract for contract in ir.function_contracts}
+
+    assert by_name["AgentRepository.get"].derivation == "direct"
+    assert by_name["AgentRepository.get"].depends_on == []
+    assert by_name["AgentService.get"].derivation == "composed"
+    assert by_name["AgentService.get"].depends_on == ["AgentRepository.get"]
+
+    assert len(ir.contract_uses) == 1
+    use = ir.contract_uses[0]
+    assert use.qualified_name == "AgentService.get"
+    assert use.contract_id == by_name["AgentService.get"].contract_id
+    assert use.established_attributes == ["workspace_id"]
+
+    path = ir.paths[0]
+    assert path.contract_use_ids == [use.use_id]
+
+    impact = compute_contract_impact(ir, ["AgentRepository.get"])
+
+    assert impact.affected_contracts == [
+        "AgentRepository.get",
+        "AgentService.get",
+    ]
+    assert impact.affected_contract_uses == [use.use_id]
+    assert impact.affected_paths == [path.path_id]
+    assert impact.affected_protected_effects == path.protected_effect_ids
+    assert impact.affected_bindings == path.binding_ids
