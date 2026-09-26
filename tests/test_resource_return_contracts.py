@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 from ovk.compilers.authorization.material_loader import materials_from_pair
+from ovk.compilers.authorization.python_ast_index import (
+    parse_head_python_materials,
+)
 from ovk.compilers.authorization.resource_return_contracts import (
+    build_contract_summary_index,
+    compose_function_contracts,
+    contract_summary_index_matches_materials,
     infer_function_contracts,
     infer_resource_return_contracts,
 )
@@ -322,3 +328,194 @@ class DocumentService:
 
     assert "DocumentRepository.get" in names
     assert "DocumentService.get" not in names
+
+
+
+def test_contract_summary_index_reuses_unchanged_files() -> None:
+    source_a = """
+class AgentRepository:
+    async def get(self, agent_id: str, *, workspace_id: str | None = None):
+        agent = await load_agent(agent_id)
+        if workspace_id is not None and agent.workspace_id != workspace_id:
+            return None
+        return agent
+""".strip()
+    source_b = """
+class AgentService:
+    def __init__(self):
+        self._repo = AgentRepository()
+
+    async def get(self, agent_id: str, *, workspace_id: str | None = None):
+        return await self._repo.get(agent_id, workspace_id=workspace_id)
+""".strip()
+    source_c = "VALUE = 1"
+
+    base = AuthMaterials(
+        head_files={
+            "repository.py": source_a,
+            "service.py": source_b,
+            "unrelated.py": source_c,
+        }
+    )
+    base_parsed = parse_head_python_materials(base)
+    base_summaries = build_contract_summary_index(
+        base,
+        parsed_trees=base_parsed.trees,
+        source_digests=base_parsed.source_digests,
+    )
+
+    head = AuthMaterials(
+        base_files=dict(base.head_files),
+        head_files={
+            "repository.py": source_a,
+            "service.py": source_b,
+            "unrelated.py": "VALUE = 2",
+        },
+    )
+    head_parsed = parse_head_python_materials(
+        head,
+        reuse_from=base_parsed,
+    )
+    head_summaries = build_contract_summary_index(
+        head,
+        parsed_trees=head_parsed.trees,
+        source_digests=head_parsed.source_digests,
+        reuse_from=base_summaries,
+    )
+
+    assert base_summaries.fresh_summary_count == 3
+    assert base_summaries.reused_summary_count == 0
+    assert head_summaries.fresh_summary_count == 1
+    assert head_summaries.reused_summary_count == 2
+    assert contract_summary_index_matches_materials(head_summaries, head)
+    assert (
+        head_summaries.summaries["repository.py"]
+        is base_summaries.summaries["repository.py"]
+    )
+    assert (
+        head_summaries.summaries["service.py"]
+        is base_summaries.summaries["service.py"]
+    )
+
+
+def test_reused_wrapper_summary_recomposes_against_changed_callee() -> None:
+    secure_repository = """
+class AgentRepository:
+    async def get(self, agent_id: str, *, workspace_id: str | None = None):
+        agent = await load_agent(agent_id)
+        if workspace_id is not None and agent.workspace_id != workspace_id:
+            return None
+        return agent
+""".strip()
+    changed_repository = secure_repository.replace(
+        "agent.workspace_id != workspace_id",
+        "agent.tenant_id != workspace_id",
+    )
+    service = """
+class AgentService:
+    def __init__(self):
+        self._repo = AgentRepository()
+
+    async def get(self, agent_id: str, *, workspace_id: str | None = None):
+        return await self._repo.get(agent_id, workspace_id=workspace_id)
+""".strip()
+
+    base = AuthMaterials(
+        head_files={
+            "repository.py": secure_repository,
+            "service.py": service,
+        }
+    )
+    base_parsed = parse_head_python_materials(base)
+    base_summaries = build_contract_summary_index(
+        base,
+        parsed_trees=base_parsed.trees,
+        source_digests=base_parsed.source_digests,
+    )
+    base_contracts = {
+        item.qualified_name: item
+        for item in compose_function_contracts(base_summaries)
+    }
+
+    head = AuthMaterials(
+        base_files=dict(base.head_files),
+        head_files={
+            "repository.py": changed_repository,
+            "service.py": service,
+        },
+    )
+    head_parsed = parse_head_python_materials(
+        head,
+        reuse_from=base_parsed,
+    )
+    head_summaries = build_contract_summary_index(
+        head,
+        parsed_trees=head_parsed.trees,
+        source_digests=head_parsed.source_digests,
+        reuse_from=base_summaries,
+    )
+    head_contracts = {
+        item.qualified_name: item
+        for item in compose_function_contracts(head_summaries)
+    }
+
+    assert head_summaries.fresh_summary_count == 1
+    assert head_summaries.reused_summary_count == 1
+    assert (
+        head_summaries.summaries["service.py"]
+        is base_summaries.summaries["service.py"]
+    )
+
+    assert (
+        base_contracts["AgentRepository.get"].contract_id
+        != head_contracts["AgentRepository.get"].contract_id
+    )
+    assert (
+        base_contracts["AgentService.get"].contract_id
+        != head_contracts["AgentService.get"].contract_id
+    )
+    assert head_contracts["AgentService.get"].depends_on == ["AgentRepository.get"]
+
+    post = head_contracts["AgentService.get"].postconditions[0]
+    assert post.left.name == "tenant_id"
+    assert post.right is not None
+    assert post.right.name == "workspace_id"
+
+
+def test_summary_composition_matches_inference_api() -> None:
+    source = """
+class DocumentRepository:
+    async def get(self, document_id: str, *, project_id: str):
+        document = await load_document(document_id)
+        if document.project_id != project_id:
+            return None
+        return document
+
+class DocumentService:
+    def __init__(self):
+        self._repo = DocumentRepository()
+
+    async def get(self, document_id: str, *, parent_project_id: str):
+        return await self._repo.get(document_id, project_id=parent_project_id)
+""".strip()
+    materials = _materials(source)
+    parsed = parse_head_python_materials(materials)
+    summaries = build_contract_summary_index(
+        materials,
+        parsed_trees=parsed.trees,
+        source_digests=parsed.source_digests,
+    )
+
+    from_summary = compose_function_contracts(summaries)
+    from_api = infer_function_contracts(
+        materials,
+        summary_index=summaries,
+    )
+
+    assert [
+        item.model_dump(mode="json")
+        for item in from_summary
+    ] == [
+        item.model_dump(mode="json")
+        for item in from_api
+    ]
