@@ -494,7 +494,6 @@ def test_signed_evidence_reuse_requires_correct_signature_key() -> None:
         protected_effect_id="pe:refund",
         policy_digest="policy-a",
         current_runtime_fingerprint=fingerprint.runtime_fingerprint,
-        signature_key=TEST_SIGNING_KEY,
         reuse_policy=ProtectedEffectReusePolicy(require_signature=True),
         signature_key=signing_key,
     )
@@ -506,7 +505,6 @@ def test_signed_evidence_reuse_requires_correct_signature_key() -> None:
         protected_effect_id="pe:refund",
         policy_digest="policy-a",
         current_runtime_fingerprint=fingerprint.runtime_fingerprint,
-        signature_key=TEST_SIGNING_KEY,
         reuse_policy=ProtectedEffectReusePolicy(require_signature=True),
         signature_key=b"wrong-key",
     )
