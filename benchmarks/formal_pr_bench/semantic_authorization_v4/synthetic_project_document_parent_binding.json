@@ -1,0 +1,54 @@
+{
+  "schema_version": "formal_pr_bench.semantic_authorization.v4",
+  "case_id": "synthetic_project_document_parent_binding",
+  "category": "semantic_authorization",
+  "framework": "fastapi",
+  "provenance_id": "synthetic_project_document_parent_binding",
+  "public_contamination_risk": "low_authored_synthetic",
+  "property": "authorized project identity must equal returned document.project_id",
+  "profile": {
+    "sink_effects": {
+      "svc.get": "project.document.read"
+    },
+    "sink_identity_args": {
+      "svc.get": 0
+    },
+    "sink_contracts": {
+      "svc.get": "DocumentService.get"
+    },
+    "sink_binding_relations": {
+      "svc.get": "equal"
+    },
+    "sink_binding_authorized_projections": {
+      "svc.get": "identity"
+    },
+    "sink_binding_acted_projections": {
+      "svc.get": "attribute"
+    },
+    "sink_binding_acted_attributes": {
+      "svc.get": "project_id"
+    },
+    "dependency_guard_resources": {
+      "require_project_member": "project_id"
+    },
+    "dependency_guard_effects": {
+      "require_project_member": [
+        "project.document.read"
+      ]
+    },
+    "principal_parameter": "user"
+  },
+  "service_source": "class DocumentService:\n    async def get(self, document_id: str, *, project_id: str):\n        document = await load_document(document_id)\n        if document.project_id != project_id:\n            return None\n        return document\n",
+  "variants": [
+    {
+      "id": "secure_parent_binding",
+      "route_source": "from fastapi import Depends, FastAPI\napp = FastAPI()\n\n@app.get(\"/projects/{project_id}/documents/{document_id}\")\nasync def get_document(\n    project_id: str,\n    document_id: str,\n    user = Depends(require_project_member),\n):\n    svc = DocumentService()\n    document = await svc.get(document_id, project_id=project_id)\n    return document\n",
+      "expected_semantic_status": "pass"
+    },
+    {
+      "id": "wrong_parent_argument",
+      "route_source": "from fastapi import Depends, FastAPI\napp = FastAPI()\n\n@app.get(\"/projects/{project_id}/documents/{document_id}\")\nasync def get_document(\n    project_id: str,\n    other_project_id: str,\n    document_id: str,\n    user = Depends(require_project_member),\n):\n    svc = DocumentService()\n    document = await svc.get(document_id, project_id=other_project_id)\n    return document\n",
+      "expected_semantic_status": "fail_when_z3_available"
+    }
+  ]
+}

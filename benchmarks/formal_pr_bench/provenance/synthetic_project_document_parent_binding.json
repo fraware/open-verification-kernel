@@ -1,0 +1,14 @@
+{
+  "schema_version": "formal_pr_bench.case_provenance.v1",
+  "case_id": "synthetic_project_document_parent_binding",
+  "source": "authored synthetic development case",
+  "source_repository": "fraware/open-verification-kernel",
+  "date": "2026-09-26",
+  "derivation": "authored_synthetic_contract_calculus_regression",
+  "partition": "development",
+  "template_dev": true,
+  "fixture": "benchmarks/formal_pr_bench/semantic_authorization_v4/synthetic_project_document_parent_binding.json",
+  "category": "semantic_authorization",
+  "contamination_risk": "low_authored_synthetic",
+  "notes": "Development regression for generic return-attribute contract composition. Not held out."
+}
