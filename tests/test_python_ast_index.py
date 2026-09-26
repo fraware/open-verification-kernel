@@ -14,6 +14,7 @@ from ovk.compilers.authorization.python_ast_index import (
     parsed_index_matches_materials,
 )
 from ovk.compilers.authorization.resource_return_contracts import (
+    build_contract_summary_index,
     infer_function_contracts,
 )
 
@@ -214,3 +215,59 @@ def test_unchanged_syntax_error_is_reused_without_reparse() -> None:
     assert head_index.parse_count == 1
     assert head_index.reused_count == 1
     assert "bad.py" in head_index.syntax_errors
+
+
+
+def test_compiler_accepts_matching_contract_summary_index() -> None:
+    materials = _materials()
+    parsed = parse_head_python_materials(materials)
+    summaries = build_contract_summary_index(
+        materials,
+        parsed_trees=parsed.trees,
+        source_digests=parsed.source_digests,
+    )
+
+    ir = FastApiDependencyEffectExtractor().compile(
+        materials,
+        _profile(),
+        parsed_index=parsed,
+        contract_summary_index=summaries,
+    )
+
+    assert ir.coverage.status == "complete"
+    assert len(ir.function_contracts) == 1
+
+
+def test_compiler_rejects_stale_contract_summary_index() -> None:
+    materials = _materials()
+    parsed = parse_head_python_materials(materials)
+    summaries = build_contract_summary_index(
+        materials,
+        parsed_trees=parsed.trees,
+        source_digests=parsed.source_digests,
+    )
+
+    changed_files = dict(materials.head_files)
+    changed_files["service.py"] = changed_files["service.py"].replace(
+        "agent.workspace_id != workspace_id",
+        "agent.tenant_id != workspace_id",
+    )
+    changed = AuthMaterials(
+        base_files=dict(materials.base_files),
+        head_files=changed_files,
+        repo=materials.repo,
+        base_revision=materials.base_revision,
+        head_revision="different-head",
+    )
+    changed_parsed = parse_head_python_materials(
+        changed,
+        reuse_from=parsed,
+    )
+
+    with pytest.raises(ValueError, match="contract summary index does not match"):
+        FastApiDependencyEffectExtractor().compile(
+            changed,
+            _profile(),
+            parsed_index=changed_parsed,
+            contract_summary_index=summaries,
+        )
