@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from datetime import datetime
+
+from pydantic import BaseModel, Field
 
 from ovk.core.bundle import content_digest
 from ovk.core.evidence_integrity import (
@@ -31,6 +33,9 @@ class EvidenceReuseContext(BaseModel):
     policy_digest: str
     configuration_digest: str
     accepted_guarantee: str = PE_GUARANTEE
+    now_iso: str | None = None
+    max_age_seconds: int | None = None
+    revoked_evidence_ids: list[str] = Field(default_factory=list)
 
 
 class EvidenceReuseDecision(BaseModel):
@@ -181,6 +186,10 @@ def _artifact(evidence: VerificationEvidence, kind: str) -> dict | None:
     return matches[0] if len(matches) == 1 else None
 
 
+def _parse_iso(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
 def protected_effect_evidence_reuse_decision(
     evidence: VerificationEvidence,
     context: EvidenceReuseContext,
@@ -191,6 +200,19 @@ def protected_effect_evidence_reuse_decision(
 
     if evidence.schema_version != "ovk.evidence.v3":
         return EvidenceReuseDecision(reusable=False, reason="unsupported_evidence_schema")
+    if evidence.evidence_id in set(context.revoked_evidence_ids):
+        return EvidenceReuseDecision(reusable=False, reason="evidence_revoked")
+    if context.max_age_seconds is not None:
+        if context.max_age_seconds < 0 or context.now_iso is None or evidence.completed_at is None:
+            return EvidenceReuseDecision(reusable=False, reason="freshness_context_incomplete")
+        try:
+            age = (_parse_iso(context.now_iso) - _parse_iso(evidence.completed_at)).total_seconds()
+        except ValueError:
+            return EvidenceReuseDecision(reusable=False, reason="freshness_timestamp_invalid")
+        if age < 0:
+            return EvidenceReuseDecision(reusable=False, reason="evidence_from_future")
+        if age > context.max_age_seconds:
+            return EvidenceReuseDecision(reusable=False, reason="evidence_expired")
     if not verify_evidence_digest(evidence):
         return EvidenceReuseDecision(reusable=False, reason="invalid_evidence_digest")
     if evidence.signature is None:
