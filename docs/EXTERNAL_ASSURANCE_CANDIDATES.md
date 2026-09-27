@@ -111,3 +111,52 @@ A candidate must not be changed from unsupported_semantics to supported_now by
 declaring a convenient but unsound source-profile mapping. The status changes
 only after the general source semantics have been extended and validated as a
 reusable capability.
+
+## Second pre-implementation triage round
+
+The second round is frozen in:
+
+    benchmarks/assurance_qualification/external_candidates.round2.v1.json
+
+It was reviewed against OVK revision:
+
+    7f6d38d103625f4d33d8942e4b0b10565a6af3e1
+
+That revision is the head of the protected-effect-local-coverage work. The round
+was committed before any source-semantic implementation motivated by these
+candidates.
+
+The six candidates deliberately span different mechanisms:
+
+- Apache Airflow backfill authorization/execution parser disagreement;
+- Open WebUI request-controlled authorization bypass;
+- flyto-core missing FastAPI route-decorator authentication;
+- fastapi-users OAuth state/session correlation;
+- fastapi-sso OAuth state/session correlation; and
+- MLflow job endpoints with a public vulnerability report but no public patched
+  transition.
+
+Under the frozen revision, the five semantically classifiable candidates contain
+zero supported_now cases:
+
+    supported_now                  0
+    unsupported_semantics          3
+    requires_new_guarantee_family  2
+    insufficient_public_evidence   1
+
+Thus second-round representational coverage is 0 / 5.
+
+This is a negative product result, not a benchmark failure to be edited away.
+Any subsequent semantic extension can be evaluated against this frozen starting
+point. The round must remain immutable once implementation work starts.
+
+The two OAuth cases expose a separate boundary: their security claims relate an
+authorization initiation event, browser/session state, and a later callback.
+They require a temporal correspondence guarantee rather than an expansion of
+protected_effect_integrity_v1.
+
+The Airflow, Open WebUI, and flyto-core cases remain inside the intended
+Protected Effect product scope, while exposing missing source semantics:
+interpretation equivalence, trusted-origin/taint-sensitive guard reasoning, and
+route-decorator dependency mediation respectively.
+
