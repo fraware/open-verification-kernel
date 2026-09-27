@@ -23,9 +23,12 @@ from __future__ import annotations
 import json
 import math
 import os
+import platform
 import statistics
 import subprocess
+import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Literal
@@ -158,6 +161,9 @@ class AssuranceQualificationReport(BaseModel):
     )
     suite_id: str
     ovk_version: str
+    collected_at: str
+    source_revision: str | None = None
+    execution_environment: dict[str, Any]
     cases_total: int = Field(ge=1)
     results: list[AssuranceQualificationCaseResult]
     metrics: AssuranceQualificationMetrics
@@ -554,6 +560,52 @@ def _qualification_status(
     )
 
 
+
+def _collected_at() -> str:
+    return (
+        datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def _source_revision() -> str | None:
+    env_sha = os.environ.get("GITHUB_SHA", "").strip()
+    if env_sha:
+        return env_sha
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    value = completed.stdout.strip()
+    return value or None
+
+
+def _execution_environment() -> dict[str, Any]:
+    try:
+        import z3  # type: ignore
+
+        z3_version: str | None = z3.get_version_string()
+    except Exception:
+        z3_version = None
+    return {
+        "python_version": sys.version.split()[0],
+        "platform": platform.platform(),
+        "z3_version": z3_version,
+        "runner_os": os.environ.get("RUNNER_OS"),
+        "timing_scope": "end_to_end_run_check",
+    }
+
+
 def build_assurance_qualification_report(
     suite: AssuranceQualificationSuite,
     results: list[AssuranceQualificationCaseResult],
@@ -675,6 +727,9 @@ def build_assurance_qualification_report(
     report = AssuranceQualificationReport(
         suite_id=suite.suite_id,
         ovk_version=OVK_VERSION,
+        collected_at=_collected_at(),
+        source_revision=_source_revision(),
+        execution_environment=_execution_environment(),
         cases_total=len(results),
         results=results,
         metrics=metrics,
