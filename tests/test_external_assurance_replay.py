@@ -125,6 +125,7 @@ def _case(tmp_path: Path) -> ExternalAssuranceReplayCase:
         case_id="local-external-regression",
         repository="external/fixture",
         repository_url=repo.resolve().as_uri(),
+        validation_class="public_upstream_reduction",
         base_sha=base_sha,
         head_sha=head_sha,
         safety_label="unsafe",
@@ -132,6 +133,7 @@ def _case(tmp_path: Path) -> ExternalAssuranceReplayCase:
         guarantee_manifest=_manifest(),
         protected_effect_profile=_profile(),
         provenance={
+            "contamination_status": "public_development_case",
             "adjudication_kind": "public_security_advisory",
             "references": ["https://example.invalid/advisory"],
         },
@@ -160,7 +162,7 @@ def test_external_replay_fetches_pinned_materials_and_uses_common_scorer(
     )
 
     qualification = result.qualification_result
-    assert qualification.validation_class == "independent_external"
+    assert qualification.validation_class == "public_upstream_reduction"
     assert qualification.safety_label == "unsafe"
     assert qualification.assurance_available is True
     assert qualification.head_established is False
@@ -193,6 +195,7 @@ def test_public_provenance_cannot_claim_measured_human_minutes() -> None:
             case_id="invalid-human-time",
             repository="owner/repo",
             repository_url="https://github.com/owner/repo.git",
+            validation_class="public_upstream_reduction",
             base_sha="a" * 40,
             head_sha="b" * 40,
             safety_label="safe",
@@ -200,6 +203,7 @@ def test_public_provenance_cannot_claim_measured_human_minutes() -> None:
             guarantee_manifest=_manifest(),
             protected_effect_profile=_profile(),
             provenance={
+                "contamination_status": "public_development_case",
                 "adjudication_kind": "public_merged_fix",
                 "references": ["https://github.com/owner/repo/pull/1"],
             },
@@ -224,6 +228,7 @@ def test_qualification_human_review_requires_explicit_human_flag() -> None:
             guarantee_manifest=_manifest(),
             protected_effect_profile=_profile(),
             provenance={
+                "contamination_status": "public_development_case",
                 "adjudication_kind": "qualification_human_review",
                 "references": ["review-ledger:1"],
             },
@@ -236,6 +241,7 @@ def test_production_url_must_match_declared_repository(tmp_path: Path) -> None:
         case_id="url-mismatch",
         repository="owner/repo",
         repository_url="https://github.com/other/repo.git",
+        validation_class="public_upstream_reduction",
         base_sha="a" * 40,
         head_sha="b" * 40,
         safety_label="unsafe",
@@ -243,6 +249,7 @@ def test_production_url_must_match_declared_repository(tmp_path: Path) -> None:
         guarantee_manifest=_manifest(),
         protected_effect_profile=_profile(),
         provenance={
+            "contamination_status": "public_development_case",
             "adjudication_kind": "public_issue",
             "references": ["https://github.com/other/repo/issues/1"],
         },
@@ -250,3 +257,52 @@ def test_production_url_must_match_declared_repository(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="does not match"):
         replay_external_assurance_case(case)
+
+
+def test_independent_external_requires_held_out_contamination_status() -> None:
+    with pytest.raises(ValueError, match="held_out_independent"):
+        ExternalAssuranceReplayCase(
+            case_id="misclassified-independent",
+            repository="owner/repo",
+            repository_url="https://github.com/owner/repo.git",
+            validation_class="independent_external",
+            base_sha="a" * 40,
+            head_sha="b" * 40,
+            safety_label="unsafe",
+            expected_head_assurance="not_established",
+            guarantee_manifest=_manifest(),
+            protected_effect_profile=_profile(),
+            provenance={
+                "contamination_status": "public_development_case",
+                "adjudication_kind": "public_issue",
+                "references": ["https://github.com/owner/repo/issues/1"],
+            },
+        )
+
+
+def test_held_out_external_projects_to_independent_evidence_class(
+    tmp_path: Path,
+) -> None:
+    case = _case(tmp_path).model_copy(
+        update={
+            "validation_class": "independent_external",
+            "provenance": {
+                "contamination_status": "held_out_independent",
+                "adjudication_kind": "public_security_advisory",
+                "references": ["https://example.invalid/held-out-advisory"],
+            },
+        }
+    )
+    # Revalidate after model_copy because Pydantic model_copy does not rerun
+    # model validators.
+    case = ExternalAssuranceReplayCase.model_validate(
+        case.model_dump(mode="json")
+    )
+    result = replay_external_assurance_case(
+        case,
+        allow_local_file_urls=True,
+    )
+    assert (
+        result.qualification_result.validation_class
+        == "independent_external"
+    )
