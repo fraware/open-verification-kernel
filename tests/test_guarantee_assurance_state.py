@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
-
 from ovk.core.assurance_ir import (
     AssuranceCoverage,
     AssuranceExtractorIdentity,
