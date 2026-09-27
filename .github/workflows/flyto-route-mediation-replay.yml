@@ -64,7 +64,9 @@ jobs:
           # effectiveness (and its startup invariants) are not yet proved.
           assert repaired["expectation_met"] is False
           assert repaired["head_established"] is False
-          assert repaired["semantic_coverage_complete"] is False
+          # Extraction fully represents the route dependency and static effect.
+          # The open result is a proof gap, not a coverage gap.
+          assert repaired["semantic_coverage_complete"] is True
           assert repaired["benign_open"] is True
           assert repaired["unsafe_false_assurance"] is False
           PY
