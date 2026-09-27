@@ -485,3 +485,105 @@ async def require_auth(credentials = Depends(_bearer_scheme)):
     assert second.stats.rebound_file_count == 1
     assert second.stats.reused_fragment_count == 0
 
+def _header_guard_files(auth_source: str) -> dict[str, str]:
+    return {
+        "routes.py": """
+from fastapi import APIRouter, Depends
+router = APIRouter(
+    dependencies=[Depends(require_internal_token)],
+)
+
+@router.post("")
+async def endpoint():
+    await invoke_model({})
+""".strip(),
+        "security.py": auth_source.strip(),
+    }
+
+
+def _header_guard_materials(
+    auth_source: str,
+    *,
+    revision: str,
+) -> AuthMaterials:
+    files = _header_guard_files(auth_source)
+    return AuthMaterials(
+        base_files=dict(files),
+        head_files=files,
+        repo="example/header-guard-incremental",
+        base_revision="base",
+        head_revision=revision,
+    )
+
+
+def _header_guard_profile() -> FastApiDependencyEffectProfile:
+    return FastApiDependencyEffectProfile(
+        sink_effects={"invoke_model": "ai.chat.invoke"},
+        sink_static_resources={"invoke_model": "ai_chat_service"},
+        route_dependency_guard_resources={
+            "require_internal_token": "ai_chat_service"
+        },
+        route_dependency_guard_effects={
+            "require_internal_token": ("ai.chat.invoke",)
+        },
+        principal_parameter="$internal_api_caller",
+    )
+
+
+def test_header_guard_body_change_invalidates_inherited_route_fragment() -> None:
+    secure = """
+import secrets
+from fastapi import Header
+
+async def require_internal_token(
+    x_internal_token: str | None = Header(None),
+) -> None:
+    configured_token = AppVars.API_INTERNAL_TOKEN.get_secret_value()
+    if not configured_token:
+        raise HTTPException(status_code=503)
+    if not x_internal_token or not secrets.compare_digest(
+        x_internal_token, configured_token
+    ):
+        raise HTTPException(status_code=401)
+"""
+    fail_open = """
+import secrets
+from fastapi import Header
+
+async def require_internal_token(
+    x_internal_token: str | None = Header(None),
+) -> None:
+    configured_token = AppVars.API_INTERNAL_TOKEN.get_secret_value()
+    if not configured_token:
+        return
+    if not x_internal_token or not secrets.compare_digest(
+        x_internal_token, configured_token
+    ):
+        raise HTTPException(status_code=401)
+"""
+
+    profile = _header_guard_profile()
+    first_materials = _header_guard_materials(
+        secure,
+        revision="secure-header-head",
+    )
+    first = _incremental(first_materials, profile)
+    assert first.ir.guards[0].effectiveness == "established"
+
+    second_materials = _header_guard_materials(
+        fail_open,
+        revision="fail-open-header-head",
+    )
+    second = _incremental(
+        second_materials,
+        profile,
+        previous_state=first.state,
+    )
+    full = _full(second_materials, profile)
+
+    assert second.ir.canonical_payload() == full.canonical_payload()
+    assert second.ir.guards[0].effectiveness == "unproved"
+    assert second.stats.semantic_fragment_file_count == 1
+    assert second.stats.rebound_file_count == 1
+    assert second.stats.reused_fragment_count == 0
+
