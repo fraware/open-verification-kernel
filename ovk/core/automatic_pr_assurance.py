@@ -19,7 +19,6 @@ from __future__ import annotations
 import os
 import platform
 import subprocess
-import sys
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Literal
 
