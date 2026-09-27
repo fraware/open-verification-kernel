@@ -527,7 +527,10 @@ def _provably_non_null_parameters(
 
 def _symbol_term(node: ast.AST) -> ResourceIdentityTerm | None:
     if isinstance(node, ast.Constant) and isinstance(node.value, (str, int, bool)):
-        return ResourceIdentityTerm.literal(str(node.value))
+        rendered = str(node.value)
+        if not rendered.strip():
+            return None
+        return ResourceIdentityTerm.literal(rendered)
     if isinstance(node, (ast.Name, ast.Attribute, ast.Subscript)):
         return ResourceIdentityTerm.symbol(ast.unparse(node))
     return None
