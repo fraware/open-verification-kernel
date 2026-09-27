@@ -256,3 +256,90 @@ def test_unrelated_branch_inside_async_with_keeps_local_coverage_partial() -> No
     assert ir.coverage.status == "partial"
     assert ir.paths[0].coverage_status == "partial"
     assert result.status == "unknown"
+
+
+CREATE_WITH_LOCAL_DATA_BRANCH = """
+from fastapi import Depends, FastAPI
+app = FastAPI()
+
+@app.post("/threads/{thread_id}/runs")
+async def create_run(
+    thread_id: str,
+    request,
+    user = Depends(get_current_user),
+    session = Depends(get_session),
+):
+    existing_thread = await session.scalar(
+        select(ThreadORM).where(ThreadORM.thread_id == thread_id)
+    )
+    if existing_thread and existing_thread.user_id != user.identity:
+        raise HTTPException(404, "Thread not found")
+
+    value = {**request.model_dump(), "thread_id": thread_id}
+    filters = await handle_event(ctx, value)
+    if filters:
+        if "config" in filters and isinstance(filters["config"], dict):
+            request.config = {**(request.config or {}), **filters["config"]}
+        if "context" in filters and isinstance(filters["context"], dict):
+            request.context = {**(request.context or {}), **filters["context"]}
+    else:
+        value_config = value.get("config")
+        if isinstance(value_config, dict):
+            request.config = {**(request.config or {}), **value_config}
+        value_context = value.get("context")
+        if isinstance(value_context, dict):
+            request.context = {**(request.context or {}), **value_context}
+
+    return await _prepare_run(session, thread_id, request, user)
+""".strip()
+
+
+def test_irrelevant_local_data_branch_does_not_poison_effect_coverage() -> None:
+    ir, result = _evaluate(
+        CREATE_WITH_LOCAL_DATA_BRANCH,
+        truthy_when_present=True,
+    )
+
+    assert ir.coverage.status == "partial"
+    assert ir.paths[0].coverage_status == "complete"
+    assert result.status == "pass"
+    assert any(
+        "Intervening local branches were excluded" in assumption
+        for assumption in ir.paths[0].coverage_assumptions
+    )
+
+
+def test_branch_rebinding_resource_identity_keeps_effect_unknown() -> None:
+    source = CREATE_WITH_LOCAL_DATA_BRANCH.replace(
+        "    if filters:\n",
+        "    if filters:\n        thread_id = filters['thread_id']\n",
+    )
+
+    ir, result = _evaluate(source, truthy_when_present=True)
+
+    assert ir.paths[0].coverage_status == "partial"
+    assert result.status == "unknown"
+
+
+def test_branch_with_unclassified_call_keeps_effect_unknown() -> None:
+    source = CREATE_WITH_LOCAL_DATA_BRANCH.replace(
+        "    if filters:\n",
+        "    if filters:\n        mutate_security_state()\n",
+    )
+
+    ir, result = _evaluate(source, truthy_when_present=True)
+
+    assert ir.paths[0].coverage_status == "partial"
+    assert result.status == "unknown"
+
+
+def test_branch_with_early_exit_keeps_effect_unknown() -> None:
+    source = CREATE_WITH_LOCAL_DATA_BRANCH.replace(
+        "    if filters:\n",
+        "    if filters:\n        if filters.get('stop'):\n            return None\n",
+    )
+
+    ir, result = _evaluate(source, truthy_when_present=True)
+
+    assert ir.paths[0].coverage_status == "partial"
+    assert result.status == "unknown"
