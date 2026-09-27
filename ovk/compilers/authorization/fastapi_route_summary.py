@@ -53,6 +53,15 @@ class DependencyParameterSummary:
 
 
 @dataclass(frozen=True)
+class RouteDependencySummary:
+    """Direct Depends/Security dependency declared on a FastAPI route."""
+
+    full_name: str
+    leaf_name: str | None
+    origin: SemanticOrigin
+
+
+@dataclass(frozen=True)
 class OwnershipAssertionSummary:
     """Profile-independent syntax summary for a fail-closed ownership check."""
 
@@ -102,6 +111,7 @@ class RouteHandlerSummary:
     has_control_flow: bool
     unsupported_control_flow_lines: tuple[int, ...]
     dependencies: tuple[DependencyParameterSummary, ...]
+    route_dependencies: tuple[RouteDependencySummary, ...]
     ownership_assertions: tuple[OwnershipAssertionSummary, ...]
     calls: tuple[CallSummary, ...]
     origin: SemanticOrigin
@@ -126,7 +136,7 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id=_EXTRACTOR_ID,
-        extractor_version="0.3.0",
+        extractor_version="0.4.0",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -151,7 +161,7 @@ def _const_str(node: ast.AST | None) -> str | None:
 
 def _route_decorator(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
-) -> tuple[str, str] | None:
+) -> tuple[str, str, ast.Call] | None:
     for decorator in node.decorator_list:
         if (
             not isinstance(decorator, ast.Call)
@@ -164,8 +174,51 @@ def _route_decorator(
         route = _const_str(decorator.args[0])
         if route is None:
             continue
-        return method.upper(), normalize_path("", route)
+        return method.upper(), normalize_path("", route), decorator
     return None
+
+
+def _route_dependencies(
+    path: str,
+    decorator: ast.Call,
+) -> tuple[RouteDependencySummary, ...]:
+    """Return direct route-level Depends/Security declarations.
+
+    The v1 route-level mediation subset accepts only a literal list/tuple whose
+    entries are Depends(name) or Security(name) with a direct name/attribute
+    target. Dependency factories and dynamic dependency collections stay
+    outside this syntax summary.
+    """
+
+    found: list[RouteDependencySummary] = []
+    dependencies_node: ast.AST | None = None
+    for keyword in decorator.keywords:
+        if keyword.arg == "dependencies":
+            dependencies_node = keyword.value
+            break
+
+    if not isinstance(dependencies_node, (ast.List, ast.Tuple)):
+        return ()
+
+    for item in dependencies_node.elts:
+        if (
+            not isinstance(item, ast.Call)
+            or _name_of(item.func) not in {"Depends", "Security"}
+            or not item.args
+        ):
+            continue
+        target = item.args[0]
+        if not isinstance(target, (ast.Name, ast.Attribute)):
+            continue
+        found.append(
+            RouteDependencySummary(
+                full_name=ast.unparse(target),
+                leaf_name=_name_of(target),
+                origin=_origin(path, item),
+            )
+        )
+
+    return tuple(found)
 
 
 def _is_supported_fail_fast_none_guard(statement: ast.stmt) -> bool:
@@ -688,7 +741,7 @@ def summarize_route_file(
         route = _route_decorator(handler)
         if route is None:
             continue
-        method, route_path = route
+        method, route_path, route_decorator = route
         aliases = _constructor_aliases(handler)
         non_null = _provably_non_null_parameters(handler)
 
@@ -738,6 +791,7 @@ def summarize_route_file(
                 has_control_flow=_has_control_flow(handler),
                 unsupported_control_flow_lines=_unsupported_control_flow_lines(handler),
                 dependencies=_dependency_parameters(path, handler),
+                route_dependencies=_route_dependencies(path, route_decorator),
                 ownership_assertions=_ownership_assertion_summaries(
                     path,
                     handler,
