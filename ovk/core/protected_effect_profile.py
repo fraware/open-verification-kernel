@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ovk.compilers.authorization.protected_effect_fastapi_dependency import (
     FastApiDependencyEffectProfile,
+    ResourceOwnershipAssertionSemantics,
     ResourceScopeAssertionSemantics,
 )
 from ovk.core.bundle import content_digest
@@ -47,6 +48,37 @@ class ScopeAssertionConfig(BaseModel):
         return value
 
 
+class OwnershipAssertionConfig(BaseModel):
+    resource_identity_attribute: str
+    owner_attribute: str
+    principal_attribute: str
+    authorized_effects: list[str]
+    allow_missing_resource: bool = True
+    truthy_when_present: bool = False
+
+    @field_validator(
+        "resource_identity_attribute",
+        "owner_attribute",
+        "principal_attribute",
+    )
+    @classmethod
+    def _non_empty_semantic_field(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("ownership assertion semantic fields must be non-empty")
+        return value
+
+    @field_validator("authorized_effects")
+    @classmethod
+    def _authorized_effects_non_empty(cls, values: list[str]) -> list[str]:
+        normalized = [value.strip() for value in values if value.strip()]
+        if not normalized:
+            raise ValueError("ownership assertion authorized_effects must be non-empty")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("ownership assertion authorized_effects must be unique")
+        return normalized
+
+
 class ProtectedEffectProfileConfig(BaseModel):
     """Repository-declared semantics for the supported FastAPI assurance profile."""
 
@@ -72,6 +104,9 @@ class ProtectedEffectProfileConfig(BaseModel):
     scope_assertions: dict[str, ScopeAssertionConfig] = Field(
         default_factory=dict
     )
+    ownership_assertions: dict[str, OwnershipAssertionConfig] = Field(
+        default_factory=dict
+    )
     sink_contracts: dict[str, str] = Field(default_factory=dict)
     sink_contract_scope_attributes: dict[str, str] = Field(default_factory=dict)
     sink_contract_identity_attributes: dict[str, str] = Field(
@@ -95,8 +130,8 @@ class ProtectedEffectProfileConfig(BaseModel):
     )
     sink_binding_acted_attributes: dict[str, str] = Field(default_factory=dict)
 
-    dependency_guard_resources: dict[str, str]
-    dependency_guard_effects: dict[str, list[str]]
+    dependency_guard_resources: dict[str, str] = Field(default_factory=dict)
+    dependency_guard_effects: dict[str, list[str]] = Field(default_factory=dict)
     principal_parameter: str = "user"
 
     @field_validator("source_paths")
@@ -114,10 +149,7 @@ class ProtectedEffectProfileConfig(BaseModel):
                 )
         return normalized
 
-    @field_validator(
-        "sink_effects",
-        "dependency_guard_resources",
-    )
+    @field_validator("sink_effects")
     @classmethod
     def _non_empty_mapping(
         cls,
@@ -181,6 +213,18 @@ class ProtectedEffectProfileConfig(BaseModel):
                 )
 
         modeled_effects = set(self.sink_effects.values())
+        for assertion_key, assertion in self.ownership_assertions.items():
+            if not assertion_key.strip():
+                raise ValueError("ownership assertion keys must be non-empty")
+            unknown_effects = sorted(
+                set(assertion.authorized_effects) - modeled_effects
+            )
+            if unknown_effects:
+                raise ValueError(
+                    f"ownership assertion {assertion_key} authorizes effects "
+                    "absent from sink_effects: "
+                    + ", ".join(unknown_effects)
+                )
         for dependency, effects in self.dependency_guard_effects.items():
             if dependency not in self.dependency_guard_resources:
                 raise ValueError(
@@ -225,6 +269,13 @@ class ProtectedEffectProfileConfig(BaseModel):
         payload["sink_missing_scope_unconstrained"] = sorted(
             payload["sink_missing_scope_unconstrained"]
         )
+        payload["ownership_assertions"] = {
+            key: {
+                **value,
+                "authorized_effects": sorted(value["authorized_effects"]),
+            }
+            for key, value in sorted(payload["ownership_assertions"].items())
+        }
         payload["dependency_guard_effects"] = {
             key: sorted(values)
             for key, values in sorted(
@@ -252,6 +303,17 @@ class ProtectedEffectProfileConfig(BaseModel):
                     acted_scope_attribute=value.acted_scope_attribute,
                 )
                 for key, value in self.scope_assertions.items()
+            },
+            ownership_assertions={
+                key: ResourceOwnershipAssertionSemantics(
+                    resource_identity_attribute=value.resource_identity_attribute,
+                    owner_attribute=value.owner_attribute,
+                    principal_attribute=value.principal_attribute,
+                    authorized_effects=tuple(value.authorized_effects),
+                    allow_missing_resource=value.allow_missing_resource,
+                    truthy_when_present=value.truthy_when_present,
+                )
+                for key, value in self.ownership_assertions.items()
             },
             sink_contracts=dict(self.sink_contracts),
             sink_contract_scope_attributes=dict(
