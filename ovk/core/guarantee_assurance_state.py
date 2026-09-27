@@ -92,6 +92,7 @@ class GuaranteeAssuranceSnapshot(BaseModel):
 
     assurance_ir_digest: str
     subject_repo: str
+    subject_base_sha: str | None = None
     subject_head_sha: str
     policy_digest: str
     graph: GuaranteeGraphRevision
@@ -459,6 +460,7 @@ def build_guarantee_assurance_snapshot(
     return GuaranteeAssuranceSnapshot(
         assurance_ir_digest=ir.assurance_ir_digest,
         subject_repo=ir.subject.repo,
+        subject_base_sha=ir.subject.base_sha,
         subject_head_sha=ir.subject.head_sha,
         policy_digest=expected_policy_digest,
         graph=graph,
