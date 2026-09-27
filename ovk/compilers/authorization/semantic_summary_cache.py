@@ -28,6 +28,8 @@ from ovk.compilers.authorization.fastapi_route_summary import (
     CallSummary,
     DependencyParameterSummary,
     ExpressionSummary,
+    IncludeRouterCallSummary,
+    ModuleImportSummary,
     OwnershipAssertionSummary,
     RouteDependencySummary,
     RouteFileSummary,
@@ -186,6 +188,36 @@ def _route_summary_payload(summary: RouteFileSummary) -> dict[str, Any]:
     return {
         "path": summary.path,
         "source_digest": summary.source_digest,
+        "apirouter_symbols": list(summary.apirouter_symbols),
+        "module_imports": [
+            {
+                "local_name": item.local_name,
+                "module_name": item.module_name,
+            }
+            for item in summary.module_imports
+        ],
+        "include_router_calls": [
+            {
+                "app_symbol": item.app_symbol,
+                "module_alias": item.module_alias,
+                "router_symbol": item.router_symbol,
+                "dependencies": (
+                    [
+                        {
+                            "full_name": dep.full_name,
+                            "leaf_name": dep.leaf_name,
+                            "source_kind": dep.source_kind,
+                            "origin": _origin_payload(dep.origin),
+                        }
+                        for dep in item.dependencies
+                    ]
+                    if item.dependencies is not None
+                    else None
+                ),
+                "origin": _origin_payload(item.origin),
+            }
+            for item in summary.include_router_calls
+        ],
         "handlers": [
             {
                 "handler_name": handler.handler_name,
@@ -349,6 +381,45 @@ def _route_summary_from_payload(payload: dict[str, Any]) -> RouteFileSummary:
         path=str(payload["path"]),
         source_digest=str(payload["source_digest"]),
         handlers=tuple(handlers),
+        apirouter_symbols=tuple(
+            str(value)
+            for value in payload.get("apirouter_symbols") or []
+        ),
+        module_imports=tuple(
+            ModuleImportSummary(
+                local_name=str(item["local_name"]),
+                module_name=str(item["module_name"]),
+            )
+            for item in payload.get("module_imports") or []
+        ),
+        include_router_calls=tuple(
+            IncludeRouterCallSummary(
+                app_symbol=str(item["app_symbol"]),
+                module_alias=str(item["module_alias"]),
+                router_symbol=str(item["router_symbol"]),
+                dependencies=(
+                    tuple(
+                        RouteDependencySummary(
+                            full_name=str(dep["full_name"]),
+                            leaf_name=(
+                                str(dep["leaf_name"])
+                                if dep.get("leaf_name") is not None
+                                else None
+                            ),
+                            source_kind=str(dep["source_kind"]),
+                            origin=SemanticOrigin.model_validate(
+                                dep["origin"]
+                            ),
+                        )
+                        for dep in item["dependencies"]
+                    )
+                    if item.get("dependencies") is not None
+                    else None
+                ),
+                origin=SemanticOrigin.model_validate(item["origin"]),
+            )
+            for item in payload.get("include_router_calls") or []
+        ),
     )
 
 
