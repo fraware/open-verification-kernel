@@ -670,3 +670,26 @@ def test_fail_open_apikeyheader_dependency_stays_benign_open() -> None:
     assert evaluations[0].status == "unknown"
     assert evaluations[0].extraction_coverage == "complete"
 
+def test_apikeyheader_rejects_rebound_hmac_module() -> None:
+    source = SECURE_APIKEY_AUTH.replace(
+        "from fastapi import Security",
+        "hmac = fake_hmac\nfrom fastapi import Security",
+    )
+    evidence = infer_route_dependency_effectiveness(
+        parsed_trees=_apikey_trees(auth_source=source),
+        dependency_names={"require_api_key"},
+    )
+    assert evidence == []
+
+
+def test_apikeyheader_requires_canonical_fastapi_scheme_import() -> None:
+    source = SECURE_APIKEY_AUTH.replace(
+        "from fastapi.security import APIKeyHeader",
+        "from custom_security import APIKeyHeader",
+    )
+    evidence = infer_route_dependency_effectiveness(
+        parsed_trees=_apikey_trees(auth_source=source),
+        dependency_names={"require_api_key"},
+    )
+    assert evidence == []
+
