@@ -20,6 +20,9 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass, field
 
+from ovk.compilers.authorization.authorization_dependency_contracts import (
+    infer_authorization_dependency_contracts,
+)
 from ovk.compilers.authorization.base import normalize_path
 from ovk.compilers.authorization.fastapi_route_summary import (
     CallSummary,
@@ -157,6 +160,13 @@ class FastApiDependencyEffectProfile:
     route_dependency_guard_resources: dict[str, str] = field(default_factory=dict)
     # Direct route-decorator dependency name -> effects it is intended to mediate.
     route_dependency_guard_effects: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Optional proof expectations for source-derived dependency contracts.
+    route_dependency_credential_expressions: dict[str, str] = field(
+        default_factory=dict
+    )
+    route_dependency_authority_expressions: dict[str, str] = field(
+        default_factory=dict
+    )
 
     principal_parameter: str = "user"
 
@@ -209,6 +219,33 @@ class FastApiDependencyEffectProfile:
             raise ValueError(
                 "route dependency guard resource/effect keys must match"
             )
+        credential_keys = set(
+            self.route_dependency_credential_expressions
+        )
+        authority_keys = set(
+            self.route_dependency_authority_expressions
+        )
+        if credential_keys != authority_keys:
+            raise ValueError(
+                "route dependency credential/authority expectation keys must match"
+            )
+        unknown_expectations = sorted(
+            credential_keys - route_resource_keys
+        )
+        if unknown_expectations:
+            raise ValueError(
+                "route dependency contract expectations reference undeclared "
+                "guards: " + ", ".join(unknown_expectations)
+            )
+        for mapping in (
+            self.route_dependency_credential_expressions,
+            self.route_dependency_authority_expressions,
+        ):
+            if any(not str(value).strip() for value in mapping.values()):
+                raise ValueError(
+                    "route dependency contract expectations must be non-empty"
+                )
+
         modeled_effects = set(self.sink_effects.values())
         for dependency, resource in (
             self.route_dependency_guard_resources.items()
@@ -270,6 +307,20 @@ class FastApiDependencyEffectProfile:
             if resource is not None and effects is not None:
                 return key, resource, effects
         return None
+
+    def route_dependency_contract_expectations(
+        self,
+        dependency_name: str,
+    ) -> tuple[str, str] | None:
+        credential = self.route_dependency_credential_expressions.get(
+            dependency_name
+        )
+        authority = self.route_dependency_authority_expressions.get(
+            dependency_name
+        )
+        if credential is None or authority is None:
+            return None
+        return credential, authority
 
     def scope_keyword(self, sink_key: str) -> str | None:
         return self.sink_scope_keywords.get(sink_key)
@@ -744,6 +795,15 @@ class FastApiDependencyEffectExtractor:
             contract.qualified_name: contract
             for contract in function_contracts
         }
+        authorization_dependency_contracts = (
+            infer_authorization_dependency_contracts(
+                parsed_trees=parsed.trees,
+            )
+        )
+        authorization_contracts_by_name = {
+            contract.qualified_name: contract
+            for contract in authorization_dependency_contracts
+        }
 
         if route_summary_index is None:
             route_summaries = build_route_summary_index(
@@ -766,6 +826,9 @@ class FastApiDependencyEffectExtractor:
                 summary,
                 profile=profile,
                 contracts_by_name=contracts_by_name,
+                authorization_contracts_by_name=(
+                    authorization_contracts_by_name
+                ),
             )
             for path, summary in sorted(route_summaries.summaries.items())
             if summary.handlers
@@ -780,6 +843,9 @@ class FastApiDependencyEffectExtractor:
         return assemble_fastapi_assurance_ir(
             materials=materials,
             function_contracts=function_contracts,
+            authorization_dependency_contracts=(
+                authorization_dependency_contracts
+            ),
             resource_return_contracts=resource_return_contracts,
             fragments=fragments,
             syntax_errors=parsed.syntax_errors,

@@ -19,6 +19,9 @@ from ovk.compilers.authorization.python_ast_index import (
 from ovk.compilers.authorization.resource_return_contracts import (
     build_contract_summary_index,
 )
+from ovk.core.protected_effect_evaluation import (
+    evaluate_protected_effect_integrity,
+)
 
 
 def _route_source() -> str:
@@ -398,3 +401,110 @@ def test_incremental_composition_and_fragment_reuse_share_dependency_closure() -
     assert third.stats.semantic_fragment_file_count == 1
     assert third.stats.rebound_file_count == 1
     assert third.stats.reused_fragment_count == 0
+
+def _route_auth_files(*, fail_open: bool) -> dict[str, str]:
+    auth_body = (
+        """
+from fastapi import HTTPException
+
+async def require_auth(credentials):
+    if BYPASS_AUTH:
+        return
+    if not credentials or credentials.credentials != ACTIVE_TOKEN:
+        raise HTTPException(status_code=401)
+""".strip()
+        if fail_open
+        else
+        """
+from fastapi import HTTPException
+
+async def require_auth(credentials):
+    if not credentials or credentials.credentials != ACTIVE_TOKEN:
+        raise HTTPException(status_code=401)
+""".strip()
+    )
+    return {
+        "routes.py": """
+from fastapi import APIRouter, Depends
+from auth import require_auth
+
+router = APIRouter()
+
+@router.post("/execute", dependencies=[Depends(require_auth)])
+async def execute():
+    await dispatch("payload")
+""".strip(),
+        "auth.py": auth_body,
+    }
+
+
+def _route_auth_materials(
+    *,
+    fail_open: bool,
+    revision: str,
+) -> AuthMaterials:
+    files = _route_auth_files(fail_open=fail_open)
+    return AuthMaterials(
+        base_files=dict(files),
+        head_files=files,
+        repo="example/route-auth",
+        base_revision="base",
+        head_revision=revision,
+    )
+
+
+def _route_auth_profile() -> FastApiDependencyEffectProfile:
+    return FastApiDependencyEffectProfile(
+        sink_effects={"dispatch": "static.dispatch.execute"},
+        sink_static_resources={"dispatch": "static_dispatch"},
+        route_dependency_guard_resources={
+            "require_auth": "static_dispatch"
+        },
+        route_dependency_guard_effects={
+            "require_auth": ("static.dispatch.execute",)
+        },
+        route_dependency_credential_expressions={
+            "require_auth": "credentials.credentials"
+        },
+        route_dependency_authority_expressions={
+            "require_auth": "ACTIVE_TOKEN"
+        },
+        principal_parameter="$authenticated_caller",
+    )
+
+
+def test_auth_contract_change_rebinds_unchanged_route_fragment() -> None:
+    profile = _route_auth_profile()
+    base = _route_auth_materials(
+        fail_open=False,
+        revision="secure-head",
+    )
+    first = _incremental(base, profile)
+    first_eval = evaluate_protected_effect_integrity(first.ir)[0]
+
+    assert first_eval.status == "pass"
+    assert first.stats.rebound_file_count == 1
+
+    head = _route_auth_materials(
+        fail_open=True,
+        revision="fail-open-head",
+    )
+    second = _incremental(
+        head,
+        profile,
+        previous_state=first.state,
+    )
+    full = _full(head, profile)
+    second_eval = evaluate_protected_effect_integrity(second.ir)[0]
+
+    assert second.ir.canonical_payload() == full.canonical_payload()
+    assert second_eval.status == "unknown"
+    assert second.stats.semantic_fragment_file_count == 1
+    assert second.stats.rebound_file_count == 1
+    assert second.stats.reused_fragment_count == 0
+    assert (
+        second.state.fragments["routes.py"]
+        .authorization_contract_dependencies["require_auth"]
+        is None
+    )
+

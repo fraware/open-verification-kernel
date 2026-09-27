@@ -179,3 +179,61 @@ def test_unavailable_base_profile_fails_closed(
     assert context.profile_available is False
     with pytest.raises(ValueError, match="trusted Protected Effect profile"):
         context.require_active_profile()
+
+def test_profile_rejects_unpaired_route_auth_contract_expectations() -> None:
+    payload = _payload()
+    payload["sink_static_resources"] = {
+        "svc.get": "workspace_agent_read"
+    }
+    payload.pop("sink_identity_args")
+    payload.pop("sink_scope_keywords")
+    payload.pop("sink_missing_scope_unconstrained")
+    payload["route_dependency_guard_resources"] = {
+        "require_auth": "workspace_agent_read"
+    }
+    payload["route_dependency_guard_effects"] = {
+        "require_auth": ["workspace.agent.read"]
+    }
+    payload["route_dependency_credential_expressions"] = {
+        "require_auth": "credentials.credentials"
+    }
+    payload["route_dependency_authority_expressions"] = {}
+
+    with pytest.raises(ValueError, match="expectation keys must match"):
+        parse_protected_effect_profile_text(
+            json.dumps(payload),
+            source="test",
+        )
+
+
+def test_profile_runtime_preserves_route_auth_contract_expectations() -> None:
+    payload = _payload()
+    payload["sink_static_resources"] = {
+        "svc.get": "workspace_agent_read"
+    }
+    payload.pop("sink_identity_args")
+    payload.pop("sink_scope_keywords")
+    payload.pop("sink_missing_scope_unconstrained")
+    payload["route_dependency_guard_resources"] = {
+        "require_auth": "workspace_agent_read"
+    }
+    payload["route_dependency_guard_effects"] = {
+        "require_auth": ["workspace.agent.read"]
+    }
+    payload["route_dependency_credential_expressions"] = {
+        "require_auth": "credentials.credentials"
+    }
+    payload["route_dependency_authority_expressions"] = {
+        "require_auth": "ACTIVE_TOKEN"
+    }
+
+    profile = parse_protected_effect_profile_text(
+        json.dumps(payload),
+        source="test",
+    )
+    runtime = profile.runtime_profile()
+
+    assert runtime.route_dependency_contract_expectations(
+        "require_auth"
+    ) == ("credentials.credentials", "ACTIVE_TOKEN")
+

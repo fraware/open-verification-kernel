@@ -135,6 +135,12 @@ class ProtectedEffectProfileConfig(BaseModel):
     dependency_guard_effects: dict[str, list[str]] = Field(default_factory=dict)
     route_dependency_guard_resources: dict[str, str] = Field(default_factory=dict)
     route_dependency_guard_effects: dict[str, list[str]] = Field(default_factory=dict)
+    route_dependency_credential_expressions: dict[str, str] = Field(
+        default_factory=dict
+    )
+    route_dependency_authority_expressions: dict[str, str] = Field(
+        default_factory=dict
+    )
     principal_parameter: str = "user"
 
     @field_validator("source_paths")
@@ -306,6 +312,33 @@ class ProtectedEffectProfileConfig(BaseModel):
                 "route dependency guard resources/effects must have identical "
                 "keys: " + "; ".join(details)
             )
+        credential_keys = set(
+            self.route_dependency_credential_expressions
+        )
+        authority_keys = set(
+            self.route_dependency_authority_expressions
+        )
+        if credential_keys != authority_keys:
+            raise ValueError(
+                "route dependency credential/authority expectation keys must match"
+            )
+        unknown_expectations = sorted(
+            credential_keys - route_resource_keys
+        )
+        if unknown_expectations:
+            raise ValueError(
+                "route dependency contract expectations reference undeclared "
+                "guards: " + ", ".join(unknown_expectations)
+            )
+        for mapping in (
+            self.route_dependency_credential_expressions,
+            self.route_dependency_authority_expressions,
+        ):
+            if any(not str(value).strip() for value in mapping.values()):
+                raise ValueError(
+                    "route dependency contract expectations must be non-empty"
+                )
+
         for dependency, effects in self.route_dependency_guard_effects.items():
             if not dependency.strip():
                 raise ValueError(
@@ -372,6 +405,12 @@ class ProtectedEffectProfileConfig(BaseModel):
                 payload["route_dependency_guard_effects"].items()
             )
         }
+        payload["route_dependency_credential_expressions"] = dict(
+            sorted(payload["route_dependency_credential_expressions"].items())
+        )
+        payload["route_dependency_authority_expressions"] = dict(
+            sorted(payload["route_dependency_authority_expressions"].items())
+        )
         return payload
 
     @property
@@ -438,6 +477,12 @@ class ProtectedEffectProfileConfig(BaseModel):
                 key: tuple(values)
                 for key, values in self.route_dependency_guard_effects.items()
             },
+            route_dependency_credential_expressions=dict(
+                self.route_dependency_credential_expressions
+            ),
+            route_dependency_authority_expressions=dict(
+                self.route_dependency_authority_expressions
+            ),
             principal_parameter=self.principal_parameter,
         )
 

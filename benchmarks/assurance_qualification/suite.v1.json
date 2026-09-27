@@ -600,6 +600,138 @@
       },
       "human_adjudicated": false,
       "human_review_minutes": null
+    },
+    {
+      "case_id": "auth_dependency_fail_open_regression",
+      "repository": "qualification/internal-route-auth-contract",
+      "description": "Adding a successful bypass return before a governed credential check must revoke authorization-dependency effectiveness and prevent durable assurance establishment.",
+      "validation_class": "production_shaped_internal",
+      "safety_label": "unsafe",
+      "expected_head_assurance": "not_established",
+      "provenance": {
+        "kind": "internal_production_shaped"
+      },
+      "base_files": {
+        "routes.py": "from fastapi import APIRouter, Depends, HTTPException\n\nrouter = APIRouter()\n\nasync def require_auth(credentials = Depends(_bearer)):\n    if not credentials or credentials.credentials != ACTIVE_TOKEN:\n        raise HTTPException(status_code=401)\n\n@router.post(\"/execute\", dependencies=[Depends(require_auth)])\nasync def execute():\n    await dispatch(\"payload\")\n"
+      },
+      "head_files": {
+        "routes.py": "from fastapi import APIRouter, Depends, HTTPException\n\nrouter = APIRouter()\n\nasync def require_auth(credentials = Depends(_bearer)):\n    if ALLOW_UNAUTHENTICATED:\n        return\n    if not credentials or credentials.credentials != ACTIVE_TOKEN:\n        raise HTTPException(status_code=401)\n\n@router.post(\"/execute\", dependencies=[Depends(require_auth)])\nasync def execute():\n    await dispatch(\"payload\")\n"
+      },
+      "guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-STATIC-DISPATCH-AUTH",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Static dispatch execution is mediated by the governed credential authorization predicate.",
+            "selector": {
+              "effect_name": "static.dispatch.execute"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "owner": "security"
+            }
+          }
+        ]
+      },
+      "protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "routes.py"
+        ],
+        "sink_effects": {
+          "dispatch": "static.dispatch.execute"
+        },
+        "sink_static_resources": {
+          "dispatch": "static_dispatch"
+        },
+        "route_dependency_guard_resources": {
+          "require_auth": "static_dispatch"
+        },
+        "route_dependency_guard_effects": {
+          "require_auth": [
+            "static.dispatch.execute"
+          ]
+        },
+        "route_dependency_credential_expressions": {
+          "require_auth": "credentials.credentials"
+        },
+        "route_dependency_authority_expressions": {
+          "require_auth": "ACTIVE_TOKEN"
+        },
+        "principal_parameter": "$authenticated_caller"
+      },
+      "human_adjudicated": false,
+      "human_review_minutes": null
+    },
+    {
+      "case_id": "auth_dependency_fail_open_repair",
+      "repository": "qualification/internal-route-auth-contract",
+      "description": "Removing the successful bypass return should restore a source-derived fail-closed authorization dependency contract and establish the durable guarantee.",
+      "validation_class": "production_shaped_internal",
+      "safety_label": "safe",
+      "expected_head_assurance": "established",
+      "provenance": {
+        "kind": "internal_production_shaped"
+      },
+      "base_files": {
+        "routes.py": "from fastapi import APIRouter, Depends, HTTPException\n\nrouter = APIRouter()\n\nasync def require_auth(credentials = Depends(_bearer)):\n    if ALLOW_UNAUTHENTICATED:\n        return\n    if not credentials or credentials.credentials != ACTIVE_TOKEN:\n        raise HTTPException(status_code=401)\n\n@router.post(\"/execute\", dependencies=[Depends(require_auth)])\nasync def execute():\n    await dispatch(\"payload\")\n"
+      },
+      "head_files": {
+        "routes.py": "from fastapi import APIRouter, Depends, HTTPException\n\nrouter = APIRouter()\n\nasync def require_auth(credentials = Depends(_bearer)):\n    if not credentials or credentials.credentials != ACTIVE_TOKEN:\n        raise HTTPException(status_code=401)\n\n@router.post(\"/execute\", dependencies=[Depends(require_auth)])\nasync def execute():\n    await dispatch(\"payload\")\n"
+      },
+      "guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-STATIC-DISPATCH-AUTH",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Static dispatch execution is mediated by the governed credential authorization predicate.",
+            "selector": {
+              "effect_name": "static.dispatch.execute"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "owner": "security"
+            }
+          }
+        ]
+      },
+      "protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "routes.py"
+        ],
+        "sink_effects": {
+          "dispatch": "static.dispatch.execute"
+        },
+        "sink_static_resources": {
+          "dispatch": "static_dispatch"
+        },
+        "route_dependency_guard_resources": {
+          "require_auth": "static_dispatch"
+        },
+        "route_dependency_guard_effects": {
+          "require_auth": [
+            "static.dispatch.execute"
+          ]
+        },
+        "route_dependency_credential_expressions": {
+          "require_auth": "credentials.credentials"
+        },
+        "route_dependency_authority_expressions": {
+          "require_auth": "ACTIVE_TOKEN"
+        },
+        "principal_parameter": "$authenticated_caller"
+      },
+      "human_adjudicated": false,
+      "human_review_minutes": null
     }
   ]
 }

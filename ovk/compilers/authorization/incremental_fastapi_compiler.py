@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ovk.compilers.authorization.authorization_dependency_contracts import (
+    infer_authorization_dependency_contracts,
+)
 from ovk.compilers.authorization.fastapi_route_summary import RouteSummaryIndex
 from ovk.compilers.authorization.incremental_contract_composition import (
     IncrementalContractCompositionState,
@@ -154,6 +157,15 @@ def compile_incremental_fastapi_assurance(
         contract.qualified_name: contract
         for contract in function_contracts
     }
+    authorization_dependency_contracts = (
+        infer_authorization_dependency_contracts(
+            parsed_trees=parsed_index.trees,
+        )
+    )
+    authorization_contracts_by_name = {
+        contract.qualified_name: contract
+        for contract in authorization_dependency_contracts
+    }
     current_contract_versions = _contract_versions(function_contracts)
     current_profile_digest = profile_semantic_digest(profile)
 
@@ -190,6 +202,9 @@ def compile_incremental_fastapi_assurance(
                 prior,
                 profile=profile,
                 contracts_by_name=contracts_by_name,
+                authorization_contracts_by_name=(
+                    authorization_contracts_by_name
+                ),
             )
         ):
             fragments[path] = prior
@@ -200,6 +215,9 @@ def compile_incremental_fastapi_assurance(
             summary,
             profile=profile,
             contracts_by_name=contracts_by_name,
+            authorization_contracts_by_name=(
+                authorization_contracts_by_name
+            ),
         )
         rebound += 1
 
@@ -219,6 +237,9 @@ def compile_incremental_fastapi_assurance(
     ir = assemble_fastapi_assurance_ir(
         materials=materials,
         function_contracts=function_contracts,
+        authorization_dependency_contracts=(
+            authorization_dependency_contracts
+        ),
         resource_return_contracts=resource_return_contracts,
         fragments=fragments,
         syntax_errors=parsed_index.syntax_errors,
