@@ -341,6 +341,9 @@ def profile_semantic_digest(profile: Any) -> str:
     payload = {
         "sink_effects": dict(sorted(profile.sink_effects.items())),
         "sink_identity_args": dict(sorted(profile.sink_identity_args.items())),
+        "sink_static_resources": dict(
+            sorted(profile.sink_static_resources.items())
+        ),
         "sink_scope_keywords": dict(sorted(profile.sink_scope_keywords.items())),
         "sink_missing_scope_unconstrained": sorted(
             profile.sink_missing_scope_unconstrained
@@ -392,6 +395,15 @@ def profile_semantic_digest(profile: Any) -> str:
         "dependency_guard_effects": {
             key: sorted(value)
             for key, value in sorted(profile.dependency_guard_effects.items())
+        },
+        "route_dependency_guard_resources": dict(
+            sorted(profile.route_dependency_guard_resources.items())
+        ),
+        "route_dependency_guard_effects": {
+            key: sorted(value)
+            for key, value in sorted(
+                profile.route_dependency_guard_effects.items()
+            )
         },
         "principal_parameter": profile.principal_parameter,
     }
@@ -450,24 +462,37 @@ def bind_route_file_summary(
                 continue
             sink_key, effect_name = sink
             sink_unsupported_start = len(unsupported)
-            identity_index = profile.identity_arg(sink_key)
-            if len(call.positional_arguments) <= identity_index:
-                unsupported.append(
-                    f"{file_summary.path}:{handler.handler_name}:"
-                    f"unsupported_sink_identity_signature:{sink_key}"
+            static_resource = profile.static_resource_for_sink(sink_key)
+            if static_resource is not None:
+                identity_expression = ExpressionSummary(
+                    rendered=f"$static:{static_resource}",
+                    term=ResourceIdentityTerm.literal(static_resource),
+                    provably_non_null=True,
+                    origin=call.origin,
                 )
-                continue
-
-            identity_expression = call.positional_arguments[identity_index]
-            identity_term = None
-            if profile.contract_identity_attribute_for_sink(sink_key) is None:
                 identity_term = identity_expression.term
-                if identity_term is None:
+            else:
+                identity_index = profile.identity_arg(sink_key)
+                if len(call.positional_arguments) <= identity_index:
                     unsupported.append(
                         f"{file_summary.path}:{handler.handler_name}:"
-                        f"unsupported_sink_identity_expression:{sink_key}"
+                        f"unsupported_sink_identity_signature:{sink_key}"
                     )
                     continue
+
+                identity_expression = call.positional_arguments[identity_index]
+                identity_term = None
+                if (
+                    profile.contract_identity_attribute_for_sink(sink_key)
+                    is None
+                ):
+                    identity_term = identity_expression.term
+                    if identity_term is None:
+                        unsupported.append(
+                            f"{file_summary.path}:{handler.handler_name}:"
+                            f"unsupported_sink_identity_expression:{sink_key}"
+                        )
+                        continue
 
             scope_term: ResourceIdentityTerm | None = None
             scope_origin: SemanticOrigin | None = None
@@ -614,12 +639,16 @@ def bind_route_file_summary(
                 scope_origin = call.origin
 
             effect_id = _semantic_id("effect", effect_name)
-            acted_id = _semantic_id(
-                "resource",
-                (
-                    f"{file_summary.path}:{handler.handler_name}:{call.line}:"
-                    f"{identity_expression.rendered}"
-                ),
+            acted_id = (
+                _semantic_id("resource", f"static:{static_resource}")
+                if static_resource is not None
+                else _semantic_id(
+                    "resource",
+                    (
+                        f"{file_summary.path}:{handler.handler_name}:"
+                        f"{call.line}:{identity_expression.rendered}"
+                    ),
+                )
             )
             protected_id = _semantic_id(
                 "protected",
@@ -635,7 +664,11 @@ def bind_route_file_summary(
             )
             resources[acted_id] = ResourceRef(
                 resource_id=acted_id,
-                symbol=identity_expression.rendered,
+                symbol=(
+                    static_resource
+                    if static_resource is not None
+                    else identity_expression.rendered
+                ),
                 identity_term=identity_term,
                 scope_term=scope_term,
                 attribute_terms=contract_attribute_terms,
@@ -666,6 +699,7 @@ def bind_route_file_summary(
 
             guard_ids: list[str] = []
             binding_ids: list[str] = []
+            route_complete_mediation = False
 
             ownership_assertion, ownership_problem = _prior_ownership_assertion(
                 handler=handler,
@@ -791,6 +825,59 @@ def bind_route_file_summary(
                 )
                 binding_ids.append(binding_id)
 
+            for route_dependency in handler.route_dependencies:
+                resolved_route_guard = profile.route_dependency_guard_names(
+                    route_dependency.full_name,
+                    route_dependency.leaf_name,
+                )
+                if resolved_route_guard is None:
+                    continue
+                (
+                    route_guard_key,
+                    route_resource_symbol,
+                    route_allowed_effects,
+                ) = resolved_route_guard
+                if effect_name not in route_allowed_effects:
+                    continue
+
+                guard_resource_id = _semantic_id(
+                    "resource",
+                    f"static:{route_resource_symbol}",
+                )
+                resources.setdefault(
+                    guard_resource_id,
+                    ResourceRef(
+                        resource_id=guard_resource_id,
+                        symbol=route_resource_symbol,
+                        identity_term=ResourceIdentityTerm.literal(
+                            route_resource_symbol
+                        ),
+                        origin=route_dependency.origin,
+                    ),
+                )
+                guard_id = _semantic_id(
+                    "guard",
+                    (
+                        f"{file_summary.path}:{handler.handler_name}:"
+                        f"route-dependency:{route_guard_key}:"
+                        f"{effect_name}:{route_resource_symbol}"
+                    ),
+                )
+                guards[guard_id] = AuthorizationGuard(
+                    guard_id=guard_id,
+                    principal_id=principal_id,
+                    effect_id=effect_id,
+                    resource_id=guard_resource_id,
+                    origin=route_dependency.origin,
+                )
+                guard_ids.append(guard_id)
+
+                if (
+                    static_resource is not None
+                    and route_resource_symbol == static_resource
+                ):
+                    route_complete_mediation = True
+
             protected[protected_id] = ProtectedEffect(
                 protected_effect_id=protected_id,
                 principal_id=principal_id,
@@ -808,12 +895,13 @@ def bind_route_file_summary(
             local_unsupported = list(
                 unsupported[sink_unsupported_start:]
             )
-            for control_line in handler.unsupported_control_flow_lines:
-                if control_line < call.line:
-                    local_unsupported.append(
-                        f"{file_summary.path}:{handler.handler_name}:"
-                        f"control_flow_before_protected_effect:{control_line}"
-                    )
+            if not route_complete_mediation:
+                for control_line in handler.unsupported_control_flow_lines:
+                    if control_line < call.line:
+                        local_unsupported.append(
+                            f"{file_summary.path}:{handler.handler_name}:"
+                            f"control_flow_before_protected_effect:{control_line}"
+                        )
             local_unsupported = sorted(set(local_unsupported))
             local_coverage_status = (
                 "partial" if local_unsupported else "complete"
@@ -893,6 +981,9 @@ def fragment_dependencies_match(
 _SUPPORTED_CONSTRUCTS = [
     "static_fastapi_route_decorator",
     "depends_or_security_default_parameter",
+    "direct_route_decorator_dependency",
+    "configured_static_sink_resource",
+    "route_dependency_complete_mediation",
     "straight_line_handler",
     "fail_fast_none_guard",
     "configured_service_call_sink",
@@ -907,6 +998,8 @@ _SUPPORTED_CONSTRUCTS = [
 
 _PROFILE_ASSUMPTIONS = [
     "Configured dependency guards authorize the declared route resource for the declared effects.",
+    "Configured direct route-decorator dependencies mediate every invocation of the handler and authorize only the declared static capability/resource for the declared effects.",
+    "Configured static sink resources denote endpoint/capability identities independent of request data and handler-local control flow.",
     "Configured service-call sinks faithfully identify protected effects.",
     "Configured sink identity argument denotes the acted resource identity only when no source-derived identity contract is required.",
     "Configured sink scope keyword denotes the acted resource scope when no source contract is required.",
@@ -992,7 +1085,7 @@ def assemble_fastapi_assurance_ir(
         ),
         extractor=AssuranceExtractorIdentity(
             extractor_id="assurance.fastapi.dependency_effects.ast_v1",
-            extractor_version="0.3.0",
+            extractor_version="0.4.0",
             source_profile_id="assurance.fastapi.dependency_effects.ast_v1",
         ),
         coverage=AssuranceCoverage(
