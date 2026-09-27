@@ -81,7 +81,7 @@ class CallSummary:
     resolved_qualified_name: str | None
     positional_arguments: tuple[ExpressionSummary, ...]
     keyword_arguments: tuple[tuple[str, ExpressionSummary], ...]
-    lexical_block_id: str = "root"
+    lexical_block_id: str
     origin: SemanticOrigin
 
     def keyword(self, name: str) -> ExpressionSummary | None:
