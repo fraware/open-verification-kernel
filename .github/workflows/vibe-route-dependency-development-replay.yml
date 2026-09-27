@@ -1,0 +1,73 @@
+name: Vibe Route Dependency Development Replay
+
+on:
+  pull_request:
+    paths:
+      - 'ovk/core/external_assurance_replay.py'
+      - 'ovk/core/protected_effect_profile.py'
+      - 'ovk/compilers/authorization/**'
+      - 'benchmarks/assurance_qualification/external/vibe_trading_route_dependency_effectiveness.development.v1.json'
+      - 'schemas/assurance.external_replay.*.json'
+      - 'schemas/protected_effect_profile.schema.json'
+      - 'scripts/run_external_assurance_replay.py'
+      - '.github/workflows/vibe-route-dependency-development-replay.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  vibe-development-replay:
+    if: github.head_ref == 'benchmark/vibe-route-dependency-effectiveness-development'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+      - name: Install OVK with solver dependencies
+        run: |
+          python scripts/sync_package_data.py
+          pip install --no-cache-dir -e '.[dev,solvers]'
+      - name: Replay Vibe-Trading development cases
+        run: |
+          python scripts/run_external_assurance_replay.py \
+            benchmarks/assurance_qualification/external/vibe_trading_route_dependency_effectiveness.development.v1.json \
+            --output .verification/vibe-route-dependency-development.json
+      - name: Upload development report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vibe-route-dependency-effectiveness-development
+          path: .verification/vibe-route-dependency-development.json
+          retention-days: 90
+      - name: Assert vulnerable rejection and repaired establishment
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(
+              Path(".verification/vibe-route-dependency-development.json").read_text()
+          )
+          assert report["cases_total"] == 2
+          results = {
+              item["case_id"]: item["qualification_result"]
+              for item in report["results"]
+          }
+
+          vulnerable = results[
+              "vibe-trading-fail-open-route-auth-vulnerable"
+          ]
+          assert vulnerable["validation_class"] == "public_upstream_reduction"
+          assert vulnerable["head_established"] is False
+          assert vulnerable["unsafe_false_assurance"] is False
+
+          repaired = results[
+              "vibe-trading-fail-open-route-auth-repair"
+          ]
+          assert repaired["validation_class"] == "public_upstream_reduction"
+          assert repaired["head_established"] is True
+          assert repaired["semantic_coverage_complete"] is True
+          PY
