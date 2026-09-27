@@ -7,7 +7,6 @@ from subprocess import CompletedProcess
 import pytest
 
 from ovk.core.guarantee_manifest import (
-    GuaranteeManifest,
     diff_guarantee_manifests,
     load_governed_guarantee_context,
     parse_guarantee_manifest_text,
