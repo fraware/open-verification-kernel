@@ -528,3 +528,45 @@ def load_governed_guarantee_context(
         diff=diff,
         warning=warning,
     )
+
+
+def guarantee_governance_summary(
+    context: GovernedGuaranteeContext,
+) -> dict[str, Any]:
+    """Return compact machine-readable governance metadata for check outputs."""
+
+    diff_payload = (
+        context.diff.model_dump(mode="json")
+        if context.diff is not None
+        else None
+    )
+    return {
+        "repository_path": context.repository_path,
+        "base_sha": context.base_sha,
+        "active_source": context.active_source,
+        "active_revision": context.active_revision,
+        "assurance_target_available": context.assurance_target_available,
+        "active_manifest_digest": (
+            context.active_manifest.manifest_digest
+            if context.active_manifest is not None
+            else None
+        ),
+        "proposed_manifest_digest": (
+            context.proposed_manifest.manifest_digest
+            if context.proposed_manifest is not None
+            else None
+        ),
+        "proposal_valid": context.proposal_valid,
+        "proposal_error": context.proposal_error,
+        "manifest_path_touched": context.manifest_path_touched,
+        "semantic_manifest_changed": context.semantic_manifest_changed,
+        "change_detection_mismatch": context.change_detection_mismatch,
+        "governance_review_required": context.governance_review_required,
+        "warning": context.warning,
+        "diff_semantic_change": (
+            context.diff.semantic_change
+            if context.diff is not None
+            else None
+        ),
+        "diff": diff_payload,
+    }
