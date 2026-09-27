@@ -65,7 +65,7 @@ class OwnershipAssertionSummary:
     principal_expression: ExpressionSummary
     principal_attribute: str
     presence_test: str
-    lexical_block_id: str = "root"
+    lexical_block_id: str
     origin: SemanticOrigin
 
     @property
@@ -568,7 +568,10 @@ def _loader_resource_candidates(
     handler: ast.FunctionDef | ast.AsyncFunctionDef,
     *,
     non_null_parameters: set[str],
-) -> dict[str, list[tuple[str, str | None, str, ExpressionSummary, int, str]]]:
+) -> dict[
+    str,
+    list[tuple[str, str | None, str, ExpressionSummary, int, str]],
+]:
     """Summarize loaded-resource assignments by route key and lexical block.
 
     The syntax rule is deliberately narrow: a named local receives a call whose
@@ -578,86 +581,96 @@ def _loader_resource_candidates(
 
     result: dict[
         str,
-        list[tuple[str, str | None, str, ExpressionSummary, int, str]],
+        list[
+            tuple[
+                str,
+                str | None,
+                str,
+                ExpressionSummary,
+                int,
+                str,
+            ]
+        ],
     ] = {}
 
     for lexical_block_id, statements in _sequential_statement_blocks(handler):
-      for statement in statements:
-          if not isinstance(statement, (ast.Assign, ast.AnnAssign)):
-              continue
+        for statement in statements:
+            if not isinstance(statement, (ast.Assign, ast.AnnAssign)):
+                continue
 
-          if isinstance(statement, ast.Assign):
-              if len(statement.targets) != 1 or not isinstance(
-                  statement.targets[0],
-                  ast.Name,
-              ):
-                  continue
-              target = statement.targets[0]
-              value = statement.value
-          else:
-              if not isinstance(statement.target, ast.Name):
-                  continue
-              target = statement.target
-              value = statement.value
+            if isinstance(statement, ast.Assign):
+                if len(statement.targets) != 1 or not isinstance(
+                    statement.targets[0],
+                    ast.Name,
+                ):
+                    continue
+                target = statement.targets[0]
+                value = statement.value
+            else:
+                if not isinstance(statement.target, ast.Name):
+                    continue
+                target = statement.target
+                value = statement.value
 
-          if value is None:
-              continue
-          outer = _unwrap_call(value)
-          if outer is None:
-              continue
+            if value is None:
+                continue
+            outer = _unwrap_call(value)
+            if outer is None:
+                continue
 
-          loader_full_name = ast.unparse(outer.func)
-          loader_leaf_name = _name_of(outer.func)
-          line = int(getattr(statement, "lineno", 0))
+            loader_full_name = ast.unparse(outer.func)
+            loader_leaf_name = _name_of(outer.func)
+            line = int(getattr(statement, "lineno", 0))
 
-          for nested in ast.walk(outer):
-              if (
-                  not isinstance(nested, ast.Call)
-                  or not isinstance(nested.func, ast.Attribute)
-                  or nested.func.attr != "where"
-                  or len(nested.args) != 1
-              ):
-                  continue
-              predicate = nested.args[0]
-              if (
-                  not isinstance(predicate, ast.Compare)
-                  or len(predicate.ops) != 1
-                  or not isinstance(predicate.ops[0], ast.Eq)
-                  or len(predicate.comparators) != 1
-              ):
-                  continue
+            for nested in ast.walk(outer):
+                if (
+                    not isinstance(nested, ast.Call)
+                    or not isinstance(nested.func, ast.Attribute)
+                    or nested.func.attr != "where"
+                    or len(nested.args) != 1
+                ):
+                    continue
+                predicate = nested.args[0]
+                if (
+                    not isinstance(predicate, ast.Compare)
+                    or len(predicate.ops) != 1
+                    or not isinstance(predicate.ops[0], ast.Eq)
+                    or len(predicate.comparators) != 1
+                ):
+                    continue
 
-              left = predicate.left
-              right = predicate.comparators[0]
-              pairs: list[tuple[ast.Attribute, ast.AST]] = []
-              if isinstance(left, ast.Attribute) and not isinstance(
-                  right,
-                  ast.Attribute,
-              ):
-                  pairs.append((left, right))
-              if isinstance(right, ast.Attribute) and not isinstance(
-                  left,
-                  ast.Attribute,
-              ):
-                  pairs.append((right, left))
+                left = predicate.left
+                right = predicate.comparators[0]
+                pairs: list[tuple[ast.Attribute, ast.AST]] = []
+                if isinstance(left, ast.Attribute) and not isinstance(
+                    right,
+                    ast.Attribute,
+                ):
+                    pairs.append((left, right))
+                if isinstance(right, ast.Attribute) and not isinstance(
+                    left,
+                    ast.Attribute,
+                ):
+                    pairs.append((right, left))
 
-              for model_attribute, resource_node in pairs:
-                  resource_summary = _expression_summary(
-                      path,
-                      resource_node,
-                      non_null_parameters=non_null_parameters,
-                  )
-                  if resource_summary.term is None:
-                      continue
-                  result.setdefault(target.id, []).append(
-                      (
-                          loader_full_name,
-                          loader_leaf_name,
-                          model_attribute.attr,
-                          resource_summary,
-                          line,
-                      )
-                  )
+                for model_attribute, resource_node in pairs:
+                    resource_summary = _expression_summary(
+                        path,
+                        resource_node,
+                        non_null_parameters=non_null_parameters,
+                    )
+                    if resource_summary.term is None:
+                        continue
+                    result.setdefault(target.id, []).append(
+                        (
+                            loader_full_name,
+                            loader_leaf_name,
+                            model_attribute.attr,
+                            resource_summary,
+                            line,
+                            lexical_block_id,
+                        )
+                    )
     return result
 
 
