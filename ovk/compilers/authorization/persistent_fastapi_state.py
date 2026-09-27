@@ -59,7 +59,7 @@ from ovk.core.bundle import content_digest
 
 
 PERSISTENT_FASTAPI_STATE_SCHEMA = "ovk.fastapi_incremental_state_cache.v1"
-PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION = "0.8.0"
+PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION = "0.9.0"
 DEFAULT_PERSISTENT_FASTAPI_STATE_DIR = Path(
     ".verification/cache/fastapi-incremental-state"
 )
@@ -88,6 +88,7 @@ def _fragment_payload(fragment: FastApiFileSemanticFragment) -> dict[str, Any]:
         "guard_effectiveness_dependencies": dict(
             sorted(fragment.guard_effectiveness_dependencies.items())
         ),
+        "route_attachment_digest": fragment.route_attachment_digest,
         "unsupported_constructs": list(fragment.unsupported_constructs),
         "principals": _models(fragment.principals),
         "resources": _models(fragment.resources),
@@ -117,6 +118,7 @@ def _fragment_from_payload(payload: dict[str, Any]) -> FastApiFileSemanticFragme
                 payload.get("guard_effectiveness_dependencies") or {}
             ).items()
         },
+        route_attachment_digest=str(payload["route_attachment_digest"]),
         unsupported_constructs=tuple(
             str(item)
             for item in payload.get("unsupported_constructs") or []
