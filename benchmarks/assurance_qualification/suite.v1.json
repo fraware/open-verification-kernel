@@ -616,10 +616,11 @@
         "upstream_head_revision": "dcc2559e9813ea36cc471d0c223ce8a4b3bca587",
         "source_path": "src/routes_fastapi/document_routes.py",
         "reduction_target": "api_delete_document",
-        "documented_defect": "workspace guard authorized one scope while delete_document acted without a bound workspace scope"
+        "documented_defect": "workspace guard authorized one scope while delete_document acted without a bound workspace scope",
+        "reduction_note": "Post-delete 404 response branch omitted because it executes after the protected effect and is outside the authorization mechanism under test."
       },
       "base_files": {
-        "src/routes_fastapi/document_routes.py": "from fastapi import APIRouter, Request\nrouter = APIRouter()\n\n@router.delete(\"/{doc_id}\")\ndef api_delete_document(doc_id: int, request: Request):\n    denied = _deny(request, None, \"editor\")\n    if denied:\n        return denied\n    caller = get_current_user_id(request)\n    deleted_by = caller if caller and caller != \"anonymous\" else None\n    deleted = request.app.state.db.delete_document(\n        doc_id, deleted_by, scope=get_scope(request)\n    )\n    if not deleted:\n        return {\"success\": False}\n    return {\"success\": True}\n"
+        "src/routes_fastapi/document_routes.py": "from fastapi import APIRouter, Request\nrouter = APIRouter()\n\n@router.delete(\"/{doc_id}\")\ndef api_delete_document(doc_id: int, request: Request):\n    denied = _deny(request, None, \"editor\")\n    if denied:\n        return denied\n    caller = get_current_user_id(request)\n    deleted_by = caller if caller and caller != \"anonymous\" else None\n    request.app.state.db.delete_document(\n        doc_id, deleted_by, scope=get_scope(request)\n    )\n    return {\"success\": True}\n"
       },
       "head_files": {
         "src/routes_fastapi/document_routes.py": "from fastapi import APIRouter, Request\nrouter = APIRouter()\n\n@router.delete(\"/{doc_id}\")\ndef api_delete_document(doc_id: int, request: Request):\n    denied = _deny(request, None, \"editor\")\n    if denied:\n        return denied\n    caller = get_current_user_id(request)\n    deleted_by = caller if caller and caller != \"anonymous\" else None\n    request.app.state.db.delete_document(doc_id, deleted_by)\n    return {\"success\": True}\n"
@@ -695,13 +696,14 @@
         "upstream_head_revision": "dcc2559e9813ea36cc471d0c223ce8a4b3bca587",
         "source_path": "src/routes_fastapi/document_routes.py",
         "reduction_target": "api_delete_document",
-        "documented_defect": "workspace guard authorized one scope while delete_document acted without a bound workspace scope"
+        "documented_defect": "workspace guard authorized one scope while delete_document acted without a bound workspace scope",
+        "reduction_note": "Post-delete 404 response branch omitted because it executes after the protected effect and is outside the authorization mechanism under test."
       },
       "base_files": {
         "src/routes_fastapi/document_routes.py": "from fastapi import APIRouter, Request\nrouter = APIRouter()\n\n@router.delete(\"/{doc_id}\")\ndef api_delete_document(doc_id: int, request: Request):\n    denied = _deny(request, None, \"editor\")\n    if denied:\n        return denied\n    caller = get_current_user_id(request)\n    deleted_by = caller if caller and caller != \"anonymous\" else None\n    request.app.state.db.delete_document(doc_id, deleted_by)\n    return {\"success\": True}\n"
       },
       "head_files": {
-        "src/routes_fastapi/document_routes.py": "from fastapi import APIRouter, Request\nrouter = APIRouter()\n\n@router.delete(\"/{doc_id}\")\ndef api_delete_document(doc_id: int, request: Request):\n    denied = _deny(request, None, \"editor\")\n    if denied:\n        return denied\n    caller = get_current_user_id(request)\n    deleted_by = caller if caller and caller != \"anonymous\" else None\n    deleted = request.app.state.db.delete_document(\n        doc_id, deleted_by, scope=get_scope(request)\n    )\n    if not deleted:\n        return {\"success\": False}\n    return {\"success\": True}\n"
+        "src/routes_fastapi/document_routes.py": "from fastapi import APIRouter, Request\nrouter = APIRouter()\n\n@router.delete(\"/{doc_id}\")\ndef api_delete_document(doc_id: int, request: Request):\n    denied = _deny(request, None, \"editor\")\n    if denied:\n        return denied\n    caller = get_current_user_id(request)\n    deleted_by = caller if caller and caller != \"anonymous\" else None\n    request.app.state.db.delete_document(\n        doc_id, deleted_by, scope=get_scope(request)\n    )\n    return {\"success\": True}\n"
       },
       "guarantee_manifest": {
         "schema_version": "ovk.guarantee_manifest.v1",
