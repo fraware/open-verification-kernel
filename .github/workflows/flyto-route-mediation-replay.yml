@@ -35,7 +35,7 @@ jobs:
           python scripts/run_external_assurance_replay.py \
             benchmarks/assurance_qualification/external/flyto_mcp_route_auth.v1.json \
             --output .verification/flyto-mcp-route-auth-replay.json
-      - name: Assert repaired head is established
+      - name: Assert vulnerable rejection and repaired establishment
         run: |
           python - <<'PY'
           import json
@@ -44,12 +44,26 @@ jobs:
           report = json.loads(
               Path(".verification/flyto-mcp-route-auth-replay.json").read_text()
           )
-          result = report["results"][0]["qualification_result"]
-          assert result["validation_class"] == "public_upstream_reduction"
-          assert result["expectation_met"] is True
-          assert result["head_established"] is True
-          assert result["semantic_coverage_complete"] is True
-          assert result["unsafe_false_assurance"] is False
+          assert report["cases_total"] == 2
+          results = {
+              item["case_id"]: item["qualification_result"]
+              for item in report["results"]
+          }
+
+          vulnerable = results["flyto-mcp-route-auth-vulnerable-snapshot"]
+          assert vulnerable["validation_class"] == "public_upstream_reduction"
+          assert vulnerable["safety_label"] == "unsafe"
+          assert vulnerable["expectation_met"] is True
+          assert vulnerable["head_established"] is False
+          assert vulnerable["unsafe_false_assurance"] is False
+
+          repaired = results["flyto-mcp-route-auth-repair"]
+          assert repaired["validation_class"] == "public_upstream_reduction"
+          assert repaired["safety_label"] == "safe"
+          assert repaired["expectation_met"] is True
+          assert repaired["head_established"] is True
+          assert repaired["semantic_coverage_complete"] is True
+          assert repaired["unsafe_false_assurance"] is False
           PY
       - name: Upload external development report
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
