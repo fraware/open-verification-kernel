@@ -127,11 +127,11 @@ The inferencer rejects successful early returns, additional conditional control
 flow, loops, try/except, delegated helpers, and other unsupported forms. Such
 dependencies remain unproved.
 
-The profile's authority expression is semantic authority: v1 treats it as a
-valid trusted credential authority at route invocation. This contract family
-does not prove initialization, secrecy, or non-null configuration invariants.
-Those remain explicit assumptions until a separate source-derived invariant
-mechanism discharges them.
+The governed credential/authority expression pair defines the authorization
+predicate accepted by policy. Source inference proves that every supported
+normal-return path passed that predicate. It does not prove initialization,
+secrecy, non-nullness, or provenance of the authority value; those are separate
+obligations for future source-derived invariant semantics.
 
 ## Exact source acquisition
 
