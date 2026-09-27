@@ -22,6 +22,7 @@ from ovk.core.assurance_ir import (
     AssuranceCoverage,
     AssuranceExtractorIdentity,
     AssuranceIR,
+    AuthorizationDependencyContract,
     AuthorizationGuard,
     ContractUse,
     EffectRef,
@@ -324,6 +325,9 @@ class FastApiFileSemanticFragment:
     source_digest: str
     profile_digest: str
     contract_dependencies: dict[str, str | None] = field(default_factory=dict)
+    authorization_contract_dependencies: dict[str, str | None] = field(
+        default_factory=dict
+    )
     unsupported_constructs: tuple[str, ...] = ()
     principals: tuple[PrincipalRef, ...] = ()
     resources: tuple[ResourceRef, ...] = ()
@@ -405,6 +409,16 @@ def profile_semantic_digest(profile: Any) -> str:
                 profile.route_dependency_guard_effects.items()
             )
         },
+        "route_dependency_credential_expressions": dict(
+            sorted(
+                profile.route_dependency_credential_expressions.items()
+            )
+        ),
+        "route_dependency_authority_expressions": dict(
+            sorted(
+                profile.route_dependency_authority_expressions.items()
+            )
+        ),
         "principal_parameter": profile.principal_parameter,
     }
     return content_digest(payload)
@@ -415,6 +429,10 @@ def bind_route_file_summary(
     *,
     profile: Any,
     contracts_by_name: Mapping[str, FunctionContract],
+    authorization_contracts_by_name: Mapping[
+        str,
+        AuthorizationDependencyContract,
+    ] | None = None,
 ) -> FastApiFileSemanticFragment:
     """Bind one file summary against current profile and function contracts."""
 
@@ -428,6 +446,10 @@ def bind_route_file_summary(
     paths: dict[str, SemanticPath] = {}
     unsupported: list[str] = []
     dependencies: dict[str, str | None] = {}
+    authorization_dependencies: dict[str, str | None] = {}
+    authorization_contracts = dict(
+        authorization_contracts_by_name or {}
+    )
 
     for handler in file_summary.handlers:
         if handler.has_control_flow:
@@ -863,12 +885,53 @@ def bind_route_file_summary(
                         f"{effect_name}:{route_resource_symbol}"
                     ),
                 )
+                contract = (
+                    authorization_contracts.get(
+                        route_dependency.full_name
+                    )
+                    or (
+                        authorization_contracts.get(
+                            route_dependency.leaf_name
+                        )
+                        if route_dependency.leaf_name is not None
+                        else None
+                    )
+                )
+                expectations = (
+                    profile.route_dependency_contract_expectations(
+                        route_guard_key
+                    )
+                )
+                authorization_dependencies[route_guard_key] = (
+                    contract.contract_id
+                    if contract is not None
+                    else None
+                )
+                contract_matches = False
+                if contract is not None and expectations is not None:
+                    expected_credential, expected_authority = expectations
+                    contract_matches = (
+                        contract.credential_expression
+                        == expected_credential
+                        and contract.authority_expression
+                        == expected_authority
+                    )
+
                 guards[guard_id] = AuthorizationGuard(
                     guard_id=guard_id,
                     principal_id=principal_id,
                     effect_id=effect_id,
                     resource_id=guard_resource_id,
-                    effectiveness="unproved",
+                    effectiveness=(
+                        "established"
+                        if contract_matches
+                        else "unproved"
+                    ),
+                    effectiveness_evidence_ids=(
+                        [contract.contract_id]
+                        if contract_matches and contract is not None
+                        else []
+                    ),
                     origin=route_dependency.origin,
                 )
                 guard_ids.append(guard_id)
@@ -926,6 +989,9 @@ def bind_route_file_summary(
         source_digest=file_summary.source_digest,
         profile_digest=profile_semantic_digest(profile),
         contract_dependencies=dict(sorted(dependencies.items())),
+        authorization_contract_dependencies=dict(
+            sorted(authorization_dependencies.items())
+        ),
         unsupported_constructs=tuple(sorted(set(unsupported))),
         principals=tuple(
             sorted(principals.values(), key=lambda item: item.principal_id)
@@ -962,6 +1028,10 @@ def fragment_dependencies_match(
     *,
     profile: Any,
     contracts_by_name: Mapping[str, FunctionContract],
+    authorization_contracts_by_name: Mapping[
+        str,
+        AuthorizationDependencyContract,
+    ] | None = None,
 ) -> bool:
     """Return whether profile and consumed contract versions are unchanged."""
 
@@ -975,7 +1045,22 @@ def fragment_dependencies_match(
         )
         for name in fragment.contract_dependencies
     }
-    return current == fragment.contract_dependencies
+    if current != fragment.contract_dependencies:
+        return False
+
+    auth_contracts = dict(authorization_contracts_by_name or {})
+    current_auth = {
+        name: (
+            auth_contracts[name].contract_id
+            if name in auth_contracts
+            else None
+        )
+        for name in fragment.authorization_contract_dependencies
+    }
+    return (
+        current_auth
+        == fragment.authorization_contract_dependencies
+    )
 
 
 
@@ -999,7 +1084,7 @@ _SUPPORTED_CONSTRUCTS = [
 
 _PROFILE_ASSUMPTIONS = [
     "Configured dependency guards authorize the declared route resource for the declared effects.",
-    "Configured direct route-decorator dependencies are candidate entrypoint mediators only; their AuthorizationGuard effectiveness remains unproved until source-derived dependency semantics establish it.",
+    "Configured direct route-decorator dependencies are candidate entrypoint mediators; effectiveness is established only when a source-derived authorization dependency contract exactly matches the governed credential and authority expressions.",
     "Configured static sink resources denote endpoint/capability identities independent of request data and handler-local control flow.",
     "Configured service-call sinks faithfully identify protected effects.",
     "Configured sink identity argument denotes the acted resource identity only when no source-derived identity contract is required.",
@@ -1018,6 +1103,9 @@ def assemble_fastapi_assurance_ir(
     *,
     materials: AuthMaterials,
     function_contracts: list[FunctionContract],
+    authorization_dependency_contracts: list[
+        AuthorizationDependencyContract
+    ] | None = None,
     resource_return_contracts: list[ResourceReturnContract],
     fragments: Mapping[str, FastApiFileSemanticFragment],
     syntax_errors: Mapping[str, str] | None = None,
@@ -1086,7 +1174,7 @@ def assemble_fastapi_assurance_ir(
         ),
         extractor=AssuranceExtractorIdentity(
             extractor_id="assurance.fastapi.dependency_effects.ast_v1",
-            extractor_version="0.5.0",
+            extractor_version="0.6.0",
             source_profile_id="assurance.fastapi.dependency_effects.ast_v1",
         ),
         coverage=AssuranceCoverage(
@@ -1122,6 +1210,10 @@ def assemble_fastapi_assurance_ir(
         ),
         resource_return_contracts=resource_return_contracts,
         function_contracts=function_contracts,
+        authorization_dependency_contracts=sorted(
+            authorization_dependency_contracts or [],
+            key=lambda item: item.contract_id,
+        ),
         contract_uses=sorted(
             contract_uses.values(),
             key=lambda item: item.use_id,
