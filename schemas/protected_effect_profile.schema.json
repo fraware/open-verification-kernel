@@ -160,6 +160,14 @@
         "items": {"type": "string", "minLength": 1}
       }
     },
+    "route_dependency_credential_expressions": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "minLength": 1}
+    },
+    "route_dependency_authority_expressions": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "minLength": 1}
+    },
     "principal_parameter": {"type": "string", "minLength": 1}
   },
   "additionalProperties": false
