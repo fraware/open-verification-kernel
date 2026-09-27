@@ -72,15 +72,19 @@ async def mcp_post(request: Request):
     # The decorator dependency is a source-grounded candidate mediator, and
     # both guard and effect refer to the same governed static capability.
     # Its implementation has not been proved fail-closed, so PASS is forbidden.
-    assert evaluation.extraction_coverage == "partial"
+    assert evaluation.extraction_coverage == "complete"
     assert evaluation.status == "unknown"
     assert len(ir.guards) == 1
     assert ir.guards[0].resource_id == ir.protected_effects[0].resource_id
-    path = ir.paths[0]
-    assert any(
-        "route_dependency_effectiveness_unproved:require_auth" in item
-        for item in path.unsupported_constructs
+    assert ir.guards[0].effectiveness == "unproved"
+    effectiveness = next(
+        check
+        for check in evaluation.checks
+        if check.dimension == "guard_effectiveness"
     )
+    assert effectiveness.status == "unknown"
+    assert "effectiveness is unproved" in effectiveness.reason
+    assert ir.paths[0].coverage_status == "complete"
 
 
 def test_missing_route_dependency_is_not_mistaken_for_authorization() -> None:
@@ -235,10 +239,13 @@ async def mcp_post(request: Request):
     ir, evaluation = _evaluation(source)
 
     assert evaluation.status == "unknown"
-    assert evaluation.extraction_coverage == "partial"
+    assert evaluation.extraction_coverage == "complete"
     assert len(ir.protected_effects) == 1
-    assert any(
-        "route_dependency_effectiveness_unproved:require_auth" in item
-        for item in ir.paths[0].unsupported_constructs
+    assert ir.guards[0].effectiveness == "unproved"
+    effectiveness = next(
+        check
+        for check in evaluation.checks
+        if check.dimension == "guard_effectiveness"
     )
+    assert effectiveness.status == "unknown"
 
