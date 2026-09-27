@@ -58,7 +58,7 @@ def test_committed_qualification_suite_executes_expected_product_behavior() -> N
     report = run_assurance_qualification_suite(suite)
 
     validate_assurance_qualification_report(report)
-    assert report.cases_total == 8
+    assert report.cases_total == 10
     assert all(item.expectation_met for item in report.results)
     assert report.metrics.unsafe_false_assurance_count == 0
     assert report.metrics.unsafe_detection_rate == 1.0

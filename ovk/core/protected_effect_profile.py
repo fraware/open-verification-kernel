@@ -95,8 +95,13 @@ class ProtectedEffectProfileConfig(BaseModel):
     )
     sink_binding_acted_attributes: dict[str, str] = Field(default_factory=dict)
 
-    dependency_guard_resources: dict[str, str]
-    dependency_guard_effects: dict[str, list[str]]
+    dependency_guard_resources: dict[str, str] = Field(default_factory=dict)
+    dependency_guard_effects: dict[str, list[str]] = Field(default_factory=dict)
+    request_scope_guards: dict[str, list[str]] = Field(default_factory=dict)
+    request_scope_guard_request_args: dict[str, int] = Field(
+        default_factory=dict
+    )
+    request_scope_accessors: dict[str, int] = Field(default_factory=dict)
     principal_parameter: str = "user"
 
     @field_validator("source_paths")
@@ -114,10 +119,7 @@ class ProtectedEffectProfileConfig(BaseModel):
                 )
         return normalized
 
-    @field_validator(
-        "sink_effects",
-        "dependency_guard_resources",
-    )
+    @field_validator("sink_effects")
     @classmethod
     def _non_empty_mapping(
         cls,
@@ -181,6 +183,34 @@ class ProtectedEffectProfileConfig(BaseModel):
                 )
 
         modeled_effects = set(self.sink_effects.values())
+        if not self.dependency_guard_effects and not self.request_scope_guards:
+            raise ValueError(
+                "profile must declare dependency guards or request-scope guards"
+            )
+
+        unknown_request_arg_guards = sorted(
+            set(self.request_scope_guard_request_args)
+            - set(self.request_scope_guards)
+        )
+        if unknown_request_arg_guards:
+            raise ValueError(
+                "request_scope_guard_request_args references unknown guards: "
+                + ", ".join(unknown_request_arg_guards)
+            )
+
+        for guard, effects in self.request_scope_guards.items():
+            if not effects:
+                raise ValueError(
+                    "request_scope_guards values must be non-empty"
+                )
+            unknown_effects = sorted(set(effects) - modeled_effects)
+            if unknown_effects:
+                raise ValueError(
+                    f"request-scope guard {guard} authorizes effects absent "
+                    "from sink_effects: "
+                    + ", ".join(unknown_effects)
+                )
+
         for dependency, effects in self.dependency_guard_effects.items():
             if dependency not in self.dependency_guard_resources:
                 raise ValueError(
@@ -231,6 +261,12 @@ class ProtectedEffectProfileConfig(BaseModel):
                 payload["dependency_guard_effects"].items()
             )
         }
+        payload["request_scope_guards"] = {
+            key: sorted(values)
+            for key, values in sorted(
+                payload["request_scope_guards"].items()
+            )
+        }
         return payload
 
     @property
@@ -278,6 +314,14 @@ class ProtectedEffectProfileConfig(BaseModel):
                 key: tuple(values)
                 for key, values in self.dependency_guard_effects.items()
             },
+            request_scope_guards={
+                key: tuple(values)
+                for key, values in self.request_scope_guards.items()
+            },
+            request_scope_guard_request_args=dict(
+                self.request_scope_guard_request_args
+            ),
+            request_scope_accessors=dict(self.request_scope_accessors),
             principal_parameter=self.principal_parameter,
         )
 

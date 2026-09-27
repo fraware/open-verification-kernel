@@ -600,6 +600,166 @@
       },
       "human_adjudicated": false,
       "human_review_minutes": null
+    },
+    {
+      "case_id": "localchat_public_object_scope_regression",
+      "repository": "jwvanderstam/LocalChat",
+      "description": "Public LocalChat P0-1 repair reversed: a fail-closed workspace guard remains, while the document delete loses the authorized scope argument.",
+      "validation_class": "public_upstream_reduction",
+      "safety_label": "unsafe",
+      "expected_head_assurance": "not_established",
+      "provenance": {
+        "contamination_status": "public_development_case",
+        "upstream_repository": "jwvanderstam/LocalChat",
+        "upstream_pull_request": "https://github.com/jwvanderstam/LocalChat/pull/380",
+        "upstream_base_revision": "3532a89dd8f48ba8f0d0820e37de6c7c4605457f",
+        "upstream_head_revision": "dcc2559e9813ea36cc471d0c223ce8a4b3bca587",
+        "source_path": "src/routes_fastapi/document_routes.py",
+        "reduction_target": "api_delete_document",
+        "documented_defect": "workspace guard authorized one scope while delete_document acted without a bound workspace scope",
+        "reduction_note": "Post-delete 404 response branch omitted because it executes after the protected effect and is outside the authorization mechanism under test."
+      },
+      "base_files": {
+        "src/routes_fastapi/document_routes.py": "from fastapi import APIRouter, Request\nrouter = APIRouter()\n\n@router.delete(\"/{doc_id}\")\ndef api_delete_document(doc_id: int, request: Request):\n    denied = _deny(request, None, \"editor\")\n    if denied:\n        return denied\n    caller = get_current_user_id(request)\n    deleted_by = caller if caller and caller != \"anonymous\" else None\n    request.app.state.db.delete_document(\n        doc_id, deleted_by, scope=get_scope(request)\n    )\n    return {\"success\": True}\n"
+      },
+      "head_files": {
+        "src/routes_fastapi/document_routes.py": "from fastapi import APIRouter, Request\nrouter = APIRouter()\n\n@router.delete(\"/{doc_id}\")\ndef api_delete_document(doc_id: int, request: Request):\n    denied = _deny(request, None, \"editor\")\n    if denied:\n        return denied\n    caller = get_current_user_id(request)\n    deleted_by = caller if caller and caller != \"anonymous\" else None\n    request.app.state.db.delete_document(doc_id, deleted_by)\n    return {\"success\": True}\n"
+      },
+      "guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-WORKSPACE-DOCUMENT-DELETE",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Document deletion is authorized for the workspace scope carried into the database operation.",
+            "selector": {
+              "effect_name": "workspace.document.delete"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "upstream_pull_request": "https://github.com/jwvanderstam/LocalChat/pull/380",
+              "security_finding": "P0-1 object-level authorization"
+            }
+          }
+        ]
+      },
+      "protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "src/routes_fastapi/document_routes.py"
+        ],
+        "sink_effects": {
+          "delete_document": "workspace.document.delete"
+        },
+        "sink_identity_args": {
+          "delete_document": 0
+        },
+        "sink_scope_keywords": {
+          "delete_document": "scope"
+        },
+        "sink_missing_scope_unconstrained": [
+          "delete_document"
+        ],
+        "dependency_guard_resources": {},
+        "dependency_guard_effects": {},
+        "request_scope_guards": {
+          "_deny": [
+            "workspace.document.delete"
+          ]
+        },
+        "request_scope_guard_request_args": {
+          "_deny": 0
+        },
+        "request_scope_accessors": {
+          "get_scope": 0
+        },
+        "principal_parameter": "request"
+      },
+      "human_adjudicated": false,
+      "human_review_minutes": null
+    },
+    {
+      "case_id": "localchat_public_object_scope_repair",
+      "repository": "jwvanderstam/LocalChat",
+      "description": "Public LocalChat P0-1 historical repair: the document delete begins carrying the exact request workspace scope established by the guard.",
+      "validation_class": "public_upstream_reduction",
+      "safety_label": "safe",
+      "expected_head_assurance": "established",
+      "provenance": {
+        "contamination_status": "public_development_case",
+        "upstream_repository": "jwvanderstam/LocalChat",
+        "upstream_pull_request": "https://github.com/jwvanderstam/LocalChat/pull/380",
+        "upstream_base_revision": "3532a89dd8f48ba8f0d0820e37de6c7c4605457f",
+        "upstream_head_revision": "dcc2559e9813ea36cc471d0c223ce8a4b3bca587",
+        "source_path": "src/routes_fastapi/document_routes.py",
+        "reduction_target": "api_delete_document",
+        "documented_defect": "workspace guard authorized one scope while delete_document acted without a bound workspace scope",
+        "reduction_note": "Post-delete 404 response branch omitted because it executes after the protected effect and is outside the authorization mechanism under test."
+      },
+      "base_files": {
+        "src/routes_fastapi/document_routes.py": "from fastapi import APIRouter, Request\nrouter = APIRouter()\n\n@router.delete(\"/{doc_id}\")\ndef api_delete_document(doc_id: int, request: Request):\n    denied = _deny(request, None, \"editor\")\n    if denied:\n        return denied\n    caller = get_current_user_id(request)\n    deleted_by = caller if caller and caller != \"anonymous\" else None\n    request.app.state.db.delete_document(doc_id, deleted_by)\n    return {\"success\": True}\n"
+      },
+      "head_files": {
+        "src/routes_fastapi/document_routes.py": "from fastapi import APIRouter, Request\nrouter = APIRouter()\n\n@router.delete(\"/{doc_id}\")\ndef api_delete_document(doc_id: int, request: Request):\n    denied = _deny(request, None, \"editor\")\n    if denied:\n        return denied\n    caller = get_current_user_id(request)\n    deleted_by = caller if caller and caller != \"anonymous\" else None\n    request.app.state.db.delete_document(\n        doc_id, deleted_by, scope=get_scope(request)\n    )\n    return {\"success\": True}\n"
+      },
+      "guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-WORKSPACE-DOCUMENT-DELETE",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Document deletion is authorized for the workspace scope carried into the database operation.",
+            "selector": {
+              "effect_name": "workspace.document.delete"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "upstream_pull_request": "https://github.com/jwvanderstam/LocalChat/pull/380",
+              "security_finding": "P0-1 object-level authorization"
+            }
+          }
+        ]
+      },
+      "protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "src/routes_fastapi/document_routes.py"
+        ],
+        "sink_effects": {
+          "delete_document": "workspace.document.delete"
+        },
+        "sink_identity_args": {
+          "delete_document": 0
+        },
+        "sink_scope_keywords": {
+          "delete_document": "scope"
+        },
+        "sink_missing_scope_unconstrained": [
+          "delete_document"
+        ],
+        "dependency_guard_resources": {},
+        "dependency_guard_effects": {},
+        "request_scope_guards": {
+          "_deny": [
+            "workspace.document.delete"
+          ]
+        },
+        "request_scope_guard_request_args": {
+          "_deny": 0
+        },
+        "request_scope_accessors": {
+          "get_scope": 0
+        },
+        "principal_parameter": "request"
+      },
+      "human_adjudicated": false,
+      "human_review_minutes": null
     }
   ]
 }

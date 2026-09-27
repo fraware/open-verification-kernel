@@ -111,6 +111,15 @@ class FastApiDependencyEffectProfile:
     # Dependency name -> effect names the dependency authorizes in this profile.
     dependency_guard_effects: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
+    # Request-scope guard helper -> effect names it authorizes on successful
+    # continuation. The guard is consumed only for the narrow fail-closed source
+    # shape summarized by fastapi_route_summary.
+    request_scope_guards: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Guard helper -> positional argument containing the request/context object.
+    request_scope_guard_request_args: dict[str, int] = field(default_factory=dict)
+    # Scope accessor helper -> positional argument containing the same request.
+    request_scope_accessors: dict[str, int] = field(default_factory=dict)
+
     principal_parameter: str = "user"
 
     def sink_effect_names(
@@ -172,6 +181,29 @@ class FastApiDependencyEffectProfile:
 
     def binding_acted_attribute_for_sink(self, sink_key: str) -> str | None:
         return self.sink_binding_acted_attributes.get(sink_key)
+
+    def request_scope_guard_effect_names(
+        self,
+        full_name: str,
+        leaf_name: str | None,
+    ) -> tuple[str, tuple[str, ...]] | None:
+        for key in (full_name, leaf_name):
+            if key and key in self.request_scope_guards:
+                return key, self.request_scope_guards[key]
+        return None
+
+    def request_arg_for_guard(self, guard_key: str) -> int:
+        return int(self.request_scope_guard_request_args.get(guard_key, 0))
+
+    def request_scope_accessor_arg(
+        self,
+        full_name: str | None,
+        leaf_name: str | None,
+    ) -> tuple[str, int] | None:
+        for key in (full_name, leaf_name):
+            if key and key in self.request_scope_accessors:
+                return key, int(self.request_scope_accessors[key])
+        return None
 
 
 def _name_of(node: ast.AST | None) -> str | None:

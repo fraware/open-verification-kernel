@@ -300,9 +300,98 @@ def profile_semantic_digest(profile: Any) -> str:
             key: sorted(value)
             for key, value in sorted(profile.dependency_guard_effects.items())
         },
+        "request_scope_guards": {
+            key: sorted(value)
+            for key, value in sorted(profile.request_scope_guards.items())
+        },
+        "request_scope_guard_request_args": dict(
+            sorted(profile.request_scope_guard_request_args.items())
+        ),
+        "request_scope_accessors": dict(
+            sorted(profile.request_scope_accessors.items())
+        ),
         "principal_parameter": profile.principal_parameter,
     }
     return content_digest(payload)
+
+
+def _request_scope_term(
+    expression: ExpressionSummary,
+    *,
+    profile: Any,
+) -> ResourceIdentityTerm | None:
+    """Resolve a configured scope accessor to its request-bound scope token."""
+
+    resolved = profile.request_scope_accessor_arg(
+        expression.call_full_name,
+        expression.call_leaf_name,
+    )
+    if resolved is None:
+        return None
+    _accessor_key, request_arg = resolved
+    if len(expression.call_positional_arguments) <= request_arg:
+        return None
+    request_expression = expression.call_positional_arguments[request_arg]
+    return ResourceIdentityTerm.symbol(
+        f"$request_scope:{request_expression}"
+    )
+
+
+def _prior_request_scope_guards(
+    *,
+    handler: RouteHandlerSummary,
+    sink_call: CallSummary,
+    effect_name: str,
+    profile: Any,
+) -> tuple[
+    list[tuple[str, CallSummary, ResourceIdentityTerm]],
+    list[str],
+]:
+    """Return configured fail-closed request guards that dominate one sink.
+
+    A helper call establishes authorization only for the narrow source shape
+    summarized as fail_closed_truthy_return. Calling the helper and ignoring its
+    denial result never creates a guard.
+    """
+
+    matches: list[tuple[str, CallSummary, ResourceIdentityTerm]] = []
+    problems: list[str] = []
+    for call in handler.calls:
+        if call.line >= sink_call.line:
+            continue
+        resolved = profile.request_scope_guard_effect_names(
+            call.full_name,
+            call.leaf_name,
+        )
+        if resolved is None:
+            continue
+        guard_key, allowed_effects = resolved
+        if effect_name not in allowed_effects:
+            continue
+        if not call.fail_closed_truthy_return:
+            problems.append(
+                f"request_scope_guard_not_fail_closed:{guard_key}"
+            )
+            continue
+        request_arg = profile.request_arg_for_guard(guard_key)
+        if len(call.positional_arguments) <= request_arg:
+            problems.append(
+                f"unsupported_request_scope_guard_signature:{guard_key}"
+            )
+            continue
+        request_expression = call.positional_arguments[
+            request_arg
+        ].rendered
+        matches.append(
+            (
+                guard_key,
+                call,
+                ResourceIdentityTerm.symbol(
+                    f"$request_scope:{request_expression}"
+                ),
+            )
+        )
+    return matches, problems
 
 
 def bind_route_file_summary(
@@ -343,7 +432,11 @@ def bind_route_file_summary(
             PrincipalRef(
                 principal_id=principal_id,
                 symbol=principal_symbol,
-                principal_type="fastapi_dependency_result",
+                principal_type=(
+                    "request_authorization_context"
+                    if profile.request_scope_guards
+                    else "fastapi_dependency_result"
+                ),
                 origin=handler.origin,
             ),
         )
@@ -477,12 +570,17 @@ def bind_route_file_summary(
                     if scope_expression is not None:
                         scope_term = scope_expression.term
                         if scope_term is None:
+                            scope_term = _request_scope_term(
+                                scope_expression,
+                                profile=profile,
+                            )
+                        if scope_term is None:
                             unsupported.append(
                                 f"{file_summary.path}:{handler.handler_name}:"
                                 f"unsupported_sink_scope_expression:{sink_key}"
                             )
                         else:
-                            scope_origin = call.origin
+                            scope_origin = scope_expression.origin
                     elif not profile.missing_scope_is_unconstrained(sink_key):
                         unsupported.append(
                             f"{file_summary.path}:{handler.handler_name}:"
@@ -661,6 +759,93 @@ def bind_route_file_summary(
                     authorized_attribute=authorized_attribute,
                     acted_attribute=acted_attribute,
                     origin=scope_origin or call.origin,
+                )
+                binding_ids.append(binding_id)
+
+            request_guards, request_guard_problems = (
+                _prior_request_scope_guards(
+                    handler=handler,
+                    sink_call=call,
+                    effect_name=effect_name,
+                    profile=profile,
+                )
+            )
+            for problem in request_guard_problems:
+                unsupported.append(
+                    f"{file_summary.path}:{handler.handler_name}:{problem}"
+                )
+            for guard_key, guard_call, request_scope_term in request_guards:
+                guard_resource_symbol = request_scope_term.value
+                guard_resource_id = _semantic_id(
+                    "resource",
+                    guard_resource_symbol,
+                )
+                resources.setdefault(
+                    guard_resource_id,
+                    ResourceRef(
+                        resource_id=guard_resource_id,
+                        symbol=guard_resource_symbol,
+                        identity_term=request_scope_term,
+                        origin=guard_call.origin,
+                    ),
+                )
+                guard_id = _semantic_id(
+                    "guard",
+                    (
+                        f"{file_summary.path}:{handler.handler_name}:"
+                        f"{guard_key}:{guard_call.line}:{effect_name}:"
+                        f"{guard_resource_symbol}"
+                    ),
+                )
+                guards[guard_id] = AuthorizationGuard(
+                    guard_id=guard_id,
+                    principal_id=principal_id,
+                    effect_id=effect_id,
+                    resource_id=guard_resource_id,
+                    origin=guard_call.origin,
+                )
+                guard_ids.append(guard_id)
+
+                relation = profile.binding_relation_for_sink(sink_key)
+                authorized_projection = (
+                    profile.binding_authorized_projection_for_sink(
+                        sink_key
+                    )
+                )
+                acted_projection = (
+                    profile.binding_acted_projection_for_sink(
+                        sink_key
+                    )
+                )
+                authorized_attribute = (
+                    profile.binding_authorized_attribute_for_sink(
+                        sink_key
+                    )
+                )
+                acted_attribute = (
+                    profile.binding_acted_attribute_for_sink(
+                        sink_key
+                    )
+                )
+                binding_id = _semantic_id(
+                    "binding",
+                    (
+                        f"{guard_id}:{guard_resource_id}:{acted_id}:"
+                        f"{relation}:{authorized_projection}:"
+                        f"{acted_projection}:{authorized_attribute}:"
+                        f"{acted_attribute}"
+                    ),
+                )
+                bindings[binding_id] = ResourceBinding(
+                    binding_id=binding_id,
+                    authorized_resource_id=guard_resource_id,
+                    acted_resource_id=acted_id,
+                    relation=relation,
+                    authorized_projection=authorized_projection,
+                    acted_projection=acted_projection,
+                    authorized_attribute=authorized_attribute,
+                    acted_attribute=acted_attribute,
+                    origin=scope_origin or guard_call.origin,
                 )
                 binding_ids.append(binding_id)
 
