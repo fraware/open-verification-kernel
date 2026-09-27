@@ -62,6 +62,41 @@ It declares:
 
 OVK does not infer these semantics heuristically from naming conventions.
 
+### Parameter-level static complete mediation
+
+A second bounded subset supports FastAPI dependencies declared as handler
+parameters when the protected effect acts on a static endpoint/capability
+resource.
+
+For example:
+
+    @router.delete("/remove-by-tags")
+    async def remove_documents_by_tags(
+        tags: list[str],
+        user = Depends(require_write_access),
+    ):
+        storage = get_storage()
+        return await storage.delete_by_tags(tags)
+
+A trusted profile may bind `require_write_access` to the same static capability
+as the protected sink. OVK treats this as complete mediation only when:
+
+- the direct `Depends` or `Security` parameter is present in source;
+- the dependency result parameter is the configured principal parameter;
+- the dependency's governed static resource exactly equals the sink's governed
+  static resource; and
+- the protected effect is explicitly listed for that dependency.
+
+This static construct is separate from the existing dynamic
+`dependency_guard_resources` semantics. One dependency name cannot declare
+both forms in the same profile. Dependency factories and other dynamic
+dependency expressions remain outside the supported subset.
+
+Because FastAPI resolves the parameter dependency before entering the handler,
+handler-local branching cannot bypass the dependency for that static
+capability. This local coverage rule does not generalize to request-derived
+resource authorization.
+
 ### Route-level complete mediation
 
 The supported route-level subset is intentionally narrow. A profile may declare

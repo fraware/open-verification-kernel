@@ -396,6 +396,15 @@ def profile_semantic_digest(profile: Any) -> str:
             key: sorted(value)
             for key, value in sorted(profile.dependency_guard_effects.items())
         },
+        "dependency_guard_static_resources": dict(
+            sorted(profile.dependency_guard_static_resources.items())
+        ),
+        "dependency_guard_static_effects": {
+            key: sorted(value)
+            for key, value in sorted(
+                profile.dependency_guard_static_effects.items()
+            )
+        },
         "route_dependency_guard_resources": dict(
             sorted(profile.route_dependency_guard_resources.items())
         ),
@@ -699,6 +708,7 @@ def bind_route_file_summary(
 
             guard_ids: list[str] = []
             binding_ids: list[str] = []
+            static_parameter_complete_mediation = False
             route_complete_mediation = False
 
             ownership_assertion, ownership_problem = _prior_ownership_assertion(
@@ -825,6 +835,63 @@ def bind_route_file_summary(
                 )
                 binding_ids.append(binding_id)
 
+            for (
+                dep_name,
+                allowed_effects,
+            ) in profile.dependency_guard_static_effects.items():
+                if effect_name not in allowed_effects:
+                    continue
+                dep_record = dependency_by_name.get(dep_name)
+                static_guard_resource = (
+                    profile.dependency_guard_static_resources.get(dep_name)
+                )
+                if dep_record is None or static_guard_resource is None:
+                    continue
+                if dep_record.parameter_name != profile.principal_parameter:
+                    unsupported.append(
+                        f"{file_summary.path}:{handler.handler_name}:"
+                        f"static_dependency_principal_mismatch:{dep_name}"
+                    )
+                    continue
+
+                guard_resource_id = _semantic_id(
+                    "resource",
+                    f"static:{static_guard_resource}",
+                )
+                resources.setdefault(
+                    guard_resource_id,
+                    ResourceRef(
+                        resource_id=guard_resource_id,
+                        symbol=static_guard_resource,
+                        identity_term=ResourceIdentityTerm.literal(
+                            static_guard_resource
+                        ),
+                        origin=dep_record.origin,
+                    ),
+                )
+                guard_id = _semantic_id(
+                    "guard",
+                    (
+                        f"{file_summary.path}:{handler.handler_name}:"
+                        f"parameter-dependency:{dep_name}:"
+                        f"{effect_name}:{static_guard_resource}"
+                    ),
+                )
+                guards[guard_id] = AuthorizationGuard(
+                    guard_id=guard_id,
+                    principal_id=principal_id,
+                    effect_id=effect_id,
+                    resource_id=guard_resource_id,
+                    origin=dep_record.origin,
+                )
+                guard_ids.append(guard_id)
+
+                if (
+                    static_resource is not None
+                    and static_guard_resource == static_resource
+                ):
+                    static_parameter_complete_mediation = True
+
             for route_dependency in handler.route_dependencies:
                 resolved_route_guard = profile.route_dependency_guard_names(
                     route_dependency.full_name,
@@ -895,7 +962,10 @@ def bind_route_file_summary(
             local_unsupported = list(
                 unsupported[sink_unsupported_start:]
             )
-            if not route_complete_mediation:
+            if not (
+                route_complete_mediation
+                or static_parameter_complete_mediation
+            ):
                 for control_line in handler.unsupported_control_flow_lines:
                     if control_line < call.line:
                         local_unsupported.append(
@@ -983,6 +1053,7 @@ _SUPPORTED_CONSTRUCTS = [
     "depends_or_security_default_parameter",
     "direct_route_decorator_dependency",
     "configured_static_sink_resource",
+    "static_parameter_dependency_complete_mediation",
     "route_dependency_complete_mediation",
     "straight_line_handler",
     "fail_fast_none_guard",
@@ -998,6 +1069,7 @@ _SUPPORTED_CONSTRUCTS = [
 
 _PROFILE_ASSUMPTIONS = [
     "Configured dependency guards authorize the declared route resource for the declared effects.",
+    "Configured parameter dependencies declared as static guards mediate every invocation of the handler, bind the configured principal parameter, and authorize only the declared static capability/resource for the declared effects.",
     "Configured direct route-decorator dependencies mediate every invocation of the handler and authorize only the declared static capability/resource for the declared effects.",
     "Configured static sink resources denote endpoint/capability identities independent of request data and handler-local control flow.",
     "Configured service-call sinks faithfully identify protected effects.",
@@ -1085,7 +1157,7 @@ def assemble_fastapi_assurance_ir(
         ),
         extractor=AssuranceExtractorIdentity(
             extractor_id="assurance.fastapi.dependency_effects.ast_v1",
-            extractor_version="0.4.0",
+            extractor_version="0.5.0",
             source_profile_id="assurance.fastapi.dependency_effects.ast_v1",
         ),
         coverage=AssuranceCoverage(

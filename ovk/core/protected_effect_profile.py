@@ -133,6 +133,8 @@ class ProtectedEffectProfileConfig(BaseModel):
 
     dependency_guard_resources: dict[str, str] = Field(default_factory=dict)
     dependency_guard_effects: dict[str, list[str]] = Field(default_factory=dict)
+    dependency_guard_static_resources: dict[str, str] = Field(default_factory=dict)
+    dependency_guard_static_effects: dict[str, list[str]] = Field(default_factory=dict)
     route_dependency_guard_resources: dict[str, str] = Field(default_factory=dict)
     route_dependency_guard_effects: dict[str, list[str]] = Field(default_factory=dict)
     principal_parameter: str = "user"
@@ -288,6 +290,48 @@ class ProtectedEffectProfileConfig(BaseModel):
                     + ", ".join(unknown_effects)
                 )
 
+        static_dependency_resource_keys = set(
+            self.dependency_guard_static_resources
+        )
+        static_dependency_effect_keys = set(
+            self.dependency_guard_static_effects
+        )
+        if static_dependency_resource_keys != static_dependency_effect_keys:
+            raise ValueError(
+                "static parameter dependency resources/effects must have identical keys"
+            )
+        dynamic_dependency_keys = set(self.dependency_guard_resources) | set(
+            self.dependency_guard_effects
+        )
+        overlap = sorted(
+            static_dependency_resource_keys & dynamic_dependency_keys
+        )
+        if overlap:
+            raise ValueError(
+                "dependency cannot declare both dynamic and static guard semantics: "
+                + ", ".join(overlap)
+            )
+        for dependency, effects in self.dependency_guard_static_effects.items():
+            if not dependency.strip():
+                raise ValueError(
+                    "static parameter dependency names must be non-empty"
+                )
+            resource = self.dependency_guard_static_resources[dependency].strip()
+            if not resource:
+                raise ValueError(
+                    "static parameter dependency resources must be non-empty"
+                )
+            if not effects:
+                raise ValueError(
+                    "dependency_guard_static_effects values must be non-empty"
+                )
+            unknown_effects = sorted(set(effects) - modeled_effects)
+            if unknown_effects:
+                raise ValueError(
+                    f"static parameter dependency {dependency} authorizes effects absent "
+                    "from sink_effects: " + ", ".join(unknown_effects)
+                )
+
         route_resource_keys = set(self.route_dependency_guard_resources)
         route_effect_keys = set(self.route_dependency_guard_effects)
         if route_resource_keys != route_effect_keys:
@@ -366,6 +410,12 @@ class ProtectedEffectProfileConfig(BaseModel):
                 payload["dependency_guard_effects"].items()
             )
         }
+        payload["dependency_guard_static_effects"] = {
+            key: sorted(values)
+            for key, values in sorted(
+                payload["dependency_guard_static_effects"].items()
+            )
+        }
         payload["route_dependency_guard_effects"] = {
             key: sorted(values)
             for key, values in sorted(
@@ -430,6 +480,13 @@ class ProtectedEffectProfileConfig(BaseModel):
             dependency_guard_effects={
                 key: tuple(values)
                 for key, values in self.dependency_guard_effects.items()
+            },
+            dependency_guard_static_resources=dict(
+                self.dependency_guard_static_resources
+            ),
+            dependency_guard_static_effects={
+                key: tuple(values)
+                for key, values in self.dependency_guard_static_effects.items()
             },
             route_dependency_guard_resources=dict(
                 self.route_dependency_guard_resources
