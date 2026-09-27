@@ -154,7 +154,9 @@ The v1 suite exercises:
 5. extraction-profile self-redefinition plus vulnerable code;
 6. a benign change outside the supported control-flow envelope;
 7. the public PraisonAI repaired-to-vulnerable regression;
-8. the public PraisonAI vulnerable-to-repaired transition.
+8. the public PraisonAI vulnerable-to-repaired transition;
+9. a fail-closed route authorization dependency changed to a successful bypass path;
+10. the reverse repair restoring the source-derived authorization dependency contract.
 
 The benign unsupported-control-flow case is expected to remain open. It is
 included to make the review burden visible rather than optimizing the benchmark
