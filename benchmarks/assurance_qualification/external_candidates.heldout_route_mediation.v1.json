@@ -1,0 +1,83 @@
+{
+  "schema_version": "ovk.assurance_external_candidate_registry.v1",
+  "registry_id": "fastapi-missing-auth-heldout-round1-2026-09-27",
+  "description": "Held-out external triage cohort frozen after route-level complete-mediation implementation and before running OVK on any selected case. Selection rule: GitHub-reviewed 2026 FastAPI missing-authentication vulnerabilities, distinct public repositories, public pinned repaired transitions, excluding repositories/cases previously used as OVK development evidence.",
+  "reviewed_against": {
+    "protected_effect_profile_type": "fastapi_dependency_effects_v1",
+    "guarantee_type": "protected_effect_integrity_v1",
+    "ovk_revision": "af94ae1bac88b15a0db1434727f8401e6922a548"
+  },
+  "candidates": [
+    {
+      "candidate_id": "langflow-monitor-missing-route-auth-2026",
+      "repository": "langflow-ai/langflow",
+      "repository_url": "https://github.com/langflow-ai/langflow.git",
+      "framework": "FastAPI",
+      "security_property": "Unauthenticated callers must not execute protected monitoring operations that expose or delete sensitive application data.",
+      "triage_status": "supported_now",
+      "semantic_pattern": "direct_route_decorator_dependency_mediates_static_endpoint_effect",
+      "reason_codes": [
+        "repair_adds_direct_dependencies_depends_get_current_active_user",
+        "protected_delete_call_is_directly_present_in_route_handler",
+        "route_dependency_dominates_handler_local_control_flow",
+        "static_endpoint_capability_fits_current_complete_mediation_subset"
+      ],
+      "base_sha": "9d57aa8f997ec10cd7e53ec2337ba25989926b60",
+      "head_sha": "3fed9fe1b5658f2c8656dbd73508e113a96e486a",
+      "fix_pr": "https://github.com/langflow-ai/langflow/pull/10977",
+      "references": [
+        "https://github.com/advisories/GHSA-c5cp-vx83-jhqx",
+        "https://github.com/langflow-ai/langflow/commit/3fed9fe1b5658f2c8656dbd73508e113a96e486a"
+      ],
+      "notes": "Pre-replay source triage selects the DELETE /monitor/builds transition and its direct delete_vertex_builds_by_flow_id call as the protected static endpoint effect. The candidate was not used to design the route-level primitive.",
+      "qualification_eligible": true
+    },
+    {
+      "candidate_id": "mlflow-fastapi-permission-middleware-gap-2026",
+      "repository": "mlflow/mlflow",
+      "repository_url": "https://github.com/mlflow/mlflow.git",
+      "framework": "FastAPI",
+      "security_property": "FastAPI job and trace routes must be authenticated and authorized under the configured MLflow application policy.",
+      "triage_status": "unsupported_semantics",
+      "semantic_pattern": "middleware_path_classifier_selects_authentication_validator",
+      "reason_codes": [
+        "repair_changes_fastapi_permission_middleware_path_dispatch",
+        "authorization_is_not_expressed_as_route_dependency",
+        "current_source_profile_does_not_model_middleware_path_policy"
+      ],
+      "base_sha": "083eac9cd0be4a8934fac7010f9248c7888c6da4",
+      "head_sha": "bb62e773263c14e9ba4d1a82fe72d0de2442c6aa",
+      "fix_pr": "https://github.com/mlflow/mlflow/pull/20920",
+      "references": [
+        "https://github.com/advisories/GHSA-75cm-x2w3-8mgf",
+        "https://github.com/mlflow/mlflow/commit/bb62e773263c14e9ba4d1a82fe72d0de2442c6aa"
+      ],
+      "notes": "The repair extends _find_fastapi_validator and shared permission middleware for non-gateway paths. This remains inside the broad Protected Effect authentication thesis but outside current route/source semantics.",
+      "qualification_eligible": false
+    },
+    {
+      "candidate_id": "mcp-memory-documents-missing-auth-2026",
+      "repository": "doobidoo/mcp-memory-service",
+      "repository_url": "https://github.com/doobidoo/mcp-memory-service.git",
+      "framework": "FastAPI",
+      "security_property": "Document read and mutation endpoints must execute only after their configured read/write authentication dependency succeeds.",
+      "triage_status": "unsupported_semantics",
+      "semantic_pattern": "parameter_dependency_mediates_endpoint_but_effect_occurs_in_helper_or_static_capability",
+      "reason_codes": [
+        "repair_adds_parameter_level_depends_require_read_or_write_access",
+        "current_parameter_guard_model_is_resource_parameter_oriented",
+        "static_capability_complete_mediation_is_currently_route_dependency_only",
+        "some_mutating_effects_occur_in_background_helper_functions"
+      ],
+      "base_sha": "3996da59f19aace8d791d5272cf7b724778440c8",
+      "head_sha": "907bac72a3ca0854822459e525c6ebc44043a567",
+      "fix_pr": null,
+      "references": [
+        "https://github.com/advisories/GHSA-84hp-mqvj-3p8h",
+        "https://github.com/doobidoo/mcp-memory-service/commit/907bac72a3ca0854822459e525c6ebc44043a567"
+      ],
+      "notes": "The repair adds AuthenticationResult = Depends(require_read_access/require_write_access) parameters to seven endpoints. Current static-capability complete mediation recognizes direct route-decorator dependencies, not this parameter-dependency theorem shape.",
+      "qualification_eligible": false
+    }
+  ]
+}
