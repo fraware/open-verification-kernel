@@ -1,0 +1,59 @@
+{
+  "schema_version": "ovk.assurance_external_candidate_registry.v1",
+  "registry_id": "fastapi-broken-access-control-v1",
+  "description": "Public external security transitions reviewed before implementation work. Unsupported cases remain in the denominator instead of being removed from qualification.",
+  "reviewed_against": {
+    "protected_effect_profile_type": "fastapi_dependency_effects_v1",
+    "guarantee_type": "protected_effect_integrity_v1",
+    "ovk_revision": "55a1de0dbe8c02ba067780fd8caf8ef6be7b3032"
+  },
+  "candidates": [
+    {
+      "candidate_id": "aegra-cross-user-run-injection-2026",
+      "repository": "aegra/aegra",
+      "repository_url": "https://github.com/aegra/aegra.git",
+      "framework": "FastAPI",
+      "security_property": "A user must not create or execute a run against a thread owned by another user.",
+      "triage_status": "unsupported_semantics",
+      "semantic_pattern": "direct_database_resource_ownership_lookup_followed_by_conditional_rejection",
+      "reason_codes": [
+        "ownership_guard_is_not_a_dependency_guard",
+        "fix_uses_source_level_conditional_control_flow",
+        "current_v1_profile_marks_handler_control_flow_partial",
+        "mapping_authentication_dependency_as_resource_authorization_would_be_unsound"
+      ],
+      "base_sha": "d7d80c850010a9c5a3d2be59254c19b9eb0e25dd",
+      "head_sha": "9e1fa430b50937177da086bbe26b5787e9b42499",
+      "fix_pr": "https://github.com/aegra/aegra/pull/337",
+      "references": [
+        "https://github.com/aegra/aegra/security/advisories/GHSA-m98r-6667-4wq7",
+        "https://github.com/aegra/aegra/issues/336",
+        "https://github.com/aegra/aegra/pull/337"
+      ],
+      "notes": "The repaired routes query ThreadORM by thread_id and reject when existing_thread.user_id differs from user.identity. The current Protected Effect FastAPI v1 profile has no sound source contract for this direct ownership-check pattern. This candidate must not be made replayable by treating get_current_user as thread authorization.",
+      "qualification_eligible": false
+    },
+    {
+      "candidate_id": "chroma-python-cross-tenant-idor-2026",
+      "repository": "chroma-core/chroma",
+      "repository_url": "https://github.com/chroma-core/chroma.git",
+      "framework": "FastAPI",
+      "security_property": "Collection operations must be authorized for the requested tenant, database, and collection rather than by action permission alone.",
+      "triage_status": "insufficient_public_evidence",
+      "semantic_pattern": "resource_context_ignored_by_authorization_provider_and_backend_lookup_by_object_id",
+      "reason_codes": [
+        "public_issue_documents_vulnerable_head",
+        "no_pinned_python_fastapi_repair_transition_in_public_issue",
+        "cannot_form_base_head_replay_without_fixed_revision"
+      ],
+      "base_sha": null,
+      "head_sha": null,
+      "fix_pr": null,
+      "references": [
+        "https://github.com/chroma-core/chroma/issues/7588"
+      ],
+      "notes": "The public issue reports that SimpleRBAC ignores AuthzResource and that Python FastAPI endpoints discard tenant/database context. Until a repaired Python FastAPI revision is publicly pinned and adjudicated, this is a candidate for coverage tracking rather than an external replay case.",
+      "qualification_eligible": false
+    }
+  ]
+}
