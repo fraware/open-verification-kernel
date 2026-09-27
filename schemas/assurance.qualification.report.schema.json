@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/assurance.qualification.report.schema.json",
+  "title": "OVK Assurance Product Qualification Report",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "suite_id",
+    "ovk_version",
+    "cases_total",
+    "results",
+    "metrics",
+    "evidence_classes",
+    "qualification"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "ovk.assurance_qualification_report.v1"},
+    "suite_id": {"type": "string", "minLength": 1},
+    "ovk_version": {"type": "string", "minLength": 1},
+    "cases_total": {"type": "integer", "minimum": 1},
+    "results": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "case_id",
+          "repository",
+          "validation_class",
+          "safety_label",
+          "expected_head_assurance",
+          "automatic_status",
+          "assurance_available",
+          "head_established",
+          "semantic_coverage_complete",
+          "expectation_met",
+          "unsafe_false_assurance",
+          "benign_open",
+          "fresh_effect_count",
+          "reused_effect_count",
+          "elapsed_ms",
+          "changed_files",
+          "head_statuses",
+          "reason_codes",
+          "governance_review_required"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "case_id": {"type": "string"},
+          "repository": {"type": "string"},
+          "validation_class": {"type": "string"},
+          "safety_label": {"type": "string"},
+          "expected_head_assurance": {"type": "string"},
+          "automatic_status": {"type": "string"},
+          "assurance_available": {"type": "boolean"},
+          "head_established": {"type": "boolean"},
+          "semantic_coverage_complete": {"type": "boolean"},
+          "expectation_met": {"type": "boolean"},
+          "unsafe_false_assurance": {"type": "boolean"},
+          "benign_open": {"type": "boolean"},
+          "fresh_effect_count": {"type": "integer", "minimum": 0},
+          "reused_effect_count": {"type": "integer", "minimum": 0},
+          "elapsed_ms": {"type": "number", "minimum": 0},
+          "changed_files": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "head_statuses": {
+            "type": "object",
+            "additionalProperties": {"type": ["string", "null"]}
+          },
+          "reason_codes": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "governance_review_required": {"type": "boolean"},
+          "human_review_minutes": {
+            "type": ["number", "null"],
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "required": [
+        "unsafe_cases",
+        "safe_cases",
+        "unsafe_false_assurance_count",
+        "unsafe_false_assurance_rate",
+        "unsafe_detection_rate",
+        "benign_open_count",
+        "benign_open_rate",
+        "safe_establishment_rate",
+        "semantic_coverage_rate",
+        "automatic_completion_rate",
+        "fresh_verification_fraction",
+        "reuse_rate",
+        "p50_latency_ms",
+        "p95_latency_ms",
+        "human_review_minutes_total",
+        "human_review_minutes_per_pr",
+        "human_minutes_observed_cases"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "unsafe_cases": {"type": "integer", "minimum": 0},
+        "safe_cases": {"type": "integer", "minimum": 0},
+        "unsafe_false_assurance_count": {"type": "integer", "minimum": 0},
+        "unsafe_false_assurance_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "unsafe_detection_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "benign_open_count": {"type": "integer", "minimum": 0},
+        "benign_open_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "safe_establishment_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "semantic_coverage_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "automatic_completion_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "fresh_verification_fraction": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "reuse_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "p50_latency_ms": {"type": ["number", "null"], "minimum": 0},
+        "p95_latency_ms": {"type": ["number", "null"], "minimum": 0},
+        "human_review_minutes_total": {"type": ["number", "null"], "minimum": 0},
+        "human_review_minutes_per_pr": {"type": ["number", "null"], "minimum": 0},
+        "human_minutes_observed_cases": {"type": "integer", "minimum": 0}
+      }
+    },
+    "evidence_classes": {
+      "type": "object",
+      "required": [
+        "synthetic_cases",
+        "production_shaped_internal_cases",
+        "public_upstream_reduction_cases",
+        "independent_external_cases",
+        "independent_external_repositories"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "synthetic_cases": {"type": "integer", "minimum": 0},
+        "production_shaped_internal_cases": {"type": "integer", "minimum": 0},
+        "public_upstream_reduction_cases": {"type": "integer", "minimum": 0},
+        "independent_external_cases": {"type": "integer", "minimum": 0},
+        "independent_external_repositories": {"type": "integer", "minimum": 0}
+      }
+    },
+    "qualification": {
+      "type": "object",
+      "required": [
+        "status",
+        "reason_codes",
+        "production_gate_met",
+        "minimum_external_repositories",
+        "minimum_human_adjudicated_prs_per_repository"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "internal_signal_only",
+            "external_evidence_incomplete",
+            "production_gate_eligible"
+          ]
+        },
+        "reason_codes": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "production_gate_met": {"type": "boolean"},
+        "minimum_external_repositories": {"type": "integer", "minimum": 1},
+        "minimum_human_adjudicated_prs_per_repository": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}
