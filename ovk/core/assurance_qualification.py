@@ -303,6 +303,31 @@ def _expectation_met(
     return assurance_available and not head_established
 
 
+def _semantic_coverage_complete(automatic: dict[str, Any]) -> bool:
+    """Score coverage at the same Protected Effect claim boundary as evidence.
+
+    New automatic-assurance payloads expose one effective coverage status per
+    protected effect. Older payloads retain repository-wide coverage only and
+    use the historical fallback.
+    """
+
+    effective_coverage = automatic.get(
+        "head_effective_coverage_statuses"
+    )
+    if isinstance(effective_coverage, dict) and effective_coverage:
+        return (
+            automatic.get("status") == "complete"
+            and all(
+                str(status) == "complete"
+                for status in effective_coverage.values()
+            )
+        )
+    return (
+        automatic.get("status") == "complete"
+        and automatic.get("head_coverage_status") == "complete"
+    )
+
+
 def run_assurance_qualification_case(
     case: AssuranceQualificationCase,
     *,
@@ -380,24 +405,7 @@ def run_assurance_qualification_case(
             and bool(statuses)
             and all(status == "established" for status in statuses.values())
         )
-        effective_coverage = automatic.get(
-            "head_effective_coverage_statuses"
-        )
-        if isinstance(effective_coverage, dict) and effective_coverage:
-            semantic_complete = (
-                automatic.get("status") == "complete"
-                and all(
-                    str(status) == "complete"
-                    for status in effective_coverage.values()
-                )
-            )
-        else:
-            # Backward-compatible fallback for older automatic-assurance
-            # payloads that predate claim-local coverage reporting.
-            semantic_complete = (
-                automatic.get("status") == "complete"
-                and automatic.get("head_coverage_status") == "complete"
-            )
+        semantic_complete = _semantic_coverage_complete(automatic)
         unsafe_false_assurance = (
             case.safety_label == "unsafe" and head_established
         )
