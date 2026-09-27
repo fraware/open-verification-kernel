@@ -234,6 +234,88 @@ def _prior_scope_assertion(
     return matches[-1][0], matches[-1][1], None
 
 
+def _prior_ownership_assertion(
+    *,
+    handler: RouteHandlerSummary,
+    sink_call: CallSummary,
+    identity_expression: ExpressionSummary,
+    effect_name: str,
+    profile: Any,
+):
+    """Resolve a configured fail-closed ownership assertion before one sink."""
+
+    matches = []
+    expected_principal_prefix = profile.principal_parameter + "."
+
+    for assertion in handler.ownership_assertions:
+        if assertion.line >= sink_call.line:
+            continue
+
+        resolved = profile.ownership_assertion_names(
+            assertion.loader_full_name,
+            assertion.loader_leaf_name,
+        )
+        if resolved is None:
+            continue
+        assertion_key, semantics = resolved
+
+        if effect_name not in semantics.authorized_effects:
+            continue
+        if (
+            assertion.resource_identity_attribute
+            != semantics.resource_identity_attribute
+        ):
+            continue
+        if assertion.resource_key.rendered != identity_expression.rendered:
+            continue
+        if assertion.owner_attribute != semantics.owner_attribute:
+            continue
+        if assertion.principal_attribute != semantics.principal_attribute:
+            continue
+        if (
+            assertion.principal_expression.rendered
+            != expected_principal_prefix + semantics.principal_attribute
+        ):
+            continue
+        if not semantics.allow_missing_resource:
+            return (
+                None,
+                "ownership_assertion_missing_resource_policy_mismatch:"
+                + assertion_key,
+            )
+        if (
+            assertion.presence_test == "truthy"
+            and not semantics.truthy_when_present
+        ):
+            return (
+                None,
+                "ownership_assertion_truthiness_unproved:" + assertion_key,
+            )
+        if assertion.presence_test not in {"truthy", "is_not_none"}:
+            return (
+                None,
+                "unsupported_ownership_presence_test:" + assertion_key,
+            )
+
+        matches.append((assertion_key, assertion))
+
+    if not matches:
+        return None, None
+
+    identities = {
+        (
+            assertion.resource_key.rendered,
+            assertion.owner_attribute,
+            assertion.principal_expression.rendered,
+        )
+        for _key, assertion in matches
+    }
+    if len(identities) != 1:
+        return None, "ambiguous_ownership_assertions"
+
+    return matches[-1][1], None
+
+
 @dataclass(frozen=True)
 class FastApiFileSemanticFragment:
     """Semantic objects produced by one source file under one binding context."""
@@ -270,6 +352,17 @@ def profile_semantic_digest(profile: Any) -> str:
                 "acted_scope_attribute": semantics.acted_scope_attribute,
             }
             for key, semantics in sorted(profile.scope_assertions.items())
+        },
+        "ownership_assertions": {
+            key: {
+                "resource_identity_attribute": semantics.resource_identity_attribute,
+                "owner_attribute": semantics.owner_attribute,
+                "principal_attribute": semantics.principal_attribute,
+                "authorized_effects": sorted(semantics.authorized_effects),
+                "allow_missing_resource": semantics.allow_missing_resource,
+                "truthy_when_present": semantics.truthy_when_present,
+            }
+            for key, semantics in sorted(profile.ownership_assertions.items())
         },
         "sink_contracts": dict(sorted(profile.sink_contracts.items())),
         "sink_contract_scope_attributes": dict(
@@ -572,6 +665,39 @@ def bind_route_file_summary(
 
             guard_ids: list[str] = []
             binding_ids: list[str] = []
+
+            ownership_assertion, ownership_problem = _prior_ownership_assertion(
+                handler=handler,
+                sink_call=call,
+                identity_expression=identity_expression,
+                effect_name=effect_name,
+                profile=profile,
+            )
+            if ownership_problem is not None:
+                unsupported.append(
+                    f"{file_summary.path}:{handler.handler_name}:"
+                    f"{ownership_problem}"
+                )
+            elif ownership_assertion is not None:
+                ownership_guard_id = _semantic_id(
+                    "guard",
+                    (
+                        f"{file_summary.path}:{handler.handler_name}:"
+                        f"{ownership_assertion.line}:ownership:"
+                        f"{effect_name}:{identity_expression.rendered}:"
+                        f"{ownership_assertion.owner_attribute}:"
+                        f"{ownership_assertion.principal_expression.rendered}"
+                    ),
+                )
+                guards[ownership_guard_id] = AuthorizationGuard(
+                    guard_id=ownership_guard_id,
+                    principal_id=principal_id,
+                    effect_id=effect_id,
+                    resource_id=acted_id,
+                    origin=ownership_assertion.origin,
+                )
+                guard_ids.append(ownership_guard_id)
+
             for (
                 dep_name,
                 allowed_effects,
@@ -753,6 +879,7 @@ _SUPPORTED_CONSTRUCTS = [
     "fail_fast_none_guard",
     "configured_service_call_sink",
     "configured_fail_closed_resource_scope_assertion",
+    "configured_fail_closed_resource_ownership_assertion",
     "configured_sink_scope_keyword",
     "source_derived_resource_return_contract",
     "typed_function_contract",
@@ -766,6 +893,7 @@ _PROFILE_ASSUMPTIONS = [
     "Configured sink identity argument denotes the acted resource identity only when no source-derived identity contract is required.",
     "Configured sink scope keyword denotes the acted resource scope when no source contract is required.",
     "Configured resource-scope assertion helpers fail closed: normal continuation establishes equality between the configured acted-resource attribute and authorization-resource argument.",
+    "Configured resource-ownership assertions fail closed: normal continuation establishes that a present loaded resource has the configured owner/principal equality; truthiness-style presence checks rely on the explicit profile truthy-when-present assumption.",
     "Source-derived function contracts are consumed only after resolving the configured service method.",
     "Only profile-selected contract attributes become required identity/scope/binding proof obligations.",
     "Conditional return contracts require the caller's non-null argument precondition to be established.",
