@@ -119,6 +119,9 @@ class FastApiDependencyEffectProfile:
 
     sink_effects: dict[str, str]
     sink_identity_args: dict[str, int] = field(default_factory=dict)
+    # Sink key -> static capability/resource identity. When present, no source
+    # argument is interpreted as resource identity for that sink.
+    sink_static_resources: dict[str, str] = field(default_factory=dict)
     sink_scope_keywords: dict[str, str] = field(default_factory=dict)
     sink_missing_scope_unconstrained: frozenset[str] = frozenset()
     # Helper name -> explicit fail-closed resource-scope assertion semantics.
@@ -148,6 +151,12 @@ class FastApiDependencyEffectProfile:
     # Dependency name -> effect names the dependency authorizes in this profile.
     dependency_guard_effects: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
+    # Direct route-decorator dependency name -> static capability/resource.
+    # These semantics are intentionally restricted to route-wide mediation.
+    route_dependency_guard_resources: dict[str, str] = field(default_factory=dict)
+    # Direct route-decorator dependency name -> authorized effect names.
+    route_dependency_guard_effects: dict[str, tuple[str, ...]] = field(default_factory=dict)
+
     principal_parameter: str = "user"
 
     def sink_effect_names(
@@ -168,6 +177,24 @@ class FastApiDependencyEffectProfile:
 
     def identity_arg(self, sink_key: str) -> int:
         return int(self.sink_identity_args.get(sink_key, 0))
+
+    def static_resource_for_sink(self, sink_key: str) -> str | None:
+        return self.sink_static_resources.get(sink_key)
+
+    def route_dependency_guard_names(
+        self,
+        full_name: str,
+        leaf_name: str | None,
+    ) -> tuple[str, str, tuple[str, ...]] | None:
+        """Resolve governed route-level complete-mediation semantics."""
+        for key in (full_name, leaf_name):
+            if not key:
+                continue
+            resource = self.route_dependency_guard_resources.get(key)
+            effects = self.route_dependency_guard_effects.get(key)
+            if resource is not None and effects is not None:
+                return key, resource, effects
+        return None
 
     def scope_keyword(self, sink_key: str) -> str | None:
         return self.sink_scope_keywords.get(sink_key)
