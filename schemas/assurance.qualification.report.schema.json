@@ -18,11 +18,27 @@
   ],
   "additionalProperties": false,
   "properties": {
-    "schema_version": {"const": "ovk.assurance_qualification_report.v1"},
-    "suite_id": {"type": "string", "minLength": 1},
-    "ovk_version": {"type": "string", "minLength": 1},
-    "collected_at": {"type": "string", "format": "date-time"},
-    "source_revision": {"type": ["string", "null"]},
+    "schema_version": {
+      "const": "ovk.assurance_qualification_report.v1"
+    },
+    "suite_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ovk_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "collected_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source_revision": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "execution_environment": {
       "type": "object",
       "required": [
@@ -34,14 +50,35 @@
       ],
       "additionalProperties": false,
       "properties": {
-        "python_version": {"type": "string", "minLength": 1},
-        "platform": {"type": "string", "minLength": 1},
-        "z3_version": {"type": ["string", "null"]},
-        "runner_os": {"type": ["string", "null"]},
-        "timing_scope": {"const": "end_to_end_run_check"}
+        "python_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "platform": {
+          "type": "string",
+          "minLength": 1
+        },
+        "z3_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runner_os": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timing_scope": {
+          "const": "end_to_end_run_check"
+        }
       }
     },
-    "cases_total": {"type": "integer", "minimum": 1},
+    "cases_total": {
+      "type": "integer",
+      "minimum": 1
+    },
     "results": {
       "type": "array",
       "minItems": 1,
@@ -66,42 +103,105 @@
           "changed_files",
           "head_statuses",
           "reason_codes",
-          "governance_review_required"
+          "governance_review_required",
+          "coverage_gap_reasons",
+          "benign_open_reasons"
         ],
         "additionalProperties": false,
         "properties": {
-          "case_id": {"type": "string"},
-          "repository": {"type": "string"},
-          "validation_class": {"type": "string"},
-          "safety_label": {"type": "string"},
-          "expected_head_assurance": {"type": "string"},
-          "automatic_status": {"type": "string"},
-          "assurance_available": {"type": "boolean"},
-          "head_established": {"type": "boolean"},
-          "semantic_coverage_complete": {"type": "boolean"},
-          "expectation_met": {"type": "boolean"},
-          "unsafe_false_assurance": {"type": "boolean"},
-          "benign_open": {"type": "boolean"},
-          "fresh_effect_count": {"type": "integer", "minimum": 0},
-          "reused_effect_count": {"type": "integer", "minimum": 0},
-          "elapsed_ms": {"type": "number", "minimum": 0},
+          "case_id": {
+            "type": "string"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "validation_class": {
+            "type": "string"
+          },
+          "safety_label": {
+            "type": "string"
+          },
+          "expected_head_assurance": {
+            "type": "string"
+          },
+          "automatic_status": {
+            "type": "string"
+          },
+          "assurance_available": {
+            "type": "boolean"
+          },
+          "head_established": {
+            "type": "boolean"
+          },
+          "semantic_coverage_complete": {
+            "type": "boolean"
+          },
+          "expectation_met": {
+            "type": "boolean"
+          },
+          "unsafe_false_assurance": {
+            "type": "boolean"
+          },
+          "benign_open": {
+            "type": "boolean"
+          },
+          "fresh_effect_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reused_effect_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "elapsed_ms": {
+            "type": "number",
+            "minimum": 0
+          },
           "changed_files": {
             "type": "array",
-            "items": {"type": "string"}
+            "items": {
+              "type": "string"
+            }
           },
           "head_statuses": {
             "type": "object",
-            "additionalProperties": {"type": ["string", "null"]}
+            "additionalProperties": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           },
           "reason_codes": {
             "type": "array",
-            "items": {"type": "string"}
+            "items": {
+              "type": "string"
+            }
           },
-          "governance_review_required": {"type": "boolean"},
-          "human_adjudicated": {"type": "boolean"},
+          "governance_review_required": {
+            "type": "boolean"
+          },
+          "human_adjudicated": {
+            "type": "boolean"
+          },
           "human_review_minutes": {
-            "type": ["number", "null"],
+            "type": [
+              "number",
+              "null"
+            ],
             "minimum": 0
+          },
+          "coverage_gap_reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "benign_open_reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       }
@@ -125,27 +225,143 @@
         "p95_latency_ms",
         "human_review_minutes_total",
         "human_review_minutes_per_pr",
-        "human_minutes_observed_cases"
+        "human_minutes_observed_cases",
+        "coverage_gap_case_count",
+        "coverage_gap_reason_counts",
+        "benign_open_reason_counts"
       ],
       "additionalProperties": false,
       "properties": {
-        "unsafe_cases": {"type": "integer", "minimum": 0},
-        "safe_cases": {"type": "integer", "minimum": 0},
-        "unsafe_false_assurance_count": {"type": "integer", "minimum": 0},
-        "unsafe_false_assurance_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
-        "unsafe_detection_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
-        "benign_open_count": {"type": "integer", "minimum": 0},
-        "benign_open_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
-        "safe_establishment_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
-        "semantic_coverage_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
-        "automatic_completion_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
-        "fresh_verification_fraction": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
-        "reuse_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
-        "p50_latency_ms": {"type": ["number", "null"], "minimum": 0},
-        "p95_latency_ms": {"type": ["number", "null"], "minimum": 0},
-        "human_review_minutes_total": {"type": ["number", "null"], "minimum": 0},
-        "human_review_minutes_per_pr": {"type": ["number", "null"], "minimum": 0},
-        "human_minutes_observed_cases": {"type": "integer", "minimum": 0}
+        "unsafe_cases": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "safe_cases": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unsafe_false_assurance_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unsafe_false_assurance_rate": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "unsafe_detection_rate": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "benign_open_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "benign_open_rate": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "safe_establishment_rate": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "semantic_coverage_rate": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "automatic_completion_rate": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "fresh_verification_fraction": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "reuse_rate": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "p50_latency_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "p95_latency_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "human_review_minutes_total": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "human_review_minutes_per_pr": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "human_minutes_observed_cases": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "coverage_gap_case_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "coverage_gap_reason_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "benign_open_reason_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
       }
     },
     "evidence_classes": {
@@ -159,11 +375,26 @@
       ],
       "additionalProperties": false,
       "properties": {
-        "synthetic_cases": {"type": "integer", "minimum": 0},
-        "production_shaped_internal_cases": {"type": "integer", "minimum": 0},
-        "public_upstream_reduction_cases": {"type": "integer", "minimum": 0},
-        "independent_external_cases": {"type": "integer", "minimum": 0},
-        "independent_external_repositories": {"type": "integer", "minimum": 0}
+        "synthetic_cases": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "production_shaped_internal_cases": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "public_upstream_reduction_cases": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "independent_external_cases": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "independent_external_repositories": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "qualification": {
@@ -190,14 +421,36 @@
         },
         "reason_codes": {
           "type": "array",
-          "items": {"type": "string"}
+          "items": {
+            "type": "string"
+          }
         },
-        "production_gate_met": {"type": "boolean"},
-        "minimum_external_repositories": {"type": "integer", "minimum": 1},
-        "minimum_human_adjudicated_prs_per_repository": {"type": "integer", "minimum": 1},
-        "required_unsafe_detection_rate": {"type": "number", "minimum": 0, "maximum": 1},
-        "minimum_semantic_coverage_rate": {"type": "number", "minimum": 0, "maximum": 1},
-        "maximum_benign_open_rate": {"type": "number", "minimum": 0, "maximum": 1}
+        "production_gate_met": {
+          "type": "boolean"
+        },
+        "minimum_external_repositories": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "minimum_human_adjudicated_prs_per_repository": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "required_unsafe_detection_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "minimum_semantic_coverage_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "maximum_benign_open_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
       }
     }
   }

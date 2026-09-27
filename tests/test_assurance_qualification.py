@@ -67,6 +67,17 @@ def test_committed_qualification_suite_executes_expected_product_behavior() -> N
     # part of the economic burden rather than being hidden from the metrics.
     assert report.metrics.benign_open_count == 1
     assert report.metrics.semantic_coverage_rate < 1.0
+    assert report.metrics.coverage_gap_case_count == 2
+    assert report.metrics.coverage_gap_reason_counts == {
+        "control_flow_outside_profile": 1,
+        "required_sink_contract_missing": 1,
+    }
+    assert report.metrics.benign_open_reason_counts[
+        "coverage:control_flow_outside_profile"
+    ] == 1
+    assert report.metrics.benign_open_reason_counts[
+        "guarantee_status:unknown"
+    ] == 1
 
     # Public-development and internal cases cannot satisfy the external gate.
     assert report.evidence_classes.independent_external_cases == 0

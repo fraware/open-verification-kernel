@@ -100,6 +100,8 @@ class AssuranceQualificationCaseResult(BaseModel):
     changed_files: list[str] = Field(default_factory=list)
     head_statuses: dict[str, str | None] = Field(default_factory=dict)
     reason_codes: list[str] = Field(default_factory=list)
+    coverage_gap_reasons: list[str] = Field(default_factory=list)
+    benign_open_reasons: list[str] = Field(default_factory=list)
     governance_review_required: bool = False
 
     human_adjudicated: bool = False
@@ -130,6 +132,9 @@ class AssuranceQualificationMetrics(BaseModel):
     human_review_minutes_total: float | None = Field(default=None, ge=0)
     human_review_minutes_per_pr: float | None = Field(default=None, ge=0)
     human_minutes_observed_cases: int = Field(ge=0)
+    coverage_gap_case_count: int = Field(ge=0)
+    coverage_gap_reason_counts: dict[str, int] = Field(default_factory=dict)
+    benign_open_reason_counts: dict[str, int] = Field(default_factory=dict)
 
 
 class AssuranceEvidenceClasses(BaseModel):
@@ -303,6 +308,54 @@ def _expectation_met(
     return assurance_available and not head_established
 
 
+def _coverage_reason_code(value: str) -> str:
+    """Normalize source-specific coverage diagnostics into stable categories."""
+
+    known = (
+        "control_flow_outside_profile",
+        "required_scope_postcondition_missing",
+        "required_identity_postcondition_missing",
+        "required_sink_contract_missing",
+        "sink_contract_target_unresolved",
+        "contract_precondition_unproved",
+        "required_identity_argument_or_precondition_unproved",
+        "unsupported_sink_scope_expression",
+        "required_sink_scope_missing",
+        "request_scope_guard_not_fail_closed",
+        "unsupported_request_scope_guard_signature",
+        "unsupported_sink_identity_expression",
+        "unsupported_sink_identity_signature",
+        "syntax_error",
+        "missing_route_summary",
+    )
+    for code in known:
+        if code in value:
+            return code
+    return "other"
+
+
+def _benign_open_reasons(
+    *,
+    automatic: dict[str, Any],
+    head_statuses: dict[str, str | None],
+    coverage_gap_reasons: list[str],
+) -> list[str]:
+    reasons: set[str] = set()
+    if automatic.get("status") != "complete":
+        reasons.add(
+            "automatic_status:"
+            + str(automatic.get("status") or "missing")
+        )
+    for reason in coverage_gap_reasons:
+        reasons.add("coverage:" + reason)
+    for status in head_statuses.values():
+        if status != "established":
+            reasons.add("guarantee_status:" + str(status))
+    for reason in automatic.get("reason_codes") or []:
+        reasons.add("automatic_reason:" + str(reason))
+    return sorted(reasons)
+
+
 def run_assurance_qualification_case(
     case: AssuranceQualificationCase,
     *,
@@ -394,6 +447,26 @@ def run_assurance_qualification_case(
             guarantee_diff.get("governance_review_required")
             or automatic.get("profile_governance_review_required")
         )
+        coverage_gap_reasons = sorted(
+            {
+                _coverage_reason_code(str(item))
+                for item in (
+                    automatic.get(
+                        "head_coverage_unsupported_constructs"
+                    )
+                    or []
+                )
+            }
+        )
+        benign_open_reasons = (
+            _benign_open_reasons(
+                automatic=automatic,
+                head_statuses=statuses,
+                coverage_gap_reasons=coverage_gap_reasons,
+            )
+            if benign_open
+            else []
+        )
 
         return AssuranceQualificationCaseResult(
             case_id=case.case_id,
@@ -425,6 +498,8 @@ def run_assurance_qualification_case(
                 str(item)
                 for item in (automatic.get("reason_codes") or [])
             ],
+            coverage_gap_reasons=coverage_gap_reasons,
+            benign_open_reasons=benign_open_reasons,
             governance_review_required=governance_review_required,
             human_adjudicated=case.human_adjudicated,
             human_review_minutes=case.human_review_minutes,
@@ -654,6 +729,18 @@ def build_assurance_qualification_report(
         else None
     )
 
+    coverage_gap_reason_counts: dict[str, int] = {}
+    benign_open_reason_counts: dict[str, int] = {}
+    for item in results:
+        for reason in item.coverage_gap_reasons:
+            coverage_gap_reason_counts[reason] = (
+                coverage_gap_reason_counts.get(reason, 0) + 1
+            )
+        for reason in item.benign_open_reasons:
+            benign_open_reason_counts[reason] = (
+                benign_open_reason_counts.get(reason, 0) + 1
+            )
+
     metrics = AssuranceQualificationMetrics(
         unsafe_cases=len(unsafe),
         safe_cases=len(safe),
@@ -694,6 +781,15 @@ def build_assurance_qualification_report(
         human_review_minutes_total=human_total,
         human_review_minutes_per_pr=human_per_pr,
         human_minutes_observed_cases=len(measured_minutes),
+        coverage_gap_case_count=sum(
+            1 for item in results if item.coverage_gap_reasons
+        ),
+        coverage_gap_reason_counts=dict(
+            sorted(coverage_gap_reason_counts.items())
+        ),
+        benign_open_reason_counts=dict(
+            sorted(benign_open_reason_counts.items())
+        ),
     )
 
     counts = {
