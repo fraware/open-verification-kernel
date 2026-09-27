@@ -62,30 +62,44 @@ It declares:
 
 OVK does not infer these semantics heuristically from naming conventions.
 
-### Route-level complete mediation
+### Route-level candidate mediation
 
-The supported route-level subset is intentionally narrow. A profile may declare
-a protected sink as acting on a static endpoint/capability resource and bind a
-direct FastAPI route dependency to that same static resource and effect.
+The supported route-level syntax subset is intentionally narrow. A profile may
+declare a protected sink as acting on a static endpoint/capability resource and
+associate a direct FastAPI route dependency with that same static resource and
+effect.
 
-For example, source shaped as:
+For example:
 
     @router.post("", dependencies=[Depends(require_auth)])
     async def endpoint(request):
         ...
         await dispatch(...)
 
-can establish complete mediation for a profile-declared static dispatch
-capability because FastAPI evaluates the route dependency before entering the
-handler. Handler-local branches and loops cannot create a path to that static
-effect that bypasses the route dependency.
+FastAPI evaluates the direct route dependency before entering the handler, so
+its presence is source-grounded evidence of handler-entry mediation. That fact
+does **not** establish that `require_auth` is an effective authorization
+decision. A dependency may return normally in an unauthenticated configuration,
+delegate to helpers with unresolved semantics, or rely on startup invariants
+outside the handler.
 
-The extractor does not generalize this rule to dependency factories, dynamic
-dependency collections, or request-derived resource authorization. Static sink
-configuration is mutually exclusive with dynamic sink identity, scope,
-source-contract, and resource-binding declarations.
+OVK therefore records the dependency as a candidate guard and marks the
+protected-effect path with:
 
-Repository-wide coverage can remain partial because of unsupported code outside
+    route_dependency_effectiveness_unproved:<dependency>
+
+until source-derived semantics establish the dependency's fail-closed
+authorization behavior. A candidate route dependency may prevent unrelated
+handler-local branching from being mistaken for a bypass of dependency
+invocation, while the unresolved effectiveness obligation keeps claim-local
+coverage partial and forbids PASS.
+
+The extractor does not generalize the syntax rule to dependency factories,
+dynamic dependency collections, or request-derived resource authorization.
+Static sink configuration is mutually exclusive with dynamic sink identity,
+scope, source-contract, and resource-binding declarations.
+
+Repository-wide coverage may remain partial because of unsupported code outside
 the relevant claim. Protected Effect evaluation, sealed evidence, and product
 qualification use effect-local coverage only when every relevant semantic path
 carries explicit local coverage metadata; otherwise they fall back to global
