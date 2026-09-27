@@ -21,6 +21,9 @@ import ast
 from dataclasses import dataclass, field
 
 from ovk.compilers.authorization.base import normalize_path
+from ovk.compilers.authorization.fastapi_include_router_dependencies import (
+    infer_include_router_dependencies,
+)
 from ovk.compilers.authorization.fastapi_route_summary import (
     CallSummary,
     RouteSummaryIndex,
@@ -719,6 +722,10 @@ class FastApiDependencyEffectExtractor:
                 )
             parsed = parsed_index
 
+        include_router_dependencies = infer_include_router_dependencies(
+            parsed_trees=parsed.trees,
+        )
+
         guard_effectiveness_evidence = infer_route_dependency_effectiveness(
             parsed_trees=parsed.trees,
             dependency_names=profile.route_dependency_guard_resources,
@@ -779,6 +786,15 @@ class FastApiDependencyEffectExtractor:
                 profile=profile,
                 contracts_by_name=contracts_by_name,
                 guard_effectiveness_by_name=guard_effectiveness_by_name,
+                external_route_dependencies_by_router=(
+                    include_router_dependencies.dependencies_by_target.get(
+                        path,
+                        {},
+                    )
+                ),
+                route_attachment_digest=(
+                    include_router_dependencies.digest_for(path)
+                ),
             )
             for path, summary in sorted(route_summaries.summaries.items())
             if summary.handlers
