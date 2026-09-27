@@ -98,6 +98,14 @@ class AutomaticPullRequestAssuranceResult(BaseModel):
     head_assurance_ir_digest: str | None = None
     base_coverage_status: str | None = None
     head_coverage_status: str | None = None
+    base_coverage_unsupported_constructs: list[str] = Field(
+        default_factory=list
+    )
+    head_coverage_unsupported_constructs: list[str] = Field(
+        default_factory=list
+    )
+    base_coverage_assumptions: list[str] = Field(default_factory=list)
+    head_coverage_assumptions: list[str] = Field(default_factory=list)
 
     base_fresh_effects: list[str] = Field(default_factory=list)
     base_reused_effects: list[str] = Field(default_factory=list)
@@ -718,6 +726,14 @@ def build_automatic_pull_request_assurance(
             head_assurance_ir_digest=head_ir.assurance_ir_digest,
             base_coverage_status=base_ir.coverage.status,
             head_coverage_status=head_ir.coverage.status,
+            base_coverage_unsupported_constructs=list(
+                base_ir.coverage.unsupported_constructs
+            ),
+            head_coverage_unsupported_constructs=list(
+                head_ir.coverage.unsupported_constructs
+            ),
+            base_coverage_assumptions=list(base_ir.coverage.assumptions),
+            head_coverage_assumptions=list(head_ir.coverage.assumptions),
             base_fresh_effects=base_execution.fresh_effects,
             base_reused_effects=base_execution.reused_effects,
             head_fresh_effects=head_execution.fresh_effects,
