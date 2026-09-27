@@ -868,15 +868,11 @@ def bind_route_file_summary(
                     principal_id=principal_id,
                     effect_id=effect_id,
                     resource_id=guard_resource_id,
+                    effectiveness="unproved",
                     origin=route_dependency.origin,
                 )
                 guard_ids.append(guard_id)
 
-                unsupported.append(
-                    f"{file_summary.path}:{handler.handler_name}:"
-                    f"route_dependency_effectiveness_unproved:"
-                    f"{route_guard_key}"
-                )
                 if (
                     static_resource is not None
                     and route_resource_symbol == static_resource
@@ -1003,7 +999,7 @@ _SUPPORTED_CONSTRUCTS = [
 
 _PROFILE_ASSUMPTIONS = [
     "Configured dependency guards authorize the declared route resource for the declared effects.",
-    "Configured direct route-decorator dependencies are candidate entrypoint mediators only; dependency effectiveness must be established by source-derived semantics before a Protected Effect claim can pass.",
+    "Configured direct route-decorator dependencies are candidate entrypoint mediators only; their AuthorizationGuard effectiveness remains unproved until source-derived dependency semantics establish it.",
     "Configured static sink resources denote endpoint/capability identities independent of request data and handler-local control flow.",
     "Configured service-call sinks faithfully identify protected effects.",
     "Configured sink identity argument denotes the acted resource identity only when no source-derived identity contract is required.",
