@@ -108,6 +108,31 @@ qualification use effect-local coverage only when every relevant semantic path
 carries explicit local coverage metadata; otherwise they fall back to global
 Assurance IR coverage.
 
+### Source-derived authorization dependency contracts
+
+A route dependency with `effectiveness = unproved` may be upgraded only from
+source-derived contract evidence that matches trusted profile expectations.
+
+The first contract family recognizes a narrow fail-closed credential equality:
+
+    async def require_auth(credentials = Depends(...)):
+        if not credentials or credentials.credentials != ACTIVE_TOKEN:
+            raise HTTPException(...)
+
+Normal completion establishes that the credential was present and passed the
+configured equality check. The trusted base profile separately declares the
+credential expression and authority expression that count for that dependency.
+
+The inferencer rejects successful early returns, additional conditional control
+flow, loops, try/except, delegated helpers, and other unsupported forms. Such
+dependencies remain unproved.
+
+The profile's authority expression is semantic authority: v1 treats it as a
+valid trusted credential authority at route invocation. This contract family
+does not prove initialization, secrecy, or non-null configuration invariants.
+Those remain explicit assumptions until a separate source-derived invariant
+mechanism discharges them.
+
 ## Exact source acquisition
 
 For pull requests, source files are loaded from Git objects for the exact base
