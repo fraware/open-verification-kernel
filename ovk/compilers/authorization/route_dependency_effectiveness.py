@@ -584,6 +584,81 @@ def _infer_header_shared_secret_evidence(
 
 
 
+def _has_direct_import(tree: ast.Module, module: str) -> bool:
+    return any(
+        isinstance(statement, ast.Import)
+        and any(
+            alias.name == module and alias.asname is None
+            for alias in statement.names
+        )
+        for statement in tree.body
+    )
+
+
+def _has_direct_from_import(
+    tree: ast.Module,
+    *,
+    module: str,
+    name: str,
+) -> bool:
+    return any(
+        isinstance(statement, ast.ImportFrom)
+        and statement.module == module
+        and statement.level == 0
+        and any(
+            alias.name == name and alias.asname is None
+            for alias in statement.names
+        )
+        for statement in tree.body
+    )
+
+
+def _top_level_name_rebound(
+    tree: ast.Module,
+    name: str,
+) -> bool:
+    """Return whether a canonical imported name is reassigned at module scope."""
+
+    for statement in tree.body:
+        targets: list[ast.AST] = []
+        if isinstance(statement, ast.Assign):
+            targets.extend(statement.targets)
+        elif isinstance(statement, ast.AnnAssign):
+            targets.append(statement.target)
+        elif isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if statement.name == name:
+                return True
+            continue
+
+        for target in targets:
+            if isinstance(target, ast.Name) and target.id == name:
+                return True
+    return False
+
+
+def _canonical_apikey_dependencies_available(tree: ast.Module) -> bool:
+    required = (
+        _has_direct_import(tree, "hmac")
+        and _has_direct_import(tree, "os")
+        and _has_direct_from_import(
+            tree,
+            module="fastapi",
+            name="Security",
+        )
+        and _has_direct_from_import(
+            tree,
+            module="fastapi.security",
+            name="APIKeyHeader",
+        )
+    )
+    if not required:
+        return False
+    return not any(
+        _top_level_name_rebound(tree, name)
+        for name in ("hmac", "os", "Security", "APIKeyHeader")
+    )
+
+
 def _security_apikeyheader_parameter(
     function: ast.FunctionDef | ast.AsyncFunctionDef,
     *,
@@ -596,6 +671,9 @@ def _security_apikeyheader_parameter(
     from that FastAPI security scheme instead of treating an arbitrary
     Security(...) dependency as a raw credential.
     """
+
+    if not _canonical_apikey_dependencies_available(tree):
+        return None
 
     candidates: list[tuple[str, str]] = []
     for parameter, default in _parameter_defaults(function):
@@ -639,15 +717,24 @@ def _security_apikeyheader_parameter(
         ):
             return None
 
-        auto_error = [
-            keyword.value
+        keywords = {
+            keyword.arg: keyword.value
             for keyword in value.keywords
-            if keyword.arg == "auto_error"
-        ]
+            if keyword.arg is not None
+        }
         if (
-            len(auto_error) != 1
-            or not isinstance(auto_error[0], ast.Constant)
-            or auto_error[0].value is not False
+            value.args
+            or set(keywords) != {"name", "auto_error"}
+            or not isinstance(
+                keywords["name"],
+                (ast.Name, ast.Constant),
+            )
+            or (
+                isinstance(keywords["name"], ast.Constant)
+                and not isinstance(keywords["name"].value, str)
+            )
+            or not isinstance(keywords["auto_error"], ast.Constant)
+            or keywords["auto_error"].value is not False
         ):
             return None
         if int(getattr(statement, "lineno", 0)) >= int(
