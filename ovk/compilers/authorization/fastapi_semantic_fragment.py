@@ -699,7 +699,7 @@ def bind_route_file_summary(
 
             guard_ids: list[str] = []
             binding_ids: list[str] = []
-            route_complete_mediation = False
+            route_dependency_candidate = False
 
             ownership_assertion, ownership_problem = _prior_ownership_assertion(
                 handler=handler,
@@ -872,11 +872,16 @@ def bind_route_file_summary(
                 )
                 guard_ids.append(guard_id)
 
+                unsupported.append(
+                    f"{file_summary.path}:{handler.handler_name}:"
+                    f"route_dependency_effectiveness_unproved:"
+                    f"{route_guard_key}"
+                )
                 if (
                     static_resource is not None
                     and route_resource_symbol == static_resource
                 ):
-                    route_complete_mediation = True
+                    route_dependency_candidate = True
 
             protected[protected_id] = ProtectedEffect(
                 protected_effect_id=protected_id,
@@ -895,7 +900,7 @@ def bind_route_file_summary(
             local_unsupported = list(
                 unsupported[sink_unsupported_start:]
             )
-            if not route_complete_mediation:
+            if not route_dependency_candidate:
                 for control_line in handler.unsupported_control_flow_lines:
                     if control_line < call.line:
                         local_unsupported.append(
@@ -983,7 +988,7 @@ _SUPPORTED_CONSTRUCTS = [
     "depends_or_security_default_parameter",
     "direct_route_decorator_dependency",
     "configured_static_sink_resource",
-    "route_dependency_complete_mediation",
+    "route_dependency_candidate_mediation",
     "straight_line_handler",
     "fail_fast_none_guard",
     "configured_service_call_sink",
@@ -998,7 +1003,7 @@ _SUPPORTED_CONSTRUCTS = [
 
 _PROFILE_ASSUMPTIONS = [
     "Configured dependency guards authorize the declared route resource for the declared effects.",
-    "Configured direct route-decorator dependencies mediate every invocation of the handler and authorize only the declared static capability/resource for the declared effects.",
+    "Configured direct route-decorator dependencies are candidate entrypoint mediators only; dependency effectiveness must be established by source-derived semantics before a Protected Effect claim can pass.",
     "Configured static sink resources denote endpoint/capability identities independent of request data and handler-local control flow.",
     "Configured service-call sinks faithfully identify protected effects.",
     "Configured sink identity argument denotes the acted resource identity only when no source-derived identity contract is required.",
@@ -1085,7 +1090,7 @@ def assemble_fastapi_assurance_ir(
         ),
         extractor=AssuranceExtractorIdentity(
             extractor_id="assurance.fastapi.dependency_effects.ast_v1",
-            extractor_version="0.4.0",
+            extractor_version="0.5.0",
             source_profile_id="assurance.fastapi.dependency_effects.ast_v1",
         ),
         coverage=AssuranceCoverage(
