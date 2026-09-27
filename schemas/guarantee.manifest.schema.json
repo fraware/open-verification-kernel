@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/guarantee.manifest.schema.json",
+  "title": "OVK Durable Guarantee Manifest",
+  "type": "object",
+  "required": ["schema_version", "guarantees"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "ovk.guarantee_manifest.v1"
+    },
+    "guarantees": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["guarantee_id", "spec_version", "guarantee_type", "statement", "selector"],
+        "properties": {
+          "guarantee_id": {"type": "string", "minLength": 1},
+          "spec_version": {"type": "string", "minLength": 1},
+          "guarantee_type": {"type": "string", "const": "protected_effect_integrity_v1"},
+          "statement": {"type": "string", "minLength": 1},
+          "selector": {
+            "type": "object",
+            "required": ["effect_name"],
+            "properties": {
+              "effect_name": {"type": "string", "minLength": 1},
+              "principal_symbol": {"type": "string", "minLength": 1},
+              "principal_type": {"type": "string", "minLength": 1},
+              "resource_symbol": {"type": "string", "minLength": 1},
+              "resource_type": {"type": "string", "minLength": 1},
+              "entrypoint": {"type": "string", "minLength": 1}
+            },
+            "additionalProperties": false
+          },
+          "assumptions": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "uniqueItems": true
+          },
+          "dependencies": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "uniqueItems": true
+          },
+          "origin_intent": {"type": "object", "additionalProperties": true}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
