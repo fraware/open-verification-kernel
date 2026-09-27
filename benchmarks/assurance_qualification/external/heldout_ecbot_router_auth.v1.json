@@ -1,0 +1,87 @@
+{
+  "schema_version": "ovk.assurance_external_replay_suite.v1",
+  "suite_id": "heldout-ecbot-router-auth-v1",
+  "description": "Held-out independent replay of blackmouse572/ecbot commit 99091b76fcad6361e53d9e04ae9deec4456a9b22 against OVK f4033efc6df2c8c4daa275776ddf57ac8a301c2e. The security repair adds fail-closed internal-token authentication at APIRouter construction. This case was selected after the OVK semantics were frozen and must not influence them before its initial result is recorded.",
+  "cases": [
+    {
+      "case_id": "ecbot-ai-chat-internal-token-repair",
+      "repository": "blackmouse572/ecbot",
+      "repository_url": "https://github.com/blackmouse572/ecbot.git",
+      "validation_class": "independent_external",
+      "base_sha": "c5a29d4455c6a91e919ebe3065f39bc16d8ec491",
+      "head_sha": "99091b76fcad6361e53d9e04ae9deec4456a9b22",
+      "description": "The repaired AI chat router acquires a fail-closed shared-secret dependency via APIRouter(..., dependencies=[Depends(require_internal_token)]). The parent route is unguarded.",
+      "safety_label": "safe",
+      "expected_head_assurance": "established",
+      "guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-ECBOT-AI-CHAT-INTERNAL-AUTH",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "AI chat model invocation executes only after the configured internal-token authorization mediator succeeds.",
+            "selector": {
+              "effect_name": "ai.chat.invoke",
+              "entrypoint": "POST /message"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "source": "blackmouse572/ecbot security fix 99091b76",
+              "endpoint": "chat_endpoint"
+            }
+          }
+        ]
+      },
+      "protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "apps/ai/src/eccho_ai/core/security.py",
+          "apps/ai/src/eccho_ai/modules/chat/routers.py"
+        ],
+        "sink_effects": {
+          "ainvoke": "ai.chat.invoke"
+        },
+        "sink_identity_args": {},
+        "sink_static_resources": {
+          "ainvoke": "ai_chat_service"
+        },
+        "sink_scope_keywords": {},
+        "sink_missing_scope_unconstrained": [],
+        "scope_assertions": {},
+        "ownership_assertions": {},
+        "sink_contracts": {},
+        "sink_contract_scope_attributes": {},
+        "sink_contract_identity_attributes": {},
+        "sink_binding_relations": {},
+        "sink_binding_authorized_projections": {},
+        "sink_binding_acted_projections": {},
+        "sink_binding_authorized_attributes": {},
+        "sink_binding_acted_attributes": {},
+        "dependency_guard_resources": {},
+        "dependency_guard_effects": {},
+        "route_dependency_guard_resources": {
+          "require_internal_token": "ai_chat_service"
+        },
+        "route_dependency_guard_effects": {
+          "require_internal_token": [
+            "ai.chat.invoke"
+          ]
+        },
+        "principal_parameter": "$internal_api_caller"
+      },
+      "provenance": {
+        "contamination_status": "held_out_independent",
+        "adjudication_kind": "public_merged_fix",
+        "references": [
+          "https://github.com/blackmouse572/ecbot/commit/99091b76fcad6361e53d9e04ae9deec4456a9b22"
+        ],
+        "notes": "Selected only after OVK PR #100 semantics were frozen. The commit message explicitly describes the internal-token routes as fail-closed and the diff adds both the dependency implementation and router attachment."
+      },
+      "qualification_human_adjudicated": false,
+      "human_review_minutes": null
+    }
+  ]
+}
