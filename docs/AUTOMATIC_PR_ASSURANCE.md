@@ -54,11 +54,42 @@ It declares:
 - resource identity and scope argument semantics;
 - source-derived contract bindings;
 - explicit scope-assertion helper semantics;
-- dependency guards and the effects they authorize;
+- parameter dependency guards and the effects they authorize;
+- direct route-decorator dependencies for bounded static capability mediation;
+- static sink capability/resource identities;
 - resource-binding projection/relation semantics;
 - bounded source file and byte limits.
 
 OVK does not infer these semantics heuristically from naming conventions.
+
+### Route-level complete mediation
+
+The supported route-level subset is intentionally narrow. A profile may declare
+a protected sink as acting on a static endpoint/capability resource and bind a
+direct FastAPI route dependency to that same static resource and effect.
+
+For example, source shaped as:
+
+    @router.post("", dependencies=[Depends(require_auth)])
+    async def endpoint(request):
+        ...
+        await dispatch(...)
+
+can establish complete mediation for a profile-declared static dispatch
+capability because FastAPI evaluates the route dependency before entering the
+handler. Handler-local branches and loops cannot create a path to that static
+effect that bypasses the route dependency.
+
+The extractor does not generalize this rule to dependency factories, dynamic
+dependency collections, or request-derived resource authorization. Static sink
+configuration is mutually exclusive with dynamic sink identity, scope,
+source-contract, and resource-binding declarations.
+
+Repository-wide coverage can remain partial because of unsupported code outside
+the relevant claim. Protected Effect evaluation, sealed evidence, and product
+qualification use effect-local coverage only when every relevant semantic path
+carries explicit local coverage metadata; otherwise they fall back to global
+Assurance IR coverage.
 
 ## Exact source acquisition
 
