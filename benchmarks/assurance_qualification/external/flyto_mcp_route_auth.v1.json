@@ -1,8 +1,88 @@
 {
   "schema_version": "ovk.assurance_external_replay_suite.v1",
   "suite_id": "flyto-mcp-route-auth-development-v1",
-  "description": "Public development replay of flytohub/flyto-core GHSA-h9f9-h6gm-wc85. This case motivated route-dependency complete-mediation semantics and is permanently excluded from the independent-external production gate.",
+  "description": "Public development replay of flytohub/flyto-core GHSA-h9f9-h6gm-wc85, including a vulnerable negative control and the repaired transition. This case motivated route-dependency complete-mediation semantics and is permanently excluded from the independent-external production gate.",
   "cases": [
+    {
+      "case_id": "flyto-mcp-route-auth-vulnerable-snapshot",
+      "repository": "flytohub/flyto-core",
+      "repository_url": "https://github.com/flytohub/flyto-core.git",
+      "validation_class": "public_upstream_reduction",
+      "base_sha": "9202ad36aaec5e7794b725e709fa404aea41914e",
+      "head_sha": "e8c6fd9902ff93389cd2e3ecaa472b7d91aec67e",
+      "description": "Pinned vulnerable MCP transport snapshot before the route-level bearer-token dependency was added. The selected MCP route source is unchanged across this narrow snapshot pair and remains unauthenticated.",
+      "safety_label": "unsafe",
+      "expected_head_assurance": "not_established",
+      "guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-FLYTO-MCP-DISPATCH-AUTH",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "MCP JSON-RPC dispatch executes only under the configured route-level authentication dependency.",
+            "selector": {
+              "effect_name": "mcp.jsonrpc.dispatch",
+              "entrypoint": "POST /"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "source": "GHSA-h9f9-h6gm-wc85",
+              "endpoint": "mcp_post"
+            }
+          }
+        ]
+      },
+      "protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "src/core/api/routes/mcp.py"
+        ],
+        "sink_effects": {
+          "handle_jsonrpc_request": "mcp.jsonrpc.dispatch"
+        },
+        "sink_identity_args": {},
+        "sink_static_resources": {
+          "handle_jsonrpc_request": "mcp_transport"
+        },
+        "sink_scope_keywords": {},
+        "sink_missing_scope_unconstrained": [],
+        "scope_assertions": {},
+        "ownership_assertions": {},
+        "sink_contracts": {},
+        "sink_contract_scope_attributes": {},
+        "sink_contract_identity_attributes": {},
+        "sink_binding_relations": {},
+        "sink_binding_authorized_projections": {},
+        "sink_binding_acted_projections": {},
+        "sink_binding_authorized_attributes": {},
+        "sink_binding_acted_attributes": {},
+        "dependency_guard_resources": {},
+        "dependency_guard_effects": {},
+        "route_dependency_guard_resources": {
+          "require_auth": "mcp_transport"
+        },
+        "route_dependency_guard_effects": {
+          "require_auth": [
+            "mcp.jsonrpc.dispatch"
+          ]
+        },
+        "principal_parameter": "$authenticated_caller"
+      },
+      "provenance": {
+        "contamination_status": "public_development_case",
+        "adjudication_kind": "public_security_advisory",
+        "references": [
+          "https://github.com/advisories/GHSA-h9f9-h6gm-wc85",
+          "https://github.com/flytohub/flyto-core/commit/e8c6fd9902ff93389cd2e3ecaa472b7d91aec67e"
+        ],
+        "notes": "Negative development control for the same public case. The relevant MCP source blob is identical at the pinned base and vulnerable head; this case verifies that the missing route dependency does not receive assurance."
+      },
+      "qualification_human_adjudicated": false,
+      "human_review_minutes": null
+    },
     {
       "case_id": "flyto-mcp-route-auth-repair",
       "repository": "flytohub/flyto-core",
