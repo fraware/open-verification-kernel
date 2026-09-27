@@ -902,7 +902,13 @@ def bind_route_file_summary(
                         route_guard_key
                     )
                 )
-                authorization_dependencies[route_guard_key] = (
+                authorization_dependency_name = (
+                    route_dependency.leaf_name
+                    or route_dependency.full_name
+                )
+                authorization_dependencies[
+                    authorization_dependency_name
+                ] = (
                     contract.contract_id
                     if contract is not None
                     else None
