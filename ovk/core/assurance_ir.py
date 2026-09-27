@@ -286,6 +286,9 @@ class SemanticPath(BaseModel):
     binding_ids: list[str] = Field(default_factory=list)
     contract_use_ids: list[str] = Field(default_factory=list)
     condition_ids: list[str] = Field(default_factory=list)
+    coverage_status: CoverageStatus | None = None
+    unsupported_constructs: list[str] = Field(default_factory=list)
+    coverage_assumptions: list[str] = Field(default_factory=list)
     origin: SemanticOrigin | None = None
 
 
@@ -382,6 +385,8 @@ class AssuranceIR(BaseModel):
             item["protected_effect_ids"] = sorted(item["protected_effect_ids"])
             item["binding_ids"] = sorted(item["binding_ids"])
             item["contract_use_ids"] = sorted(item["contract_use_ids"])
+            item["unsupported_constructs"] = sorted(item["unsupported_constructs"])
+            item["coverage_assumptions"] = sorted(item["coverage_assumptions"])
 
         for item in payload["function_contracts"]:
             item["depends_on"] = sorted(item["depends_on"])
