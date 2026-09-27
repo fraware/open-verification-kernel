@@ -145,7 +145,7 @@ class GuardEffectivenessEvidence(BaseModel):
     credential_parameter: str
     credential_attribute: str | None = None
     token_expression: str
-    comparison_kind: GuardEffectivenessComparisonKind
+    comparison_kind: GuardEffectivenessComparisonKind = "direct_inequality"
     assumptions: list[str] = Field(default_factory=list)
     origin: SemanticOrigin
 
