@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/assurance.external_replay.report.schema.json",
+  "title": "OVK External Assurance Replay Report",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "suite_id",
+    "collected_at",
+    "cases_total",
+    "results"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "ovk.assurance_external_replay_report.v1"},
+    "suite_id": {"type": "string", "minLength": 1},
+    "collected_at": {"type": "string", "format": "date-time"},
+    "cases_total": {"type": "integer", "minimum": 1},
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "case_id",
+          "repository",
+          "repository_url",
+          "base_sha",
+          "head_sha",
+          "upstream_base_material_digest",
+          "upstream_head_material_digest",
+          "qualification_result"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "case_id": {"type": "string", "minLength": 1},
+          "repository": {"type": "string", "minLength": 1},
+          "repository_url": {"type": "string", "minLength": 1},
+          "base_sha": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"},
+          "head_sha": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"},
+          "upstream_base_material_digest": {"type": "string", "minLength": 1},
+          "upstream_head_material_digest": {"type": "string", "minLength": 1},
+          "selected_paths": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "qualification_result": {"type": "object"}
+        }
+      }
+    }
+  }
+}
