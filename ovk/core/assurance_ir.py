@@ -23,6 +23,7 @@ from ovk.core.resource_identity import ResourceIdentityTerm
 
 CoverageStatus = Literal["complete", "partial", "unknown", "inapplicable"]
 GuardEffectiveness = Literal["established", "unproved"]
+GuardEffectivenessEvidenceKind = Literal["fail_closed_bearer_match_v1"]
 BindingRelation = Literal["equal", "same_tenant", "custom"]
 BindingProjection = Literal["identity", "scope", "attribute"]
 ContractTermKind = Literal["parameter", "return_attribute", "literal"]
@@ -126,6 +127,35 @@ class AuthorizationGuard(BaseModel):
     effectiveness_evidence_ids: list[str] = Field(default_factory=list)
     condition_ids: list[str] = Field(default_factory=list)
     origin: SemanticOrigin
+
+
+class GuardEffectivenessEvidence(BaseModel):
+    """Source-derived evidence that a candidate authorization guard fails closed."""
+
+    evidence_id: str
+    dependency_name: str
+    evidence_kind: GuardEffectivenessEvidenceKind
+    credential_parameter: str
+    credential_attribute: str
+    token_expression: str
+    assumptions: list[str] = Field(default_factory=list)
+    origin: SemanticOrigin
+
+    @field_validator(
+        "evidence_id",
+        "dependency_name",
+        "credential_parameter",
+        "credential_attribute",
+        "token_expression",
+    )
+    @classmethod
+    def _effectiveness_fields_non_empty(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError(
+                "guard-effectiveness evidence fields must be non-empty"
+            )
+        return value
 
 
 class ProtectedEffect(BaseModel):
@@ -349,6 +379,9 @@ class AssuranceIR(BaseModel):
     effects: list[EffectRef] = Field(default_factory=list)
     conditions: list[PathCondition] = Field(default_factory=list)
     guards: list[AuthorizationGuard] = Field(default_factory=list)
+    guard_effectiveness_evidence: list[GuardEffectivenessEvidence] = Field(
+        default_factory=list
+    )
     protected_effects: list[ProtectedEffect] = Field(default_factory=list)
     resource_bindings: list[ResourceBinding] = Field(default_factory=list)
     resource_return_contracts: list[ResourceReturnContract] = Field(default_factory=list)
@@ -368,6 +401,7 @@ class AssuranceIR(BaseModel):
             "effects": "effect_id",
             "conditions": "condition_id",
             "guards": "guard_id",
+            "guard_effectiveness_evidence": "evidence_id",
             "protected_effects": "protected_effect_id",
             "resource_bindings": "binding_id",
             "resource_return_contracts": "contract_id",
@@ -391,6 +425,9 @@ class AssuranceIR(BaseModel):
                     item["effectiveness_evidence_ids"] = sorted(
                         item["effectiveness_evidence_ids"]
                     )
+
+        for item in payload["guard_effectiveness_evidence"]:
+            item["assumptions"] = sorted(item["assumptions"])
 
         for item in payload["paths"]:
             item["guard_ids"] = sorted(item["guard_ids"])
