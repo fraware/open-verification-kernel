@@ -53,7 +53,7 @@ from ovk.core.resource_identity import ResourceIdentityTerm
 
 
 SEMANTIC_SUMMARY_CACHE_SCHEMA = "ovk.python_semantic_summary_cache.v1"
-SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.5.0"
+SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.6.0"
 DEFAULT_SEMANTIC_SUMMARY_CACHE_DIR = Path(
     ".verification/cache/python-semantic-summaries"
 )
@@ -191,6 +191,7 @@ def _route_summary_payload(summary: RouteFileSummary) -> dict[str, Any]:
                 "handler_name": handler.handler_name,
                 "method": handler.method,
                 "route_path": handler.route_path,
+                "router_symbol": handler.router_symbol,
                 "has_control_flow": handler.has_control_flow,
                 "unsupported_control_flow_lines": list(handler.unsupported_control_flow_lines),
                 "ownership_assertions": [
@@ -289,6 +290,11 @@ def _route_summary_from_payload(payload: dict[str, Any]) -> RouteFileSummary:
                 handler_name=str(handler["handler_name"]),
                 method=str(handler["method"]),
                 route_path=str(handler["route_path"]),
+                router_symbol=(
+                    str(handler["router_symbol"])
+                    if handler.get("router_symbol") is not None
+                    else None
+                ),
                 has_control_flow=bool(handler["has_control_flow"]),
                 unsupported_control_flow_lines=tuple(
                     int(value)
