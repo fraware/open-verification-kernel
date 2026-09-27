@@ -81,6 +81,39 @@ class ResourceScopeAssertionSemantics:
 
 
 @dataclass(frozen=True)
+class ResourceOwnershipAssertionSemantics:
+    """Semantics for one fail-closed resource ownership assertion.
+
+    A configured loader binds a route resource key to a loaded resource object.
+    A supported source assertion rejects the continuing path when a present
+    resource owner attribute differs from the configured principal attribute.
+
+    truthy_when_present is required only for source forms that use a truthy
+    resource presence check instead of an explicit is-not-None test.
+    """
+
+    resource_identity_attribute: str
+    owner_attribute: str
+    principal_attribute: str
+    authorized_effects: tuple[str, ...]
+    allow_missing_resource: bool = True
+    truthy_when_present: bool = False
+
+    def __post_init__(self) -> None:
+        for value, label in (
+            (self.resource_identity_attribute, "resource_identity_attribute"),
+            (self.owner_attribute, "owner_attribute"),
+            (self.principal_attribute, "principal_attribute"),
+        ):
+            if not value.strip():
+                raise ValueError(f"{label} must be non-empty")
+        if not self.authorized_effects:
+            raise ValueError("ownership assertion authorized_effects must be non-empty")
+        if any(not effect.strip() for effect in self.authorized_effects):
+            raise ValueError("ownership assertion effects must be non-empty")
+
+
+@dataclass(frozen=True)
 class FastApiDependencyEffectProfile:
     """Explicit semantics for dependency guards and protected service calls."""
 
@@ -90,6 +123,10 @@ class FastApiDependencyEffectProfile:
     sink_missing_scope_unconstrained: frozenset[str] = frozenset()
     # Helper name -> explicit fail-closed resource-scope assertion semantics.
     scope_assertions: dict[str, ResourceScopeAssertionSemantics] = field(
+        default_factory=dict
+    )
+    # Loader call -> source-grounded fail-closed ownership assertion semantics.
+    ownership_assertions: dict[str, ResourceOwnershipAssertionSemantics] = field(
         default_factory=dict
     )
     # Sink key -> source-derived contract qualified name, e.g. AgentService.get.
@@ -147,6 +184,16 @@ class FastApiDependencyEffectProfile:
         for key in (full_name, leaf_name):
             if key and key in self.scope_assertions:
                 return key, self.scope_assertions[key]
+        return None
+
+    def ownership_assertion_names(
+        self,
+        full_name: str,
+        leaf_name: str | None,
+    ) -> tuple[str, ResourceOwnershipAssertionSemantics] | None:
+        for key in (full_name, leaf_name):
+            if key and key in self.ownership_assertions:
+                return key, self.ownership_assertions[key]
         return None
 
     def contract_for_sink(self, sink_key: str) -> str | None:
