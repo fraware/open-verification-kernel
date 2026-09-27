@@ -150,7 +150,10 @@
         "reason_codes",
         "production_gate_met",
         "minimum_external_repositories",
-        "minimum_human_adjudicated_prs_per_repository"
+        "minimum_human_adjudicated_prs_per_repository",
+        "required_unsafe_detection_rate",
+        "minimum_semantic_coverage_rate",
+        "maximum_benign_open_rate"
       ],
       "additionalProperties": false,
       "properties": {
@@ -168,7 +171,10 @@
         },
         "production_gate_met": {"type": "boolean"},
         "minimum_external_repositories": {"type": "integer", "minimum": 1},
-        "minimum_human_adjudicated_prs_per_repository": {"type": "integer", "minimum": 1}
+        "minimum_human_adjudicated_prs_per_repository": {"type": "integer", "minimum": 1},
+        "required_unsafe_detection_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "minimum_semantic_coverage_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "maximum_benign_open_rate": {"type": "number", "minimum": 0, "maximum": 1}
       }
     }
   }
