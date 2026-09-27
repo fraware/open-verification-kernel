@@ -23,7 +23,7 @@ from ovk.core.models import SourceRange
 
 
 _EXTRACTOR_ID = "assurance.fastapi.route_dependency_effectiveness.ast_v1"
-_EXTRACTOR_VERSION = "0.1.0"
+_EXTRACTOR_VERSION = "0.2.0"
 
 
 def _origin(path: str, node: ast.AST) -> SemanticOrigin:
@@ -318,6 +318,7 @@ def _infer_function_evidence(
         credential_parameter=credential_parameter,
         credential_attribute=credential_attribute,
         token_expression=token_expression,
+        comparison_kind="direct_inequality",
         assumptions=[
             (
                 "The governed source profile assigns authorization meaning to "
@@ -327,6 +328,255 @@ def _infer_function_evidence(
                 "Normal return implies the dependency credential is present "
                 "and its configured credential attribute equals the guarded "
                 "server token expression."
+            ),
+        ],
+        origin=_origin(path, function),
+    )
+
+
+
+def _parameter_defaults(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> list[tuple[str, ast.AST]]:
+    """Return explicit parameter default expressions by parameter name."""
+
+    pairs: list[tuple[str, ast.AST]] = []
+    positional = list(function.args.posonlyargs) + list(function.args.args)
+    defaults = list(function.args.defaults)
+    if defaults:
+        pairs.extend(
+            (argument.arg, default)
+            for argument, default in zip(
+                positional[-len(defaults) :],
+                defaults,
+            )
+        )
+    pairs.extend(
+        (argument.arg, default)
+        for argument, default in zip(
+            function.args.kwonlyargs,
+            function.args.kw_defaults,
+        )
+        if default is not None
+    )
+    return pairs
+
+
+def _header_none_parameters(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> set[str]:
+    """Return parameters whose exact default is Header(None).
+
+    Keyword options, aliases, required Header parameters, and indirect helper
+    calls remain outside this first theorem.
+    """
+
+    names: set[str] = set()
+    for parameter, default in _parameter_defaults(function):
+        if (
+            not isinstance(default, ast.Call)
+            or _leaf_name(default.func) != "Header"
+            or default.keywords
+            or len(default.args) != 1
+            or not isinstance(default.args[0], ast.Constant)
+            or default.args[0].value is not None
+        ):
+            continue
+        names.add(parameter)
+    return names
+
+
+def _token_binding_assignment(
+    statement: ast.stmt,
+    *,
+    credential_parameters: set[str],
+) -> tuple[str, str] | None:
+    """Recognize one local binding to a server-side token expression.
+
+    The RHS is restricted to a name/attribute or a zero-argument call through
+    an attribute expression. It must not reference the request credential.
+    """
+
+    if (
+        not isinstance(statement, ast.Assign)
+        or len(statement.targets) != 1
+        or not isinstance(statement.targets[0], ast.Name)
+    ):
+        return None
+
+    target = statement.targets[0].id
+    value = statement.value
+    if any(
+        isinstance(node, ast.Name) and node.id in credential_parameters
+        for node in ast.walk(value)
+    ):
+        return None
+
+    if isinstance(value, (ast.Name, ast.Attribute)):
+        return target, ast.unparse(value)
+
+    if (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Attribute)
+        and not value.args
+        and not value.keywords
+    ):
+        return target, ast.unparse(value)
+
+    return None
+
+
+def _falsey_name_guard(test: ast.AST, expected_name: str) -> bool:
+    return (
+        isinstance(test, ast.UnaryOp)
+        and isinstance(test.op, ast.Not)
+        and isinstance(test.operand, ast.Name)
+        and test.operand.id == expected_name
+    )
+
+
+def _compare_digest_call(
+    node: ast.AST,
+    *,
+    credential_parameter: str,
+    token_alias: str,
+) -> bool:
+    """Recognize secrets.compare_digest(credential, token_alias), either order."""
+
+    if (
+        not isinstance(node, ast.Call)
+        or not isinstance(node.func, ast.Attribute)
+        or node.func.attr != "compare_digest"
+        or not isinstance(node.func.value, ast.Name)
+        or node.func.value.id != "secrets"
+        or len(node.args) != 2
+        or node.keywords
+    ):
+        return False
+
+    rendered = [
+        arg.id if isinstance(arg, ast.Name) else None
+        for arg in node.args
+    ]
+    return set(rendered) == {credential_parameter, token_alias}
+
+
+def _header_shared_secret_mismatch_guard(
+    test: ast.AST,
+    *,
+    credential_parameters: set[str],
+    token_alias: str,
+) -> str | None:
+    """Recognize missing header OR failed constant-time shared-secret match."""
+
+    if (
+        not isinstance(test, ast.BoolOp)
+        or not isinstance(test.op, ast.Or)
+        or len(test.values) != 2
+    ):
+        return None
+
+    for missing_node, mismatch_node in (
+        (test.values[0], test.values[1]),
+        (test.values[1], test.values[0]),
+    ):
+        credential = _missing_credential_parameter(
+            missing_node,
+            credential_parameters,
+        )
+        if credential is None:
+            continue
+        if (
+            isinstance(mismatch_node, ast.UnaryOp)
+            and isinstance(mismatch_node.op, ast.Not)
+            and _compare_digest_call(
+                mismatch_node.operand,
+                credential_parameter=credential,
+                token_alias=token_alias,
+            )
+        ):
+            return credential
+    return None
+
+
+def _infer_header_shared_secret_evidence(
+    *,
+    dependency_name: str,
+    path: str,
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> GuardEffectivenessEvidence | None:
+    """Infer fail-closed effectiveness for one raw Header/shared-secret guard."""
+
+    header_parameters = _header_none_parameters(function)
+    if len(header_parameters) != 1:
+        return None
+
+    body = _meaningful_body(function)
+    if len(body) != 3:
+        return None
+
+    binding = _token_binding_assignment(
+        body[0],
+        credential_parameters=header_parameters,
+    )
+    if binding is None:
+        return None
+    token_alias, token_expression = binding
+
+    token_guard = _raise_only_if(body[1])
+    if (
+        token_guard is None
+        or not _falsey_name_guard(token_guard, token_alias)
+    ):
+        return None
+
+    mismatch_guard = _raise_only_if(body[2])
+    if mismatch_guard is None:
+        return None
+    credential_parameter = _header_shared_secret_mismatch_guard(
+        mismatch_guard,
+        credential_parameters=header_parameters,
+        token_alias=token_alias,
+    )
+    if credential_parameter is None:
+        return None
+
+    proof_payload = {
+        "kind": "fail_closed_header_shared_secret_v1",
+        "dependency_name": dependency_name,
+        "path": path,
+        "function": function.name,
+        "credential_parameter": credential_parameter,
+        "token_alias": token_alias,
+        "token_expression": token_expression,
+        "comparison_kind": "secrets_compare_digest",
+        "syntax": ast.dump(
+            function,
+            annotate_fields=True,
+            include_attributes=False,
+        ),
+    }
+    evidence_id = (
+        "guard-effectiveness:"
+        + content_digest(proof_payload)[:16]
+    )
+    return GuardEffectivenessEvidence(
+        evidence_id=evidence_id,
+        dependency_name=dependency_name,
+        evidence_kind="fail_closed_header_shared_secret_v1",
+        credential_parameter=credential_parameter,
+        credential_attribute=None,
+        token_expression=token_expression,
+        comparison_kind="secrets_compare_digest",
+        assumptions=[
+            (
+                "The governed source profile assigns authorization meaning to "
+                "this dependency for the declared effect/resource."
+            ),
+            (
+                "Normal return implies the raw Header credential is present "
+                "and secrets.compare_digest accepts it against the single "
+                "server-token value bound earlier in the function."
             ),
         ],
         origin=_origin(path, function),
@@ -360,6 +610,12 @@ def infer_route_dependency_effectiveness(
             path=path,
             function=function,
         )
+        if item is None:
+            item = _infer_header_shared_secret_evidence(
+                dependency_name=dependency_name,
+                path=path,
+                function=function,
+            )
         if item is not None:
             evidence.append(item)
 
