@@ -4,6 +4,7 @@ from ovk.core.assurance_qualification import (
     AssuranceQualificationCaseResult,
     AssuranceQualificationSuite,
     _qualification_status,
+    _semantic_coverage_complete,
     load_assurance_qualification_suite,
     run_assurance_qualification_suite,
     validate_assurance_qualification_report,
@@ -124,3 +125,50 @@ def test_suite_model_rejects_empty_case_collection() -> None:
         cases=[],
     )
     assert suite.cases == []
+
+
+def test_claim_local_coverage_overrides_global_partial_for_qualification() -> None:
+    automatic = {
+        "status": "complete",
+        "head_coverage_status": "partial",
+        "head_effective_coverage_statuses": {
+            "pe:a": "complete",
+            "pe:b": "complete",
+        },
+    }
+
+    assert _semantic_coverage_complete(automatic) is True
+
+
+def test_any_incomplete_claim_local_coverage_blocks_complete_score() -> None:
+    automatic = {
+        "status": "complete",
+        "head_coverage_status": "complete",
+        "head_effective_coverage_statuses": {
+            "pe:a": "complete",
+            "pe:b": "partial",
+        },
+    }
+
+    assert _semantic_coverage_complete(automatic) is False
+
+
+def test_legacy_qualification_payload_falls_back_to_global_coverage() -> None:
+    assert (
+        _semantic_coverage_complete(
+            {
+                "status": "complete",
+                "head_coverage_status": "complete",
+            }
+        )
+        is True
+    )
+    assert (
+        _semantic_coverage_complete(
+            {
+                "status": "complete",
+                "head_coverage_status": "partial",
+            }
+        )
+        is False
+    )
