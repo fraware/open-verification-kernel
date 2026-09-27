@@ -43,7 +43,7 @@ def _evaluation(source: str, profile: FastApiDependencyEffectProfile = PROFILE):
     return ir, evaluations[0]
 
 
-def test_direct_route_dependency_completely_mediates_static_effect() -> None:
+def test_direct_route_dependency_is_candidate_until_effectiveness_is_proved() -> None:
     source = """
 from fastapi import APIRouter, Depends, Request
 
@@ -69,13 +69,18 @@ async def mcp_post(request: Request):
     # branching/iteration outside the general source profile.
     assert ir.coverage.status == "partial"
 
-    # The route dependency executes before every handler path and both guard and
-    # effect refer to the same governed static capability. Internal control flow
-    # therefore cannot bypass this authorization decision.
-    assert evaluation.extraction_coverage == "complete"
-    assert evaluation.status == "pass"
+    # The decorator dependency is a source-grounded candidate mediator, and
+    # both guard and effect refer to the same governed static capability.
+    # Its implementation has not been proved fail-closed, so PASS is forbidden.
+    assert evaluation.extraction_coverage == "partial"
+    assert evaluation.status == "unknown"
     assert len(ir.guards) == 1
     assert ir.guards[0].resource_id == ir.protected_effects[0].resource_id
+    path = ir.paths[0]
+    assert any(
+        "route_dependency_effectiveness_unproved:require_auth" in item
+        for item in path.unsupported_constructs
+    )
 
 
 def test_missing_route_dependency_is_not_mistaken_for_authorization() -> None:
@@ -229,7 +234,11 @@ async def mcp_post(request: Request):
 
     ir, evaluation = _evaluation(source)
 
-    assert evaluation.status == "pass"
-    assert evaluation.extraction_coverage == "complete"
+    assert evaluation.status == "unknown"
+    assert evaluation.extraction_coverage == "partial"
     assert len(ir.protected_effects) == 1
+    assert any(
+        "route_dependency_effectiveness_unproved:require_auth" in item
+        for item in ir.paths[0].unsupported_constructs
+    )
 
