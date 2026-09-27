@@ -52,6 +52,13 @@ cost. The metric intentionally captures that burden.
 
 Unsupported semantics are not removed from the denominator.
 
+The report also records `coverage_gap_reason_counts` and, for safe cases left
+open, `benign_open_reason_counts`. Source-specific diagnostic strings are
+normalized into stable semantic categories such as
+`control_flow_outside_profile` and
+`required_scope_postcondition_missing`. This makes the qualification artifact
+a prioritization input for source-profile engineering, not only a scorecard.
+
 ### Verification work
 
 The report separately counts fresh and strictly reused head evidence:
