@@ -101,6 +101,21 @@ Every case is labeled as exactly one of:
 
 Only the last category contributes to production-gate eligibility.
 
+External replay additionally carries a contamination status:
+
+- `public_development_case`
+- `held_out_independent`
+
+The admissible pairings are enforced:
+
+- `public_upstream_reduction + public_development_case`
+- `independent_external + held_out_independent`
+
+A public case that influences implementation cannot later be relabeled as
+independent evidence. Failed held-out attempts are preserved as evaluation
+history; subsequent reruns after implementation changes are development
+evidence.
+
 The committed v1 suite contains internal production-shaped cases, adversarial
 synthetic cases, and the public PraisonAI upstream reduction. It contains zero
 independent external cases.
