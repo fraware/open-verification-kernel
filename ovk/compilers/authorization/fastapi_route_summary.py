@@ -58,7 +58,11 @@ class RouteDependencySummary:
 
     full_name: str
     leaf_name: str | None
-    source_kind: Literal["route_decorator", "router_constructor"]
+    source_kind: Literal[
+        "route_decorator",
+        "router_constructor",
+        "include_router",
+    ]
     origin: SemanticOrigin
 
 
@@ -109,6 +113,7 @@ class RouteHandlerSummary:
     handler_name: str
     method: str
     route_path: str
+    router_symbol: str | None
     has_control_flow: bool
     unsupported_control_flow_lines: tuple[int, ...]
     dependencies: tuple[DependencyParameterSummary, ...]
@@ -137,7 +142,7 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id=_EXTRACTOR_ID,
-        extractor_version="0.5.0",
+        extractor_version="0.6.0",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -882,6 +887,7 @@ def summarize_route_file(
                 handler_name=handler.name,
                 method=method,
                 route_path=route_path,
+                router_symbol=router_symbol,
                 has_control_flow=_has_control_flow(handler),
                 unsupported_control_flow_lines=_unsupported_control_flow_lines(handler),
                 dependencies=_dependency_parameters(path, handler),
