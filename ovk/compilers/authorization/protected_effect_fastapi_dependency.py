@@ -159,6 +159,75 @@ class FastApiDependencyEffectProfile:
 
     principal_parameter: str = "user"
 
+    def __post_init__(self) -> None:
+        static_sinks = set(self.sink_static_resources)
+        conflicting_maps = {
+            "sink_identity_args": set(self.sink_identity_args),
+            "sink_scope_keywords": set(self.sink_scope_keywords),
+            "sink_missing_scope_unconstrained": set(
+                self.sink_missing_scope_unconstrained
+            ),
+            "sink_contracts": set(self.sink_contracts),
+            "sink_contract_scope_attributes": set(
+                self.sink_contract_scope_attributes
+            ),
+            "sink_contract_identity_attributes": set(
+                self.sink_contract_identity_attributes
+            ),
+            "sink_binding_relations": set(self.sink_binding_relations),
+            "sink_binding_authorized_projections": set(
+                self.sink_binding_authorized_projections
+            ),
+            "sink_binding_acted_projections": set(
+                self.sink_binding_acted_projections
+            ),
+            "sink_binding_authorized_attributes": set(
+                self.sink_binding_authorized_attributes
+            ),
+            "sink_binding_acted_attributes": set(
+                self.sink_binding_acted_attributes
+            ),
+        }
+        for label, keys in conflicting_maps.items():
+            conflict = sorted(static_sinks & keys)
+            if conflict:
+                raise ValueError(
+                    "static sink resources cannot combine with "
+                    f"{label}: " + ", ".join(conflict)
+                )
+
+        if any(
+            not str(value).strip()
+            for value in self.sink_static_resources.values()
+        ):
+            raise ValueError("static sink resources must be non-empty")
+
+        route_resource_keys = set(self.route_dependency_guard_resources)
+        route_effect_keys = set(self.route_dependency_guard_effects)
+        if route_resource_keys != route_effect_keys:
+            raise ValueError(
+                "route dependency guard resource/effect keys must match"
+            )
+        modeled_effects = set(self.sink_effects.values())
+        for dependency, resource in (
+            self.route_dependency_guard_resources.items()
+        ):
+            if not dependency.strip() or not resource.strip():
+                raise ValueError(
+                    "route dependency guard names/resources must be non-empty"
+                )
+            effects = self.route_dependency_guard_effects[dependency]
+            if not effects or any(not effect.strip() for effect in effects):
+                raise ValueError(
+                    "route dependency guard effects must be non-empty"
+                )
+            unknown = sorted(set(effects) - modeled_effects)
+            if unknown:
+                raise ValueError(
+                    "route dependency guard effects absent from sink model: "
+                    + ", ".join(unknown)
+                )
+
     def sink_effect_names(
         self,
         full_name: str,
