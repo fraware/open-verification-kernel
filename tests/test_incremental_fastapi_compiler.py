@@ -587,3 +587,148 @@ async def require_internal_token(
     assert second.stats.rebound_file_count == 1
     assert second.stats.reused_fragment_count == 0
 
+def _include_router_files(
+    *,
+    guarded: bool,
+    unrelated_value: int = 1,
+) -> dict[str, str]:
+    dependency = (
+        ", dependencies=[Depends(require_auth)]"
+        if guarded
+        else ""
+    )
+    return {
+        "app/main.py": f"""
+from fastapi import Depends, FastAPI
+from app.endpoints import stats
+
+app = FastAPI()
+app.include_router(stats.router{dependency})
+UNRELATED = {unrelated_value}
+""".strip(),
+        "app/endpoints/stats.py": """
+from fastapi import APIRouter
+
+router = APIRouter()
+
+@router.post("/sample")
+async def sample():
+    return protected_call()
+""".strip(),
+    }
+
+
+def _include_router_materials(
+    *,
+    guarded: bool,
+    revision: str,
+    unrelated_value: int = 1,
+) -> AuthMaterials:
+    files = _include_router_files(
+        guarded=guarded,
+        unrelated_value=unrelated_value,
+    )
+    return AuthMaterials(
+        base_files=dict(files),
+        head_files=files,
+        repo="example/include-router-incremental",
+        base_revision="base",
+        head_revision=revision,
+    )
+
+
+def _include_router_profile() -> FastApiDependencyEffectProfile:
+    return FastApiDependencyEffectProfile(
+        sink_effects={"protected_call": "stats.sample.generate"},
+        sink_static_resources={
+            "protected_call": "stats_sampling_service"
+        },
+        route_dependency_guard_resources={
+            "require_auth": "stats_sampling_service"
+        },
+        route_dependency_guard_effects={
+            "require_auth": ("stats.sample.generate",)
+        },
+        principal_parameter="$api_key_caller",
+    )
+
+
+def test_include_router_change_rebinds_unchanged_target_fragment() -> None:
+    profile = _include_router_profile()
+    first_materials = _include_router_materials(
+        guarded=False,
+        revision="unguarded",
+    )
+    first = _incremental(first_materials, profile)
+    assert first.ir.guards == []
+
+    second_materials = _include_router_materials(
+        guarded=True,
+        revision="guarded",
+    )
+    second = _incremental(
+        second_materials,
+        profile,
+        previous_state=first.state,
+    )
+    full = _full(second_materials, profile)
+
+    assert second.ir.canonical_payload() == full.canonical_payload()
+    assert len(second.ir.guards) == 1
+    assert second.ir.guards[0].effectiveness == "unproved"
+    assert second.stats.semantic_fragment_file_count == 1
+    assert second.stats.rebound_file_count == 1
+    assert second.stats.reused_fragment_count == 0
+
+
+def test_include_router_removal_rebinds_unchanged_target_fragment() -> None:
+    profile = _include_router_profile()
+    first_materials = _include_router_materials(
+        guarded=True,
+        revision="guarded",
+    )
+    first = _incremental(first_materials, profile)
+    assert len(first.ir.guards) == 1
+
+    second_materials = _include_router_materials(
+        guarded=False,
+        revision="unguarded",
+    )
+    second = _incremental(
+        second_materials,
+        profile,
+        previous_state=first.state,
+    )
+    full = _full(second_materials, profile)
+
+    assert second.ir.canonical_payload() == full.canonical_payload()
+    assert second.ir.guards == []
+    assert second.stats.rebound_file_count == 1
+    assert second.stats.reused_fragment_count == 0
+
+
+def test_unrelated_include_router_source_change_reuses_target_fragment() -> None:
+    profile = _include_router_profile()
+    first_materials = _include_router_materials(
+        guarded=True,
+        revision="head-1",
+        unrelated_value=1,
+    )
+    first = _incremental(first_materials, profile)
+
+    second_materials = _include_router_materials(
+        guarded=True,
+        revision="head-2",
+        unrelated_value=2,
+    )
+    second = _incremental(
+        second_materials,
+        profile,
+        previous_state=first.state,
+    )
+    full = _full(second_materials, profile)
+
+    assert second.ir.canonical_payload() == full.canonical_payload()
+    assert second.stats.rebound_file_count == 0
+    assert second.stats.reused_fragment_count == 1
+
