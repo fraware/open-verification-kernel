@@ -163,7 +163,7 @@ def _overall_status(
     return "pass", "all protected-effect integrity dimensions are established under declared assumptions"
 
 
-def _coverage_for_protected_effect(
+def protected_effect_coverage(
     ir: AssuranceIR,
     protected_effect_id: str,
 ) -> tuple[str, list[str]]:
@@ -256,7 +256,7 @@ def evaluate_protected_effect_integrity(
             resource_evidence.extend(evidence)
 
         extraction_coverage, coverage_assumptions = (
-            _coverage_for_protected_effect(
+            protected_effect_coverage(
                 ir,
                 obligation.protected_effect_id,
             )
