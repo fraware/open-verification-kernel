@@ -144,8 +144,14 @@ def test_calling_guard_without_fail_closed_result_check_is_not_authorization() -
         "request_scope_guard_not_fail_closed:_deny" in reason
         for reason in ir.coverage.unsupported_constructs
     )
-    assert result.status == "unknown"
+    assert result.status == "fail"
     assert ir.guards == []
+    guard_check = next(
+        check
+        for check in result.checks
+        if check.dimension == "guard_presence"
+    )
+    assert guard_check.status == "violated"
 
 
 def test_scope_accessor_on_different_request_is_refuted() -> None:
