@@ -53,7 +53,7 @@ from ovk.core.resource_identity import ResourceIdentityTerm
 
 
 SEMANTIC_SUMMARY_CACHE_SCHEMA = "ovk.python_semantic_summary_cache.v1"
-SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.4.0"
+SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.5.0"
 DEFAULT_SEMANTIC_SUMMARY_CACHE_DIR = Path(
     ".verification/cache/python-semantic-summaries"
 )
@@ -220,6 +220,7 @@ def _route_summary_payload(summary: RouteFileSummary) -> dict[str, Any]:
                     {
                         "full_name": dep.full_name,
                         "leaf_name": dep.leaf_name,
+                        "source_kind": dep.source_kind,
                         "origin": _origin_payload(dep.origin),
                     }
                     for dep in handler.route_dependencies
@@ -328,6 +329,7 @@ def _route_summary_from_payload(payload: dict[str, Any]) -> RouteFileSummary:
                             if dep.get("leaf_name") is not None
                             else None
                         ),
+                        source_kind=str(dep["source_kind"]),
                         origin=SemanticOrigin.model_validate(dep["origin"]),
                     )
                     for dep in handler.get("route_dependencies") or []
