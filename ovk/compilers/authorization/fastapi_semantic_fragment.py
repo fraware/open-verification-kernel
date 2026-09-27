@@ -419,10 +419,11 @@ def bind_route_file_summary(
     *,
     profile: Any,
     contracts_by_name: Mapping[str, FunctionContract],
-    guard_effectiveness_by_name: Mapping[str, GuardEffectivenessEvidence],
+    guard_effectiveness_by_name: Mapping[str, GuardEffectivenessEvidence] | None = None,
 ) -> FastApiFileSemanticFragment:
     """Bind one file summary against current profile and function contracts."""
 
+    guard_effectiveness_by_name = guard_effectiveness_by_name or {}
     principals: dict[str, PrincipalRef] = {}
     resources: dict[str, ResourceRef] = {}
     effects: dict[str, EffectRef] = {}
@@ -988,10 +989,11 @@ def fragment_dependencies_match(
     *,
     profile: Any,
     contracts_by_name: Mapping[str, FunctionContract],
-    guard_effectiveness_by_name: Mapping[str, GuardEffectivenessEvidence],
+    guard_effectiveness_by_name: Mapping[str, GuardEffectivenessEvidence] | None = None,
 ) -> bool:
     """Return whether profile and consumed contract versions are unchanged."""
 
+    guard_effectiveness_by_name = guard_effectiveness_by_name or {}
     if fragment.profile_digest != profile_semantic_digest(profile):
         return False
     current = {
@@ -1059,8 +1061,8 @@ def assemble_fastapi_assurance_ir(
     materials: AuthMaterials,
     function_contracts: list[FunctionContract],
     resource_return_contracts: list[ResourceReturnContract],
-    guard_effectiveness_evidence: list[GuardEffectivenessEvidence],
     fragments: Mapping[str, FastApiFileSemanticFragment],
+    guard_effectiveness_evidence: list[GuardEffectivenessEvidence] | None = None,
     syntax_errors: Mapping[str, str] | None = None,
     missing_route_summary_paths: list[str] | None = None,
 ) -> AssuranceIR:
@@ -1154,7 +1156,7 @@ def assemble_fastapi_assurance_ir(
             key=lambda item: item.guard_id,
         ),
         guard_effectiveness_evidence=sorted(
-            guard_effectiveness_evidence,
+            guard_effectiveness_evidence or [],
             key=lambda item: item.evidence_id,
         ),
         protected_effects=sorted(
