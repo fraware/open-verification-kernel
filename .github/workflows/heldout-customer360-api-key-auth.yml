@@ -1,0 +1,77 @@
+name: Held-out Customer360 API-key Auth Replay
+
+on:
+  pull_request:
+    paths:
+      - 'benchmarks/assurance_qualification/external/heldout_customer360_api_key_auth.v1.json'
+      - '.github/workflows/heldout-customer360-api-key-auth.yml'
+      - 'ovk/core/external_assurance_replay.py'
+      - 'ovk/core/assurance_qualification.py'
+      - 'ovk/compilers/authorization/**'
+
+permissions:
+  contents: read
+
+jobs:
+  heldout-customer360-replay:
+    if: github.head_ref == 'eval/heldout-customer360-api-key-auth'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+      - name: Install OVK with solver dependencies
+        run: |
+          python scripts/sync_package_data.py
+          pip install --no-cache-dir -e '.[dev,solvers]'
+      - name: Replay held-out Customer360 security cases
+        run: |
+          python scripts/run_external_assurance_replay.py \
+            benchmarks/assurance_qualification/external/heldout_customer360_api_key_auth.v1.json \
+            --output .verification/heldout-customer360-api-key-auth.json
+      - name: Upload held-out report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: heldout-customer360-api-key-auth
+          path: .verification/heldout-customer360-api-key-auth.json
+          retention-days: 90
+      - name: Assert frozen first-run behavior
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(
+              Path('.verification/heldout-customer360-api-key-auth.json').read_text()
+          )
+          assert report['cases_total'] == 2
+          results = {
+              item['case_id']: item['qualification_result']
+              for item in report['results']
+          }
+
+          vulnerable = results['customer360-bp1-api-key-vulnerable-snapshot']
+          assert vulnerable['validation_class'] == 'independent_external'
+          assert vulnerable['safety_label'] == 'unsafe'
+          assert vulnerable['head_established'] is False
+          assert vulnerable['unsafe_false_assurance'] is False
+
+          repaired = results['customer360-bp1-api-key-repair']
+          assert repaired['validation_class'] == 'independent_external'
+          assert repaired['safety_label'] == 'safe'
+
+          # The upstream repair is expected to establish the guarantee in the
+          # real system. Frozen OVK #105 does not model Security(APIKeyHeader)
+          # plus hmac.compare_digest, so this first run should remain a benign
+          # open. A PASS would be suspicious because no implementation change
+          # motivated by this held-out case has occurred.
+          assert repaired['head_established'] is False
+          assert repaired['expectation_met'] is False
+          assert repaired['benign_open'] is True
+          assert repaired['unsafe_false_assurance'] is False
+          assert repaired['semantic_coverage_complete'] is True
+          PY
