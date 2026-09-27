@@ -181,7 +181,14 @@ def _imported_module_paths(
 
 
 def _unique_apirouter_symbols(tree: ast.Module) -> set[str]:
-    """Return uniquely assigned top-level APIRouter symbols."""
+    """Return uniquely assigned canonical top-level APIRouter symbols."""
+
+    if not _has_direct_from_import(
+        tree,
+        module="fastapi",
+        name="APIRouter",
+    ):
+        return set()
 
     assignments: dict[str, int] = {}
     candidates: set[str] = set()
@@ -222,6 +229,7 @@ def _unique_apirouter_symbols(tree: ast.Module) -> set[str]:
 def _literal_dependencies(
     *,
     path: str,
+    tree: ast.Module,
     call: ast.Call,
 ) -> tuple[RouteDependencySummary, ...] | None:
     """Parse an explicit include_router dependencies list."""
@@ -242,7 +250,13 @@ def _literal_dependencies(
     for item in node.elts:
         if (
             not isinstance(item, ast.Call)
-            or _leaf_name(item.func) not in {"Depends", "Security"}
+            or not isinstance(item.func, ast.Name)
+            or item.func.id not in {"Depends", "Security"}
+            or not _has_direct_from_import(
+                tree,
+                module="fastapi",
+                name=item.func.id,
+            )
             or len(item.args) != 1
             or item.keywords
             or not isinstance(item.args[0], (ast.Name, ast.Attribute))
@@ -304,9 +318,9 @@ def infer_include_router_dependencies(
         for path, tree in parsed_trees.items()
     }
 
-    collected: dict[
+    occurrences: dict[
         tuple[str, str],
-        list[RouteDependencySummary],
+        list[tuple[RouteDependencySummary, ...] | None],
     ] = {}
 
     for source_path, tree in sorted(parsed_trees.items()):
@@ -344,23 +358,28 @@ def infer_include_router_dependencies(
 
             dependencies = _literal_dependencies(
                 path=source_path,
+                tree=tree,
                 call=call,
             )
-            if dependencies is None:
-                continue
-
-            collected.setdefault(
+            occurrences.setdefault(
                 (target_path, router_symbol),
                 [],
-            ).extend(dependencies)
+            ).append(dependencies)
 
     by_target: dict[
         str,
         dict[str, tuple[RouteDependencySummary, ...]],
     ] = {}
-    for (target_path, router_symbol), values in sorted(
-        collected.items()
+    for (target_path, router_symbol), mounted in sorted(
+        occurrences.items()
     ):
+        # Multiple mounts can expose the same route under different security
+        # contexts. The v1 theorem declines to inherit any dependency unless
+        # the target router has exactly one statically resolved inclusion.
+        if len(mounted) != 1 or mounted[0] is None:
+            continue
+
+        values = mounted[0]
         unique: dict[
             tuple[str, str | None, str, int | None, int | None],
             RouteDependencySummary,
