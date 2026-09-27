@@ -151,10 +151,11 @@ class FastApiDependencyEffectProfile:
     # Dependency name -> effect names the dependency authorizes in this profile.
     dependency_guard_effects: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
-    # Direct route-decorator dependency name -> static capability/resource.
-    # These semantics are intentionally restricted to route-wide mediation.
+    # Direct route-decorator dependency name -> candidate static capability/resource.
+    # This mapping identifies intended mediation only. It does not establish
+    # that the dependency implementation is an effective authorization check.
     route_dependency_guard_resources: dict[str, str] = field(default_factory=dict)
-    # Direct route-decorator dependency name -> authorized effect names.
+    # Direct route-decorator dependency name -> effects it is intended to mediate.
     route_dependency_guard_effects: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     principal_parameter: str = "user"
@@ -255,7 +256,12 @@ class FastApiDependencyEffectProfile:
         full_name: str,
         leaf_name: str | None,
     ) -> tuple[str, str, tuple[str, ...]] | None:
-        """Resolve governed route-level complete-mediation semantics."""
+        """Resolve governed route-level candidate-mediation intent.
+
+        The returned mapping is not proof that the dependency fails closed.
+        Source-derived dependency semantics must establish effectiveness before
+        a Protected Effect claim can pass.
+        """
         for key in (full_name, leaf_name):
             if not key:
                 continue
