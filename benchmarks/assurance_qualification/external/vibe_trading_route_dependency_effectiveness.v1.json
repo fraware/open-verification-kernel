@@ -1,0 +1,167 @@
+{
+  "schema_version": "ovk.assurance_external_replay_suite.v1",
+  "suite_id": "vibe-trading-route-dependency-effectiveness-heldout-v1",
+  "description": "Held-out independent evaluation of whether a syntactically present FastAPI route dependency is treated as effective authorization when its implementation can fail open. Frozen against OVK route-dependency complete-mediation revision d097018f558b1798999f284be6d193ee5a59db6b before any semantic change motivated by this case.",
+  "cases": [
+    {
+      "case_id": "vibe-trading-fail-open-route-auth-vulnerable",
+      "repository": "HKUDS/Vibe-Trading",
+      "repository_url": "https://github.com/HKUDS/Vibe-Trading.git",
+      "validation_class": "independent_external",
+      "base_sha": "fd7384e4722f8cf1f79c83f8a294b7ded7c8ed26",
+      "head_sha": "fd767f5c29c72cffe8e3f89c7ff006cb3041397f",
+      "description": "Vulnerable snapshot in which POST /sessions/{session_id}/messages declares Depends(require_auth), but require_auth returns normally whenever API_AUTH_KEY is unset, so dependency presence does not imply effective authentication.",
+      "safety_label": "unsafe",
+      "expected_head_assurance": "not_established",
+      "guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-VIBE-SESSION-MESSAGE-AUTH",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Session message execution is mediated by effective API authentication.",
+            "selector": {
+              "effect_name": "agent.session.message.execute",
+              "entrypoint": "POST /sessions/{session_id}/messages"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "source": "GHSA-v2f8-6655-7grj",
+              "endpoint": "send_message"
+            }
+          }
+        ]
+      },
+      "protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "agent/api_server.py"
+        ],
+        "sink_effects": {
+          "svc.send_message": "agent.session.message.execute"
+        },
+        "sink_identity_args": {},
+        "sink_static_resources": {
+          "svc.send_message": "session_message_execution"
+        },
+        "sink_scope_keywords": {},
+        "sink_missing_scope_unconstrained": [],
+        "scope_assertions": {},
+        "ownership_assertions": {},
+        "sink_contracts": {},
+        "sink_contract_scope_attributes": {},
+        "sink_contract_identity_attributes": {},
+        "sink_binding_relations": {},
+        "sink_binding_authorized_projections": {},
+        "sink_binding_acted_projections": {},
+        "sink_binding_authorized_attributes": {},
+        "sink_binding_acted_attributes": {},
+        "dependency_guard_resources": {},
+        "dependency_guard_effects": {},
+        "route_dependency_guard_resources": {
+          "require_auth": "session_message_execution"
+        },
+        "route_dependency_guard_effects": {
+          "require_auth": [
+            "agent.session.message.execute"
+          ]
+        },
+        "principal_parameter": "$authenticated_caller"
+      },
+      "provenance": {
+        "contamination_status": "held_out_independent",
+        "adjudication_kind": "public_security_advisory",
+        "references": [
+          "https://github.com/HKUDS/Vibe-Trading/security/advisories/GHSA-v2f8-6655-7grj",
+          "https://github.com/HKUDS/Vibe-Trading/commit/fd767f5c29c72cffe8e3f89c7ff006cb3041397f"
+        ],
+        "notes": "Selected only after the route-dependency primitive was implemented and before observing its result. The relevant source explicitly documents that authentication is skipped when API_AUTH_KEY is unset."
+      },
+      "qualification_human_adjudicated": false,
+      "human_review_minutes": null
+    },
+    {
+      "case_id": "vibe-trading-fail-open-route-auth-repair",
+      "repository": "HKUDS/Vibe-Trading",
+      "repository_url": "https://github.com/HKUDS/Vibe-Trading.git",
+      "validation_class": "independent_external",
+      "base_sha": "fd767f5c29c72cffe8e3f89c7ff006cb3041397f",
+      "head_sha": "9454d4a27a763b80e1d6eb5763b86c88e9e4e714",
+      "description": "Security-hardening transition that replaces no-key network authentication bypass with non-local fail-closed behavior and tightens API protection defaults.",
+      "safety_label": "safe",
+      "expected_head_assurance": "established",
+      "guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-VIBE-SESSION-MESSAGE-AUTH",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Session message execution is mediated by effective API authentication.",
+            "selector": {
+              "effect_name": "agent.session.message.execute",
+              "entrypoint": "POST /sessions/{session_id}/messages"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "source": "GHSA-v2f8-6655-7grj",
+              "endpoint": "send_message"
+            }
+          }
+        ]
+      },
+      "protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "agent/api_server.py"
+        ],
+        "sink_effects": {
+          "svc.send_message": "agent.session.message.execute"
+        },
+        "sink_identity_args": {},
+        "sink_static_resources": {
+          "svc.send_message": "session_message_execution"
+        },
+        "sink_scope_keywords": {},
+        "sink_missing_scope_unconstrained": [],
+        "scope_assertions": {},
+        "ownership_assertions": {},
+        "sink_contracts": {},
+        "sink_contract_scope_attributes": {},
+        "sink_contract_identity_attributes": {},
+        "sink_binding_relations": {},
+        "sink_binding_authorized_projections": {},
+        "sink_binding_acted_projections": {},
+        "sink_binding_authorized_attributes": {},
+        "sink_binding_acted_attributes": {},
+        "dependency_guard_resources": {},
+        "dependency_guard_effects": {},
+        "route_dependency_guard_resources": {
+          "require_auth": "session_message_execution"
+        },
+        "route_dependency_guard_effects": {
+          "require_auth": [
+            "agent.session.message.execute"
+          ]
+        },
+        "principal_parameter": "$authenticated_caller"
+      },
+      "provenance": {
+        "contamination_status": "held_out_independent",
+        "adjudication_kind": "public_merged_fix",
+        "references": [
+          "https://github.com/HKUDS/Vibe-Trading/commit/9454d4a27a763b80e1d6eb5763b86c88e9e4e714",
+          "https://github.com/HKUDS/Vibe-Trading/security/advisories/GHSA-v2f8-6655-7grj"
+        ],
+        "notes": "Held out from implementation. This transition changes the authentication helper semantics while the protected route already contains the route dependency."
+      },
+      "qualification_human_adjudicated": false,
+      "human_review_minutes": null
+    }
+  ]
+}
