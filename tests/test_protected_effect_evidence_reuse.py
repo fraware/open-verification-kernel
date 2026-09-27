@@ -548,3 +548,87 @@ def test_semantic_cache_rejects_tampered_evidence_payload(tmp_path: Path) -> Non
         signature_key=TEST_SIGNING_KEY,
     )
     assert reused is None
+
+
+def _local_complete_global_partial_ir(*, head_sha: str = "head-a") -> AssuranceIR:
+    ir = _simple_ir(head_sha=head_sha)
+    ir.coverage.status = "partial"
+    ir.coverage.unsupported_constructs = [
+        "unrelated.py:other_handler:control_flow_outside_v1_subset"
+    ]
+    ir.coverage.assumptions = ["global extractor has unrelated unsupported code"]
+    ir.paths[0].coverage_status = "complete"
+    ir.paths[0].unsupported_constructs = []
+    ir.paths[0].coverage_assumptions = [
+        "protected-effect prefix is fully represented"
+    ]
+    return ir
+
+
+def test_fresh_evidence_uses_effect_local_coverage_scope() -> None:
+    ir = _local_complete_global_partial_ir()
+    evaluation, _, evidence = _evidence(ir)
+
+    assert evaluation.status == "pass"
+    assert evaluation.extraction_coverage == "complete"
+    assert evidence.coverage is not None
+    assert evidence.coverage["status"] == "complete"
+    assert evidence.coverage["scope"] == "protected_effect"
+    assert evidence.coverage["source"] == "path_local"
+    assert evidence.coverage["protected_effect_id"] == "pe:refund"
+    assert evidence.coverage["unsupported_constructs"] == []
+    assert evidence.coverage["assumptions"] == [
+        "protected-effect prefix is fully represented"
+    ]
+
+
+def test_reissued_evidence_recomputes_effect_local_coverage(
+    tmp_path: Path,
+) -> None:
+    base = _local_complete_global_partial_ir(head_sha="head-a")
+    _, fingerprint, evidence = _evidence(base)
+    cache = ProtectedEffectEvidenceCache(
+        HardenedResultCache(tmp_path, ttl_seconds=86400)
+    )
+    cache.put(
+        ir=base,
+        protected_effect_id="pe:refund",
+        policy_digest="policy-a",
+        execution_fingerprint=fingerprint,
+        evidence=evidence,
+        signature_key=TEST_SIGNING_KEY,
+    )
+
+    head = _local_complete_global_partial_ir(head_sha="head-b")
+    reused = cache.reuse_for_head(
+        head_ir=head,
+        protected_effect_id="pe:refund",
+        policy_digest="policy-a",
+        current_runtime_fingerprint=fingerprint.runtime_fingerprint,
+        signature_key=TEST_SIGNING_KEY,
+        signing_key=TEST_SIGNING_KEY,
+    )
+
+    assert reused is not None
+    assert reused.coverage is not None
+    assert reused.coverage["status"] == "complete"
+    assert reused.coverage["scope"] == "protected_effect"
+    assert reused.coverage["source"] == "path_local"
+    assert verify_evidence_digest(reused)
+
+
+def test_evidence_coverage_falls_back_to_global_for_legacy_paths() -> None:
+    ir = _simple_ir()
+    ir.coverage.status = "partial"
+    ir.coverage.unsupported_constructs = ["legacy-global-gap"]
+
+    evaluation, _, evidence = _evidence(ir)
+
+    assert evaluation.status == "unknown"
+    assert evaluation.extraction_coverage == "partial"
+    assert evidence.coverage is not None
+    assert evidence.coverage["status"] == "partial"
+    assert evidence.coverage["source"] == "assurance_ir_global"
+    assert evidence.coverage["unsupported_constructs"] == [
+        "legacy-global-gap"
+    ]
