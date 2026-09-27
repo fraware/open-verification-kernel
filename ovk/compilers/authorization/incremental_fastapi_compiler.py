@@ -24,6 +24,9 @@ from ovk.compilers.authorization.python_ast_index import (
     ParsedPythonMaterials,
     parsed_index_matches_materials,
 )
+from ovk.compilers.authorization.route_dependency_effectiveness import (
+    infer_route_dependency_effectiveness,
+)
 from ovk.compilers.authorization.resource_return_contracts import (
     ContractSummaryIndex,
     contract_summary_index_matches_materials,
@@ -137,6 +140,15 @@ def compile_incremental_fastapi_assurance(
         route_summary_index=route_summary_index,
     )
 
+    guard_effectiveness_evidence = infer_route_dependency_effectiveness(
+        parsed_trees=parsed_index.trees,
+        dependency_names=profile.route_dependency_guard_resources,
+    )
+    guard_effectiveness_by_name = {
+        item.dependency_name: item
+        for item in guard_effectiveness_evidence
+    }
+
     contract_composition = compose_function_contracts_incremental(
         contract_summary_index,
         previous_state=(
@@ -190,6 +202,7 @@ def compile_incremental_fastapi_assurance(
                 prior,
                 profile=profile,
                 contracts_by_name=contracts_by_name,
+                guard_effectiveness_by_name=guard_effectiveness_by_name,
             )
         ):
             fragments[path] = prior
@@ -200,6 +213,7 @@ def compile_incremental_fastapi_assurance(
             summary,
             profile=profile,
             contracts_by_name=contracts_by_name,
+            guard_effectiveness_by_name=guard_effectiveness_by_name,
         )
         rebound += 1
 
@@ -220,6 +234,7 @@ def compile_incremental_fastapi_assurance(
         materials=materials,
         function_contracts=function_contracts,
         resource_return_contracts=resource_return_contracts,
+        guard_effectiveness_evidence=guard_effectiveness_evidence,
         fragments=fragments,
         syntax_errors=parsed_index.syntax_errors,
         missing_route_summary_paths=missing_route_summaries,
