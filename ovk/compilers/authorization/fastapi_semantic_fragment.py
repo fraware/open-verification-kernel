@@ -15,6 +15,7 @@ from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.compilers.authorization.fastapi_route_summary import (
     CallSummary,
     ExpressionSummary,
+    LocalBranchSummary,
     RouteFileSummary,
     RouteHandlerSummary,
 )
@@ -316,6 +317,29 @@ def _prior_ownership_assertion(
         return None, "ambiguous_ownership_assertions"
 
     return matches[-1][1], None
+
+
+def _rendered_root(rendered: str) -> str | None:
+    """Return a leading Python identifier from a rendered source expression."""
+
+    candidate = rendered.strip().split(".", 1)[0].split("[", 1)[0]
+    return candidate if candidate.isidentifier() else None
+
+
+def _local_branch_irrelevant_to_effect(
+    branch: LocalBranchSummary,
+    *,
+    relevant_roots: set[str],
+) -> bool:
+    """Return whether a summarized if cannot change this theorem's support roots.
+
+    This is intentionally syntactic. Unknown calls, early exits, or writes to a
+    principal/resource/sink root keep the branch inside the unsupported slice.
+    """
+
+    if branch.has_early_exit or branch.impure_calls:
+        return False
+    return set(branch.assigned_roots).isdisjoint(relevant_roots)
 
 
 @dataclass(frozen=True)
@@ -810,16 +834,59 @@ def bind_route_file_summary(
             local_unsupported = list(
                 unsupported[sink_unsupported_start:]
             )
+            relevant_roots = {
+                profile.principal_parameter,
+            }
+            identity_root = _rendered_root(identity_expression.rendered)
+            if identity_root is not None:
+                relevant_roots.add(identity_root)
+            sink_root = _rendered_root(call.full_name)
+            if sink_root is not None:
+                relevant_roots.add(sink_root)
+            if ownership_assertion is not None:
+                relevant_roots.add(
+                    ownership_assertion.loaded_resource_symbol
+                )
+
+            local_branches_by_line = {
+                item.line: item
+                for item in handler.local_branches
+            }
+            ignored_local_branch_lines: list[int] = []
             for control_line in handler.unsupported_control_flow_lines:
-                if control_line < call.line:
-                    local_unsupported.append(
-                        f"{file_summary.path}:{handler.handler_name}:"
-                        f"control_flow_before_protected_effect:{control_line}"
+                if control_line >= call.line:
+                    continue
+                branch = local_branches_by_line.get(control_line)
+                if (
+                    branch is not None
+                    and _local_branch_irrelevant_to_effect(
+                        branch,
+                        relevant_roots=relevant_roots,
                     )
+                ):
+                    ignored_local_branch_lines.append(control_line)
+                    continue
+                local_unsupported.append(
+                    f"{file_summary.path}:{handler.handler_name}:"
+                    f"control_flow_before_protected_effect:{control_line}"
+                )
             local_unsupported = sorted(set(local_unsupported))
             local_coverage_status = (
                 "partial" if local_unsupported else "complete"
             )
+            local_coverage_assumptions = list(_PROFILE_ASSUMPTIONS)
+            if ignored_local_branch_lines:
+                local_coverage_assumptions.append(
+                    "Intervening local branches were excluded from this "
+                    "Protected Effect support slice only because their syntax "
+                    "contained no early exit, no unclassified side-effecting "
+                    "call, and no write to the effect's principal/resource/"
+                    "sink roots; lines="
+                    + ",".join(
+                        str(line)
+                        for line in sorted(ignored_local_branch_lines)
+                    )
+                )
 
             paths[path_id] = SemanticPath(
                 path_id=path_id,
@@ -830,7 +897,7 @@ def bind_route_file_summary(
                 contract_use_ids=sorted(contract_use_ids),
                 coverage_status=local_coverage_status,
                 unsupported_constructs=local_unsupported,
-                coverage_assumptions=list(_PROFILE_ASSUMPTIONS),
+                coverage_assumptions=local_coverage_assumptions,
                 origin=handler.origin,
             )
 
@@ -994,7 +1061,7 @@ def assemble_fastapi_assurance_ir(
         ),
         extractor=AssuranceExtractorIdentity(
             extractor_id="assurance.fastapi.dependency_effects.ast_v1",
-            extractor_version="0.4.0",
+            extractor_version="0.5.0",
             source_profile_id="assurance.fastapi.dependency_effects.ast_v1",
         ),
         coverage=AssuranceCoverage(
