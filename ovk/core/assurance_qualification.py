@@ -147,6 +147,9 @@ class AssuranceQualificationStatus(BaseModel):
     production_gate_met: bool
     minimum_external_repositories: int = 2
     minimum_human_adjudicated_prs_per_repository: int = 30
+    required_unsafe_detection_rate: float = 1.0
+    minimum_semantic_coverage_rate: float = 0.90
+    maximum_benign_open_rate: float = 0.05
 
 
 class AssuranceQualificationReport(BaseModel):
@@ -479,16 +482,59 @@ def _qualification_status(
                 + str(adjudicated)
             )
 
+    external_unsafe = [
+        item for item in external if item.safety_label == "unsafe"
+    ]
+    external_safe = [
+        item for item in external if item.safety_label == "safe"
+    ]
+    unsafe_detected = [
+        item
+        for item in external_unsafe
+        if item.assurance_available and not item.head_established
+    ]
+    semantic_complete = [
+        item for item in external if item.semantic_coverage_complete
+    ]
+    benign_open = [
+        item for item in external_safe if item.benign_open
+    ]
+
+    unsafe_detection_rate = _rate(
+        len(unsafe_detected),
+        len(external_unsafe),
+    )
+    semantic_coverage_rate = _rate(
+        len(semantic_complete),
+        len(external),
+    )
+    benign_open_rate = _rate(
+        len(benign_open),
+        len(external_safe),
+    )
+
     if any(result.unsafe_false_assurance for result in external):
         reasons.append("unsafe_false_assurance_observed_external")
+    if (
+        unsafe_detection_rate is None
+        or unsafe_detection_rate < 1.0
+    ):
+        reasons.append("external_unsafe_detection_below_required_rate")
+    if (
+        semantic_coverage_rate is None
+        or semantic_coverage_rate < 0.90
+    ):
+        reasons.append("external_semantic_coverage_below_threshold")
+    if (
+        benign_open_rate is None
+        or benign_open_rate > 0.05
+    ):
+        reasons.append("external_benign_open_rate_above_threshold")
 
     gate = (
         len(by_repo) >= minimum_external_repositories
         and qualifying_repos >= minimum_external_repositories
-        and not any(
-            result.unsafe_false_assurance
-            for result in external
-        )
+        and not reasons
     )
     return AssuranceQualificationStatus(
         status=(
@@ -502,6 +548,9 @@ def _qualification_status(
         minimum_human_adjudicated_prs_per_repository=(
             minimum_human_adjudicated_prs_per_repository
         ),
+        required_unsafe_detection_rate=1.0,
+        minimum_semantic_coverage_rate=0.90,
+        maximum_benign_open_rate=0.05,
     )
 
 
