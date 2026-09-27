@@ -20,6 +20,9 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass, field
 
+from ovk.compilers.authorization.authorization_dependency_contracts import (
+    infer_authorization_dependency_contracts,
+)
 from ovk.compilers.authorization.base import normalize_path
 from ovk.compilers.authorization.fastapi_route_summary import (
     CallSummary,
@@ -792,6 +795,15 @@ class FastApiDependencyEffectExtractor:
             contract.qualified_name: contract
             for contract in function_contracts
         }
+        authorization_dependency_contracts = (
+            infer_authorization_dependency_contracts(
+                parsed_trees=parsed.trees,
+            )
+        )
+        authorization_contracts_by_name = {
+            contract.qualified_name: contract
+            for contract in authorization_dependency_contracts
+        }
 
         if route_summary_index is None:
             route_summaries = build_route_summary_index(
@@ -814,6 +826,9 @@ class FastApiDependencyEffectExtractor:
                 summary,
                 profile=profile,
                 contracts_by_name=contracts_by_name,
+                authorization_contracts_by_name=(
+                    authorization_contracts_by_name
+                ),
             )
             for path, summary in sorted(route_summaries.summaries.items())
             if summary.handlers
@@ -828,6 +843,9 @@ class FastApiDependencyEffectExtractor:
         return assemble_fastapi_assurance_ir(
             materials=materials,
             function_contracts=function_contracts,
+            authorization_dependency_contracts=(
+                authorization_dependency_contracts
+            ),
             resource_return_contracts=resource_return_contracts,
             fragments=fragments,
             syntax_errors=parsed.syntax_errors,
