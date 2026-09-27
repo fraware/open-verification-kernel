@@ -306,7 +306,7 @@ def _materialize_current_ir_evidence(
     ir,
     *,
     policy_digest: str,
-    cache: ProtectedEffectEvidenceCache,
+    cache: ProtectedEffectEvidenceCache | None,
     runtime_provider: Callable[
         [str],
         ProtectedEffectRuntimeFingerprint | None,
@@ -328,7 +328,7 @@ def _materialize_current_ir_evidence(
         runtime = runtime_provider(effect_id)
         runtime_by_effect[effect_id] = runtime
         reused = None
-        if runtime is not None:
+        if runtime is not None and cache is not None:
             reused = cache.reuse_for_head(
                 head_ir=ir,
                 protected_effect_id=effect_id,
@@ -385,6 +385,7 @@ def _materialize_current_ir_evidence(
             if (
                 evaluation.status == "pass"
                 and fingerprint is not None
+                and cache is not None
             ):
                 try:
                     cache.put(
@@ -493,6 +494,7 @@ def build_automatic_pull_request_assurance(
     changed_files: list[str],
     verification_policy: dict[str, Any] | None = None,
     cache_dir: Path = DEFAULT_CACHE_DIR,
+    use_cache: bool = True,
     signing_key: bytes | None = None,
     runtime_fingerprint_provider: Callable[
         [str],
@@ -642,8 +644,10 @@ def build_automatic_pull_request_assurance(
             governance=governance,
             profile=profile,
         )
-        cache = ProtectedEffectEvidenceCache(
-            HardenedResultCache(cache_dir)
+        cache = (
+            ProtectedEffectEvidenceCache(HardenedResultCache(cache_dir))
+            if use_cache
+            else None
         )
         runtime_provider = (
             runtime_fingerprint_provider
