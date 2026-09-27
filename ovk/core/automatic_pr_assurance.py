@@ -98,6 +98,12 @@ class AutomaticPullRequestAssuranceResult(BaseModel):
     head_assurance_ir_digest: str | None = None
     base_coverage_status: str | None = None
     head_coverage_status: str | None = None
+    base_effective_coverage_statuses: dict[str, str] = Field(
+        default_factory=dict
+    )
+    head_effective_coverage_statuses: dict[str, str] = Field(
+        default_factory=dict
+    )
 
     base_fresh_effects: list[str] = Field(default_factory=list)
     base_reused_effects: list[str] = Field(default_factory=list)
@@ -114,6 +120,40 @@ class _CurrentEvidenceResult(BaseModel):
     evidence: list[Any] = Field(default_factory=list)
     fresh_effects: list[str] = Field(default_factory=list)
     reused_effects: list[str] = Field(default_factory=list)
+
+
+def _effective_coverage_statuses_from_evidence(
+    evidence: list[Any],
+) -> dict[str, str]:
+    """Return claim-local coverage statuses carried by sealed effect evidence.
+
+    Protected Effect evidence is the durable claim boundary. Fresh and reused
+    evidence both carry the effective coverage scope used by evaluation. Missing
+    or duplicate coverage identity is an internal consistency error instead of
+    falling back silently to repository-wide coverage.
+    """
+
+    statuses: dict[str, str] = {}
+    for item in evidence:
+        coverage = getattr(item, "coverage", None)
+        if not isinstance(coverage, dict):
+            raise ValueError(
+                "Protected Effect evidence is missing typed coverage metadata"
+            )
+        effect_id = str(coverage.get("protected_effect_id") or "").strip()
+        status = str(coverage.get("status") or "").strip()
+        if not effect_id or not status:
+            raise ValueError(
+                "Protected Effect evidence coverage is missing effect identity "
+                "or status"
+            )
+        if effect_id in statuses:
+            raise ValueError(
+                "duplicate Protected Effect evidence coverage identity: "
+                + effect_id
+            )
+        statuses[effect_id] = status
+    return dict(sorted(statuses.items()))
 
 
 def _run_git(
@@ -691,6 +731,17 @@ def build_automatic_pull_request_assurance(
             signature_key=selected_key,
         )
 
+        base_effective_coverage_statuses = (
+            _effective_coverage_statuses_from_evidence(
+                base_execution.evidence
+            )
+        )
+        head_effective_coverage_statuses = (
+            _effective_coverage_statuses_from_evidence(
+                head_execution.evidence
+            )
+        )
+
         review = build_pull_request_assurance_review(
             repo=repo,
             base_sha=base_sha,
@@ -718,6 +769,12 @@ def build_automatic_pull_request_assurance(
             head_assurance_ir_digest=head_ir.assurance_ir_digest,
             base_coverage_status=base_ir.coverage.status,
             head_coverage_status=head_ir.coverage.status,
+            base_effective_coverage_statuses=(
+                base_effective_coverage_statuses
+            ),
+            head_effective_coverage_statuses=(
+                head_effective_coverage_statuses
+            ),
             base_fresh_effects=base_execution.fresh_effects,
             base_reused_effects=base_execution.reused_effects,
             head_fresh_effects=head_execution.fresh_effects,
