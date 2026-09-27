@@ -505,3 +505,43 @@ async def sample():
     assert ir.guards == []
     assert evaluations[0].status == "fail"
 
+def test_include_router_rejects_non_fastapi_depends_symbol() -> None:
+    source = """
+from fastapi import FastAPI
+from custom_framework import Depends
+from app.endpoints import stats
+
+app = FastAPI()
+app.include_router(
+    stats.router,
+    dependencies=[Depends(require_auth)],
+)
+""".strip()
+
+    ir = _compile_include_router(main_source=source)
+    evaluations = evaluate_protected_effect_integrity(ir)
+
+    assert ir.guards == []
+    assert evaluations[0].status == "fail"
+
+
+def test_multiple_include_router_mounts_suppress_inheritance() -> None:
+    source = """
+from fastapi import Depends, FastAPI
+from app.endpoints import stats
+
+app = FastAPI()
+app.include_router(
+    stats.router,
+    prefix="/guarded",
+    dependencies=[Depends(require_auth)],
+)
+app.include_router(stats.router, prefix="/public")
+""".strip()
+
+    ir = _compile_include_router(main_source=source)
+    evaluations = evaluate_protected_effect_integrity(ir)
+
+    assert ir.guards == []
+    assert evaluations[0].status == "fail"
+
