@@ -52,7 +52,7 @@ from ovk.core.resource_identity import ResourceIdentityTerm
 
 
 SEMANTIC_SUMMARY_CACHE_SCHEMA = "ovk.python_semantic_summary_cache.v1"
-SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.3.0"
+SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.4.0"
 DEFAULT_SEMANTIC_SUMMARY_CACHE_DIR = Path(
     ".verification/cache/python-semantic-summaries"
 )
@@ -203,6 +203,7 @@ def _route_summary_payload(summary: RouteFileSummary) -> dict[str, Any]:
                         "principal_expression": _expression_payload(item.principal_expression),
                         "principal_attribute": item.principal_attribute,
                         "presence_test": item.presence_test,
+                        "lexical_block_id": item.lexical_block_id,
                         "origin": _origin_payload(item.origin),
                     }
                     for item in handler.ownership_assertions
@@ -230,6 +231,7 @@ def _route_summary_payload(summary: RouteFileSummary) -> dict[str, Any]:
                             [name, _expression_payload(argument)]
                             for name, argument in call.keyword_arguments
                         ],
+                        "lexical_block_id": call.lexical_block_id,
                         "origin": _origin_payload(call.origin),
                     }
                     for call in handler.calls
@@ -270,6 +272,7 @@ def _route_summary_from_payload(payload: dict[str, Any]) -> RouteFileSummary:
                         )
                         for pair in call.get("keyword_arguments") or []
                     ),
+                    lexical_block_id=str(call["lexical_block_id"]),
                     origin=SemanticOrigin.model_validate(call["origin"]),
                 )
             )
@@ -299,6 +302,7 @@ def _route_summary_from_payload(payload: dict[str, Any]) -> RouteFileSummary:
                         principal_expression=_expression_from_payload(item["principal_expression"]),
                         principal_attribute=str(item["principal_attribute"]),
                         presence_test=str(item["presence_test"]),
+                        lexical_block_id=str(item["lexical_block_id"]),
                         origin=SemanticOrigin.model_validate(item["origin"]),
                     )
                     for item in handler.get("ownership_assertions") or []
