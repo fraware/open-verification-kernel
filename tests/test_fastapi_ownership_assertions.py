@@ -179,3 +179,80 @@ async def create_run(
 
     assert len(ir.guards) == 0
     assert result.status != "pass"
+
+
+SECURE_ASYNC_WITH = """
+from fastapi import Depends, FastAPI
+app = FastAPI()
+
+@app.post("/threads/{thread_id}/runs/wait")
+async def wait_for_run(
+    thread_id: str,
+    request,
+    user = Depends(get_current_user),
+):
+    maker = get_session_maker()
+    async with maker() as session:
+        existing_thread = await session.scalar(
+            select(ThreadORM).where(ThreadORM.thread_id == thread_id)
+        )
+        if existing_thread and existing_thread.user_id != user.identity:
+            raise HTTPException(404, "Thread not found")
+        return await _prepare_run(session, thread_id, request, user)
+""".strip()
+
+
+def test_ownership_assertion_and_sink_inside_same_async_with_block_pass() -> None:
+    ir, result = _evaluate(
+        SECURE_ASYNC_WITH,
+        truthy_when_present=True,
+    )
+
+    assert ir.coverage.status == "complete"
+    assert len(ir.guards) == 1
+    assert result.status == "pass"
+    assert ir.paths[0].coverage_status == "complete"
+
+
+def test_ownership_guard_does_not_cross_into_async_with_sink_scope() -> None:
+    source = """
+from fastapi import Depends, FastAPI
+app = FastAPI()
+
+@app.post("/threads/{thread_id}/runs/wait")
+async def wait_for_run(
+    thread_id: str,
+    request,
+    user = Depends(get_current_user),
+    session = Depends(get_session),
+):
+    existing_thread = await session.scalar(
+        select(ThreadORM).where(ThreadORM.thread_id == thread_id)
+    )
+    if existing_thread and existing_thread.user_id != user.identity:
+        raise HTTPException(404, "Thread not found")
+    maker = get_session_maker()
+    async with maker() as inner_session:
+        return await _prepare_run(inner_session, thread_id, request, user)
+""".strip()
+
+    ir, result = _evaluate(source, truthy_when_present=True)
+
+    assert len(ir.protected_effects) == 1
+    assert len(ir.guards) == 0
+    assert result.status == "fail"
+
+
+def test_unrelated_branch_inside_async_with_keeps_local_coverage_partial() -> None:
+    source = SECURE_ASYNC_WITH.replace(
+        '        return await _prepare_run(session, thread_id, request, user)',
+        '''        if request.debug:
+            audit(thread_id)
+        return await _prepare_run(session, thread_id, request, user)''',
+    )
+
+    ir, result = _evaluate(source, truthy_when_present=True)
+
+    assert ir.coverage.status == "partial"
+    assert ir.paths[0].coverage_status == "partial"
+    assert result.status == "unknown"
