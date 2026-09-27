@@ -53,6 +53,27 @@ class DependencyParameterSummary:
 
 
 @dataclass(frozen=True)
+class OwnershipAssertionSummary:
+    """Profile-independent syntax summary for a fail-closed ownership check."""
+
+    loader_full_name: str
+    loader_leaf_name: str | None
+    loaded_resource_symbol: str
+    resource_identity_attribute: str
+    resource_key: ExpressionSummary
+    owner_attribute: str
+    principal_expression: ExpressionSummary
+    principal_attribute: str
+    presence_test: str
+    origin: SemanticOrigin
+
+    @property
+    def line(self) -> int:
+        source_range = self.origin.source_range
+        return int(source_range.start_line or 0) if source_range is not None else 0
+
+
+@dataclass(frozen=True)
 class CallSummary:
     full_name: str
     leaf_name: str | None
@@ -80,6 +101,7 @@ class RouteHandlerSummary:
     route_path: str
     has_control_flow: bool
     dependencies: tuple[DependencyParameterSummary, ...]
+    ownership_assertions: tuple[OwnershipAssertionSummary, ...]
     calls: tuple[CallSummary, ...]
     origin: SemanticOrigin
 
@@ -189,9 +211,120 @@ def _is_supported_fail_fast_none_guard(statement: ast.stmt) -> bool:
     )
 
 
+def _ownership_guard_shape(
+    statement: ast.stmt,
+) -> tuple[str, str, ast.AST, str, str] | None:
+    """Return the narrow fail-closed ownership-check syntax, if present.
+
+    Supported continuing-path forms are:
+
+        if resource and resource.owner != principal.id:
+            raise ...
+
+        if resource is not None and resource.owner != principal.id:
+            raise ...
+
+    The result is purely syntactic and carries no authorization meaning until a
+    governed profile binds the loader and attributes.
+    """
+
+    if (
+        not isinstance(statement, ast.If)
+        or statement.orelse
+        or len(statement.body) != 1
+        or not isinstance(statement.body[0], ast.Raise)
+        or not isinstance(statement.test, ast.BoolOp)
+        or not isinstance(statement.test.op, ast.And)
+        or len(statement.test.values) != 2
+    ):
+        return None
+
+    values = list(statement.test.values)
+
+    def presence(node: ast.AST) -> tuple[str, str] | None:
+        if isinstance(node, ast.Name):
+            return node.id, "truthy"
+        if (
+            isinstance(node, ast.Compare)
+            and len(node.ops) == 1
+            and isinstance(node.ops[0], ast.IsNot)
+            and len(node.comparators) == 1
+        ):
+            left = node.left
+            right = node.comparators[0]
+            if (
+                isinstance(left, ast.Name)
+                and isinstance(right, ast.Constant)
+                and right.value is None
+            ):
+                return left.id, "is_not_none"
+            if (
+                isinstance(right, ast.Name)
+                and isinstance(left, ast.Constant)
+                and left.value is None
+            ):
+                return right.id, "is_not_none"
+        return None
+
+    for presence_node, mismatch_node in (
+        (values[0], values[1]),
+        (values[1], values[0]),
+    ):
+        present = presence(presence_node)
+        if present is None:
+            continue
+        loaded_symbol, presence_test = present
+
+        if (
+            not isinstance(mismatch_node, ast.Compare)
+            or len(mismatch_node.ops) != 1
+            or not isinstance(mismatch_node.ops[0], ast.NotEq)
+            or len(mismatch_node.comparators) != 1
+        ):
+            continue
+
+        left = mismatch_node.left
+        right = mismatch_node.comparators[0]
+
+        def loaded_owner(node: ast.AST) -> str | None:
+            if (
+                isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and node.value.id == loaded_symbol
+            ):
+                return node.attr
+            return None
+
+        left_owner = loaded_owner(left)
+        right_owner = loaded_owner(right)
+        if left_owner is not None and isinstance(right, ast.Attribute):
+            return (
+                loaded_symbol,
+                left_owner,
+                right,
+                right.attr,
+                presence_test,
+            )
+        if right_owner is not None and isinstance(left, ast.Attribute):
+            return (
+                loaded_symbol,
+                right_owner,
+                left,
+                left.attr,
+                presence_test,
+            )
+    return None
+
+
+def _is_supported_fail_closed_ownership_guard(statement: ast.stmt) -> bool:
+    return _ownership_guard_shape(statement) is not None
+
+
 def _has_control_flow(handler: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     for statement in handler.body:
         if _is_supported_fail_fast_none_guard(statement):
+            continue
+        if _is_supported_fail_closed_ownership_guard(statement):
             continue
         if any(isinstance(node, _CONTROL_FLOW) for node in ast.walk(statement)):
             return True
@@ -352,6 +485,180 @@ def _expression_summary(
     )
 
 
+def _unwrap_call(node: ast.AST) -> ast.Call | None:
+    if isinstance(node, ast.Await):
+        node = node.value
+    return node if isinstance(node, ast.Call) else None
+
+
+def _loader_resource_candidates(
+    path: str,
+    handler: ast.FunctionDef | ast.AsyncFunctionDef,
+    *,
+    non_null_parameters: set[str],
+) -> dict[str, list[tuple[str, str | None, str, ExpressionSummary, int]]]:
+    """Summarize top-level loaded-resource assignments by route key.
+
+    The syntax rule is deliberately narrow: a named local receives a call whose
+    nested expression contains where(Model.resource_attr == route_expression).
+    Policy meaning is deferred to the governed profile.
+    """
+
+    result: dict[
+        str,
+        list[tuple[str, str | None, str, ExpressionSummary, int]],
+    ] = {}
+
+    for statement in handler.body:
+        if not isinstance(statement, (ast.Assign, ast.AnnAssign)):
+            continue
+
+        if isinstance(statement, ast.Assign):
+            if len(statement.targets) != 1 or not isinstance(
+                statement.targets[0],
+                ast.Name,
+            ):
+                continue
+            target = statement.targets[0]
+            value = statement.value
+        else:
+            if not isinstance(statement.target, ast.Name):
+                continue
+            target = statement.target
+            value = statement.value
+
+        if value is None:
+            continue
+        outer = _unwrap_call(value)
+        if outer is None:
+            continue
+
+        loader_full_name = ast.unparse(outer.func)
+        loader_leaf_name = _name_of(outer.func)
+        line = int(getattr(statement, "lineno", 0))
+
+        for nested in ast.walk(outer):
+            if (
+                not isinstance(nested, ast.Call)
+                or not isinstance(nested.func, ast.Attribute)
+                or nested.func.attr != "where"
+                or len(nested.args) != 1
+            ):
+                continue
+            predicate = nested.args[0]
+            if (
+                not isinstance(predicate, ast.Compare)
+                or len(predicate.ops) != 1
+                or not isinstance(predicate.ops[0], ast.Eq)
+                or len(predicate.comparators) != 1
+            ):
+                continue
+
+            left = predicate.left
+            right = predicate.comparators[0]
+            pairs: list[tuple[ast.Attribute, ast.AST]] = []
+            if isinstance(left, ast.Attribute) and not isinstance(
+                right,
+                ast.Attribute,
+            ):
+                pairs.append((left, right))
+            if isinstance(right, ast.Attribute) and not isinstance(
+                left,
+                ast.Attribute,
+            ):
+                pairs.append((right, left))
+
+            for model_attribute, resource_node in pairs:
+                resource_summary = _expression_summary(
+                    path,
+                    resource_node,
+                    non_null_parameters=non_null_parameters,
+                )
+                if resource_summary.term is None:
+                    continue
+                result.setdefault(target.id, []).append(
+                    (
+                        loader_full_name,
+                        loader_leaf_name,
+                        model_attribute.attr,
+                        resource_summary,
+                        line,
+                    )
+                )
+    return result
+
+
+def _ownership_assertion_summaries(
+    path: str,
+    handler: ast.FunctionDef | ast.AsyncFunctionDef,
+    *,
+    non_null_parameters: set[str],
+) -> tuple[OwnershipAssertionSummary, ...]:
+    loaders = _loader_resource_candidates(
+        path,
+        handler,
+        non_null_parameters=non_null_parameters,
+    )
+    found: list[OwnershipAssertionSummary] = []
+
+    for statement in handler.body:
+        shape = _ownership_guard_shape(statement)
+        if shape is None:
+            continue
+        (
+            loaded_symbol,
+            owner_attribute,
+            principal_node,
+            principal_attribute,
+            presence_test,
+        ) = shape
+        statement_line = int(getattr(statement, "lineno", 0))
+        principal = _expression_summary(
+            path,
+            principal_node,
+            non_null_parameters=non_null_parameters,
+        )
+        if principal.term is None:
+            continue
+
+        for (
+            loader_full_name,
+            loader_leaf_name,
+            resource_identity_attribute,
+            resource_key,
+            load_line,
+        ) in loaders.get(loaded_symbol, []):
+            if load_line >= statement_line:
+                continue
+            found.append(
+                OwnershipAssertionSummary(
+                    loader_full_name=loader_full_name,
+                    loader_leaf_name=loader_leaf_name,
+                    loaded_resource_symbol=loaded_symbol,
+                    resource_identity_attribute=resource_identity_attribute,
+                    resource_key=resource_key,
+                    owner_attribute=owner_attribute,
+                    principal_expression=principal,
+                    principal_attribute=principal_attribute,
+                    presence_test=presence_test,
+                    origin=_origin(path, statement),
+                )
+            )
+
+    return tuple(
+        sorted(
+            found,
+            key=lambda item: (
+                item.line,
+                item.loaded_resource_symbol,
+                item.resource_identity_attribute,
+                item.owner_attribute,
+                item.principal_expression.rendered,
+            ),
+        )
+    )
+
+
 def summarize_route_file(
     *,
     path: str,
@@ -415,6 +722,11 @@ def summarize_route_file(
                 route_path=route_path,
                 has_control_flow=_has_control_flow(handler),
                 dependencies=_dependency_parameters(path, handler),
+                ownership_assertions=_ownership_assertion_summaries(
+                    path,
+                    handler,
+                    non_null_parameters=non_null,
+                ),
                 calls=tuple(calls),
                 origin=_origin(path, handler),
             )
