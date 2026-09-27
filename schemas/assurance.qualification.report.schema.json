@@ -75,6 +75,7 @@
             "items": {"type": "string"}
           },
           "governance_review_required": {"type": "boolean"},
+          "human_adjudicated": {"type": "boolean"},
           "human_review_minutes": {
             "type": ["number", "null"],
             "minimum": 0
