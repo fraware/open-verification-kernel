@@ -43,6 +43,16 @@ from ovk.core.schema_validation import load_json, require_schema_valid
 from ovk.paths import schema_path
 
 
+ExternalReplayValidationClass = Literal[
+    "public_upstream_reduction",
+    "independent_external",
+]
+ExternalReplayContaminationStatus = Literal[
+    "public_development_case",
+    "held_out_independent",
+]
+
+
 ExternalAdjudicationKind = Literal[
     "public_security_advisory",
     "public_merged_fix",
@@ -54,6 +64,7 @@ _FULL_SHA = re.compile(r"^[0-9a-fA-F]{40}$")
 
 
 class ExternalReplayProvenance(BaseModel):
+    contamination_status: ExternalReplayContaminationStatus
     adjudication_kind: ExternalAdjudicationKind
     references: list[str]
     notes: str | None = None
@@ -71,6 +82,7 @@ class ExternalAssuranceReplayCase(BaseModel):
     case_id: str
     repository: str
     repository_url: str
+    validation_class: ExternalReplayValidationClass
     base_sha: str
     head_sha: str
     description: str = ""
@@ -100,6 +112,20 @@ class ExternalAssuranceReplayCase(BaseModel):
 
     @model_validator(mode="after")
     def _human_measurement_consistency(self) -> "ExternalAssuranceReplayCase":
+        if (
+            self.validation_class == "independent_external"
+            and self.provenance.contamination_status != "held_out_independent"
+        ):
+            raise ValueError(
+                "independent_external replay requires held_out_independent contamination status"
+            )
+        if (
+            self.validation_class == "public_upstream_reduction"
+            and self.provenance.contamination_status == "held_out_independent"
+        ):
+            raise ValueError(
+                "held_out_independent replay must use independent_external validation class"
+            )
         if (
             self.human_review_minutes is not None
             and not self.qualification_human_adjudicated
@@ -406,7 +432,7 @@ def replay_external_assurance_case(
             case_id=case.case_id,
             repository=case.repository,
             description=case.description,
-            validation_class="independent_external",
+            validation_class=case.validation_class,
             safety_label=case.safety_label,
             expected_head_assurance=case.expected_head_assurance,
             provenance={
@@ -416,6 +442,7 @@ def replay_external_assurance_case(
                 "head_sha": case.head_sha,
                 "upstream_base_material_digest": base_digest,
                 "upstream_head_material_digest": head_digest,
+                "contamination_status": case.provenance.contamination_status,
                 "adjudication_kind": case.provenance.adjudication_kind,
                 "references": case.provenance.references,
                 "notes": case.provenance.notes,
