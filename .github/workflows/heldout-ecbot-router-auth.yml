@@ -1,0 +1,61 @@
+name: Held-out ecbot Router Auth Replay
+
+on:
+  pull_request:
+    paths:
+      - 'benchmarks/assurance_qualification/external/heldout_ecbot_router_auth.v1.json'
+      - '.github/workflows/heldout-ecbot-router-auth.yml'
+      - 'ovk/core/external_assurance_replay.py'
+      - 'ovk/core/assurance_qualification.py'
+      - 'ovk/compilers/authorization/**'
+
+permissions:
+  contents: read
+
+jobs:
+  heldout-ecbot-replay:
+    if: github.head_ref == 'eval/heldout-ecbot-router-auth'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+      - name: Install OVK with solver dependencies
+        run: |
+          python scripts/sync_package_data.py
+          pip install --no-cache-dir -e '.[dev,solvers]'
+      - name: Replay held-out ecbot security repair
+        run: |
+          python scripts/run_external_assurance_replay.py \
+            benchmarks/assurance_qualification/external/heldout_ecbot_router_auth.v1.json \
+            --output .verification/heldout-ecbot-router-auth.json
+      - name: Assert conservative held-out behavior
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(
+              Path('.verification/heldout-ecbot-router-auth.json').read_text()
+          )
+          assert report['cases_total'] == 1
+          result = report['results'][0]['qualification_result']
+          assert result['validation_class'] == 'independent_external'
+          assert result['safety_label'] == 'safe'
+          # This first held-out run is frozen against PR #100. The repaired
+          # source uses APIRouter-level dependency inheritance, which #100
+          # intentionally does not model. A PASS here would be suspicious.
+          assert result['head_established'] is False
+          assert result['expectation_met'] is False
+          assert result['benign_open'] is True
+          assert result['unsafe_false_assurance'] is False
+          PY
+      - name: Upload held-out report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: heldout-ecbot-router-auth
+          path: .verification/heldout-ecbot-router-auth.json
+          retention-days: 90
