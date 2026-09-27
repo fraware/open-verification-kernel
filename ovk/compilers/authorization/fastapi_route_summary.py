@@ -100,6 +100,7 @@ class RouteHandlerSummary:
     method: str
     route_path: str
     has_control_flow: bool
+    unsupported_control_flow_lines: tuple[int, ...]
     dependencies: tuple[DependencyParameterSummary, ...]
     ownership_assertions: tuple[OwnershipAssertionSummary, ...]
     calls: tuple[CallSummary, ...]
@@ -125,7 +126,7 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id=_EXTRACTOR_ID,
-        extractor_version="0.2.0",
+        extractor_version="0.3.0",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -320,15 +321,29 @@ def _is_supported_fail_closed_ownership_guard(statement: ast.stmt) -> bool:
     return _ownership_guard_shape(statement) is not None
 
 
-def _has_control_flow(handler: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+def _unsupported_control_flow_lines(
+    handler: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> tuple[int, ...]:
+    """Return top-level statement lines containing unsupported control flow.
+
+    These source locations support protected-effect-local coverage: unsupported
+    control flow before a sink affects that sink's path, while unrelated
+    control flow in another handler or after the sink does not.
+    """
+
+    lines: list[int] = []
     for statement in handler.body:
         if _is_supported_fail_fast_none_guard(statement):
             continue
         if _is_supported_fail_closed_ownership_guard(statement):
             continue
         if any(isinstance(node, _CONTROL_FLOW) for node in ast.walk(statement)):
-            return True
-    return False
+            lines.append(int(getattr(statement, "lineno", 0)))
+    return tuple(sorted(set(lines)))
+
+
+def _has_control_flow(handler: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    return bool(_unsupported_control_flow_lines(handler))
 
 
 def _body_calls(handler: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.Call]:
@@ -721,6 +736,7 @@ def summarize_route_file(
                 method=method,
                 route_path=route_path,
                 has_control_flow=_has_control_flow(handler),
+                unsupported_control_flow_lines=_unsupported_control_flow_lines(handler),
                 dependencies=_dependency_parameters(path, handler),
                 ownership_assertions=_ownership_assertion_summaries(
                     path,
