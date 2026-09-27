@@ -1,0 +1,67 @@
+name: Langflow Held-out Route Auth Replay
+
+on:
+  pull_request:
+    paths:
+      - 'ovk/core/external_assurance_replay.py'
+      - 'ovk/core/assurance_qualification.py'
+      - 'ovk/core/automatic_pr_assurance.py'
+      - 'ovk/core/protected_effect_profile.py'
+      - 'ovk/compilers/authorization/**'
+      - 'benchmarks/assurance_qualification/external/langflow_monitor_auth_heldout.v1.json'
+      - 'schemas/assurance.external_replay.*.json'
+      - 'schemas/protected_effect_profile.schema.json'
+      - 'scripts/run_external_assurance_replay.py'
+      - 'tests/test_langflow_heldout_replay_spec.py'
+      - '.github/workflows/langflow-heldout-route-auth.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  langflow-heldout-replay:
+    if: github.head_ref == 'eval/langflow-heldout-route-replay'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+      - name: Install OVK with solver dependencies
+        run: |
+          python scripts/sync_package_data.py
+          pip install --no-cache-dir -e '.[dev,solvers]'
+      - name: Validate held-out replay specification
+        run: pytest -q tests/test_langflow_heldout_replay_spec.py
+      - name: Replay pinned Langflow security repair
+        run: |
+          python scripts/run_external_assurance_replay.py \
+            benchmarks/assurance_qualification/external/langflow_monitor_auth_heldout.v1.json \
+            --output .verification/langflow-heldout-route-auth.json
+      - name: Assert frozen held-out prediction
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(
+              Path(".verification/langflow-heldout-route-auth.json").read_text()
+          )
+          assert report["cases_total"] == 1
+          result = report["results"][0]["qualification_result"]
+          assert result["validation_class"] == "independent_external"
+          assert result["expectation_met"] is True
+          assert result["head_established"] is True
+          assert result["semantic_coverage_complete"] is True
+          assert result["unsafe_false_assurance"] is False
+          PY
+      - name: Upload held-out replay report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: langflow-heldout-route-auth
+          path: .verification/langflow-heldout-route-auth.json
+          retention-days: 90
+          if-no-files-found: warn
