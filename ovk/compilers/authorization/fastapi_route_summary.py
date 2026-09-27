@@ -125,7 +125,7 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id=_EXTRACTOR_ID,
-        extractor_version="0.1.0",
+        extractor_version="0.2.0",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
