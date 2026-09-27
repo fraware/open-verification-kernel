@@ -22,6 +22,7 @@ from ovk.core.resource_identity import ResourceIdentityTerm
 
 
 CoverageStatus = Literal["complete", "partial", "unknown", "inapplicable"]
+GuardEffectiveness = Literal["established", "unproved"]
 BindingRelation = Literal["equal", "same_tenant", "custom"]
 BindingProjection = Literal["identity", "scope", "attribute"]
 ContractTermKind = Literal["parameter", "return_attribute", "literal"]
@@ -110,12 +111,19 @@ class PathCondition(BaseModel):
 
 
 class AuthorizationGuard(BaseModel):
-    """Authorization decision observed on an execution path."""
+    """Candidate authorization decision observed on an execution path.
+
+    effectiveness distinguishes source-grounded mediation from a proved
+    authorization decision. Existing extractors default to established only
+    where their source profile already validates the guard semantics.
+    """
 
     guard_id: str
     principal_id: str
     effect_id: str
     resource_id: str
+    effectiveness: GuardEffectiveness = "established"
+    effectiveness_evidence_ids: list[str] = Field(default_factory=list)
     condition_ids: list[str] = Field(default_factory=list)
     origin: SemanticOrigin
 
@@ -379,6 +387,10 @@ class AssuranceIR(BaseModel):
             for item in payload[field_name]:
                 if "condition_ids" in item:
                     item["condition_ids"] = sorted(item["condition_ids"])
+                if "effectiveness_evidence_ids" in item:
+                    item["effectiveness_evidence_ids"] = sorted(
+                        item["effectiveness_evidence_ids"]
+                    )
 
         for item in payload["paths"]:
             item["guard_ids"] = sorted(item["guard_ids"])
