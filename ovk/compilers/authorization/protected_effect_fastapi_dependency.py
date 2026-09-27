@@ -37,6 +37,9 @@ from ovk.compilers.authorization.python_ast_index import (
     parse_head_python_materials,
     parsed_index_matches_materials,
 )
+from ovk.compilers.authorization.route_dependency_effectiveness import (
+    infer_route_dependency_effectiveness,
+)
 from ovk.compilers.authorization.resource_return_contracts import (
     ContractSummaryIndex,
     build_contract_summary_index,
@@ -716,6 +719,15 @@ class FastApiDependencyEffectExtractor:
                 )
             parsed = parsed_index
 
+        guard_effectiveness_evidence = infer_route_dependency_effectiveness(
+            parsed_trees=parsed.trees,
+            dependency_names=profile.route_dependency_guard_resources,
+        )
+        guard_effectiveness_by_name = {
+            item.dependency_name: item
+            for item in guard_effectiveness_evidence
+        }
+
         if contract_summary_index is None:
             contract_summaries = build_contract_summary_index(
                 materials,
@@ -766,6 +778,7 @@ class FastApiDependencyEffectExtractor:
                 summary,
                 profile=profile,
                 contracts_by_name=contracts_by_name,
+                guard_effectiveness_by_name=guard_effectiveness_by_name,
             )
             for path, summary in sorted(route_summaries.summaries.items())
             if summary.handlers
@@ -781,6 +794,7 @@ class FastApiDependencyEffectExtractor:
             materials=materials,
             function_contracts=function_contracts,
             resource_return_contracts=resource_return_contracts,
+            guard_effectiveness_evidence=guard_effectiveness_evidence,
             fragments=fragments,
             syntax_errors=parsed.syntax_errors,
             missing_route_summary_paths=missing_route_summaries,
