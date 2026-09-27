@@ -48,6 +48,7 @@ jobs:
           assert result["validation_class"] == "public_upstream_reduction"
           assert result["expectation_met"] is True
           assert result["head_established"] is True
+          assert result["semantic_coverage_complete"] is True
           assert result["unsafe_false_assurance"] is False
           PY
       - name: Upload external development report
