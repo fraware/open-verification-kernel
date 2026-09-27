@@ -213,19 +213,21 @@ def _admit_evidence(
         ):
             reasons.append("semantic_artifact_digest_mismatch")
 
+    change_source = str(evidence.change_origin.get("source") or "")
+
     evaluation_artifact = _single_artifact(
         evidence, "protected_effect_integrity_evaluation"
     )
     evaluation: ProtectedEffectIntegrityEvaluation | None = None
-    if evaluation_artifact is None:
-        reasons.append("missing_or_ambiguous_evaluation_artifact")
-    else:
+    if evaluation_artifact is not None:
         try:
             evaluation = ProtectedEffectIntegrityEvaluation.model_validate(
                 evaluation_artifact.get("evaluation")
             )
         except Exception:
             reasons.append("invalid_evaluation_artifact")
+    elif change_source == "assurance_ir":
+        reasons.append("missing_or_ambiguous_evaluation_artifact")
 
     if evaluation is not None:
         if evaluation.assurance_ir_digest != ir.assurance_ir_digest:
@@ -254,7 +256,6 @@ def _admit_evidence(
         reasons.append("evidence_has_controlling_findings")
 
     origin: GuaranteeEvidenceOrigin | None = None
-    change_source = str(evidence.change_origin.get("source") or "")
     if change_source == "assurance_ir":
         origin = "fresh"
         if (
