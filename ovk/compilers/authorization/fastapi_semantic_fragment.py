@@ -1091,6 +1091,7 @@ _SUPPORTED_CONSTRUCTS = [
 _PROFILE_ASSUMPTIONS = [
     "Configured dependency guards authorize the declared route resource for the declared effects.",
     "Configured direct route-decorator dependencies are candidate entrypoint mediators; effectiveness is established only when a source-derived authorization dependency contract exactly matches the governed credential and authority expressions.",
+    "A governed route-dependency authority expression denotes a valid trusted credential authority at route invocation; v1 source inference proves fail-closed comparison against that authority but does not establish its initialization, secrecy, or non-null invariant.",
     "Configured static sink resources denote endpoint/capability identities independent of request data and handler-local control flow.",
     "Configured service-call sinks faithfully identify protected effects.",
     "Configured sink identity argument denotes the acted resource identity only when no source-derived identity contract is required.",
