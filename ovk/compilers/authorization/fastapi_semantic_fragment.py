@@ -449,6 +449,7 @@ def bind_route_file_summary(
             if sink is None:
                 continue
             sink_key, effect_name = sink
+            sink_unsupported_start = len(unsupported)
             identity_index = profile.identity_arg(sink_key)
             if len(call.positional_arguments) <= identity_index:
                 unsupported.append(
@@ -804,6 +805,20 @@ def bind_route_file_summary(
                     f"{handler.handler_name}:{protected_id}"
                 ),
             )
+            local_unsupported = list(
+                unsupported[sink_unsupported_start:]
+            )
+            for control_line in handler.unsupported_control_flow_lines:
+                if control_line < call.line:
+                    local_unsupported.append(
+                        f"{file_summary.path}:{handler.handler_name}:"
+                        f"control_flow_before_protected_effect:{control_line}"
+                    )
+            local_unsupported = sorted(set(local_unsupported))
+            local_coverage_status = (
+                "partial" if local_unsupported else "complete"
+            )
+
             paths[path_id] = SemanticPath(
                 path_id=path_id,
                 entrypoint=f"{handler.method} {handler.route_path}",
@@ -811,6 +826,9 @@ def bind_route_file_summary(
                 protected_effect_ids=[protected_id],
                 binding_ids=sorted(binding_ids),
                 contract_use_ids=sorted(contract_use_ids),
+                coverage_status=local_coverage_status,
+                unsupported_constructs=local_unsupported,
+                coverage_assumptions=list(_PROFILE_ASSUMPTIONS),
                 origin=handler.origin,
             )
 
@@ -974,7 +992,7 @@ def assemble_fastapi_assurance_ir(
         ),
         extractor=AssuranceExtractorIdentity(
             extractor_id="assurance.fastapi.dependency_effects.ast_v1",
-            extractor_version="0.2.0",
+            extractor_version="0.3.0",
             source_profile_id="assurance.fastapi.dependency_effects.ast_v1",
         ),
         coverage=AssuranceCoverage(
