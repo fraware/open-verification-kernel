@@ -13,6 +13,7 @@ from ovk.core.backend_ids import normalize_allowed_backends, normalize_denied_ba
 from ovk.core.change_detection import detect_change_surfaces
 from ovk.core.check_metadata import load_required_check_metadata
 from ovk.core.github_event import load_github_event_metadata, metadata_to_self_protection_defaults
+from ovk.core.guarantee_manifest import guarantee_governance_summary, load_governed_guarantee_context
 from ovk.core.json_io import read_json_file
 from ovk.core.router import VerificationBudget
 from ovk.paths import schema_path
@@ -223,6 +224,13 @@ def build_repository_context(
         base_sha=base_sha,
     )
     branch_metadata["verification_policy"] = policy_metadata
+    guarantee_context = load_governed_guarantee_context(
+        changed_files=files,
+        base_sha=base_sha,
+    )
+    branch_metadata["guarantee_governance"] = guarantee_governance_summary(
+        guarantee_context
+    )
     surfaces = [surface.__dict__ for surface in detect_change_surfaces(files)]
     return RepositoryContext(
         repo=repo,
