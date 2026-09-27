@@ -43,6 +43,9 @@ class ExpressionSummary:
     term: ResourceIdentityTerm | None
     provably_non_null: bool
     origin: SemanticOrigin
+    call_full_name: str | None = None
+    call_leaf_name: str | None = None
+    call_positional_arguments: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -60,6 +63,8 @@ class CallSummary:
     positional_arguments: tuple[ExpressionSummary, ...]
     keyword_arguments: tuple[tuple[str, ExpressionSummary], ...]
     origin: SemanticOrigin
+    assigned_to: str | None = None
+    fail_closed_truthy_return: bool = False
 
     def keyword(self, name: str) -> ExpressionSummary | None:
         for key, value in self.keyword_arguments:
@@ -189,9 +194,69 @@ def _is_supported_fail_fast_none_guard(statement: ast.stmt) -> bool:
     )
 
 
+def _fail_closed_truthy_return_variables(
+    handler: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> set[str]:
+    """Return variables whose truthy value immediately exits the handler.
+
+    Supported source shape:
+
+        denied = guard(...)
+        if denied:
+            return denied
+
+    Treating the terminating branch as path pruning is conservative. The
+    semantic meaning of guard(...) is still supplied separately by the active
+    source profile.
+    """
+
+    result: set[str] = set()
+    for index, statement in enumerate(handler.body[:-1]):
+        target: ast.Name | None = None
+        value: ast.AST | None = None
+        if (
+            isinstance(statement, ast.Assign)
+            and len(statement.targets) == 1
+            and isinstance(statement.targets[0], ast.Name)
+        ):
+            target = statement.targets[0]
+            value = statement.value
+        elif isinstance(statement, ast.AnnAssign) and isinstance(
+            statement.target, ast.Name
+        ):
+            target = statement.target
+            value = statement.value
+        if target is None or not isinstance(value, ast.Call):
+            continue
+
+        following = handler.body[index + 1]
+        if (
+            isinstance(following, ast.If)
+            and not following.orelse
+            and isinstance(following.test, ast.Name)
+            and following.test.id == target.id
+            and len(following.body) == 1
+            and isinstance(following.body[0], ast.Return)
+            and isinstance(following.body[0].value, ast.Name)
+            and following.body[0].value.id == target.id
+        ):
+            result.add(target.id)
+    return result
+
+
 def _has_control_flow(handler: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    fail_closed = _fail_closed_truthy_return_variables(handler)
     for statement in handler.body:
         if _is_supported_fail_fast_none_guard(statement):
+            continue
+        if (
+            isinstance(statement, ast.If)
+            and not statement.orelse
+            and isinstance(statement.test, ast.Name)
+            and statement.test.id in fail_closed
+            and len(statement.body) == 1
+            and isinstance(statement.body[0], ast.Return)
+        ):
             continue
         if any(isinstance(node, _CONTROL_FLOW) for node in ast.walk(statement)):
             return True
@@ -338,6 +403,15 @@ def _expression_summary(
     *,
     non_null_parameters: set[str],
 ) -> ExpressionSummary:
+    call_full_name = None
+    call_leaf_name = None
+    call_positional_arguments: tuple[str, ...] = ()
+    if isinstance(node, ast.Call):
+        call_full_name = ast.unparse(node.func)
+        call_leaf_name = _name_of(node.func)
+        call_positional_arguments = tuple(
+            ast.unparse(argument) for argument in node.args
+        )
     return ExpressionSummary(
         rendered=ast.unparse(node),
         term=_symbol_term(node),
@@ -349,6 +423,9 @@ def _expression_summary(
             )
         ),
         origin=_origin(path, node),
+        call_full_name=call_full_name,
+        call_leaf_name=call_leaf_name,
+        call_positional_arguments=call_positional_arguments,
     )
 
 
@@ -369,6 +446,23 @@ def summarize_route_file(
         method, route_path = route
         aliases = _constructor_aliases(handler)
         non_null = _provably_non_null_parameters(handler)
+
+        fail_closed_variables = _fail_closed_truthy_return_variables(handler)
+        call_assignments: dict[int, str] = {}
+        for statement in handler.body:
+            if (
+                isinstance(statement, ast.Assign)
+                and len(statement.targets) == 1
+                and isinstance(statement.targets[0], ast.Name)
+                and isinstance(statement.value, ast.Call)
+            ):
+                call_assignments[id(statement.value)] = statement.targets[0].id
+            elif (
+                isinstance(statement, ast.AnnAssign)
+                and isinstance(statement.target, ast.Name)
+                and isinstance(statement.value, ast.Call)
+            ):
+                call_assignments[id(statement.value)] = statement.target.id
 
         calls: list[CallSummary] = []
         for call in _body_calls(handler):
@@ -405,6 +499,10 @@ def summarize_route_file(
                     ),
                     keyword_arguments=tuple(keywords),
                     origin=_origin(path, call),
+                    assigned_to=call_assignments.get(id(call)),
+                    fail_closed_truthy_return=(
+                        call_assignments.get(id(call)) in fail_closed_variables
+                    ),
                 )
             )
 
