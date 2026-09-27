@@ -99,6 +99,7 @@ class ProtectedEffectProfileConfig(BaseModel):
 
     sink_effects: dict[str, str]
     sink_identity_args: dict[str, int] = Field(default_factory=dict)
+    sink_static_resources: dict[str, str] = Field(default_factory=dict)
     sink_scope_keywords: dict[str, str] = Field(default_factory=dict)
     sink_missing_scope_unconstrained: list[str] = Field(default_factory=list)
     scope_assertions: dict[str, ScopeAssertionConfig] = Field(
@@ -132,6 +133,8 @@ class ProtectedEffectProfileConfig(BaseModel):
 
     dependency_guard_resources: dict[str, str] = Field(default_factory=dict)
     dependency_guard_effects: dict[str, list[str]] = Field(default_factory=dict)
+    route_dependency_guard_resources: dict[str, str] = Field(default_factory=dict)
+    route_dependency_guard_effects: dict[str, list[str]] = Field(default_factory=dict)
     principal_parameter: str = "user"
 
     @field_validator("source_paths")
@@ -179,6 +182,7 @@ class ProtectedEffectProfileConfig(BaseModel):
         sink_keys = set(self.sink_effects)
         per_sink_maps = {
             "sink_identity_args": set(self.sink_identity_args),
+            "sink_static_resources": set(self.sink_static_resources),
             "sink_scope_keywords": set(self.sink_scope_keywords),
             "sink_missing_scope_unconstrained": set(
                 self.sink_missing_scope_unconstrained
@@ -243,6 +247,45 @@ class ProtectedEffectProfileConfig(BaseModel):
                     + ", ".join(unknown_effects)
                 )
 
+        route_resource_keys = set(self.route_dependency_guard_resources)
+        route_effect_keys = set(self.route_dependency_guard_effects)
+        if route_resource_keys != route_effect_keys:
+            missing_resources = sorted(route_effect_keys - route_resource_keys)
+            missing_effects = sorted(route_resource_keys - route_effect_keys)
+            details: list[str] = []
+            if missing_resources:
+                details.append(
+                    "effects-without-resource=" + ",".join(missing_resources)
+                )
+            if missing_effects:
+                details.append(
+                    "resources-without-effects=" + ",".join(missing_effects)
+                )
+            raise ValueError(
+                "route dependency guard resources/effects must have identical "
+                "keys: " + "; ".join(details)
+            )
+        for dependency, effects in self.route_dependency_guard_effects.items():
+            if not dependency.strip():
+                raise ValueError(
+                    "route dependency guard names must be non-empty"
+                )
+            resource = self.route_dependency_guard_resources[dependency].strip()
+            if not resource:
+                raise ValueError(
+                    "route dependency guard resources must be non-empty"
+                )
+            if not effects:
+                raise ValueError(
+                    "route_dependency_guard_effects values must be non-empty"
+                )
+            unknown_effects = sorted(set(effects) - modeled_effects)
+            if unknown_effects:
+                raise ValueError(
+                    f"route dependency {dependency} authorizes effects absent "
+                    "from sink_effects: " + ", ".join(unknown_effects)
+                )
+
         for sink, projection in self.sink_binding_authorized_projections.items():
             if (
                 projection == "attribute"
@@ -282,6 +325,12 @@ class ProtectedEffectProfileConfig(BaseModel):
                 payload["dependency_guard_effects"].items()
             )
         }
+        payload["route_dependency_guard_effects"] = {
+            key: sorted(values)
+            for key, values in sorted(
+                payload["route_dependency_guard_effects"].items()
+            )
+        }
         return payload
 
     @property
@@ -292,6 +341,7 @@ class ProtectedEffectProfileConfig(BaseModel):
         return FastApiDependencyEffectProfile(
             sink_effects=dict(self.sink_effects),
             sink_identity_args=dict(self.sink_identity_args),
+            sink_static_resources=dict(self.sink_static_resources),
             sink_scope_keywords=dict(self.sink_scope_keywords),
             sink_missing_scope_unconstrained=frozenset(
                 self.sink_missing_scope_unconstrained
@@ -339,6 +389,13 @@ class ProtectedEffectProfileConfig(BaseModel):
             dependency_guard_effects={
                 key: tuple(values)
                 for key, values in self.dependency_guard_effects.items()
+            },
+            route_dependency_guard_resources=dict(
+                self.route_dependency_guard_resources
+            ),
+            route_dependency_guard_effects={
+                key: tuple(values)
+                for key, values in self.route_dependency_guard_effects.items()
             },
             principal_parameter=self.principal_parameter,
         )
