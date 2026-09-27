@@ -65,6 +65,7 @@ class OwnershipAssertionSummary:
     principal_expression: ExpressionSummary
     principal_attribute: str
     presence_test: str
+    lexical_block_id: str = "root"
     origin: SemanticOrigin
 
     @property
@@ -80,6 +81,7 @@ class CallSummary:
     resolved_qualified_name: str | None
     positional_arguments: tuple[ExpressionSummary, ...]
     keyword_arguments: tuple[tuple[str, ExpressionSummary], ...]
+    lexical_block_id: str = "root"
     origin: SemanticOrigin
 
     def keyword(self, name: str) -> ExpressionSummary | None:
@@ -126,7 +128,7 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id=_EXTRACTOR_ID,
-        extractor_version="0.3.0",
+        extractor_version="0.4.0",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -321,24 +323,58 @@ def _is_supported_fail_closed_ownership_guard(statement: ast.stmt) -> bool:
     return _ownership_guard_shape(statement) is not None
 
 
+def _child_block_id(parent: str, statement: ast.stmt) -> str:
+    """Stable lexical identity for a sequential with/async-with body."""
+
+    kind = "async-with" if isinstance(statement, ast.AsyncWith) else "with"
+    return (
+        f"{parent}/{kind}:"
+        f"{int(getattr(statement, 'lineno', 0))}:"
+        f"{int(getattr(statement, 'col_offset', 0))}"
+    )
+
+
+def _sequential_statement_blocks(
+    handler: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> list[tuple[str, list[ast.stmt]]]:
+    """Return root and nested with/async-with sequential statement blocks.
+
+    Branch, loop, try and match bodies are deliberately not descended into.
+    Authorization facts never cross one of those control-flow boundaries.
+    """
+
+    blocks: list[tuple[str, list[ast.stmt]]] = []
+
+    def visit(block_id: str, statements: list[ast.stmt]) -> None:
+        blocks.append((block_id, statements))
+        for statement in statements:
+            if isinstance(statement, (ast.With, ast.AsyncWith)):
+                visit(_child_block_id(block_id, statement), statement.body)
+
+    visit("root", list(handler.body))
+    return blocks
+
+
 def _unsupported_control_flow_lines(
     handler: ast.FunctionDef | ast.AsyncFunctionDef,
 ) -> tuple[int, ...]:
-    """Return top-level statement lines containing unsupported control flow.
+    """Return unsupported control-flow lines across supported sequential blocks.
 
-    These source locations support protected-effect-local coverage: unsupported
-    control flow before a sink affects that sink's path, while unrelated
-    control flow in another handler or after the sink does not.
+    A with/async-with body is treated as a lexical sequential scope. Its body is
+    inspected recursively. Branches, loops, try and match remain unsupported.
     """
 
     lines: list[int] = []
-    for statement in handler.body:
-        if _is_supported_fail_fast_none_guard(statement):
-            continue
-        if _is_supported_fail_closed_ownership_guard(statement):
-            continue
-        if any(isinstance(node, _CONTROL_FLOW) for node in ast.walk(statement)):
-            lines.append(int(getattr(statement, "lineno", 0)))
+    for _block_id, statements in _sequential_statement_blocks(handler):
+        for statement in statements:
+            if isinstance(statement, (ast.With, ast.AsyncWith)):
+                continue
+            if _is_supported_fail_fast_none_guard(statement):
+                continue
+            if _is_supported_fail_closed_ownership_guard(statement):
+                continue
+            if any(isinstance(node, _CONTROL_FLOW) for node in ast.walk(statement)):
+                lines.append(int(getattr(statement, "lineno", 0)))
     return tuple(sorted(set(lines)))
 
 
@@ -346,20 +382,41 @@ def _has_control_flow(handler: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     return bool(_unsupported_control_flow_lines(handler))
 
 
-def _body_calls(handler: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.Call]:
-    calls = [
-        node
-        for statement in handler.body
-        for node in ast.walk(statement)
-        if isinstance(node, ast.Call)
-    ]
+def _calls_with_lexical_blocks(
+    handler: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> list[tuple[ast.Call, str]]:
+    """Collect calls and their nearest supported sequential lexical block."""
+
+    calls: list[tuple[ast.Call, str]] = []
+    for block_id, statements in _sequential_statement_blocks(handler):
+        for statement in statements:
+            # Child with/async-with bodies are collected in their own block.
+            # Only context expressions belong to the parent statement.
+            if isinstance(statement, (ast.With, ast.AsyncWith)):
+                nodes: list[ast.AST] = []
+                for item in statement.items:
+                    nodes.extend(ast.walk(item.context_expr))
+                    if item.optional_vars is not None:
+                        nodes.extend(ast.walk(item.optional_vars))
+            else:
+                nodes = list(ast.walk(statement))
+            for node in nodes:
+                if isinstance(node, ast.Call):
+                    calls.append((node, block_id))
     return sorted(
         calls,
         key=lambda item: (
-            getattr(item, "lineno", 0),
-            getattr(item, "col_offset", 0),
+            getattr(item[0], "lineno", 0),
+            getattr(item[0], "col_offset", 0),
+            item[1],
         ),
     )
+
+
+def _body_calls(handler: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.Call]:
+    """Compatibility projection for callers that only need source-ordered calls."""
+
+    return [call for call, _block_id in _calls_with_lexical_blocks(handler)]
 
 
 def _depends_name(node: ast.AST | None) -> str | None:
@@ -511,8 +568,8 @@ def _loader_resource_candidates(
     handler: ast.FunctionDef | ast.AsyncFunctionDef,
     *,
     non_null_parameters: set[str],
-) -> dict[str, list[tuple[str, str | None, str, ExpressionSummary, int]]]:
-    """Summarize top-level loaded-resource assignments by route key.
+) -> dict[str, list[tuple[str, str | None, str, ExpressionSummary, int, str]]]:
+    """Summarize loaded-resource assignments by route key and lexical block.
 
     The syntax rule is deliberately narrow: a named local receives a call whose
     nested expression contains where(Model.resource_attr == route_expression).
@@ -521,85 +578,86 @@ def _loader_resource_candidates(
 
     result: dict[
         str,
-        list[tuple[str, str | None, str, ExpressionSummary, int]],
+        list[tuple[str, str | None, str, ExpressionSummary, int, str]],
     ] = {}
 
-    for statement in handler.body:
-        if not isinstance(statement, (ast.Assign, ast.AnnAssign)):
-            continue
+    for lexical_block_id, statements in _sequential_statement_blocks(handler):
+      for statement in statements:
+          if not isinstance(statement, (ast.Assign, ast.AnnAssign)):
+              continue
 
-        if isinstance(statement, ast.Assign):
-            if len(statement.targets) != 1 or not isinstance(
-                statement.targets[0],
-                ast.Name,
-            ):
-                continue
-            target = statement.targets[0]
-            value = statement.value
-        else:
-            if not isinstance(statement.target, ast.Name):
-                continue
-            target = statement.target
-            value = statement.value
+          if isinstance(statement, ast.Assign):
+              if len(statement.targets) != 1 or not isinstance(
+                  statement.targets[0],
+                  ast.Name,
+              ):
+                  continue
+              target = statement.targets[0]
+              value = statement.value
+          else:
+              if not isinstance(statement.target, ast.Name):
+                  continue
+              target = statement.target
+              value = statement.value
 
-        if value is None:
-            continue
-        outer = _unwrap_call(value)
-        if outer is None:
-            continue
+          if value is None:
+              continue
+          outer = _unwrap_call(value)
+          if outer is None:
+              continue
 
-        loader_full_name = ast.unparse(outer.func)
-        loader_leaf_name = _name_of(outer.func)
-        line = int(getattr(statement, "lineno", 0))
+          loader_full_name = ast.unparse(outer.func)
+          loader_leaf_name = _name_of(outer.func)
+          line = int(getattr(statement, "lineno", 0))
 
-        for nested in ast.walk(outer):
-            if (
-                not isinstance(nested, ast.Call)
-                or not isinstance(nested.func, ast.Attribute)
-                or nested.func.attr != "where"
-                or len(nested.args) != 1
-            ):
-                continue
-            predicate = nested.args[0]
-            if (
-                not isinstance(predicate, ast.Compare)
-                or len(predicate.ops) != 1
-                or not isinstance(predicate.ops[0], ast.Eq)
-                or len(predicate.comparators) != 1
-            ):
-                continue
+          for nested in ast.walk(outer):
+              if (
+                  not isinstance(nested, ast.Call)
+                  or not isinstance(nested.func, ast.Attribute)
+                  or nested.func.attr != "where"
+                  or len(nested.args) != 1
+              ):
+                  continue
+              predicate = nested.args[0]
+              if (
+                  not isinstance(predicate, ast.Compare)
+                  or len(predicate.ops) != 1
+                  or not isinstance(predicate.ops[0], ast.Eq)
+                  or len(predicate.comparators) != 1
+              ):
+                  continue
 
-            left = predicate.left
-            right = predicate.comparators[0]
-            pairs: list[tuple[ast.Attribute, ast.AST]] = []
-            if isinstance(left, ast.Attribute) and not isinstance(
-                right,
-                ast.Attribute,
-            ):
-                pairs.append((left, right))
-            if isinstance(right, ast.Attribute) and not isinstance(
-                left,
-                ast.Attribute,
-            ):
-                pairs.append((right, left))
+              left = predicate.left
+              right = predicate.comparators[0]
+              pairs: list[tuple[ast.Attribute, ast.AST]] = []
+              if isinstance(left, ast.Attribute) and not isinstance(
+                  right,
+                  ast.Attribute,
+              ):
+                  pairs.append((left, right))
+              if isinstance(right, ast.Attribute) and not isinstance(
+                  left,
+                  ast.Attribute,
+              ):
+                  pairs.append((right, left))
 
-            for model_attribute, resource_node in pairs:
-                resource_summary = _expression_summary(
-                    path,
-                    resource_node,
-                    non_null_parameters=non_null_parameters,
-                )
-                if resource_summary.term is None:
-                    continue
-                result.setdefault(target.id, []).append(
-                    (
-                        loader_full_name,
-                        loader_leaf_name,
-                        model_attribute.attr,
-                        resource_summary,
-                        line,
-                    )
-                )
+              for model_attribute, resource_node in pairs:
+                  resource_summary = _expression_summary(
+                      path,
+                      resource_node,
+                      non_null_parameters=non_null_parameters,
+                  )
+                  if resource_summary.term is None:
+                      continue
+                  result.setdefault(target.id, []).append(
+                      (
+                          loader_full_name,
+                          loader_leaf_name,
+                          model_attribute.attr,
+                          resource_summary,
+                          line,
+                      )
+                  )
     return result
 
 
@@ -616,55 +674,61 @@ def _ownership_assertion_summaries(
     )
     found: list[OwnershipAssertionSummary] = []
 
-    for statement in handler.body:
-        shape = _ownership_guard_shape(statement)
-        if shape is None:
-            continue
-        (
-            loaded_symbol,
-            owner_attribute,
-            principal_node,
-            principal_attribute,
-            presence_test,
-        ) = shape
-        statement_line = int(getattr(statement, "lineno", 0))
-        principal = _expression_summary(
-            path,
-            principal_node,
-            non_null_parameters=non_null_parameters,
-        )
-        if principal.term is None:
-            continue
-
-        for (
-            loader_full_name,
-            loader_leaf_name,
-            resource_identity_attribute,
-            resource_key,
-            load_line,
-        ) in loaders.get(loaded_symbol, []):
-            if load_line >= statement_line:
+    for lexical_block_id, statements in _sequential_statement_blocks(handler):
+        for statement in statements:
+            shape = _ownership_guard_shape(statement)
+            if shape is None:
                 continue
-            found.append(
-                OwnershipAssertionSummary(
-                    loader_full_name=loader_full_name,
-                    loader_leaf_name=loader_leaf_name,
-                    loaded_resource_symbol=loaded_symbol,
-                    resource_identity_attribute=resource_identity_attribute,
-                    resource_key=resource_key,
-                    owner_attribute=owner_attribute,
-                    principal_expression=principal,
-                    principal_attribute=principal_attribute,
-                    presence_test=presence_test,
-                    origin=_origin(path, statement),
-                )
+            (
+                loaded_symbol,
+                owner_attribute,
+                principal_node,
+                principal_attribute,
+                presence_test,
+            ) = shape
+            statement_line = int(getattr(statement, "lineno", 0))
+            principal = _expression_summary(
+                path,
+                principal_node,
+                non_null_parameters=non_null_parameters,
             )
+            if principal.term is None:
+                continue
+
+            for (
+                loader_full_name,
+                loader_leaf_name,
+                resource_identity_attribute,
+                resource_key,
+                load_line,
+                loader_block_id,
+            ) in loaders.get(loaded_symbol, []):
+                if loader_block_id != lexical_block_id:
+                    continue
+                if load_line >= statement_line:
+                    continue
+                found.append(
+                    OwnershipAssertionSummary(
+                        loader_full_name=loader_full_name,
+                        loader_leaf_name=loader_leaf_name,
+                        loaded_resource_symbol=loaded_symbol,
+                        resource_identity_attribute=resource_identity_attribute,
+                        resource_key=resource_key,
+                        owner_attribute=owner_attribute,
+                        principal_expression=principal,
+                        principal_attribute=principal_attribute,
+                        presence_test=presence_test,
+                        lexical_block_id=lexical_block_id,
+                        origin=_origin(path, statement),
+                    )
+                )
 
     return tuple(
         sorted(
             found,
             key=lambda item: (
                 item.line,
+                item.lexical_block_id,
                 item.loaded_resource_symbol,
                 item.resource_identity_attribute,
                 item.owner_attribute,
@@ -693,7 +757,7 @@ def summarize_route_file(
         non_null = _provably_non_null_parameters(handler)
 
         calls: list[CallSummary] = []
-        for call in _body_calls(handler):
+        for call, lexical_block_id in _calls_with_lexical_blocks(handler):
             keywords: list[tuple[str, ExpressionSummary]] = []
             for keyword in call.keywords:
                 if keyword.arg is None:
@@ -726,6 +790,7 @@ def summarize_route_file(
                         for argument in call.args
                     ),
                     keyword_arguments=tuple(keywords),
+                    lexical_block_id=lexical_block_id,
                     origin=_origin(path, call),
                 )
             )
