@@ -29,6 +29,7 @@ from ovk.compilers.authorization.fastapi_route_summary import (
     DependencyParameterSummary,
     ExpressionSummary,
     OwnershipAssertionSummary,
+    RouteDependencySummary,
     RouteFileSummary,
     RouteHandlerSummary,
     RouteSummaryIndex,
@@ -52,7 +53,7 @@ from ovk.core.resource_identity import ResourceIdentityTerm
 
 
 SEMANTIC_SUMMARY_CACHE_SCHEMA = "ovk.python_semantic_summary_cache.v1"
-SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.3.0"
+SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.4.0"
 DEFAULT_SEMANTIC_SUMMARY_CACHE_DIR = Path(
     ".verification/cache/python-semantic-summaries"
 )
@@ -215,6 +216,14 @@ def _route_summary_payload(summary: RouteFileSummary) -> dict[str, Any]:
                     }
                     for dep in handler.dependencies
                 ],
+                "route_dependencies": [
+                    {
+                        "full_name": dep.full_name,
+                        "leaf_name": dep.leaf_name,
+                        "origin": _origin_payload(dep.origin),
+                    }
+                    for dep in handler.route_dependencies
+                ],
                 "calls": [
                     {
                         "full_name": call.full_name,
@@ -310,6 +319,18 @@ def _route_summary_from_payload(payload: dict[str, Any]) -> RouteFileSummary:
                         origin=SemanticOrigin.model_validate(dep["origin"]),
                     )
                     for dep in handler.get("dependencies") or []
+                ),
+                route_dependencies=tuple(
+                    RouteDependencySummary(
+                        full_name=str(dep["full_name"]),
+                        leaf_name=(
+                            str(dep["leaf_name"])
+                            if dep.get("leaf_name") is not None
+                            else None
+                        ),
+                        origin=SemanticOrigin.model_validate(dep["origin"]),
+                    )
+                    for dep in handler.get("route_dependencies") or []
                 ),
                 calls=tuple(calls),
                 origin=SemanticOrigin.model_validate(handler["origin"]),
