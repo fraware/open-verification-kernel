@@ -74,6 +74,11 @@ def main() -> int:
                         "semantic_coverage_complete": (
                             item.qualification_result.semantic_coverage_complete
                         ),
+                        "automatic_status": item.qualification_result.automatic_status,
+                        "head_established": item.qualification_result.head_established,
+                        "benign_open": item.qualification_result.benign_open,
+                        "head_statuses": item.qualification_result.head_statuses,
+                        "reason_codes": item.qualification_result.reason_codes,
                     }
                     for item in report.results
                 ],

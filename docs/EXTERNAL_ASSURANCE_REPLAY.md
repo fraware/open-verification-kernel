@@ -13,6 +13,8 @@ An external replay case binds:
 
 - repository identity;
 - HTTPS GitHub repository URL;
+- explicit validation class (public_upstream_reduction or independent_external);
+- explicit contamination status;
 - full 40-character base and head commit SHAs;
 - a safe/unsafe label;
 - expected head assurance state;
@@ -44,7 +46,13 @@ This keeps external and internal results comparable.
 ## Human adjudication
 
 Public advisories, merged fixes, and public issue labels are useful provenance,
-but they do not count as qualification human adjudications.
+but they do not count as qualification human adjudications. A replay used to
+select, design, or tune OVK semantics must be marked public_upstream_reduction
+with contamination_status=public_development_case. It cannot contribute to the
+independent-external production gate.
+
+independent_external is valid only with
+contamination_status=held_out_independent.
 
 Only:
 
@@ -75,6 +83,7 @@ the command-line runner does not enable them.
           "case_id": "upstream-security-fix",
           "repository": "owner/repository",
           "repository_url": "https://github.com/owner/repository.git",
+          "validation_class": "independent_external",
           "base_sha": "<40-char vulnerable commit>",
           "head_sha": "<40-char fixed commit>",
           "safety_label": "safe",
@@ -82,6 +91,7 @@ the command-line runner does not enable them.
           "guarantee_manifest": {},
           "protected_effect_profile": {},
           "provenance": {
+            "contamination_status": "held_out_independent",
             "adjudication_kind": "public_security_advisory",
             "references": [
               "https://github.com/advisories/..."
