@@ -1,0 +1,481 @@
+{
+  "schema_version": "ovk.assurance_external_replay_suite.v1",
+  "suite_id": "heldout-fastapi-auth-shapes-round4-v1",
+  "description": "Independent external authentication-shape cohort frozen against OVK b6b8839a2a6d0f5a03e66eb3d3c6632df48b5c58 after PR #108. The cohort spans APIRouter multi-key authentication, include_router dependency attachment, and inline Header guard mediation. No implementation change motivated by these cases belongs in this evaluation branch.",
+  "cases": [
+    {
+      "case_id": "clinical-ai-documents-api-key-vulnerable-snapshot",
+      "repository": "AkhilReddyJ7/clinical-ai-platform",
+      "repository_url": "https://github.com/AkhilReddyJ7/clinical-ai-platform.git",
+      "validation_class": "independent_external",
+      "base_sha": "fc265513e67906bb385e6fd4956876ade0e599ef",
+      "head_sha": "fc265513e67906bb385e6fd4956876ade0e599ef",
+      "description": "Pinned vulnerable snapshot before the public authentication repair. The repair attaches require_api_key at APIRouter construction and adds a fail-closed APIKeyHeader dependency over a configured set of valid keys; document upload registration is the protected operation.",
+      "safety_label": "unsafe",
+      "expected_head_assurance": "not_established",
+      "guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-CLINICAL-DOCUMENT-UPLOAD-AUTH",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Document upload registration executes only after the configured API-key authorization mediator succeeds.",
+            "selector": {
+              "effect_name": "clinical.documents.upload"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "source": "clinical-ai-platform security repair d54c2c5a",
+              "endpoint": "upload_document"
+            }
+          }
+        ]
+      },
+      "protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "apps/api/routers/documents.py",
+          "modules/auth/api_key.py"
+        ],
+        "sink_effects": {
+          "register_document": "clinical.documents.upload"
+        },
+        "sink_identity_args": {},
+        "sink_static_resources": {
+          "register_document": "document_ingestion_service"
+        },
+        "sink_scope_keywords": {},
+        "sink_missing_scope_unconstrained": [],
+        "scope_assertions": {},
+        "ownership_assertions": {},
+        "sink_contracts": {},
+        "sink_contract_scope_attributes": {},
+        "sink_contract_identity_attributes": {},
+        "sink_binding_relations": {},
+        "sink_binding_authorized_projections": {},
+        "sink_binding_acted_projections": {},
+        "sink_binding_authorized_attributes": {},
+        "sink_binding_acted_attributes": {},
+        "dependency_guard_resources": {},
+        "dependency_guard_effects": {},
+        "route_dependency_guard_resources": {
+          "require_api_key": "document_ingestion_service"
+        },
+        "route_dependency_guard_effects": {
+          "require_api_key": [
+            "clinical.documents.upload"
+          ]
+        },
+        "principal_parameter": "$api_key_caller"
+      },
+      "provenance": {
+        "contamination_status": "held_out_independent",
+        "adjudication_kind": "public_merged_fix",
+        "references": [
+          "https://github.com/AkhilReddyJ7/clinical-ai-platform/commit/d54c2c5a22eb0d4fca087e85bee77044fdf46de5"
+        ],
+        "notes": "Negative snapshot selected after OVK PR #108 semantics were frozen and before any implementation response to this repository."
+      },
+      "qualification_human_adjudicated": false,
+      "human_review_minutes": null
+    },
+    {
+      "case_id": "clinical-ai-documents-api-key-repair",
+      "repository": "AkhilReddyJ7/clinical-ai-platform",
+      "repository_url": "https://github.com/AkhilReddyJ7/clinical-ai-platform.git",
+      "validation_class": "independent_external",
+      "base_sha": "fc265513e67906bb385e6fd4956876ade0e599ef",
+      "head_sha": "d54c2c5a22eb0d4fca087e85bee77044fdf46de5",
+      "description": "The repair attaches require_api_key at APIRouter construction and adds a fail-closed APIKeyHeader dependency over a configured set of valid keys; document upload registration is the protected operation.",
+      "safety_label": "safe",
+      "expected_head_assurance": "established",
+      "guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-CLINICAL-DOCUMENT-UPLOAD-AUTH",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Document upload registration executes only after the configured API-key authorization mediator succeeds.",
+            "selector": {
+              "effect_name": "clinical.documents.upload"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "source": "clinical-ai-platform security repair d54c2c5a",
+              "endpoint": "upload_document"
+            }
+          }
+        ]
+      },
+      "protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "apps/api/routers/documents.py",
+          "modules/auth/api_key.py"
+        ],
+        "sink_effects": {
+          "register_document": "clinical.documents.upload"
+        },
+        "sink_identity_args": {},
+        "sink_static_resources": {
+          "register_document": "document_ingestion_service"
+        },
+        "sink_scope_keywords": {},
+        "sink_missing_scope_unconstrained": [],
+        "scope_assertions": {},
+        "ownership_assertions": {},
+        "sink_contracts": {},
+        "sink_contract_scope_attributes": {},
+        "sink_contract_identity_attributes": {},
+        "sink_binding_relations": {},
+        "sink_binding_authorized_projections": {},
+        "sink_binding_acted_projections": {},
+        "sink_binding_authorized_attributes": {},
+        "sink_binding_acted_attributes": {},
+        "dependency_guard_resources": {},
+        "dependency_guard_effects": {},
+        "route_dependency_guard_resources": {
+          "require_api_key": "document_ingestion_service"
+        },
+        "route_dependency_guard_effects": {
+          "require_api_key": [
+            "clinical.documents.upload"
+          ]
+        },
+        "principal_parameter": "$api_key_caller"
+      },
+      "provenance": {
+        "contamination_status": "held_out_independent",
+        "adjudication_kind": "public_merged_fix",
+        "references": [
+          "https://github.com/AkhilReddyJ7/clinical-ai-platform/commit/d54c2c5a22eb0d4fca087e85bee77044fdf46de5"
+        ],
+        "notes": "Repair selected after OVK PR #108 semantics were frozen. It must remain independent evidence until the first replay result is recorded."
+      },
+      "qualification_human_adjudicated": false,
+      "human_review_minutes": null
+    },
+    {
+      "case_id": "researchportfolio-stats-api-key-vulnerable-snapshot",
+      "repository": "regmibishal1/ResearchPortfolio-FastAPI",
+      "repository_url": "https://github.com/regmibishal1/ResearchPortfolio-FastAPI.git",
+      "validation_class": "independent_external",
+      "base_sha": "bf6c99d2e9a37b3abe6bffac21d84bb83106c019",
+      "head_sha": "bf6c99d2e9a37b3abe6bffac21d84bb83106c019",
+      "description": "Pinned vulnerable snapshot before the public authentication repair. The repair attaches has_api_key through app.include_router(..., dependencies=[Depends(...)]) and validates an APIKeyHeader value with hmac.compare_digest before the statistics sampling endpoint is reachable.",
+      "safety_label": "unsafe",
+      "expected_head_assurance": "not_established",
+      "guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-RESEARCHPORTFOLIO-STATS-AUTH",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Statistical sample generation executes only after the configured API-key authorization mediator succeeds.",
+            "selector": {
+              "effect_name": "stats.sample.generate"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "source": "ResearchPortfolio-FastAPI security repair 14dd7689",
+              "endpoint": "sample_distribution"
+            }
+          }
+        ]
+      },
+      "protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "src/main.py",
+          "src/dependency.py",
+          "src/endpoints/stats.py"
+        ],
+        "sink_effects": {
+          "_generate": "stats.sample.generate"
+        },
+        "sink_identity_args": {},
+        "sink_static_resources": {
+          "_generate": "stats_sampling_service"
+        },
+        "sink_scope_keywords": {},
+        "sink_missing_scope_unconstrained": [],
+        "scope_assertions": {},
+        "ownership_assertions": {},
+        "sink_contracts": {},
+        "sink_contract_scope_attributes": {},
+        "sink_contract_identity_attributes": {},
+        "sink_binding_relations": {},
+        "sink_binding_authorized_projections": {},
+        "sink_binding_acted_projections": {},
+        "sink_binding_authorized_attributes": {},
+        "sink_binding_acted_attributes": {},
+        "dependency_guard_resources": {},
+        "dependency_guard_effects": {},
+        "route_dependency_guard_resources": {
+          "has_api_key": "stats_sampling_service"
+        },
+        "route_dependency_guard_effects": {
+          "has_api_key": [
+            "stats.sample.generate"
+          ]
+        },
+        "principal_parameter": "$api_key_caller"
+      },
+      "provenance": {
+        "contamination_status": "held_out_independent",
+        "adjudication_kind": "public_merged_fix",
+        "references": [
+          "https://github.com/regmibishal1/ResearchPortfolio-FastAPI/commit/14dd7689bdcac3492601cc86794d6aaab7930c19"
+        ],
+        "notes": "Negative snapshot selected after OVK PR #108 semantics were frozen and before any implementation response to this repository."
+      },
+      "qualification_human_adjudicated": false,
+      "human_review_minutes": null
+    },
+    {
+      "case_id": "researchportfolio-stats-api-key-repair",
+      "repository": "regmibishal1/ResearchPortfolio-FastAPI",
+      "repository_url": "https://github.com/regmibishal1/ResearchPortfolio-FastAPI.git",
+      "validation_class": "independent_external",
+      "base_sha": "bf6c99d2e9a37b3abe6bffac21d84bb83106c019",
+      "head_sha": "14dd7689bdcac3492601cc86794d6aaab7930c19",
+      "description": "The repair attaches has_api_key through app.include_router(..., dependencies=[Depends(...)]) and validates an APIKeyHeader value with hmac.compare_digest before the statistics sampling endpoint is reachable.",
+      "safety_label": "safe",
+      "expected_head_assurance": "established",
+      "guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-RESEARCHPORTFOLIO-STATS-AUTH",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Statistical sample generation executes only after the configured API-key authorization mediator succeeds.",
+            "selector": {
+              "effect_name": "stats.sample.generate"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "source": "ResearchPortfolio-FastAPI security repair 14dd7689",
+              "endpoint": "sample_distribution"
+            }
+          }
+        ]
+      },
+      "protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "src/main.py",
+          "src/dependency.py",
+          "src/endpoints/stats.py"
+        ],
+        "sink_effects": {
+          "_generate": "stats.sample.generate"
+        },
+        "sink_identity_args": {},
+        "sink_static_resources": {
+          "_generate": "stats_sampling_service"
+        },
+        "sink_scope_keywords": {},
+        "sink_missing_scope_unconstrained": [],
+        "scope_assertions": {},
+        "ownership_assertions": {},
+        "sink_contracts": {},
+        "sink_contract_scope_attributes": {},
+        "sink_contract_identity_attributes": {},
+        "sink_binding_relations": {},
+        "sink_binding_authorized_projections": {},
+        "sink_binding_acted_projections": {},
+        "sink_binding_authorized_attributes": {},
+        "sink_binding_acted_attributes": {},
+        "dependency_guard_resources": {},
+        "dependency_guard_effects": {},
+        "route_dependency_guard_resources": {
+          "has_api_key": "stats_sampling_service"
+        },
+        "route_dependency_guard_effects": {
+          "has_api_key": [
+            "stats.sample.generate"
+          ]
+        },
+        "principal_parameter": "$api_key_caller"
+      },
+      "provenance": {
+        "contamination_status": "held_out_independent",
+        "adjudication_kind": "public_merged_fix",
+        "references": [
+          "https://github.com/regmibishal1/ResearchPortfolio-FastAPI/commit/14dd7689bdcac3492601cc86794d6aaab7930c19"
+        ],
+        "notes": "Repair selected after OVK PR #108 semantics were frozen. It must remain independent evidence until the first replay result is recorded."
+      },
+      "qualification_human_adjudicated": false,
+      "human_review_minutes": null
+    },
+    {
+      "case_id": "vader-analyze-api-key-vulnerable-snapshot",
+      "repository": "chiefthinkerupper/vader-sentiment-api",
+      "repository_url": "https://github.com/chiefthinkerupper/vader-sentiment-api.git",
+      "validation_class": "independent_external",
+      "base_sha": "89558bb4128e9f9e41bfbd261a8adc3c465b7414",
+      "head_sha": "89558bb4128e9f9e41bfbd261a8adc3c465b7414",
+      "description": "Pinned vulnerable snapshot before the public authentication repair. The repair adds an X-API-Key Header parameter and an inline fail-closed require_api_key call before sentiment scoring; missing server configuration returns 503 and missing/wrong credentials return 401 via hmac.compare_digest.",
+      "safety_label": "unsafe",
+      "expected_head_assurance": "not_established",
+      "guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-VADER-ANALYZE-AUTH",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Sentiment scoring executes only after the configured API-key authorization mediator succeeds.",
+            "selector": {
+              "effect_name": "sentiment.analyze.score"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "source": "vader-sentiment-api security repair 5c9a2ee1",
+              "endpoint": "analyze"
+            }
+          }
+        ]
+      },
+      "protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "fastapi_app.py"
+        ],
+        "sink_effects": {
+          "polarity_scores": "sentiment.analyze.score"
+        },
+        "sink_identity_args": {},
+        "sink_static_resources": {
+          "polarity_scores": "vader_sentiment_scoring"
+        },
+        "sink_scope_keywords": {},
+        "sink_missing_scope_unconstrained": [],
+        "scope_assertions": {},
+        "ownership_assertions": {},
+        "sink_contracts": {},
+        "sink_contract_scope_attributes": {},
+        "sink_contract_identity_attributes": {},
+        "sink_binding_relations": {},
+        "sink_binding_authorized_projections": {},
+        "sink_binding_acted_projections": {},
+        "sink_binding_authorized_attributes": {},
+        "sink_binding_acted_attributes": {},
+        "dependency_guard_resources": {},
+        "dependency_guard_effects": {},
+        "route_dependency_guard_resources": {
+          "require_api_key": "vader_sentiment_scoring"
+        },
+        "route_dependency_guard_effects": {
+          "require_api_key": [
+            "sentiment.analyze.score"
+          ]
+        },
+        "principal_parameter": "$api_key_caller"
+      },
+      "provenance": {
+        "contamination_status": "held_out_independent",
+        "adjudication_kind": "public_merged_fix",
+        "references": [
+          "https://github.com/chiefthinkerupper/vader-sentiment-api/commit/5c9a2ee11fd6b7bd77a77eb2e4cc2567fbca3b90"
+        ],
+        "notes": "Negative snapshot selected after OVK PR #108 semantics were frozen and before any implementation response to this repository."
+      },
+      "qualification_human_adjudicated": false,
+      "human_review_minutes": null
+    },
+    {
+      "case_id": "vader-analyze-api-key-repair",
+      "repository": "chiefthinkerupper/vader-sentiment-api",
+      "repository_url": "https://github.com/chiefthinkerupper/vader-sentiment-api.git",
+      "validation_class": "independent_external",
+      "base_sha": "89558bb4128e9f9e41bfbd261a8adc3c465b7414",
+      "head_sha": "5c9a2ee11fd6b7bd77a77eb2e4cc2567fbca3b90",
+      "description": "The repair adds an X-API-Key Header parameter and an inline fail-closed require_api_key call before sentiment scoring; missing server configuration returns 503 and missing/wrong credentials return 401 via hmac.compare_digest.",
+      "safety_label": "safe",
+      "expected_head_assurance": "established",
+      "guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-VADER-ANALYZE-AUTH",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Sentiment scoring executes only after the configured API-key authorization mediator succeeds.",
+            "selector": {
+              "effect_name": "sentiment.analyze.score"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "source": "vader-sentiment-api security repair 5c9a2ee1",
+              "endpoint": "analyze"
+            }
+          }
+        ]
+      },
+      "protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "fastapi_app.py"
+        ],
+        "sink_effects": {
+          "polarity_scores": "sentiment.analyze.score"
+        },
+        "sink_identity_args": {},
+        "sink_static_resources": {
+          "polarity_scores": "vader_sentiment_scoring"
+        },
+        "sink_scope_keywords": {},
+        "sink_missing_scope_unconstrained": [],
+        "scope_assertions": {},
+        "ownership_assertions": {},
+        "sink_contracts": {},
+        "sink_contract_scope_attributes": {},
+        "sink_contract_identity_attributes": {},
+        "sink_binding_relations": {},
+        "sink_binding_authorized_projections": {},
+        "sink_binding_acted_projections": {},
+        "sink_binding_authorized_attributes": {},
+        "sink_binding_acted_attributes": {},
+        "dependency_guard_resources": {},
+        "dependency_guard_effects": {},
+        "route_dependency_guard_resources": {
+          "require_api_key": "vader_sentiment_scoring"
+        },
+        "route_dependency_guard_effects": {
+          "require_api_key": [
+            "sentiment.analyze.score"
+          ]
+        },
+        "principal_parameter": "$api_key_caller"
+      },
+      "provenance": {
+        "contamination_status": "held_out_independent",
+        "adjudication_kind": "public_merged_fix",
+        "references": [
+          "https://github.com/chiefthinkerupper/vader-sentiment-api/commit/5c9a2ee11fd6b7bd77a77eb2e4cc2567fbca3b90"
+        ],
+        "notes": "Repair selected after OVK PR #108 semantics were frozen. It must remain independent evidence until the first replay result is recorded."
+      },
+      "qualification_human_adjudicated": false,
+      "human_review_minutes": null
+    }
+  ]
+}
