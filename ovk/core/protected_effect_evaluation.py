@@ -163,6 +163,45 @@ def _overall_status(
     return "pass", "all protected-effect integrity dimensions are established under declared assumptions"
 
 
+def _coverage_for_protected_effect(
+    ir: AssuranceIR,
+    protected_effect_id: str,
+) -> tuple[str, list[str]]:
+    """Return conservative local coverage when every relevant path declares it.
+
+    Older or non-FastAPI IR producers may omit path-local coverage. In that
+    case the historical global IR coverage remains authoritative.
+    """
+
+    paths = [
+        path
+        for path in ir.paths
+        if protected_effect_id in path.protected_effect_ids
+    ]
+    if not paths or any(path.coverage_status is None for path in paths):
+        return ir.coverage.status, list(ir.coverage.assumptions)
+
+    statuses = [str(path.coverage_status) for path in paths]
+    assumptions = sorted(
+        {
+            assumption
+            for path in paths
+            for assumption in path.coverage_assumptions
+        }
+    )
+
+    if all(status == "complete" for status in statuses):
+        return "complete", assumptions
+
+    # No non-complete local status can authorize PASS. Preserve a useful
+    # diagnostic status while maintaining that invariant.
+    if "unknown" in statuses:
+        return "unknown", assumptions
+    if "partial" in statuses:
+        return "partial", assumptions
+    return "inapplicable", assumptions
+
+
 def evaluate_protected_effect_integrity(
     ir: AssuranceIR,
     *,
@@ -216,23 +255,29 @@ def evaluate_protected_effect_integrity(
             checks.append(resolved)
             resource_evidence.extend(evidence)
 
+        extraction_coverage, coverage_assumptions = (
+            _coverage_for_protected_effect(
+                ir,
+                obligation.protected_effect_id,
+            )
+        )
         status, reason = _overall_status(
             checks=checks,
-            extraction_coverage=ir.coverage.status,
+            extraction_coverage=extraction_coverage,
         )
         results.append(
             ProtectedEffectIntegrityEvaluation(
                 obligation_id=obligation.obligation_id,
                 protected_effect_id=obligation.protected_effect_id,
                 assurance_ir_digest=ir.assurance_ir_digest,
-                extraction_coverage=ir.coverage.status,
+                extraction_coverage=extraction_coverage,
                 status=status,
                 reason=reason,
                 checks=checks,
                 resource_binding_evidence=resource_evidence,
                 assumptions=[
                     *obligation.assumptions,
-                    *ir.coverage.assumptions,
+                    *coverage_assumptions,
                 ],
             )
         )
