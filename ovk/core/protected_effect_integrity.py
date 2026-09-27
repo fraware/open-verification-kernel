@@ -25,6 +25,7 @@ from ovk.core.assurance_ir import AssuranceIR, AuthorizationGuard, ProtectedEffe
 DimensionStatus = Literal["established", "violated", "unknown"]
 IntegrityDimension = Literal[
     "guard_presence",
+    "guard_effectiveness",
     "principal_binding",
     "effect_binding",
     "resource_binding",
@@ -191,6 +192,56 @@ def compile_protected_effect_integrity(ir: AssuranceIR) -> list[ProtectedEffectI
                 status=effect_status,
                 reason=effect_reason,
                 evidence_ids=sorted(guard.guard_id for guard in effect_matches),
+            )
+        )
+
+        effective_guards = [
+            guard
+            for guard in effect_matches
+            if guard.effectiveness == "established"
+        ]
+        unproved_guards = [
+            guard
+            for guard in effect_matches
+            if guard.effectiveness == "unproved"
+        ]
+        if effective_guards:
+            effectiveness_status: DimensionStatus = "established"
+            effectiveness_reason = (
+                "at least one principal/effect-compatible guard has proved "
+                "authorization effectiveness"
+            )
+            effectiveness_evidence = sorted(
+                {
+                    evidence_id
+                    for guard in effective_guards
+                    for evidence_id in (
+                        guard.effectiveness_evidence_ids or [guard.guard_id]
+                    )
+                }
+            )
+        elif unproved_guards:
+            effectiveness_status = "unknown"
+            effectiveness_reason = (
+                "candidate authorization guard is source-grounded but its "
+                "authorization effectiveness is unproved"
+            )
+            effectiveness_evidence = sorted(
+                guard.guard_id for guard in unproved_guards
+            )
+        else:
+            effectiveness_status = "unknown"
+            effectiveness_reason = (
+                "guard effectiveness cannot be established without a "
+                "principal/effect-compatible candidate guard"
+            )
+            effectiveness_evidence = []
+        checks.append(
+            IntegrityCheck(
+                dimension="guard_effectiveness",
+                status=effectiveness_status,
+                reason=effectiveness_reason,
+                evidence_ids=effectiveness_evidence,
             )
         )
 
