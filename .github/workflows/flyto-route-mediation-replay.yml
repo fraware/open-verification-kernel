@@ -35,7 +35,7 @@ jobs:
           python scripts/run_external_assurance_replay.py \
             benchmarks/assurance_qualification/external/flyto_mcp_route_auth.v1.json \
             --output .verification/flyto-mcp-route-auth-replay.json
-      - name: Assert vulnerable rejection and repaired establishment
+      - name: Assert no false assurance before dependency proof support
         run: |
           python - <<'PY'
           import json
@@ -60,9 +60,12 @@ jobs:
           repaired = results["flyto-mcp-route-auth-repair"]
           assert repaired["validation_class"] == "public_upstream_reduction"
           assert repaired["safety_label"] == "safe"
-          assert repaired["expectation_met"] is True
-          assert repaired["head_established"] is True
-          assert repaired["semantic_coverage_complete"] is True
+          # The repaired route is still open because the dependency function's
+          # effectiveness (and its startup invariants) are not yet proved.
+          assert repaired["expectation_met"] is False
+          assert repaired["head_established"] is False
+          assert repaired["semantic_coverage_complete"] is False
+          assert repaired["benign_open"] is True
           assert repaired["unsafe_false_assurance"] is False
           PY
       - name: Upload external development report
