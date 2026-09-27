@@ -249,3 +249,127 @@ async def mcp_post(request: Request):
     )
     assert effectiveness.status == "unknown"
 
+def _proved_profile(
+    *,
+    expected_authority: str = "ACTIVE_TOKEN",
+) -> FastApiDependencyEffectProfile:
+    return FastApiDependencyEffectProfile(
+        sink_effects={"handle_jsonrpc_request": "mcp.module.execute"},
+        sink_static_resources={
+            "handle_jsonrpc_request": "mcp_transport"
+        },
+        route_dependency_guard_resources={
+            "require_auth": "mcp_transport"
+        },
+        route_dependency_guard_effects={
+            "require_auth": ("mcp.module.execute",)
+        },
+        route_dependency_credential_expressions={
+            "require_auth": "credentials.credentials"
+        },
+        route_dependency_authority_expressions={
+            "require_auth": expected_authority
+        },
+        principal_parameter="$authenticated_caller",
+    )
+
+
+def test_source_contract_establishes_route_guard_effectiveness() -> None:
+    profile = _proved_profile()
+    source = """
+from fastapi import APIRouter, Depends, HTTPException
+
+router = APIRouter()
+
+async def require_auth(credentials = Depends(_bearer)):
+    if not credentials or credentials.credentials != ACTIVE_TOKEN:
+        raise HTTPException(status_code=401)
+
+@router.post("", dependencies=[Depends(require_auth)])
+async def mcp_post():
+    await handle_jsonrpc_request("payload")
+""".strip()
+
+    ir, evaluation = _evaluation(source, profile)
+
+    assert evaluation.extraction_coverage == "complete"
+    assert evaluation.status == "pass"
+    assert len(ir.authorization_dependency_contracts) == 1
+    assert ir.guards[0].effectiveness == "established"
+    assert ir.guards[0].effectiveness_evidence_ids == [
+        ir.authorization_dependency_contracts[0].contract_id
+    ]
+    effectiveness = next(
+        check
+        for check in evaluation.checks
+        if check.dimension == "guard_effectiveness"
+    )
+    assert effectiveness.status == "established"
+
+
+def test_fail_open_dependency_stays_unproved() -> None:
+    profile = _proved_profile()
+    source = """
+from fastapi import APIRouter, Depends, HTTPException
+
+router = APIRouter()
+
+async def require_auth(credentials = Depends(_bearer)):
+    if ACTIVE_TOKEN is None:
+        return
+    if not credentials or credentials.credentials != ACTIVE_TOKEN:
+        raise HTTPException(status_code=401)
+
+@router.post("", dependencies=[Depends(require_auth)])
+async def mcp_post():
+    await handle_jsonrpc_request("payload")
+""".strip()
+
+    ir, evaluation = _evaluation(source, profile)
+
+    assert ir.authorization_dependency_contracts == []
+    assert ir.guards[0].effectiveness == "unproved"
+    assert evaluation.extraction_coverage == "complete"
+    assert evaluation.status == "unknown"
+
+
+def test_governed_authority_must_match_source_contract() -> None:
+    profile = _proved_profile(expected_authority="OTHER_TOKEN")
+    source = """
+from fastapi import APIRouter, Depends, HTTPException
+
+router = APIRouter()
+
+async def require_auth(credentials = Depends(_bearer)):
+    if not credentials or credentials.credentials != ACTIVE_TOKEN:
+        raise HTTPException(status_code=401)
+
+@router.post("", dependencies=[Depends(require_auth)])
+async def mcp_post():
+    await handle_jsonrpc_request("payload")
+""".strip()
+
+    ir, evaluation = _evaluation(source, profile)
+
+    assert len(ir.authorization_dependency_contracts) == 1
+    assert ir.guards[0].effectiveness == "unproved"
+    assert evaluation.status == "unknown"
+
+
+def test_profile_rejects_unpaired_auth_contract_expectations() -> None:
+    with pytest.raises(ValueError, match="expectation keys must match"):
+        FastApiDependencyEffectProfile(
+            sink_effects={"dispatch": "mcp.dispatch"},
+            sink_static_resources={"dispatch": "mcp_transport"},
+            route_dependency_guard_resources={
+                "require_auth": "mcp_transport"
+            },
+            route_dependency_guard_effects={
+                "require_auth": ("mcp.dispatch",)
+            },
+            route_dependency_credential_expressions={
+                "require_auth": "credentials.credentials"
+            },
+            route_dependency_authority_expressions={},
+        )
+
