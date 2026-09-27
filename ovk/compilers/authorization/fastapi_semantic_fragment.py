@@ -15,6 +15,7 @@ from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.compilers.authorization.fastapi_route_summary import (
     CallSummary,
     ExpressionSummary,
+    RouteDependencySummary,
     RouteFileSummary,
     RouteHandlerSummary,
 )
@@ -328,6 +329,9 @@ class FastApiFileSemanticFragment:
     guard_effectiveness_dependencies: dict[str, str | None] = field(
         default_factory=dict
     )
+    route_attachment_digest: str = field(
+        default_factory=lambda: content_digest([])
+    )
     unsupported_constructs: tuple[str, ...] = ()
     principals: tuple[PrincipalRef, ...] = ()
     resources: tuple[ResourceRef, ...] = ()
@@ -420,10 +424,23 @@ def bind_route_file_summary(
     profile: Any,
     contracts_by_name: Mapping[str, FunctionContract],
     guard_effectiveness_by_name: Mapping[str, GuardEffectivenessEvidence] | None = None,
+    external_route_dependencies_by_router: Mapping[
+        str,
+        tuple[RouteDependencySummary, ...],
+    ] | None = None,
+    route_attachment_digest: str | None = None,
 ) -> FastApiFileSemanticFragment:
     """Bind one file summary against current profile and function contracts."""
 
     guard_effectiveness_by_name = guard_effectiveness_by_name or {}
+    external_route_dependencies_by_router = (
+        external_route_dependencies_by_router or {}
+    )
+    effective_attachment_digest = (
+        route_attachment_digest
+        if route_attachment_digest is not None
+        else content_digest([])
+    )
     principals: dict[str, PrincipalRef] = {}
     resources: dict[str, ResourceRef] = {}
     effects: dict[str, EffectRef] = {}
@@ -447,6 +464,21 @@ def bind_route_file_summary(
             item.dependency_name: item
             for item in handler.dependencies
         }
+
+        effective_route_dependencies: dict[
+            tuple[str, str | None],
+            RouteDependencySummary,
+        ] = {
+            (item.full_name, item.leaf_name): item
+            for item in external_route_dependencies_by_router.get(
+                handler.router_symbol or "",
+                (),
+            )
+        }
+        for item in handler.route_dependencies:
+            effective_route_dependencies[
+                (item.full_name, item.leaf_name)
+            ] = item
 
         principal_symbol = profile.principal_parameter
         principal_id = _semantic_id("principal", principal_symbol)
@@ -832,7 +864,14 @@ def bind_route_file_summary(
                 )
                 binding_ids.append(binding_id)
 
-            for route_dependency in handler.route_dependencies:
+            for route_dependency in sorted(
+                effective_route_dependencies.values(),
+                key=lambda item: (
+                    item.full_name,
+                    item.leaf_name or "",
+                    item.source_kind,
+                ),
+            ):
                 resolved_route_guard = profile.route_dependency_guard_names(
                     route_dependency.full_name,
                     route_dependency.leaf_name,
@@ -953,6 +992,7 @@ def bind_route_file_summary(
         guard_effectiveness_dependencies=dict(
             sorted(guard_effectiveness_dependencies.items())
         ),
+        route_attachment_digest=effective_attachment_digest,
         unsupported_constructs=tuple(sorted(set(unsupported))),
         principals=tuple(
             sorted(principals.values(), key=lambda item: item.principal_id)
@@ -990,11 +1030,19 @@ def fragment_dependencies_match(
     profile: Any,
     contracts_by_name: Mapping[str, FunctionContract],
     guard_effectiveness_by_name: Mapping[str, GuardEffectivenessEvidence] | None = None,
+    route_attachment_digest: str | None = None,
 ) -> bool:
     """Return whether profile and consumed contract versions are unchanged."""
 
     guard_effectiveness_by_name = guard_effectiveness_by_name or {}
     if fragment.profile_digest != profile_semantic_digest(profile):
+        return False
+    effective_attachment_digest = (
+        route_attachment_digest
+        if route_attachment_digest is not None
+        else content_digest([])
+    )
+    if fragment.route_attachment_digest != effective_attachment_digest:
         return False
     current = {
         name: (
@@ -1026,6 +1074,7 @@ _SUPPORTED_CONSTRUCTS = [
     "depends_or_security_default_parameter",
     "direct_route_decorator_dependency",
     "direct_apirouter_constructor_dependency",
+    "direct_fastapi_include_router_dependency",
     "configured_static_sink_resource",
     "route_dependency_candidate_mediation",
     "straight_line_handler",
@@ -1042,7 +1091,7 @@ _SUPPORTED_CONSTRUCTS = [
 
 _PROFILE_ASSUMPTIONS = [
     "Configured dependency guards authorize the declared route resource for the declared effects.",
-    "Configured direct route-decorator dependencies are candidate entrypoint mediators only; their AuthorizationGuard effectiveness remains unproved until source-derived dependency semantics establish it.",
+    "Configured direct route-decorator, APIRouter-constructor, and bounded FastAPI include_router dependencies are candidate entrypoint mediators only; their AuthorizationGuard effectiveness remains unproved until source-derived dependency semantics establish it.",
     "Configured static sink resources denote endpoint/capability identities independent of request data and handler-local control flow.",
     "Configured service-call sinks faithfully identify protected effects.",
     "Configured sink identity argument denotes the acted resource identity only when no source-derived identity contract is required.",
@@ -1130,7 +1179,7 @@ def assemble_fastapi_assurance_ir(
         ),
         extractor=AssuranceExtractorIdentity(
             extractor_id="assurance.fastapi.dependency_effects.ast_v1",
-            extractor_version="0.9.0",
+            extractor_version="0.10.0",
             source_profile_id="assurance.fastapi.dependency_effects.ast_v1",
         ),
         coverage=AssuranceCoverage(
