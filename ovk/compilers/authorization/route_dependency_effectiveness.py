@@ -23,7 +23,7 @@ from ovk.core.models import SourceRange
 
 
 _EXTRACTOR_ID = "assurance.fastapi.route_dependency_effectiveness.ast_v1"
-_EXTRACTOR_VERSION = "0.2.0"
+_EXTRACTOR_VERSION = "0.3.0"
 
 
 def _origin(path: str, node: ast.AST) -> SemanticOrigin:
@@ -583,6 +583,297 @@ def _infer_header_shared_secret_evidence(
     )
 
 
+
+def _security_apikeyheader_parameter(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    *,
+    tree: ast.Module,
+) -> str | None:
+    """Return the unique parameter supplied by Security(APIKeyHeader(...)).
+
+    The supported scheme must be a unique top-level binding created directly by
+    APIKeyHeader with auto_error=False. This proves the parameter is populated
+    from that FastAPI security scheme instead of treating an arbitrary
+    Security(...) dependency as a raw credential.
+    """
+
+    candidates: list[tuple[str, str]] = []
+    for parameter, default in _parameter_defaults(function):
+        if (
+            not isinstance(default, ast.Call)
+            or _leaf_name(default.func) != "Security"
+            or len(default.args) != 1
+            or default.keywords
+            or not isinstance(default.args[0], ast.Name)
+        ):
+            continue
+        candidates.append((parameter, default.args[0].id))
+
+    if len(candidates) != 1:
+        return None
+    parameter, scheme_name = candidates[0]
+
+    scheme_assignments: list[ast.AST] = []
+    for statement in tree.body:
+        target: ast.AST | None = None
+        value: ast.AST | None = None
+        if (
+            isinstance(statement, ast.Assign)
+            and len(statement.targets) == 1
+        ):
+            target = statement.targets[0]
+            value = statement.value
+        elif isinstance(statement, ast.AnnAssign):
+            target = statement.target
+            value = statement.value
+
+        if (
+            not isinstance(target, ast.Name)
+            or target.id != scheme_name
+            or value is None
+        ):
+            continue
+        if (
+            not isinstance(value, ast.Call)
+            or _leaf_name(value.func) != "APIKeyHeader"
+        ):
+            return None
+
+        auto_error = [
+            keyword.value
+            for keyword in value.keywords
+            if keyword.arg == "auto_error"
+        ]
+        if (
+            len(auto_error) != 1
+            or not isinstance(auto_error[0], ast.Constant)
+            or auto_error[0].value is not False
+        ):
+            return None
+        if int(getattr(statement, "lineno", 0)) >= int(
+            getattr(function, "lineno", 0)
+        ):
+            return None
+        scheme_assignments.append(statement)
+
+    if len(scheme_assignments) != 1:
+        return None
+    return parameter
+
+
+def _environment_token_binding_assignment(
+    statement: ast.stmt,
+    *,
+    credential_parameter: str,
+) -> tuple[str, str] | None:
+    """Recognize local = os.environ.get(SERVER_KEY_NAME).
+
+    The environment-key expression may be a literal or source constant, but it
+    must not depend on the presented credential. No fallback/default argument is
+    accepted in this first theorem.
+    """
+
+    if (
+        not isinstance(statement, ast.Assign)
+        or len(statement.targets) != 1
+        or not isinstance(statement.targets[0], ast.Name)
+        or not isinstance(statement.value, ast.Call)
+    ):
+        return None
+
+    call = statement.value
+    if (
+        not isinstance(call.func, ast.Attribute)
+        or call.func.attr != "get"
+        or not isinstance(call.func.value, ast.Attribute)
+        or call.func.value.attr != "environ"
+        or not isinstance(call.func.value.value, ast.Name)
+        or call.func.value.value.id != "os"
+        or len(call.args) != 1
+        or call.keywords
+    ):
+        return None
+
+    if any(
+        isinstance(node, ast.Name) and node.id == credential_parameter
+        for node in ast.walk(call)
+    ):
+        return None
+
+    key = call.args[0]
+    if not isinstance(key, (ast.Name, ast.Constant)):
+        return None
+    if isinstance(key, ast.Constant) and not isinstance(key.value, str):
+        return None
+
+    return statement.targets[0].id, ast.unparse(call)
+
+
+def _hmac_compare_digest_call(
+    node: ast.AST,
+    *,
+    credential_parameter: str,
+    token_alias: str,
+) -> bool:
+    if (
+        not isinstance(node, ast.Call)
+        or not isinstance(node.func, ast.Attribute)
+        or node.func.attr != "compare_digest"
+        or not isinstance(node.func.value, ast.Name)
+        or node.func.value.id != "hmac"
+        or len(node.args) != 2
+        or node.keywords
+    ):
+        return False
+
+    rendered = [
+        arg.id if isinstance(arg, ast.Name) else None
+        for arg in node.args
+    ]
+    return set(rendered) == {credential_parameter, token_alias}
+
+
+def _apikeyheader_mismatch_guard(
+    test: ast.AST,
+    *,
+    credential_parameter: str,
+    token_alias: str,
+) -> bool:
+    if (
+        not isinstance(test, ast.BoolOp)
+        or not isinstance(test.op, ast.Or)
+        or len(test.values) != 2
+    ):
+        return False
+
+    for missing_node, mismatch_node in (
+        (test.values[0], test.values[1]),
+        (test.values[1], test.values[0]),
+    ):
+        missing = _missing_credential_parameter(
+            missing_node,
+            {credential_parameter},
+        )
+        if missing != credential_parameter:
+            continue
+        if (
+            isinstance(mismatch_node, ast.UnaryOp)
+            and isinstance(mismatch_node.op, ast.Not)
+            and _hmac_compare_digest_call(
+                mismatch_node.operand,
+                credential_parameter=credential_parameter,
+                token_alias=token_alias,
+            )
+        ):
+            return True
+    return False
+
+
+def _body_without_optional_none_return(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> list[ast.stmt]:
+    body = _meaningful_body(function)
+    if body and isinstance(body[-1], ast.Return):
+        value = body[-1].value
+        if value is None or (
+            isinstance(value, ast.Constant) and value.value is None
+        ):
+            body = body[:-1]
+    return body
+
+
+def _infer_apikeyheader_shared_secret_evidence(
+    *,
+    dependency_name: str,
+    path: str,
+    tree: ast.Module,
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> GuardEffectivenessEvidence | None:
+    """Infer fail-closed APIKeyHeader/environment shared-secret effectiveness."""
+
+    credential_parameter = _security_apikeyheader_parameter(
+        function,
+        tree=tree,
+    )
+    if credential_parameter is None:
+        return None
+
+    body = _body_without_optional_none_return(function)
+    if len(body) != 3:
+        return None
+
+    binding = _environment_token_binding_assignment(
+        body[0],
+        credential_parameter=credential_parameter,
+    )
+    if binding is None:
+        return None
+    token_alias, token_expression = binding
+
+    token_guard = _raise_only_if(body[1])
+    if (
+        token_guard is None
+        or not _falsey_name_guard(token_guard, token_alias)
+    ):
+        return None
+
+    credential_guard = _raise_only_if(body[2])
+    if (
+        credential_guard is None
+        or not _apikeyheader_mismatch_guard(
+            credential_guard,
+            credential_parameter=credential_parameter,
+            token_alias=token_alias,
+        )
+    ):
+        return None
+
+    proof_payload = {
+        "kind": "fail_closed_apikeyheader_shared_secret_v1",
+        "dependency_name": dependency_name,
+        "path": path,
+        "function": function.name,
+        "credential_parameter": credential_parameter,
+        "token_alias": token_alias,
+        "token_expression": token_expression,
+        "comparison_kind": "hmac_compare_digest",
+        "syntax": ast.dump(
+            function,
+            annotate_fields=True,
+            include_attributes=False,
+        ),
+    }
+    evidence_id = (
+        "guard-effectiveness:"
+        + content_digest(proof_payload)[:16]
+    )
+    return GuardEffectivenessEvidence(
+        evidence_id=evidence_id,
+        dependency_name=dependency_name,
+        evidence_kind="fail_closed_apikeyheader_shared_secret_v1",
+        credential_parameter=credential_parameter,
+        credential_attribute=None,
+        token_expression=token_expression,
+        comparison_kind="hmac_compare_digest",
+        assumptions=[
+            (
+                "The governed source profile assigns authorization meaning to "
+                "this dependency for the declared effect/resource."
+            ),
+            (
+                "FastAPI Security(APIKeyHeader(auto_error=False)) supplies the "
+                "presented API-key header value or None to the dependency."
+            ),
+            (
+                "Normal return implies the configured environment secret is "
+                "present and hmac.compare_digest accepts the presented key "
+                "against that same bound secret value."
+            ),
+        ],
+        origin=_origin(path, function),
+    )
+
+
 def infer_route_dependency_effectiveness(
     *,
     parsed_trees: Mapping[str, ast.Module],
@@ -614,6 +905,13 @@ def infer_route_dependency_effectiveness(
             item = _infer_header_shared_secret_evidence(
                 dependency_name=dependency_name,
                 path=path,
+                function=function,
+            )
+        if item is None:
+            item = _infer_apikeyheader_shared_secret_evidence(
+                dependency_name=dependency_name,
+                path=path,
+                tree=parsed_trees[path],
                 function=function,
             )
         if item is not None:
