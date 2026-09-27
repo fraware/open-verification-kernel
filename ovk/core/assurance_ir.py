@@ -28,6 +28,7 @@ BindingProjection = Literal["identity", "scope", "attribute"]
 ContractTermKind = Literal["parameter", "return_attribute", "literal"]
 ContractRelation = Literal["eq", "non_null"]
 ContractDerivation = Literal["direct", "composed"]
+AuthorizationDependencyContractKind = Literal["credential_equality"]
 ClaimKind = Literal[
     "protected_effect_integrity",
     "authorization",
@@ -214,6 +215,42 @@ class FunctionContract(BaseModel):
         return value
 
 
+class AuthorizationDependencyContract(BaseModel):
+    """Source-derived proof fact for one authorization dependency.
+
+    v1 contracts establish only a narrow credential-equality postcondition on
+    normal completion. They do not by themselves assign resource/effect policy;
+    governed route-dependency profile semantics perform that binding.
+    """
+
+    contract_id: str
+    qualified_name: str
+    contract_kind: AuthorizationDependencyContractKind = "credential_equality"
+    credential_expression: str
+    authority_expression: str
+    derivation: ContractDerivation = "direct"
+    depends_on: list[str] = Field(default_factory=list)
+    origin: SemanticOrigin
+
+    @field_validator(
+        "contract_id",
+        "qualified_name",
+        "credential_expression",
+        "authority_expression",
+    )
+    @classmethod
+    def _authorization_contract_fields_non_empty(
+        cls,
+        value: str,
+    ) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError(
+                "authorization dependency contract fields must be non-empty"
+            )
+        return value
+
+
 class ContractUse(BaseModel):
     """One source-grounded consumption of a FunctionContract."""
 
@@ -353,6 +390,9 @@ class AssuranceIR(BaseModel):
     resource_bindings: list[ResourceBinding] = Field(default_factory=list)
     resource_return_contracts: list[ResourceReturnContract] = Field(default_factory=list)
     function_contracts: list[FunctionContract] = Field(default_factory=list)
+    authorization_dependency_contracts: list[
+        AuthorizationDependencyContract
+    ] = Field(default_factory=list)
     contract_uses: list[ContractUse] = Field(default_factory=list)
     paths: list[SemanticPath] = Field(default_factory=list)
     claims: list[AssuranceClaim] = Field(default_factory=list)
@@ -372,6 +412,7 @@ class AssuranceIR(BaseModel):
             "resource_bindings": "binding_id",
             "resource_return_contracts": "contract_id",
             "function_contracts": "contract_id",
+            "authorization_dependency_contracts": "contract_id",
             "contract_uses": "use_id",
             "paths": "path_id",
             "claims": "claim_id",
@@ -410,6 +451,9 @@ class AssuranceIR(BaseModel):
                 item["postconditions"],
                 key=lambda pred: content_digest(pred),
             )
+
+        for item in payload["authorization_dependency_contracts"]:
+            item["depends_on"] = sorted(item["depends_on"])
 
         for item in payload["contract_uses"]:
             item["established_attributes"] = sorted(item["established_attributes"])
