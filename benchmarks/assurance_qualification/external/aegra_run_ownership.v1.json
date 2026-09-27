@@ -1,0 +1,122 @@
+{
+  "schema_version": "ovk.assurance_external_replay_suite.v1",
+  "suite_id": "aegra-run-ownership-development-v1",
+  "description": "Public development replay of aegra/aegra PR #337. This case was used to identify and extend ownership semantics and is permanently excluded from the independent-external production gate.",
+  "cases": [
+    {
+      "case_id": "aegra-pr337-thread-run-ownership-repair",
+      "repository": "aegra/aegra",
+      "repository_url": "https://github.com/aegra/aegra.git",
+      "validation_class": "public_upstream_reduction",
+      "base_sha": "d7d80c850010a9c5a3d2be59254c19b9eb0e25dd",
+      "head_sha": "9e1fa430b50937177da086bbe26b5787e9b42499",
+      "description": "PR #337 adds fail-closed thread ownership checks before run creation, streaming, and wait execution.",
+      "safety_label": "safe",
+      "expected_head_assurance": "established",
+      "guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-AEGRA-RUN-CREATE-OWNER",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Creating a run against a thread is authorized for the thread owner or for a thread that does not yet exist.",
+            "selector": {
+              "effect_name": "thread.run.create",
+              "entrypoint": "POST /threads/{thread_id}/runs"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "source": "GHSA-m98r-6667-4wq7",
+              "endpoint": "create_run"
+            }
+          },
+          {
+            "guarantee_id": "G-AEGRA-RUN-STREAM-OWNER",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Streaming a run against a thread is authorized for the thread owner or for a thread that does not yet exist.",
+            "selector": {
+              "effect_name": "thread.run.create",
+              "entrypoint": "POST /threads/{thread_id}/runs/stream"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "source": "GHSA-m98r-6667-4wq7",
+              "endpoint": "create_and_stream_run"
+            }
+          },
+          {
+            "guarantee_id": "G-AEGRA-RUN-WAIT-OWNER",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Waiting on a newly created run against a thread is authorized for the thread owner or for a thread that does not yet exist.",
+            "selector": {
+              "effect_name": "thread.run.create",
+              "entrypoint": "POST /threads/{thread_id}/runs/wait"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "source": "GHSA-m98r-6667-4wq7",
+              "endpoint": "wait_for_run"
+            }
+          }
+        ]
+      },
+      "protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "libs/aegra-api/src/aegra_api/api/runs.py"
+        ],
+        "sink_effects": {
+          "_prepare_run": "thread.run.create"
+        },
+        "sink_identity_args": {
+          "_prepare_run": 1
+        },
+        "sink_scope_keywords": {},
+        "sink_missing_scope_unconstrained": [],
+        "scope_assertions": {},
+        "ownership_assertions": {
+          "session.scalar": {
+            "resource_identity_attribute": "thread_id",
+            "owner_attribute": "user_id",
+            "principal_attribute": "identity",
+            "authorized_effects": [
+              "thread.run.create"
+            ],
+            "allow_missing_resource": true,
+            "truthy_when_present": true
+          }
+        },
+        "sink_contracts": {},
+        "sink_contract_scope_attributes": {},
+        "sink_contract_identity_attributes": {},
+        "sink_binding_relations": {},
+        "sink_binding_authorized_projections": {},
+        "sink_binding_acted_projections": {},
+        "sink_binding_authorized_attributes": {},
+        "sink_binding_acted_attributes": {},
+        "dependency_guard_resources": {},
+        "dependency_guard_effects": {},
+        "principal_parameter": "user"
+      },
+      "provenance": {
+        "contamination_status": "public_development_case",
+        "adjudication_kind": "public_security_advisory",
+        "references": [
+          "https://github.com/aegra/aegra/security/advisories/GHSA-m98r-6667-4wq7",
+          "https://github.com/aegra/aegra/issues/336",
+          "https://github.com/aegra/aegra/pull/337"
+        ],
+        "notes": "This case directly influenced the ownership-assertion semantic extension and must never be counted as independent external validation."
+      },
+      "qualification_human_adjudicated": false,
+      "human_review_minutes": null
+    }
+  ]
+}
