@@ -111,3 +111,62 @@ A candidate must not be changed from unsupported_semantics to supported_now by
 declaring a convenient but unsound source-profile mapping. The status changes
 only after the general source semantics have been extended and validated as a
 reusable capability.
+
+## Held-out route-mediation cohort
+
+A separate held-out cohort is frozen in:
+
+    benchmarks/assurance_qualification/external_candidates.heldout_route_mediation.v1.json
+
+It was selected after the route-level complete-mediation implementation was
+complete and before OVK was run on any selected case. The cohort is bound to
+OVK revision:
+
+    af94ae1bac88b15a0db1434727f8401e6922a548
+
+Selection used the following rule:
+
+1. GitHub-reviewed vulnerabilities published in 2026;
+2. the affected application uses FastAPI;
+3. the vulnerability is missing or bypassed authentication on a protected HTTP
+   surface;
+4. a public repaired transition can be pinned exactly;
+5. use distinct repositories; and
+6. exclude repositories or cases already used as OVK development evidence.
+
+The resulting repositories are:
+
+- langflow-ai/langflow
+- mlflow/mlflow
+- doobidoo/mcp-memory-service
+
+PraisonAI candidates found by the same search are excluded because PraisonAI has
+already been used in OVK development evidence.
+
+Pre-replay triage is frozen as:
+
+    supported_now                  1
+    unsupported_semantics          2
+    requires_new_guarantee_family  0
+    insufficient_public_evidence   0
+
+Thus pre-replay representational coverage is 1 / 3.
+
+Langflow is classified supported_now because the repaired protected operation is
+directly present in a route handler and the repair adds a direct
+`dependencies=[Depends(get_current_active_user)]` route dependency, matching the
+bounded static-capability complete-mediation theorem.
+
+MLflow remains unsupported because its repair changes shared permission
+middleware and path-to-validator dispatch rather than a modeled route
+dependency.
+
+mcp-memory-service remains unsupported because its repair adds parameter-level
+read/write dependencies and some protected mutations occur in helper/background
+functions. The current static-capability complete-mediation theorem applies only
+to direct route-decorator dependencies.
+
+These classifications are fixed before replay. A failed held-out replay must be
+reported as a failure of the implementation or its pre-replay triage; it must
+not be repaired by editing this cohort.
+
