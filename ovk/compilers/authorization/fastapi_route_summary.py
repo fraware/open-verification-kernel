@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass, field
-from typing import Mapping
+from typing import Literal, Mapping
 
 from ovk.compilers.authorization.base import normalize_path
 from ovk.compilers.authorization.material_loader import AuthMaterials
@@ -54,10 +54,11 @@ class DependencyParameterSummary:
 
 @dataclass(frozen=True)
 class RouteDependencySummary:
-    """Direct Depends/Security dependency declared on a FastAPI route."""
+    """Direct Depends/Security dependency inherited by one FastAPI route."""
 
     full_name: str
     leaf_name: str | None
+    source_kind: Literal["route_decorator", "router_constructor"]
     origin: SemanticOrigin
 
 
@@ -136,7 +137,7 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id=_EXTRACTOR_ID,
-        extractor_version="0.4.0",
+        extractor_version="0.5.0",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -161,7 +162,7 @@ def _const_str(node: ast.AST | None) -> str | None:
 
 def _route_decorator(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
-) -> tuple[str, str, ast.Call] | None:
+) -> tuple[str, str, ast.Call, str | None] | None:
     for decorator in node.decorator_list:
         if (
             not isinstance(decorator, ast.Call)
@@ -174,25 +175,27 @@ def _route_decorator(
         route = _const_str(decorator.args[0])
         if route is None:
             continue
-        return method.upper(), normalize_path("", route), decorator
+        receiver = decorator.func.value
+        router_symbol = receiver.id if isinstance(receiver, ast.Name) else None
+        return (
+            method.upper(),
+            normalize_path("", route),
+            decorator,
+            router_symbol,
+        )
     return None
 
 
-def _route_dependencies(
+def _direct_dependencies(
     path: str,
-    decorator: ast.Call,
+    owner: ast.Call,
+    *,
+    source_kind: Literal["route_decorator", "router_constructor"],
 ) -> tuple[RouteDependencySummary, ...]:
-    """Return direct route-level Depends/Security declarations.
+    """Return direct Depends/Security declarations from one static owner call."""
 
-    The v1 route-level mediation subset accepts only a literal list/tuple whose
-    entries are Depends(name) or Security(name) with a direct name/attribute
-    target. Dependency factories and dynamic dependency collections stay
-    outside this syntax summary.
-    """
-
-    found: list[RouteDependencySummary] = []
     dependencies_node: ast.AST | None = None
-    for keyword in decorator.keywords:
+    for keyword in owner.keywords:
         if keyword.arg == "dependencies":
             dependencies_node = keyword.value
             break
@@ -200,6 +203,7 @@ def _route_dependencies(
     if not isinstance(dependencies_node, (ast.List, ast.Tuple)):
         return ()
 
+    found: list[RouteDependencySummary] = []
     for item in dependencies_node.elts:
         if (
             not isinstance(item, ast.Call)
@@ -214,11 +218,97 @@ def _route_dependencies(
             RouteDependencySummary(
                 full_name=ast.unparse(target),
                 leaf_name=_name_of(target),
+                source_kind=source_kind,
                 origin=_origin(path, item),
             )
         )
-
     return tuple(found)
+
+
+def _router_constructor_dependencies(
+    path: str,
+    tree: ast.Module,
+) -> dict[str, tuple[RouteDependencySummary, ...]]:
+    """Return dependencies for uniquely assigned top-level APIRouter symbols.
+
+    The supported inheritance form is deliberately narrow:
+
+        router = APIRouter(dependencies=[Depends(require_auth)])
+
+    Any second top-level assignment to the same symbol makes the binding
+    ambiguous and suppresses inherited dependency semantics for that symbol.
+    """
+
+    assignments: dict[str, int] = {}
+    candidates: dict[str, tuple[RouteDependencySummary, ...]] = {}
+
+    for statement in tree.body:
+        target: ast.Name | None = None
+        value: ast.AST | None = None
+        if (
+            isinstance(statement, ast.Assign)
+            and len(statement.targets) == 1
+            and isinstance(statement.targets[0], ast.Name)
+        ):
+            target = statement.targets[0]
+            value = statement.value
+        elif (
+            isinstance(statement, ast.AnnAssign)
+            and isinstance(statement.target, ast.Name)
+        ):
+            target = statement.target
+            value = statement.value
+
+        if target is None:
+            continue
+        assignments[target.id] = assignments.get(target.id, 0) + 1
+
+        if (
+            isinstance(value, ast.Call)
+            and _name_of(value.func) == "APIRouter"
+        ):
+            candidates[target.id] = _direct_dependencies(
+                path,
+                value,
+                source_kind="router_constructor",
+            )
+
+    return {
+        name: dependencies
+        for name, dependencies in candidates.items()
+        if assignments.get(name) == 1
+    }
+
+
+def _route_dependencies(
+    path: str,
+    decorator: ast.Call,
+    *,
+    inherited: tuple[RouteDependencySummary, ...] = (),
+) -> tuple[RouteDependencySummary, ...]:
+    """Combine inherited router dependencies with direct route dependencies."""
+
+    combined: dict[tuple[str, str | None], RouteDependencySummary] = {
+        (item.full_name, item.leaf_name): item
+        for item in inherited
+    }
+    for item in _direct_dependencies(
+        path,
+        decorator,
+        source_kind="route_decorator",
+    ):
+        combined[(item.full_name, item.leaf_name)] = item
+
+    return tuple(
+        sorted(
+            combined.values(),
+            key=lambda item: (
+                item.full_name,
+                item.leaf_name or "",
+                item.source_kind,
+            ),
+        )
+    )
 
 
 def _is_supported_fail_fast_none_guard(statement: ast.stmt) -> bool:
@@ -737,6 +827,7 @@ def summarize_route_file(
     source_digest: str,
 ) -> RouteFileSummary:
     handlers: list[RouteHandlerSummary] = []
+    inherited_by_router = _router_constructor_dependencies(path, tree)
 
     for handler in tree.body:
         if not isinstance(handler, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -744,7 +835,7 @@ def summarize_route_file(
         route = _route_decorator(handler)
         if route is None:
             continue
-        method, route_path, route_decorator = route
+        method, route_path, route_decorator, router_symbol = route
         aliases = _constructor_aliases(handler)
         non_null = _provably_non_null_parameters(handler)
 
@@ -794,7 +885,15 @@ def summarize_route_file(
                 has_control_flow=_has_control_flow(handler),
                 unsupported_control_flow_lines=_unsupported_control_flow_lines(handler),
                 dependencies=_dependency_parameters(path, handler),
-                route_dependencies=_route_dependencies(path, route_decorator),
+                route_dependencies=_route_dependencies(
+                    path,
+                    route_decorator,
+                    inherited=(
+                        inherited_by_router.get(router_symbol, ())
+                        if router_symbol is not None
+                        else ()
+                    ),
+                ),
                 ownership_assertions=_ownership_assertion_summaries(
                     path,
                     handler,
