@@ -63,6 +63,7 @@
           "head_guarantee_manifest": {"type": ["object", "null"]},
           "protected_effect_profile": {"type": "object"},
           "head_protected_effect_profile": {"type": ["object", "null"]},
+          "human_adjudicated": {"type": "boolean"},
           "human_review_minutes": {
             "type": ["number", "null"],
             "minimum": 0
