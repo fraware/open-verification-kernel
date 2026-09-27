@@ -163,6 +163,9 @@ def _expression_payload(item: ExpressionSummary) -> dict[str, Any]:
         "term": _resource_term_payload(item.term),
         "provably_non_null": item.provably_non_null,
         "origin": _origin_payload(item.origin),
+        "call_full_name": item.call_full_name,
+        "call_leaf_name": item.call_leaf_name,
+        "call_positional_arguments": list(item.call_positional_arguments),
     }
 
 
@@ -177,6 +180,20 @@ def _expression_from_payload(payload: dict[str, Any]) -> ExpressionSummary:
         ),
         provably_non_null=bool(payload["provably_non_null"]),
         origin=SemanticOrigin.model_validate(payload["origin"]),
+        call_full_name=(
+            str(payload["call_full_name"])
+            if payload.get("call_full_name") is not None
+            else None
+        ),
+        call_leaf_name=(
+            str(payload["call_leaf_name"])
+            if payload.get("call_leaf_name") is not None
+            else None
+        ),
+        call_positional_arguments=tuple(
+            str(value)
+            for value in payload.get("call_positional_arguments") or []
+        ),
     )
 
 
@@ -214,6 +231,10 @@ def _route_summary_payload(summary: RouteFileSummary) -> dict[str, Any]:
                             for name, argument in call.keyword_arguments
                         ],
                         "origin": _origin_payload(call.origin),
+                        "assigned_to": call.assigned_to,
+                        "fail_closed_truthy_return": (
+                            call.fail_closed_truthy_return
+                        ),
                     }
                     for call in handler.calls
                 ],
@@ -254,6 +275,14 @@ def _route_summary_from_payload(payload: dict[str, Any]) -> RouteFileSummary:
                         for pair in call.get("keyword_arguments") or []
                     ),
                     origin=SemanticOrigin.model_validate(call["origin"]),
+                    assigned_to=(
+                        str(call["assigned_to"])
+                        if call.get("assigned_to") is not None
+                        else None
+                    ),
+                    fail_closed_truthy_return=bool(
+                        call.get("fail_closed_truthy_return", False)
+                    ),
                 )
             )
 
