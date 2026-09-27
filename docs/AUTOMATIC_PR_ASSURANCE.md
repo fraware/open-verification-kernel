@@ -83,16 +83,19 @@ decision. A dependency may return normally in an unauthenticated configuration,
 delegate to helpers with unresolved semantics, or rely on startup invariants
 outside the handler.
 
-OVK therefore records the dependency as a candidate guard and marks the
-protected-effect path with:
+OVK therefore records the dependency as a candidate guard with:
 
-    route_dependency_effectiveness_unproved:<dependency>
+    effectiveness = unproved
 
-until source-derived semantics establish the dependency's fail-closed
-authorization behavior. A candidate route dependency may prevent unrelated
-handler-local branching from being mistaken for a bypass of dependency
-invocation, while the unresolved effectiveness obligation keeps claim-local
-coverage partial and forbids PASS.
+Protected Effect Integrity carries a separate `guard_effectiveness` proof
+obligation. Source coverage can be complete when the route-dependency syntax,
+static resource, effect, and entrypoint dominance are all represented, while the
+security claim remains UNKNOWN until source-derived semantics establish the
+dependency's fail-closed authorization behavior.
+
+This separation is deliberate: extraction coverage measures representational
+completeness; guard effectiveness measures proof discharge. An unresolved proof
+must not be disguised as missing source coverage.
 
 The extractor does not generalize the syntax rule to dependency factories,
 dynamic dependency collections, or request-derived resource authorization.
