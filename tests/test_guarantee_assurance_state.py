@@ -439,3 +439,56 @@ def test_unbound_guarantee_is_not_established_by_unrelated_evidence() -> None:
     state = snapshot.state_for("G-EXPORT")
     assert state.status == "unbound"
     assert state.evidence_digest is None
+
+
+def test_effect_local_complete_coverage_establishes_guarantee_under_global_partial() -> None:
+    ir = _ir()
+    ir.coverage.status = "partial"
+    ir.coverage.unsupported_constructs = [
+        "accounts.py:unrelated_handler:control_flow_outside_v1_subset"
+    ]
+    refund_path = next(
+        path
+        for path in ir.paths
+        if path.path_id == "path:refund"
+    )
+    refund_path.coverage_status = "complete"
+    refund_path.unsupported_constructs = []
+    refund_path.coverage_assumptions = [
+        "refund protected-effect prefix is fully represented"
+    ]
+
+    evaluation = evaluate_protected_effect_integrity(
+        ir,
+        protected_effect_ids=["pe:refund"],
+    )[0]
+    assert evaluation.status == "pass"
+    runtime = _runtime()
+    fingerprint = build_execution_fingerprint(
+        evaluation,
+        environment_digest=runtime.environment_digest,
+        tool_digest=runtime.tool_digest,
+        worker_image_digest=runtime.worker_image_digest,
+        native_execution=runtime.native_execution,
+    )
+    evidence = protected_effect_evaluation_to_evidence(
+        ir,
+        evaluation,
+        policy_digest="policy-a",
+        execution_fingerprint=fingerprint,
+        signing_key=TEST_KEY,
+    )
+
+    assert evidence.coverage is not None
+    assert evidence.coverage["status"] == "complete"
+    snapshot = build_guarantee_assurance_snapshot(
+        ir,
+        [_specs()[0]],
+        [evidence],
+        policy_digest="policy-a",
+        signature_key=TEST_KEY,
+    )
+
+    state = snapshot.state_for("G-REFUND")
+    assert state.status == "established"
+    assert state.reason_codes == []
