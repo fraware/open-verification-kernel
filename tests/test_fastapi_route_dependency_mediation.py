@@ -214,3 +214,22 @@ def test_runtime_profile_rejects_contradictory_static_sink_semantics() -> None:
                 "require_auth": ("mcp.dispatch",)
             },
         )
+
+def test_unrelated_empty_string_literal_does_not_break_route_summary() -> None:
+    source = """
+from fastapi import APIRouter, Depends, Request
+
+router = APIRouter()
+
+@router.post("", dependencies=[Depends(require_auth)])
+async def mcp_post(request: Request):
+    token = request.headers.get("x-token", "")
+    await handle_jsonrpc_request(token)
+""".strip()
+
+    ir, evaluation = _evaluation(source)
+
+    assert evaluation.status == "pass"
+    assert evaluation.extraction_coverage == "complete"
+    assert len(ir.protected_effects) == 1
+
