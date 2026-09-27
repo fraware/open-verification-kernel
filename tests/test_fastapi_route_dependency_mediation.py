@@ -183,3 +183,34 @@ def test_profile_rejects_route_dependency_effect_outside_sink_model() -> None:
                 "require_auth": ["different.effect"]
             },
         )
+
+
+def test_static_sink_rejects_dynamic_identity_configuration() -> None:
+    with pytest.raises(ValueError, match="static sink resources cannot combine"):
+        ProtectedEffectProfileConfig(
+            source_paths=["routes.py"],
+            sink_effects={"dispatch": "mcp.dispatch"},
+            sink_static_resources={"dispatch": "mcp_transport"},
+            sink_identity_args={"dispatch": 0},
+            route_dependency_guard_resources={
+                "require_auth": "mcp_transport"
+            },
+            route_dependency_guard_effects={
+                "require_auth": ["mcp.dispatch"]
+            },
+        )
+
+
+def test_runtime_profile_rejects_contradictory_static_sink_semantics() -> None:
+    with pytest.raises(ValueError, match="static sink resources cannot combine"):
+        FastApiDependencyEffectProfile(
+            sink_effects={"dispatch": "mcp.dispatch"},
+            sink_static_resources={"dispatch": "mcp_transport"},
+            sink_scope_keywords={"dispatch": "workspace_id"},
+            route_dependency_guard_resources={
+                "require_auth": "mcp_transport"
+            },
+            route_dependency_guard_effects={
+                "require_auth": ("mcp.dispatch",)
+            },
+        )
