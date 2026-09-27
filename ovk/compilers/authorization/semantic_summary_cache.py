@@ -28,6 +28,7 @@ from ovk.compilers.authorization.fastapi_route_summary import (
     CallSummary,
     DependencyParameterSummary,
     ExpressionSummary,
+    LocalBranchSummary,
     OwnershipAssertionSummary,
     RouteFileSummary,
     RouteHandlerSummary,
@@ -52,7 +53,7 @@ from ovk.core.resource_identity import ResourceIdentityTerm
 
 
 SEMANTIC_SUMMARY_CACHE_SCHEMA = "ovk.python_semantic_summary_cache.v1"
-SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.4.0"
+SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.5.0"
 DEFAULT_SEMANTIC_SUMMARY_CACHE_DIR = Path(
     ".verification/cache/python-semantic-summaries"
 )
@@ -208,6 +209,17 @@ def _route_summary_payload(summary: RouteFileSummary) -> dict[str, Any]:
                     }
                     for item in handler.ownership_assertions
                 ],
+                "local_branches": [
+                    {
+                        "line": item.line,
+                        "lexical_block_id": item.lexical_block_id,
+                        "assigned_roots": list(item.assigned_roots),
+                        "impure_calls": list(item.impure_calls),
+                        "has_early_exit": item.has_early_exit,
+                        "origin": _origin_payload(item.origin),
+                    }
+                    for item in handler.local_branches
+                ],
                 "dependencies": [
                     {
                         "parameter_name": dep.parameter_name,
@@ -306,6 +318,23 @@ def _route_summary_from_payload(payload: dict[str, Any]) -> RouteFileSummary:
                         origin=SemanticOrigin.model_validate(item["origin"]),
                     )
                     for item in handler.get("ownership_assertions") or []
+                ),
+                local_branches=tuple(
+                    LocalBranchSummary(
+                        line=int(item["line"]),
+                        lexical_block_id=str(item["lexical_block_id"]),
+                        assigned_roots=tuple(
+                            str(value)
+                            for value in item.get("assigned_roots") or []
+                        ),
+                        impure_calls=tuple(
+                            str(value)
+                            for value in item.get("impure_calls") or []
+                        ),
+                        has_early_exit=bool(item["has_early_exit"]),
+                        origin=SemanticOrigin.model_validate(item["origin"]),
+                    )
+                    for item in handler.get("local_branches") or []
                 ),
                 dependencies=tuple(
                     DependencyParameterSummary(
