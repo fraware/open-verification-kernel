@@ -97,6 +97,9 @@
     "guards": {
       "type": "array"
     },
+    "guard_effectiveness_evidence": {
+      "type": "array"
+    },
     "protected_effects": {
       "type": "array"
     },
