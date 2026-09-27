@@ -1,0 +1,150 @@
+{
+  "schema_version": "ovk.assurance_external_candidate_registry.v1",
+  "registry_id": "fastapi-broken-access-control-round2-2026-09-27",
+  "description": "Second pre-implementation public external triage round, frozen against OVK PR #84 before any model changes motivated by these candidates. Unsupported and out-of-family cases remain in the denominator.",
+  "reviewed_against": {
+    "protected_effect_profile_type": "fastapi_dependency_effects_v1",
+    "guarantee_type": "protected_effect_integrity_v1",
+    "ovk_revision": "7f6d38d103625f4d33d8942e4b0b10565a6af3e1"
+  },
+  "candidates": [
+    {
+      "candidate_id": "airflow-backfill-parser-authorization-conflict-2026",
+      "repository": "apache/airflow",
+      "repository_url": "https://github.com/apache/airflow.git",
+      "framework": "FastAPI",
+      "security_property": "Authorization and execution must resolve a backfill identifier to the same DAG for every path representation accepted by the route.",
+      "triage_status": "unsupported_semantics",
+      "semantic_pattern": "divergent_input_interpretation_between_authorization_dependency_and_route_handler",
+      "reason_codes": [
+        "authorization_dependency_and_handler_use_distinct_input_coercions",
+        "current_profile_has_no_parser_equivalence_contract",
+        "same_source_expression_does_not_establish_same_semantic_resource"
+      ],
+      "base_sha": "0bda2ffece97df4b90484a70dd4c62ff35993fda",
+      "head_sha": "f4f7fc317bc404f7c8791b1a6841b7a8fbcf5bad",
+      "fix_pr": "https://github.com/apache/airflow/pull/70889",
+      "references": [
+        "https://github.com/advisories/GHSA-j4jc-cq9h-xrhr",
+        "https://github.com/apache/airflow/pull/70889"
+      ],
+      "notes": "The repair replaces int() in the authorization dependency with the same Pydantic NonNegativeInt interpretation used by the route. Protected Effect Integrity is the relevant guarantee family, but the current source model does not prove equivalence of independently applied parsers/coercions.",
+      "qualification_eligible": false
+    },
+    {
+      "candidate_id": "open-webui-client-controlled-model-access-bypass-2026",
+      "repository": "open-webui/open-webui",
+      "repository_url": "https://github.com/open-webui/open-webui.git",
+      "framework": "FastAPI",
+      "security_property": "A client-controlled HTTP parameter must not disable the model-access authorization check for a restricted model invocation.",
+      "triage_status": "unsupported_semantics",
+      "semantic_pattern": "request_bound_boolean_bypasses_authorization_guard",
+      "reason_codes": [
+        "authorization_guard_execution_depends_on_request_controlled_boolean",
+        "current_profile_has_no_request_taint_or_trusted_origin_semantics",
+        "guard_presence_alone_would_be_unsound"
+      ],
+      "base_sha": "30068afd780e034f0c116419103672d7315a7fe3",
+      "head_sha": "c0385f60ba049da48d2d5452068586d375303c37",
+      "fix_pr": null,
+      "references": [
+        "https://github.com/advisories/GHSA-v6qf-75pr-p96m",
+        "https://github.com/open-webui/open-webui/commit/c0385f60ba049da48d2d5452068586d375303c37"
+      ],
+      "notes": "The vulnerable route binds bypass_filter from the external request and conditionally skips model access checks. The repair moves the bypass authority to server-populated request.state. The current profile does not establish trusted origin or taint-sensitive dominance for such a guard.",
+      "qualification_eligible": false
+    },
+    {
+      "candidate_id": "flyto-core-mcp-missing-route-authentication-2026",
+      "repository": "flytohub/flyto-core",
+      "repository_url": "https://github.com/flytohub/flyto-core.git",
+      "framework": "FastAPI",
+      "security_property": "MCP module execution must be mediated by the Execution API authentication requirement before dispatch.",
+      "triage_status": "unsupported_semantics",
+      "semantic_pattern": "missing_fastapi_route_decorator_dependency_before_indirect_critical_dispatch",
+      "reason_codes": [
+        "repair_uses_route_decorator_dependencies_list",
+        "current_profile_models_parameter_dependencies_not_route_decorator_dependencies",
+        "route_has_no_bound_authenticated_principal_parameter",
+        "critical_effect_is_reached_through_indirect_jsonrpc_dispatch"
+      ],
+      "base_sha": "e8c6fd9902ff93389cd2e3ecaa472b7d91aec67e",
+      "head_sha": "db7f116b1d3c5dcf94aded00d14118f81f3e225e",
+      "fix_pr": null,
+      "references": [
+        "https://github.com/advisories/GHSA-h9f9-h6gm-wc85",
+        "https://github.com/flytohub/flyto-core/commit/db7f116b1d3c5dcf94aded00d14118f81f3e225e"
+      ],
+      "notes": "The repair adds dependencies=[Depends(require_auth)] to POST/DELETE /mcp before JSON-RPC dispatch. The current FastAPI profile does not soundly derive authorization from route-decorator dependencies or bind an authenticated principal for this handler shape.",
+      "qualification_eligible": false
+    },
+    {
+      "candidate_id": "fastapi-users-oauth-state-session-binding-2025",
+      "repository": "fastapi-users/fastapi-users",
+      "repository_url": "https://github.com/fastapi-users/fastapi-users.git",
+      "framework": "FastAPI",
+      "security_property": "An OAuth callback state must be correlated with the browser session that initiated the authorization flow.",
+      "triage_status": "requires_new_guarantee_family",
+      "semantic_pattern": "cross_request_oauth_state_session_correlation",
+      "reason_codes": [
+        "property_spans_multiple_http_requests",
+        "requires_freshness_and_session_correlation",
+        "protected_effect_integrity_v1_is_pointwise_authorization_not_protocol_correspondence"
+      ],
+      "base_sha": "bcee8c9b884de31decb5d799aead3974a0b5b158",
+      "head_sha": "7cf413cd766b9cb0ab323ce424ddab2c0d235932",
+      "fix_pr": null,
+      "references": [
+        "https://github.com/advisories/GHSA-5j53-63w8-8625",
+        "https://github.com/fastapi-users/fastapi-users/commit/7cf413cd766b9cb0ab323ce424ddab2c0d235932"
+      ],
+      "notes": "The repair introduces a per-flow CSRF token carried in OAuth state and a browser cookie, then checks equality at callback. This is a temporal correspondence/session-binding property rather than the current pointwise protected-effect authorization theorem.",
+      "qualification_eligible": false
+    },
+    {
+      "candidate_id": "fastapi-sso-oauth-state-session-binding-2025",
+      "repository": "tomasvotava/fastapi-sso",
+      "repository_url": "https://github.com/tomasvotava/fastapi-sso.git",
+      "framework": "FastAPI",
+      "security_property": "An OAuth callback state must match trusted state persisted for the initiating browser session.",
+      "triage_status": "requires_new_guarantee_family",
+      "semantic_pattern": "cross_request_oauth_state_cookie_correlation",
+      "reason_codes": [
+        "property_spans_login_redirect_and_callback_requests",
+        "requires_protocol_state_correspondence",
+        "protected_effect_integrity_v1_does_not_express_request_pairing"
+      ],
+      "base_sha": "da63c19bca7db0fe8a7e66d03fdf07154ec7182a",
+      "head_sha": "6117d1a5ad498ba57d671e8a059ebe20db5abe02",
+      "fix_pr": "https://github.com/tomasvotava/fastapi-sso/pull/267",
+      "references": [
+        "https://github.com/advisories/GHSA-hp6r-r9vc-q8wx",
+        "https://github.com/tomasvotava/fastapi-sso/commit/6117d1a5ad498ba57d671e8a059ebe20db5abe02"
+      ],
+      "notes": "The repair persists state in a cookie during login initiation and compares it with callback state. The required theorem relates two protocol events and trusted session state, outside the current guarantee family.",
+      "qualification_eligible": false
+    },
+    {
+      "candidate_id": "mlflow-fastapi-jobs-missing-authentication-2026",
+      "repository": "mlflow/mlflow",
+      "repository_url": "https://github.com/mlflow/mlflow.git",
+      "framework": "FastAPI",
+      "security_property": "Job submission, read, search, and cancellation endpoints must enforce the configured application authentication and authorization policy.",
+      "triage_status": "insufficient_public_evidence",
+      "semantic_pattern": "missing_authentication_on_critical_job_endpoints",
+      "reason_codes": [
+        "public_advisory_documents_vulnerable_behavior",
+        "advisory_lists_no_patched_version",
+        "no_pinned_repaired_transition_available_for_semantic_triage"
+      ],
+      "base_sha": null,
+      "head_sha": null,
+      "fix_pr": null,
+      "references": [
+        "https://github.com/advisories/GHSA-7qhf-v65m-g5f3"
+      ],
+      "notes": "The public advisory reports unprotected FastAPI job endpoints and no patched version. This remains outside the semantic denominator until a repaired public transition is available and can be classified without inventing the fix.",
+      "qualification_eligible": false
+    }
+  ]
+}
