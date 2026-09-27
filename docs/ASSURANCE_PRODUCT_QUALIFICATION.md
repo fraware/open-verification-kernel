@@ -127,11 +127,19 @@ The v1 suite exercises:
 5. extraction-profile self-redefinition plus vulnerable code;
 6. a benign change outside the supported control-flow envelope;
 7. the public PraisonAI repaired-to-vulnerable regression;
-8. the public PraisonAI vulnerable-to-repaired transition.
+8. the public PraisonAI vulnerable-to-repaired transition;
+9. the public LocalChat P0-1 scoped-delete repair reversed to the historical unscoped shape;
+10. the public LocalChat P0-1 unscoped-delete shape repaired with request-scope propagation.
 
 The benign unsupported-control-flow case is expected to remain open. It is
 included to make the review burden visible rather than optimizing the benchmark
 by excluding unsupported safe cases.
+
+The LocalChat cases are reductions of the documented security repair in
+jwvanderstam/LocalChat PR #380. They preserve the relevant route-level mechanism:
+the same fail-closed workspace guard appears on both sides, while the repaired
+database operation carries `scope=get_scope(request)` and the historical shape
+does not. They remain public-development evidence, not independent pilot data.
 
 ## Running
 
