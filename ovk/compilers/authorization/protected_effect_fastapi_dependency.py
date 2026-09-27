@@ -151,6 +151,13 @@ class FastApiDependencyEffectProfile:
     # Dependency name -> effect names the dependency authorizes in this profile.
     dependency_guard_effects: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
+    # Parameter dependency name -> static capability/resource. This is distinct
+    # from dependency_guard_resources, whose values name dynamic route-resource
+    # symbols.
+    dependency_guard_static_resources: dict[str, str] = field(default_factory=dict)
+    # Parameter dependency name -> effects authorized for that static capability.
+    dependency_guard_static_effects: dict[str, tuple[str, ...]] = field(default_factory=dict)
+
     # Direct route-decorator dependency name -> static capability/resource.
     # These semantics are intentionally restricted to route-wide mediation.
     route_dependency_guard_resources: dict[str, str] = field(default_factory=dict)
@@ -201,6 +208,47 @@ class FastApiDependencyEffectProfile:
             for value in self.sink_static_resources.values()
         ):
             raise ValueError("static sink resources must be non-empty")
+
+        static_dependency_resource_keys = set(
+            self.dependency_guard_static_resources
+        )
+        static_dependency_effect_keys = set(
+            self.dependency_guard_static_effects
+        )
+        if static_dependency_resource_keys != static_dependency_effect_keys:
+            raise ValueError(
+                "static parameter dependency resource/effect keys must match"
+            )
+        dynamic_dependency_keys = set(self.dependency_guard_resources) | set(
+            self.dependency_guard_effects
+        )
+        overlap = sorted(
+            static_dependency_resource_keys & dynamic_dependency_keys
+        )
+        if overlap:
+            raise ValueError(
+                "dependency cannot declare both dynamic and static guard semantics: "
+                + ", ".join(overlap)
+            )
+        modeled_effects = set(self.sink_effects.values())
+        for dependency, resource in (
+            self.dependency_guard_static_resources.items()
+        ):
+            if not dependency.strip() or not resource.strip():
+                raise ValueError(
+                    "static parameter dependency names/resources must be non-empty"
+                )
+            effects = self.dependency_guard_static_effects[dependency]
+            if not effects or any(not effect.strip() for effect in effects):
+                raise ValueError(
+                    "static parameter dependency effects must be non-empty"
+                )
+            unknown = sorted(set(effects) - modeled_effects)
+            if unknown:
+                raise ValueError(
+                    "static parameter dependency effects absent from sink model: "
+                    + ", ".join(unknown)
+                )
 
         route_resource_keys = set(self.route_dependency_guard_resources)
         route_effect_keys = set(self.route_dependency_guard_effects)
