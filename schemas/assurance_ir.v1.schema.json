@@ -121,6 +121,9 @@
     "function_contracts": {
       "type": "array"
     },
+    "authorization_dependency_contracts": {
+      "type": "array"
+    },
     "contract_uses": {
       "type": "array"
     }
