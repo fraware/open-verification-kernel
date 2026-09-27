@@ -46,11 +46,23 @@ cost. The metric intentionally captures that burden.
 
 ### Semantic coverage
 
+Qualification scores semantic coverage at the same claim boundary used by
+Protected Effect evaluation and sealed evidence:
+
     semantic_coverage_rate
-      = cases with complete head source-to-Assurance-IR coverage
+      = cases whose represented head Protected Effects all have complete
+        effective coverage
         / all cases
 
-Unsupported semantics are not removed from the denominator.
+Effect-local coverage is authoritative only when every semantic path relevant
+to that Protected Effect carries explicit local coverage metadata. Otherwise
+evaluation, evidence, and qualification all fall back to repository-wide
+Assurance IR coverage.
+
+This distinction matters for source files that contain unsupported semantics
+outside the protected effect's path. Repository-wide coverage remains available
+as a diagnostic and is never rewritten to complete. Unsupported qualification
+cases remain in the denominator.
 
 ### Verification work
 
