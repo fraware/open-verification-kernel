@@ -114,3 +114,26 @@ async def require_auth(credentials = Depends(_bearer)):
 """.strip()
 
     assert _infer(source) == []
+
+def test_duplicate_dependency_function_names_are_ambiguous() -> None:
+    trees = {
+        "a.py": ast.parse(
+            """
+async def require_auth(credentials):
+    if not credentials or credentials.credentials != TOKEN_A:
+        raise RuntimeError()
+""".strip()
+        ),
+        "b.py": ast.parse(
+            """
+async def require_auth(credentials):
+    if not credentials or credentials.credentials != TOKEN_B:
+        raise RuntimeError()
+""".strip()
+        ),
+    }
+
+    assert infer_authorization_dependency_contracts(
+        parsed_trees=trees
+    ) == []
+
