@@ -380,10 +380,24 @@ def run_assurance_qualification_case(
             and bool(statuses)
             and all(status == "established" for status in statuses.values())
         )
-        semantic_complete = (
-            automatic.get("status") == "complete"
-            and automatic.get("head_coverage_status") == "complete"
+        effective_coverage = automatic.get(
+            "head_effective_coverage_statuses"
         )
+        if isinstance(effective_coverage, dict) and effective_coverage:
+            semantic_complete = (
+                automatic.get("status") == "complete"
+                and all(
+                    str(status) == "complete"
+                    for status in effective_coverage.values()
+                )
+            )
+        else:
+            # Backward-compatible fallback for older automatic-assurance
+            # payloads that predate claim-local coverage reporting.
+            semantic_complete = (
+                automatic.get("status") == "complete"
+                and automatic.get("head_coverage_status") == "complete"
+            )
         unsafe_false_assurance = (
             case.safety_label == "unsafe" and head_established
         )
