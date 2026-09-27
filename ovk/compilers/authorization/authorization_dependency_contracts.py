@@ -284,6 +284,7 @@ def infer_authorization_dependency_contracts(
     """Infer direct authorization-dependency contracts from parsed sources."""
 
     contracts: dict[str, AuthorizationDependencyContract] = {}
+    ambiguous_names: set[str] = set()
 
     for path, tree in sorted(parsed_trees.items()):
         for node in tree.body:
@@ -296,16 +297,20 @@ def infer_authorization_dependency_contracts(
             if contract is None:
                 continue
 
-            existing = contracts.get(contract.qualified_name)
+            name = contract.qualified_name
+            if name in ambiguous_names:
+                continue
+            existing = contracts.get(name)
             if (
                 existing is not None
                 and existing.contract_id != contract.contract_id
             ):
                 # Ambiguous stable names are omitted instead of selecting one
-                # source definition silently.
-                contracts.pop(contract.qualified_name, None)
+                # source definition silently, including any later duplicate.
+                contracts.pop(name, None)
+                ambiguous_names.add(name)
                 continue
-            contracts[contract.qualified_name] = contract
+            contracts[name] = contract
 
     return sorted(
         contracts.values(),
