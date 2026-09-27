@@ -145,6 +145,11 @@ The dedicated GitHub Actions workflow runs the same suite with the Z3 solver
 installed and uploads the report as the `assurance-product-qualification`
 artifact.
 
+Every report records the OVK version, exact source revision, UTC collection
+timestamp, Python/platform identity, Z3 version, runner OS, and the fact that
+latency measures the end-to-end `run_check` path. Timing numbers are therefore
+traceable to the environment that produced them.
+
 ## What this report cannot establish
 
 The committed suite does not measure:
