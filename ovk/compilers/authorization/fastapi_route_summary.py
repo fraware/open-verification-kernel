@@ -75,6 +75,18 @@ class OwnershipAssertionSummary:
 
 
 @dataclass(frozen=True)
+class LocalBranchSummary:
+    """Profile-independent effect summary for one ordinary local if statement."""
+
+    line: int
+    lexical_block_id: str
+    assigned_roots: tuple[str, ...]
+    impure_calls: tuple[str, ...]
+    has_early_exit: bool
+    origin: SemanticOrigin
+
+
+@dataclass(frozen=True)
 class CallSummary:
     full_name: str
     leaf_name: str | None
@@ -105,6 +117,7 @@ class RouteHandlerSummary:
     unsupported_control_flow_lines: tuple[int, ...]
     dependencies: tuple[DependencyParameterSummary, ...]
     ownership_assertions: tuple[OwnershipAssertionSummary, ...]
+    local_branches: tuple[LocalBranchSummary, ...]
     calls: tuple[CallSummary, ...]
     origin: SemanticOrigin
 
@@ -128,7 +141,7 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id=_EXTRACTOR_ID,
-        extractor_version="0.4.0",
+        extractor_version="0.5.0",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -353,6 +366,131 @@ def _sequential_statement_blocks(
 
     visit("root", list(handler.body))
     return blocks
+
+
+def _assignment_root(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        current: ast.AST = node
+        while isinstance(current, ast.Attribute):
+            current = current.value
+        return current.id if isinstance(current, ast.Name) else None
+    if isinstance(node, ast.Subscript):
+        current = node.value
+        while isinstance(current, (ast.Attribute, ast.Subscript)):
+            current = current.value
+        return current.id if isinstance(current, ast.Name) else None
+    return None
+
+
+def _dict_like_locals(statements: list[ast.stmt]) -> set[str]:
+    """Return locals syntactically initialized from dict literals in this block."""
+
+    names: set[str] = set()
+    for statement in statements:
+        if (
+            isinstance(statement, ast.Assign)
+            and len(statement.targets) == 1
+            and isinstance(statement.targets[0], ast.Name)
+            and isinstance(statement.value, ast.Dict)
+        ):
+            names.add(statement.targets[0].id)
+        elif (
+            isinstance(statement, ast.AnnAssign)
+            and isinstance(statement.target, ast.Name)
+            and isinstance(statement.value, ast.Dict)
+        ):
+            names.add(statement.target.id)
+    return names
+
+
+def _call_is_syntactically_pure(
+    call: ast.Call,
+    *,
+    dict_like_locals: set[str],
+) -> bool:
+    """Recognize only tiny built-in/local-data reads used inside local branches."""
+
+    if isinstance(call.func, ast.Name) and call.func.id == "isinstance":
+        return True
+    if (
+        isinstance(call.func, ast.Attribute)
+        and call.func.attr == "get"
+        and isinstance(call.func.value, ast.Name)
+        and call.func.value.id in dict_like_locals
+    ):
+        return True
+    return False
+
+
+def _local_branch_summaries(
+    path: str,
+    handler: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> tuple[LocalBranchSummary, ...]:
+    """Summarize ordinary if statements without granting them semantic meaning."""
+
+    found: list[LocalBranchSummary] = []
+    early_exit_types = (
+        ast.Return,
+        ast.Raise,
+        ast.Yield,
+        ast.YieldFrom,
+        ast.Break,
+        ast.Continue,
+    )
+
+    for lexical_block_id, statements in _sequential_statement_blocks(handler):
+        dict_like = _dict_like_locals(statements)
+        for statement in statements:
+            if not isinstance(statement, ast.If):
+                continue
+            if _is_supported_fail_fast_none_guard(statement):
+                continue
+            if _is_supported_fail_closed_ownership_guard(statement):
+                continue
+
+            assigned_roots: set[str] = set()
+            impure_calls: set[str] = set()
+            has_early_exit = False
+            for node in ast.walk(statement):
+                if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                    targets: list[ast.AST]
+                    if isinstance(node, ast.Assign):
+                        targets = list(node.targets)
+                    else:
+                        targets = [node.target]
+                    for target in targets:
+                        for child in ast.walk(target):
+                            root = _assignment_root(child)
+                            if root:
+                                assigned_roots.add(root)
+                elif isinstance(node, ast.Call):
+                    if not _call_is_syntactically_pure(
+                        node,
+                        dict_like_locals=dict_like,
+                    ):
+                        impure_calls.add(ast.unparse(node.func))
+                elif isinstance(node, early_exit_types):
+                    has_early_exit = True
+
+            found.append(
+                LocalBranchSummary(
+                    line=int(getattr(statement, "lineno", 0)),
+                    lexical_block_id=lexical_block_id,
+                    assigned_roots=tuple(sorted(assigned_roots)),
+                    impure_calls=tuple(sorted(impure_calls)),
+                    has_early_exit=has_early_exit,
+                    origin=_origin(path, statement),
+                )
+            )
+
+    return tuple(
+        sorted(
+            found,
+            key=lambda item: (item.line, item.lexical_block_id),
+        )
+    )
 
 
 def _unsupported_control_flow_lines(
@@ -821,6 +959,7 @@ def summarize_route_file(
                     handler,
                     non_null_parameters=non_null,
                 ),
+                local_branches=_local_branch_summaries(path, handler),
                 calls=tuple(calls),
                 origin=_origin(path, handler),
             )
