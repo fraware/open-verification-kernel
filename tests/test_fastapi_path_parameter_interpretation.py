@@ -8,6 +8,10 @@ from ovk.compilers.authorization.fastapi_route_summary import (
     summarize_route_file,
 )
 from ovk.compilers.authorization.material_loader import AuthMaterials
+from ovk.compilers.authorization.protected_effect_fastapi_dependency import (
+    FastApiDependencyEffectExtractor,
+    FastApiDependencyEffectProfile,
+)
 from ovk.compilers.authorization.semantic_summary_cache import (
     PersistentPythonSemanticSummaryCache,
     load_persistent_semantic_summaries,
@@ -235,3 +239,41 @@ def get_backfill(backfill_id: NonNegativeInt):
     assert term.interpretation is not None
     assert term.interpretation.input_origin == "request.path.backfill_id"
     assert term.interpretation.output_type == "pydantic.NonNegativeInt"
+
+
+
+def test_interpretation_reaches_assurance_ir_resource_identity() -> None:
+    source = """
+from fastapi import APIRouter
+from pydantic import NonNegativeInt
+
+router = APIRouter()
+
+@router.get("/backfills/{backfill_id}")
+def get_backfill(backfill_id: NonNegativeInt):
+    return load_backfill(backfill_id)
+""".strip()
+    materials = AuthMaterials(
+        head_files={"routes.py": source},
+        repo="example/interpreted-path",
+        head_revision="head",
+    )
+    profile = FastApiDependencyEffectProfile(
+        sink_effects={"load_backfill": "backfill.read"},
+        sink_identity_args={"load_backfill": 0},
+    )
+
+    ir = FastApiDependencyEffectExtractor().compile(materials, profile)
+
+    resources = [
+        resource
+        for resource in ir.resources
+        if resource.symbol == "backfill_id"
+    ]
+    assert len(resources) == 1
+    identity = resources[0].identity_term
+    assert identity is not None
+    assert identity.interpretation is not None
+    assert identity.interpretation.input_origin == "request.path.backfill_id"
+    assert identity.interpretation.decoder == "fastapi.path_parameter"
+    assert identity.interpretation.output_type == "pydantic.NonNegativeInt"
