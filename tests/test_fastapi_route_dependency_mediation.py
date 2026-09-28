@@ -319,6 +319,25 @@ async def mcp_post(request: Request):
     assert evaluation.status == "fail"
 
 
+def test_direct_and_factory_dependencies_with_same_name_remain_distinct() -> None:
+    source = """
+from fastapi import APIRouter, Depends, Request
+
+router = APIRouter(dependencies=[Depends(require_auth)])
+
+@router.post("", dependencies=[Depends(require_auth(scope="route"))])
+async def mcp_post(request: Request):
+    await handle_jsonrpc_request(await request.json())
+""".strip()
+
+    ir, evaluation = _evaluation(source)
+
+    assert len(ir.guards) == 2
+    assert all(guard.effectiveness == "unproved" for guard in ir.guards)
+    assert len({guard.guard_id for guard in ir.guards}) == 2
+    assert evaluation.status == "unknown"
+
+
 def test_dependency_on_different_router_is_not_inherited() -> None:
     source = """
 from fastapi import APIRouter, Depends, Request
