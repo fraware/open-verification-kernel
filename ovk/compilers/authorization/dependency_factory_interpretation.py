@@ -16,7 +16,7 @@ from ovk.core.resource_identity import ResourceIdentityTerm
 
 
 _EXTRACTOR_ID = "assurance.fastapi.dependency_factory_interpretation.ast_v1"
-_EXTRACTOR_VERSION = "0.1.0"
+_EXTRACTOR_VERSION = "0.2.0"
 
 
 @dataclass(frozen=True)
@@ -185,12 +185,19 @@ def _returned_callable(
 
 def _request_parameter(
     tree: ast.Module,
+    factory: ast.FunctionDef | ast.AsyncFunctionDef,
     function: ast.FunctionDef | ast.AsyncFunctionDef,
 ) -> str | None:
     if not _unique_direct_import(
         tree,
         module="fastapi",
         name="Request",
+    ):
+        return None
+
+    if (
+        _scope_binding_count(factory, "Request") != 0
+        or _scope_binding_count(function, "Request") != 0
     ):
         return None
 
@@ -205,7 +212,37 @@ def _request_parameter(
         if isinstance(argument.annotation, ast.Name)
         and argument.annotation.id == "Request"
     ]
-    return candidates[0] if len(candidates) == 1 else None
+    if len(candidates) != 1:
+        return None
+    request_parameter = candidates[0]
+    if _scope_binding_count(function, request_parameter) != 1:
+        return None
+    return request_parameter
+
+
+def _walk_node_without_nested_scopes(node: ast.AST):
+    """Yield one executable AST subtree without entering nested scopes."""
+
+    yield node
+    for child in ast.iter_child_nodes(node):
+        if isinstance(
+            child,
+            (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda),
+        ):
+            continue
+        yield from _walk_node_without_nested_scopes(child)
+
+
+def _executable_nodes(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+):
+    for statement in function.body:
+        if isinstance(
+            statement,
+            (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef),
+        ):
+            continue
+        yield from _walk_node_without_nested_scopes(statement)
 
 
 def _scope_store_count(
@@ -214,7 +251,7 @@ def _scope_store_count(
 ) -> int:
     return sum(
         1
-        for node in ast.walk(function)
+        for node in _executable_nodes(function)
         if isinstance(node, ast.Name)
         and node.id == name
         and isinstance(node.ctx, (ast.Store, ast.Del))
@@ -225,10 +262,10 @@ def _raw_path_bindings(
     function: ast.FunctionDef | ast.AsyncFunctionDef,
     *,
     request_parameter: str,
-) -> dict[str, str]:
+) -> dict[str, tuple[str, int]]:
     """Return single-assignment request.path_params.get(...) aliases."""
 
-    candidates: dict[str, list[str]] = {}
+    candidates: dict[str, list[tuple[str, int]]] = {}
     for statement in function.body:
         assigned = _assignment(statement)
         if assigned is None:
@@ -248,7 +285,12 @@ def _raw_path_bindings(
             or value.func.value.value.id != request_parameter
         ):
             continue
-        candidates.setdefault(target, []).append(value.args[0].value)
+        candidates.setdefault(target, []).append(
+            (
+                value.args[0].value,
+                int(getattr(statement, "lineno", 0)),
+            )
+        )
 
     return {
         symbol: paths[0]
@@ -298,6 +340,96 @@ def _parser_call(
     ):
         return node.body
     return None
+
+
+def _attribute_target_matches(
+    node: ast.AST,
+    *,
+    object_name: str,
+    attribute: str,
+) -> bool:
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == attribute
+        and isinstance(node.value, ast.Name)
+        and node.value.id == object_name
+    )
+
+
+def _nodes_mutate_attribute(
+    nodes,
+    *,
+    object_name: str,
+    attribute: str,
+) -> bool:
+    for node in nodes:
+        targets: list[ast.AST] = []
+        if isinstance(node, ast.Assign):
+            targets.extend(node.targets)
+        elif isinstance(node, ast.AnnAssign):
+            targets.append(node.target)
+        elif isinstance(node, ast.AugAssign):
+            targets.append(node.target)
+        elif isinstance(node, ast.Delete):
+            targets.extend(node.targets)
+
+        if any(
+            _attribute_target_matches(
+                target,
+                object_name=object_name,
+                attribute=attribute,
+            )
+            for target in targets
+        ):
+            return True
+
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "setattr"
+            and len(node.args) >= 2
+            and isinstance(node.args[0], ast.Name)
+            and node.args[0].id == object_name
+            and isinstance(node.args[1], ast.Constant)
+            and node.args[1].value == attribute
+        ):
+            return True
+    return False
+
+
+def _module_mutates_attribute(
+    tree: ast.Module,
+    *,
+    object_name: str,
+    attribute: str,
+) -> bool:
+    def nodes():
+        for statement in tree.body:
+            if isinstance(
+                statement,
+                (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef),
+            ):
+                continue
+            yield from _walk_node_without_nested_scopes(statement)
+
+    return _nodes_mutate_attribute(
+        nodes(),
+        object_name=object_name,
+        attribute=attribute,
+    )
+
+
+def _scope_mutates_attribute(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    *,
+    object_name: str,
+    attribute: str,
+) -> bool:
+    return _nodes_mutate_attribute(
+        _executable_nodes(function),
+        object_name=object_name,
+        attribute=attribute,
+    )
 
 
 def _nonnegativeint_adapters(tree: ast.Module) -> set[str]:
@@ -377,6 +509,21 @@ def _summary_for_call(
         and call.func.value.id in adapters
         and _scope_binding_count(factory, call.func.value.id) == 0
         and _scope_binding_count(returned, call.func.value.id) == 0
+        and not _module_mutates_attribute(
+            tree,
+            object_name=call.func.value.id,
+            attribute="validate_python",
+        )
+        and not _scope_mutates_attribute(
+            factory,
+            object_name=call.func.value.id,
+            attribute="validate_python",
+        )
+        and not _scope_mutates_attribute(
+            returned,
+            object_name=call.func.value.id,
+            attribute="validate_python",
+        )
     ):
         term = ResourceIdentityTerm.interpreted_symbol(
             parsed_symbol,
@@ -408,7 +555,7 @@ def _factory_summaries(
     returned = _returned_callable(factory)
     if returned is None:
         return []
-    request_parameter = _request_parameter(tree, returned)
+    request_parameter = _request_parameter(tree, factory, returned)
     if request_parameter is None:
         return []
 
@@ -421,14 +568,18 @@ def _factory_summaries(
 
     adapters = _nonnegativeint_adapters(tree)
     found: list[DependencyFactoryInterpretationSummary] = []
-    for node in ast.walk(returned):
+    for node in _executable_nodes(returned):
         assigned = _assignment(node)
         if assigned is None:
             continue
         parsed_symbol, value = assigned
-        for raw_symbol, path_parameter in sorted(raw_bindings.items()):
+        for raw_symbol, raw_binding in sorted(raw_bindings.items()):
+            path_parameter, raw_line = raw_binding
             call = _parser_call(value, raw_symbol=raw_symbol)
             if call is None:
+                continue
+            call_line = int(getattr(call, "lineno", 0))
+            if raw_line <= 0 or call_line <= raw_line:
                 continue
             item = _summary_for_call(
                 path=path,
