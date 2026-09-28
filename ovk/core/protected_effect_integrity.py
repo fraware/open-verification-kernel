@@ -416,7 +416,7 @@ def compile_protected_effect_integrity(ir: AssuranceIR) -> list[ProtectedEffectI
                 reason=(
                     "every protected-effect path has at least one principal/effect-compatible guard with proved authorization effectiveness"
                     if effectiveness_status == "established"
-                    else "guard effectiveness is unresolved on at least one protected-effect path"
+                    else "guard effectiveness is unproved or unresolved on at least one protected-effect path"
                 ),
                 evidence_ids=effectiveness_evidence,
             )
