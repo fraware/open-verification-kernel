@@ -18,7 +18,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ovk.core.bundle import content_digest
 from ovk.core.models import SourceRange, VerificationSubject
-from ovk.core.resource_identity import ResourceIdentityTerm
+from ovk.core.resource_identity import (
+    ResourceIdentityTerm,
+    ResourceInterpretation,
+)
 
 
 CoverageStatus = Literal["complete", "partial", "unknown", "inapplicable"]
@@ -32,6 +35,12 @@ GuardEffectivenessComparisonKind = Literal[
     "direct_inequality",
     "secrets_compare_digest",
     "hmac_compare_digest",
+]
+InterpretationCompatibilityRelation = Literal[
+    "equal_on_acted_domain",
+]
+InterpretationCompatibilityEvidenceKind = Literal[
+    "interpretation_contract_v1",
 ]
 BindingRelation = Literal["equal", "same_tenant", "custom"]
 BindingProjection = Literal["identity", "scope", "attribute"]
@@ -198,6 +207,49 @@ class GuardEffectivenessEvidence(BaseModel):
                 raise ValueError(
                     "APIKeyHeader shared-secret evidence requires hmac_compare_digest"
                 )
+        return self
+
+
+class InterpretationCompatibilityEvidence(BaseModel):
+    """Evidence that authorization agrees with execution where execution proceeds.
+
+    equal_on_acted_domain is directional. For every raw input accepted by
+    the acted/execution interpretation, the authorized interpretation must
+    accept that same input and produce the same semantic resource value.
+    Authorization may accept additional inputs because those inputs do not
+    reach the acted resource under this relation.
+
+    Constructing this object does not itself prove the relation. evidence_kind
+    identifies the independently checked contract that established it.
+    """
+
+    evidence_id: str
+    authorized_interpretation: ResourceInterpretation
+    acted_interpretation: ResourceInterpretation
+    relation: InterpretationCompatibilityRelation = "equal_on_acted_domain"
+    evidence_kind: InterpretationCompatibilityEvidenceKind
+    assumptions: list[str] = Field(default_factory=list)
+    origin: SemanticOrigin
+
+    @field_validator("evidence_id")
+    @classmethod
+    def _compatibility_id_non_empty(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError(
+                "interpretation compatibility evidence_id must be non-empty"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _compatibility_shape(self) -> "InterpretationCompatibilityEvidence":
+        if (
+            self.authorized_interpretation.input_origin
+            != self.acted_interpretation.input_origin
+        ):
+            raise ValueError(
+                "interpretation compatibility requires the same input_origin"
+            )
         return self
 
 
@@ -425,6 +477,9 @@ class AssuranceIR(BaseModel):
     guard_effectiveness_evidence: list[GuardEffectivenessEvidence] = Field(
         default_factory=list
     )
+    interpretation_compatibility_evidence: list[
+        InterpretationCompatibilityEvidence
+    ] = Field(default_factory=list)
     protected_effects: list[ProtectedEffect] = Field(default_factory=list)
     resource_bindings: list[ResourceBinding] = Field(default_factory=list)
     resource_return_contracts: list[ResourceReturnContract] = Field(default_factory=list)
@@ -445,6 +500,7 @@ class AssuranceIR(BaseModel):
             "conditions": "condition_id",
             "guards": "guard_id",
             "guard_effectiveness_evidence": "evidence_id",
+            "interpretation_compatibility_evidence": "evidence_id",
             "protected_effects": "protected_effect_id",
             "resource_bindings": "binding_id",
             "resource_return_contracts": "contract_id",
@@ -487,6 +543,9 @@ class AssuranceIR(BaseModel):
         for item in payload["guard_effectiveness_evidence"]:
             item["assumptions"] = sorted(item["assumptions"])
 
+        for item in payload["interpretation_compatibility_evidence"]:
+            item["assumptions"] = sorted(item["assumptions"])
+
         for item in payload["paths"]:
             item["guard_ids"] = sorted(item["guard_ids"])
             item["protected_effect_ids"] = sorted(item["protected_effect_ids"])
@@ -515,6 +574,11 @@ class AssuranceIR(BaseModel):
             item["acceptable_guarantees"] = sorted(item["acceptable_guarantees"])
 
         payload["assumptions"] = dict(sorted(payload["assumptions"].items()))
+
+        # Preserve v1 content identity for IRs that do not use the additive
+        # interpretation-compatibility evidence extension.
+        if not self.interpretation_compatibility_evidence:
+            payload.pop("interpretation_compatibility_evidence", None)
         return payload
 
     @property
