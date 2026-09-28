@@ -612,10 +612,7 @@ def _router_wrapper_class_summaries(
             continue
 
         body = _meaningful_statements(node.body)
-        if body == [next(iter(body), None)] and body and isinstance(
-            body[0],
-            ast.Pass,
-        ):
+        if len(body) == 1 and isinstance(body[0], ast.Pass):
             proof_kind = "direct_apirouter_subclass_v1"
         elif not body:
             proof_kind = "direct_apirouter_subclass_v1"
