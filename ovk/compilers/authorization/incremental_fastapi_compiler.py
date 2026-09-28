@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from ovk.compilers.authorization.fastapi_include_router_dependencies import (
     infer_include_router_dependencies,
 )
+from ovk.compilers.authorization.fastapi_router_wrappers import (
+    infer_fastapi_router_wrappers,
+)
 from ovk.compilers.authorization.fastapi_route_summary import RouteSummaryIndex
 from ovk.compilers.authorization.incremental_contract_composition import (
     IncrementalContractCompositionState,
@@ -36,6 +39,7 @@ from ovk.compilers.authorization.resource_return_contracts import (
     infer_resource_return_contracts,
 )
 from ovk.core.assurance_ir import AssuranceIR
+from ovk.core.bundle import content_digest
 
 
 @dataclass(frozen=True)
@@ -146,6 +150,17 @@ def compile_incremental_fastapi_assurance(
     include_router_dependencies = infer_include_router_dependencies(
         route_summary_index=route_summary_index,
     )
+    router_wrappers = infer_fastapi_router_wrappers(
+        route_summary_index=route_summary_index,
+    )
+
+    def route_attachment_digest(path: str) -> str:
+        return content_digest(
+            {
+                "include_router": include_router_dependencies.digest_for(path),
+                "router_wrappers": router_wrappers.digest_for(path),
+            }
+        )
 
     guard_effectiveness_evidence = infer_route_dependency_effectiveness(
         parsed_trees=parsed_index.trees,
@@ -210,9 +225,7 @@ def compile_incremental_fastapi_assurance(
                 profile=profile,
                 contracts_by_name=contracts_by_name,
                 guard_effectiveness_by_name=guard_effectiveness_by_name,
-                route_attachment_digest=(
-                    include_router_dependencies.digest_for(path)
-                ),
+                route_attachment_digest=route_attachment_digest(path),
             )
         ):
             fragments[path] = prior
@@ -230,9 +243,8 @@ def compile_incremental_fastapi_assurance(
                     {},
                 )
             ),
-            route_attachment_digest=(
-                include_router_dependencies.digest_for(path)
-            ),
+            external_fastapi_route_owners=router_wrappers.owners_for(path),
+            route_attachment_digest=route_attachment_digest(path),
         )
         rebound += 1
 
