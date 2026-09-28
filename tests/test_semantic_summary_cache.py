@@ -151,6 +151,48 @@ def test_fresh_worker_parses_only_changed_file_and_rebinds_semantics(tmp_path: P
     )
 
 
+def test_factory_route_dependency_survives_persistent_summary_cache(
+    tmp_path: Path,
+) -> None:
+    source = """
+from fastapi import APIRouter, Depends
+
+router = APIRouter()
+
+@router.put(
+    "/backfills/{backfill_id}",
+    dependencies=[Depends(requires_access_backfill(method="PUT"))],
+)
+def pause_backfill(backfill_id: int):
+    return protected_call(backfill_id)
+""".strip()
+    materials = AuthMaterials(
+        head_files={"routes.py": source},
+        repo="example/factory-dependency-cache",
+        head_revision="head",
+    )
+    root = tmp_path / "summaries"
+
+    first = load_persistent_semantic_summaries(
+        materials,
+        cache=PersistentPythonSemanticSummaryCache(root),
+    )
+    second = load_persistent_semantic_summaries(
+        materials,
+        cache=PersistentPythonSemanticSummaryCache(root),
+    )
+
+    assert first.stats.misses == 1
+    assert second.stats.hits == 1
+    assert second.stats.parse_count == 0
+    route = second.route_summary_index.summaries["routes.py"].handlers[0]
+    assert len(route.route_dependencies) == 1
+    dependency = route.route_dependencies[0]
+    assert dependency.full_name == "requires_access_backfill"
+    assert dependency.leaf_name == "requires_access_backfill"
+    assert dependency.factory_call == 'requires_access_backfill(method="PUT")'
+
+
 def test_corrupt_payload_digest_is_cache_miss_and_rebuilt(tmp_path: Path) -> None:
     materials = _materials()
     root = tmp_path / "summaries"
