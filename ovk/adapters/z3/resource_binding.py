@@ -171,16 +171,16 @@ def evaluate_resource_binding_with_z3(ir: AssuranceIR, binding: ResourceBinding)
             and left_interpretation.input_origin
             == right_interpretation.input_origin
         )
-        same_local_symbol_with_interpretation = (
+        same_local_symbol_with_partial_interpretation = (
             left.value == right.value
             and (
-                left_interpretation is not None
-                or right_interpretation is not None
+                (left_interpretation is None)
+                != (right_interpretation is None)
             )
         )
         if (
             same_interpreted_origin
-            or same_local_symbol_with_interpretation
+            or same_local_symbol_with_partial_interpretation
         ):
             return {
                 "status": "unknown",
