@@ -28,6 +28,7 @@ from ovk.core.assurance_ir import (
     EffectRef,
     FunctionContract,
     GuardEffectivenessEvidence,
+    PathCondition,
     PrincipalRef,
     ProtectedEffect,
     ResourceBinding,
@@ -337,6 +338,7 @@ class FastApiFileSemanticFragment:
     resources: tuple[ResourceRef, ...] = ()
     effects: tuple[EffectRef, ...] = ()
     guards: tuple[AuthorizationGuard, ...] = ()
+    conditions: tuple[PathCondition, ...] = ()
     protected_effects: tuple[ProtectedEffect, ...] = ()
     resource_bindings: tuple[ResourceBinding, ...] = ()
     contract_uses: tuple[ContractUse, ...] = ()
@@ -512,6 +514,7 @@ def bind_route_file_summary(
     resources: dict[str, ResourceRef] = {}
     effects: dict[str, EffectRef] = {}
     guards: dict[str, AuthorizationGuard] = {}
+    conditions: dict[str, PathCondition] = {}
     protected: dict[str, ProtectedEffect] = {}
     bindings: dict[str, ResourceBinding] = {}
     contract_uses: dict[str, ContractUse] = {}
@@ -571,6 +574,36 @@ def bind_route_file_summary(
             if sink is None:
                 continue
             sink_key, effect_name = sink
+
+            condition_ids: list[str] = []
+            for lexical_condition in call.lexical_conditions:
+                source_range = lexical_condition.origin.source_range
+                condition_id = _semantic_id(
+                    "condition",
+                    (
+                        f"{lexical_condition.origin.path}:"
+                        f"{source_range.start_line if source_range else None}:"
+                        f"{source_range.end_line if source_range else None}:"
+                        f"{lexical_condition.truth_value}:"
+                        f"{lexical_condition.expression}"
+                    ),
+                )
+                rendered_condition = (
+                    lexical_condition.expression
+                    if lexical_condition.truth_value
+                    else f"not ({lexical_condition.expression})"
+                )
+                conditions.setdefault(
+                    condition_id,
+                    PathCondition(
+                        condition_id=condition_id,
+                        expression=rendered_condition,
+                        origin=lexical_condition.origin,
+                    ),
+                )
+                condition_ids.append(condition_id)
+            condition_ids = sorted(set(condition_ids))
+
             sink_unsupported_start = len(unsupported)
             static_resource = profile.static_resource_for_sink(sink_key)
             if static_resource is not None:
@@ -1025,6 +1058,7 @@ def bind_route_file_summary(
                 principal_id=principal_id,
                 effect_id=effect_id,
                 resource_id=acted_id,
+                condition_ids=condition_ids,
                 origin=call.origin,
             )
             path_id = _semantic_id(
@@ -1056,6 +1090,7 @@ def bind_route_file_summary(
                 protected_effect_ids=[protected_id],
                 binding_ids=sorted(binding_ids),
                 contract_use_ids=sorted(contract_use_ids),
+                condition_ids=condition_ids,
                 coverage_status=local_coverage_status,
                 unsupported_constructs=local_unsupported,
                 coverage_assumptions=list(_PROFILE_ASSUMPTIONS),
@@ -1083,6 +1118,9 @@ def bind_route_file_summary(
         ),
         guards=tuple(
             sorted(guards.values(), key=lambda item: item.guard_id)
+        ),
+        conditions=tuple(
+            sorted(conditions.values(), key=lambda item: item.condition_id)
         ),
         protected_effects=tuple(
             sorted(
@@ -1202,6 +1240,7 @@ def assemble_fastapi_assurance_ir(
     resources: dict[str, ResourceRef] = {}
     effects: dict[str, EffectRef] = {}
     guards: dict[str, AuthorizationGuard] = {}
+    conditions: dict[str, PathCondition] = {}
     protected: dict[str, ProtectedEffect] = {}
     bindings: dict[str, ResourceBinding] = {}
     contract_uses: dict[str, ContractUse] = {}
@@ -1232,6 +1271,8 @@ def assemble_fastapi_assurance_ir(
             effects.setdefault(item.effect_id, item)
         for item in fragment.guards:
             guards[item.guard_id] = item
+        for item in fragment.conditions:
+            conditions[item.condition_id] = item
         for item in fragment.protected_effects:
             protected[item.protected_effect_id] = item
         for item in fragment.resource_bindings:
@@ -1259,7 +1300,7 @@ def assemble_fastapi_assurance_ir(
         ),
         extractor=AssuranceExtractorIdentity(
             extractor_id="assurance.fastapi.dependency_effects.ast_v1",
-            extractor_version="0.14.0",
+            extractor_version="0.15.0",
             source_profile_id="assurance.fastapi.dependency_effects.ast_v1",
         ),
         coverage=AssuranceCoverage(
@@ -1284,6 +1325,10 @@ def assemble_fastapi_assurance_ir(
         guards=sorted(
             guards.values(),
             key=lambda item: item.guard_id,
+        ),
+        conditions=sorted(
+            conditions.values(),
+            key=lambda item: item.condition_id,
         ),
         guard_effectiveness_evidence=sorted(
             guard_effectiveness_evidence or [],
