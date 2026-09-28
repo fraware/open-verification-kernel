@@ -114,7 +114,7 @@ def infer_include_router_dependencies(
             continue
 
         unique = {
-            (item.full_name, item.leaf_name): item
+            (item.full_name, item.leaf_name, item.factory_call): item
             for item in mounted[0]
         }
         by_target.setdefault(target_path, {})[
@@ -125,6 +125,7 @@ def infer_include_router_dependencies(
                 key=lambda item: (
                     item.full_name,
                     item.leaf_name or "",
+                    item.factory_call or "",
                     item.origin.path,
                 ),
             )
@@ -143,6 +144,7 @@ def infer_include_router_dependencies(
                         "full_name": item.full_name,
                         "leaf_name": item.leaf_name,
                         "source_kind": item.source_kind,
+                        "factory_call": item.factory_call,
                         "origin": item.origin.model_dump(mode="json"),
                     }
                 )
