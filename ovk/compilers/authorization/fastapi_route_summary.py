@@ -171,7 +171,7 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id=_EXTRACTOR_ID,
-        extractor_version="0.8.0",
+        extractor_version="0.9.0",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -197,6 +197,14 @@ def _const_str(node: ast.AST | None) -> str | None:
 def _route_decorator(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
 ) -> tuple[str, str, ast.Call, str | None] | None:
+    """Return one bounded static FastAPI route decorator.
+
+    FastAPI permits the route path as the first positional argument or as the
+    explicit path keyword. OVK accepts exactly one of those forms and requires
+    a literal string. Ambiguous or dynamic path expressions remain outside the
+    source theorem.
+    """
+
     for decorator in node.decorator_list:
         if (
             not isinstance(decorator, ast.Call)
@@ -204,9 +212,26 @@ def _route_decorator(
         ):
             continue
         method = decorator.func.attr.lower()
-        if method not in _HTTP_METHODS or not decorator.args:
+        if method not in _HTTP_METHODS:
             continue
-        route = _const_str(decorator.args[0])
+
+        path_keywords = [
+            keyword.value
+            for keyword in decorator.keywords
+            if keyword.arg == "path"
+        ]
+        if len(decorator.args) > 1 or len(path_keywords) > 1:
+            continue
+        if decorator.args and path_keywords:
+            continue
+
+        route_node: ast.AST | None = None
+        if len(decorator.args) == 1:
+            route_node = decorator.args[0]
+        elif len(path_keywords) == 1:
+            route_node = path_keywords[0]
+
+        route = _const_str(route_node)
         if route is None:
             continue
         receiver = decorator.func.value
