@@ -722,10 +722,6 @@ class FastApiDependencyEffectExtractor:
                 )
             parsed = parsed_index
 
-        include_router_dependencies = infer_include_router_dependencies(
-            parsed_trees=parsed.trees,
-        )
-
         guard_effectiveness_evidence = infer_route_dependency_effectiveness(
             parsed_trees=parsed.trees,
             dependency_names=profile.route_dependency_guard_resources,
@@ -779,6 +775,10 @@ class FastApiDependencyEffectExtractor:
                     "route summary index does not match supplied head materials"
                 )
             route_summaries = route_summary_index
+
+        include_router_dependencies = infer_include_router_dependencies(
+            route_summary_index=route_summaries,
+        )
 
         fragments = {
             path: bind_route_file_summary(
