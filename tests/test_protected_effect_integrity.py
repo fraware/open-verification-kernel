@@ -6,6 +6,7 @@ from ovk.core.assurance_ir import (
     AssuranceIR,
     AuthorizationGuard,
     EffectRef,
+    PathCondition,
     PrincipalRef,
     ProtectedEffect,
     ResourceBinding,
@@ -135,3 +136,134 @@ def test_guard_for_wrong_principal_is_violated() -> None:
 
     assert obligation.structural_status == "violated"
     assert _status(obligation, "principal_binding") == "violated"
+
+def test_every_complete_effect_path_requires_a_dominating_guard() -> None:
+    ir = _base_ir(
+        guard_resource="r:authorized",
+        effect_resource="r:authorized",
+        include_binding=False,
+    )
+    ir.paths[0].coverage_status = "complete"
+    ir.paths.append(
+        SemanticPath(
+            path_id="path:unguarded",
+            entrypoint="POST /refund",
+            guard_ids=[],
+            protected_effect_ids=["pe:refund"],
+            coverage_status="complete",
+            origin=_origin(20),
+        )
+    )
+
+    obligation = compile_protected_effect_integrity(ir)[0]
+
+    assert obligation.structural_status == "violated"
+    assert _status(obligation, "guard_presence") == "violated"
+    assert obligation.path_candidate_guard_ids == {
+        "path:refund": ["g:refund"],
+        "path:unguarded": [],
+    }
+
+
+def test_partial_unguarded_path_preserves_unknown_instead_of_false_fail() -> None:
+    ir = _base_ir(
+        guard_resource="r:authorized",
+        effect_resource="r:authorized",
+        include_binding=False,
+    )
+    ir.paths[0].coverage_status = "complete"
+    ir.paths.append(
+        SemanticPath(
+            path_id="path:partial",
+            entrypoint="POST /refund",
+            guard_ids=[],
+            protected_effect_ids=["pe:refund"],
+            coverage_status="partial",
+            unsupported_constructs=["branch_outside_profile"],
+            origin=_origin(20),
+        )
+    )
+
+    obligation = compile_protected_effect_integrity(ir)[0]
+
+    assert obligation.structural_status == "unknown"
+    assert _status(obligation, "guard_presence") == "unknown"
+
+
+def test_distinct_valid_guards_may_cover_distinct_paths() -> None:
+    ir = _base_ir(
+        guard_resource="r:authorized",
+        effect_resource="r:authorized",
+        include_binding=False,
+    )
+    ir.paths[0].coverage_status = "complete"
+    ir.guards.append(
+        AuthorizationGuard(
+            guard_id="g:refund-alt",
+            principal_id="p:user",
+            effect_id="e:refund",
+            resource_id="r:authorized",
+            origin=_origin(21),
+        )
+    )
+    ir.paths.append(
+        SemanticPath(
+            path_id="path:alt",
+            entrypoint="POST /refund",
+            guard_ids=["g:refund-alt"],
+            protected_effect_ids=["pe:refund"],
+            coverage_status="complete",
+            origin=_origin(20),
+        )
+    )
+
+    obligation = compile_protected_effect_integrity(ir)[0]
+
+    assert obligation.structural_status == "established"
+    assert _status(obligation, "guard_presence") == "established"
+    assert _status(obligation, "principal_binding") == "established"
+    assert _status(obligation, "effect_binding") == "established"
+    assert _status(obligation, "guard_effectiveness") == "established"
+    assert _status(obligation, "resource_binding") == "established"
+
+
+def test_conditional_guard_must_dominate_effect_path() -> None:
+    ir = _base_ir(
+        guard_resource="r:authorized",
+        effect_resource="r:authorized",
+        include_binding=False,
+    )
+    ir.paths[0].coverage_status = "complete"
+    ir.conditions = [
+        PathCondition(
+            condition_id="condition:checked",
+            expression="check_access",
+            origin=_origin(7),
+        )
+    ]
+    ir.guards[0].condition_ids = ["condition:checked"]
+
+    unguarded = compile_protected_effect_integrity(ir)[0]
+    assert _status(unguarded, "guard_presence") == "violated"
+
+    ir.paths[0].condition_ids = ["condition:checked"]
+    dominated = compile_protected_effect_integrity(ir)[0]
+
+    assert dominated.structural_status == "established"
+    assert _status(dominated, "guard_presence") == "established"
+
+
+def test_unknown_condition_atom_cannot_establish_dominance() -> None:
+    ir = _base_ir(
+        guard_resource="r:authorized",
+        effect_resource="r:authorized",
+        include_binding=False,
+    )
+    ir.paths[0].coverage_status = "complete"
+    ir.guards[0].condition_ids = ["condition:unresolved"]
+    ir.paths[0].condition_ids = ["condition:unresolved"]
+
+    obligation = compile_protected_effect_integrity(ir)[0]
+
+    assert _status(obligation, "guard_presence") == "violated"
+
