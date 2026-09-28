@@ -144,6 +144,79 @@ def test_non_request_parameter_does_not_mint_path_interpretation() -> None:
     assert _interpretations(source) == ()
 
 
+def test_request_parameter_reassignment_suppresses_interpretation() -> None:
+    source = FIXED_SOURCE.replace(
+        '        backfill_id_raw = request.path_params.get("backfill_id")\n',
+        '        request = fake_request\n'
+        '        backfill_id_raw = request.path_params.get("backfill_id")\n',
+    )
+
+    assert _interpretations(source) == ()
+
+
+def test_factory_scope_request_shadowing_suppresses_interpretation() -> None:
+    source = FIXED_SOURCE.replace(
+        "def requires_access_backfill(method):\n",
+        "def requires_access_backfill(method):\n"
+        "    Request = custom_request_type\n",
+    )
+
+    assert _interpretations(source) == ()
+
+
+def test_nested_scope_parser_does_not_mint_returned_callable_evidence() -> None:
+    source = """
+from fastapi import Request
+from pydantic import NonNegativeInt, TypeAdapter
+
+_ADAPTER: TypeAdapter[NonNegativeInt] = TypeAdapter(NonNegativeInt)
+
+
+def requires_access_backfill(method):
+    async def inner(request: Request):
+        backfill_id_raw = request.path_params.get("backfill_id")
+
+        def parse():
+            backfill_id = _ADAPTER.validate_python(backfill_id_raw)
+            return backfill_id
+
+        authorize(method, parse())
+
+    return inner
+""".strip()
+
+    assert _interpretations(source) == ()
+
+
+def test_parser_must_follow_raw_path_binding() -> None:
+    source = """
+from fastapi import Request
+
+
+def requires_access_backfill(method):
+    async def inner(request: Request):
+        backfill_id = int(backfill_id_raw)
+        backfill_id_raw = request.path_params.get("backfill_id")
+        authorize(method, backfill_id)
+
+    return inner
+""".strip()
+
+    assert _interpretations(source) == ()
+
+
+def test_adapter_method_mutation_suppresses_interpretation() -> None:
+    source = FIXED_SOURCE.replace(
+        "_BACKFILL_ID_ADAPTER: TypeAdapter[NonNegativeInt] = "
+        "TypeAdapter(NonNegativeInt)\n",
+        "_BACKFILL_ID_ADAPTER: TypeAdapter[NonNegativeInt] = "
+        "TypeAdapter(NonNegativeInt)\n"
+        "_BACKFILL_ID_ADAPTER.validate_python = custom_validate\n",
+    )
+
+    assert _interpretations(source) == ()
+
+
 def test_factory_interpretation_survives_persistent_summary_cache(
     tmp_path: Path,
 ) -> None:
