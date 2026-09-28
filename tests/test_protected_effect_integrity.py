@@ -165,7 +165,7 @@ def test_every_complete_effect_path_requires_a_dominating_guard() -> None:
     }
 
 
-def test_partial_unguarded_path_preserves_unknown_instead_of_false_fail() -> None:
+def test_partial_path_with_no_guard_remains_a_concrete_violation() -> None:
     ir = _base_ir(
         guard_resource="r:authorized",
         effect_resource="r:authorized",
@@ -183,6 +183,29 @@ def test_partial_unguarded_path_preserves_unknown_instead_of_false_fail() -> Non
             origin=_origin(20),
         )
     )
+
+    obligation = compile_protected_effect_integrity(ir)[0]
+
+    assert obligation.structural_status == "violated"
+    assert _status(obligation, "guard_presence") == "violated"
+
+
+def test_partial_path_with_conditional_guard_preserves_dominance_unknown() -> None:
+    ir = _base_ir(
+        guard_resource="r:authorized",
+        effect_resource="r:authorized",
+        include_binding=False,
+    )
+    ir.conditions = [
+        PathCondition(
+            condition_id="condition:checked",
+            expression="check_access",
+            origin=_origin(7),
+        )
+    ]
+    ir.guards[0].condition_ids = ["condition:checked"]
+    ir.paths[0].coverage_status = "partial"
+    ir.paths[0].unsupported_constructs = ["branch_outside_profile"]
 
     obligation = compile_protected_effect_integrity(ir)[0]
 
