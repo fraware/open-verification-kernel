@@ -95,6 +95,48 @@ def get_backfill(backfill_id: NNInt):
     assert term.interpretation is None
 
 
+def test_spoofed_route_owner_cannot_mint_fastapi_interpretation_evidence() -> None:
+    source = """
+from pydantic import NonNegativeInt
+
+class FakeRouter:
+    def get(self, _path):
+        def decorate(fn):
+            return fn
+        return decorate
+
+router = FakeRouter()
+
+@router.get("/backfills/{backfill_id}")
+def get_backfill(backfill_id: NonNegativeInt):
+    return load_backfill(backfill_id)
+""".strip()
+
+    term = _first_call_term(source)
+
+    assert term is not None
+    assert term.interpretation is None
+
+
+def test_second_import_binding_cannot_spoof_nonnegativeint() -> None:
+    source = """
+from fastapi import APIRouter
+from pydantic import NonNegativeInt
+from example_types import NonNegativeInt
+
+router = APIRouter()
+
+@router.get("/backfills/{backfill_id}")
+def get_backfill(backfill_id: NonNegativeInt):
+    return load_backfill(backfill_id)
+""".strip()
+
+    term = _first_call_term(source)
+
+    assert term is not None
+    assert term.interpretation is None
+
+
 def test_rebound_nonnegativeint_name_cannot_mint_interpretation_evidence() -> None:
     source = """
 from fastapi import APIRouter
