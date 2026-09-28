@@ -144,7 +144,7 @@ def compile_incremental_fastapi_assurance(
     )
 
     include_router_dependencies = infer_include_router_dependencies(
-        parsed_trees=parsed_index.trees,
+        route_summary_index=route_summary_index,
     )
 
     guard_effectiveness_evidence = infer_route_dependency_effectiveness(
