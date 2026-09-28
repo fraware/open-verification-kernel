@@ -5,10 +5,11 @@ This module defines the first assurance theorem family over Assurance IR:
     Performed(principal, effect, resource)
         -> Authorized(principal, effect, resource)
 
-The compiler is deliberately conservative. It does not prove resource identity or
-source-level dominance. It decomposes one protected effect into explicit
-sub-obligations and records which parts are structurally established, violated,
-or still require a stronger backend.
+The compiler is deliberately conservative. It does not prove resource identity.
+It proves only a bounded source-level dominance relation over exact conjunctive
+condition atoms already present in Assurance IR, then decomposes one protected
+effect into explicit sub-obligations and records which parts are structurally
+established, violated, or still require a stronger backend.
 
 No merge decision is produced here.
 """
