@@ -1400,23 +1400,18 @@ def _path_parameter_names(route_path: str) -> set[str]:
     return names
 
 
-def _path_parameter_interpretations(
+def _path_parameter_interpretation_candidates(
     *,
+    path: str,
     tree: ast.Module,
     handler: ast.FunctionDef | ast.AsyncFunctionDef,
     route_path: str,
-    router_symbol: str | None,
-) -> dict[str, ResourceIdentityTerm]:
-    """Infer source-grounded interpretation contracts for bounded path types.
+) -> dict[str, PathParameterInterpretationSummary]:
+    """Summarize bounded path interpretation independently of route ownership.
 
-    v1 intentionally supports only an unaliased pydantic.NonNegativeInt
-    annotation on a parameter whose name occurs as an exact route-path
-    placeholder. Annotated metadata, Path customization, import aliases,
-    custom validators, and rebound names remain outside this theorem.
-
-    The decoder label records the FastAPI path-parameter boundary. It does not
-    assert equivalence with a separate TypeAdapter/parser call; that requires
-    independent source evidence.
+    The candidate records only local syntax and a canonical Pydantic binding.
+    Semantic binding applies it only after the route owner is established as a
+    canonical FastAPI router or a separately source-proved APIRouter wrapper.
     """
 
     if not _has_unique_direct_import_binding(
@@ -1426,27 +1421,11 @@ def _path_parameter_interpretations(
     ):
         return {}
 
-    route_owners: set[str] = set()
-    for constructor in ("FastAPI", "APIRouter"):
-        if _has_unique_direct_import_binding(
-            tree,
-            module="fastapi",
-            name=constructor,
-        ):
-            route_owners.update(
-                _unique_constructor_symbols(
-                    tree,
-                    constructor=constructor,
-                )
-            )
-    if router_symbol is None or router_symbol not in route_owners:
-        return {}
-
     path_parameters = _path_parameter_names(route_path)
     if not path_parameters:
         return {}
 
-    interpreted: dict[str, ResourceIdentityTerm] = {}
+    interpreted: dict[str, PathParameterInterpretationSummary] = {}
     arguments = (
         list(handler.args.posonlyargs)
         + list(handler.args.args)
@@ -1459,12 +1438,16 @@ def _path_parameter_interpretations(
             or argument.annotation.id != "NonNegativeInt"
         ):
             continue
-        interpreted[argument.arg] = ResourceIdentityTerm.interpreted_symbol(
-            argument.arg,
-            input_origin=f"request.path.{argument.arg}",
-            decoder="fastapi.path_parameter",
-            output_type="pydantic.NonNegativeInt",
-            constraints=("ge=0", "validation_mode=default"),
+        interpreted[argument.arg] = PathParameterInterpretationSummary(
+            parameter_name=argument.arg,
+            term=ResourceIdentityTerm.interpreted_symbol(
+                argument.arg,
+                input_origin=f"request.path.{argument.arg}",
+                decoder="fastapi.path_parameter",
+                output_type="pydantic.NonNegativeInt",
+                constraints=("ge=0", "validation_mode=default"),
+            ),
+            origin=_origin(path, argument.annotation),
         )
     return interpreted
 
@@ -1685,6 +1668,7 @@ def summarize_route_file(
 ) -> RouteFileSummary:
     handlers: list[RouteHandlerSummary] = []
     inherited_by_router = _router_constructor_dependencies(path, tree)
+    canonical_route_owners = _canonical_fastapi_route_owner_symbols(tree)
 
     for handler in tree.body:
         if not isinstance(handler, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -1695,11 +1679,21 @@ def summarize_route_file(
         method, route_path, route_decorator, router_symbol = route
         aliases = _constructor_aliases(handler)
         non_null = _provably_non_null_parameters(handler)
-        interpreted_parameters = _path_parameter_interpretations(
-            tree=tree,
-            handler=handler,
-            route_path=route_path,
-            router_symbol=router_symbol,
+        interpretation_candidates = (
+            _path_parameter_interpretation_candidates(
+                path=path,
+                tree=tree,
+                handler=handler,
+                route_path=route_path,
+            )
+        )
+        interpreted_parameters = (
+            {
+                name: item.term
+                for name, item in interpretation_candidates.items()
+            }
+            if router_symbol in canonical_route_owners
+            else {}
         )
 
         calls: list[CallSummary] = []
@@ -1767,6 +1761,12 @@ def summarize_route_file(
                     interpreted_parameters=interpreted_parameters,
                 ),
                 calls=tuple(calls),
+                path_parameter_interpretations=tuple(
+                    sorted(
+                        interpretation_candidates.values(),
+                        key=lambda item: item.parameter_name,
+                    )
+                ),
                 origin=_origin(path, handler),
             )
         )
@@ -1794,6 +1794,14 @@ def summarize_route_file(
         ),
         module_imports=_module_import_summaries(tree),
         include_router_calls=_include_router_call_summaries(
+            path,
+            tree,
+        ),
+        router_wrapper_classes=_router_wrapper_class_summaries(
+            path,
+            tree,
+        ),
+        imported_constructor_bindings=_imported_constructor_bindings(
             path,
             tree,
         ),
