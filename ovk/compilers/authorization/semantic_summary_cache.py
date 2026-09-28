@@ -55,7 +55,7 @@ from ovk.core.resource_identity import ResourceIdentityTerm
 
 
 SEMANTIC_SUMMARY_CACHE_SCHEMA = "ovk.python_semantic_summary_cache.v1"
-SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.7.0"
+SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.8.0"
 DEFAULT_SEMANTIC_SUMMARY_CACHE_DIR = Path(
     ".verification/cache/python-semantic-summaries"
 )
@@ -207,6 +207,7 @@ def _route_summary_payload(summary: RouteFileSummary) -> dict[str, Any]:
                             "full_name": dep.full_name,
                             "leaf_name": dep.leaf_name,
                             "source_kind": dep.source_kind,
+                            "factory_call": dep.factory_call,
                             "origin": _origin_payload(dep.origin),
                         }
                         for dep in item.dependencies
@@ -254,6 +255,7 @@ def _route_summary_payload(summary: RouteFileSummary) -> dict[str, Any]:
                         "full_name": dep.full_name,
                         "leaf_name": dep.leaf_name,
                         "source_kind": dep.source_kind,
+                        "factory_call": dep.factory_call,
                         "origin": _origin_payload(dep.origin),
                     }
                     for dep in handler.route_dependencies
@@ -369,6 +371,11 @@ def _route_summary_from_payload(payload: dict[str, Any]) -> RouteFileSummary:
                         ),
                         source_kind=str(dep["source_kind"]),
                         origin=SemanticOrigin.model_validate(dep["origin"]),
+                        factory_call=(
+                            str(dep["factory_call"])
+                            if dep.get("factory_call") is not None
+                            else None
+                        ),
                     )
                     for dep in handler.get("route_dependencies") or []
                 ),
@@ -409,6 +416,11 @@ def _route_summary_from_payload(payload: dict[str, Any]) -> RouteFileSummary:
                             source_kind=str(dep["source_kind"]),
                             origin=SemanticOrigin.model_validate(
                                 dep["origin"]
+                            ),
+                            factory_call=(
+                                str(dep["factory_call"])
+                                if dep.get("factory_call") is not None
+                                else None
                             ),
                         )
                         for dep in item["dependencies"]
