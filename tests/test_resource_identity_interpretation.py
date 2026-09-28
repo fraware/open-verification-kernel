@@ -93,6 +93,39 @@ def test_plain_term_canonical_payload_preserves_v1_identity() -> None:
     assert term.term_id == f"rid:{content_digest(payload)[:16]}"
 
 
+def test_plain_term_keeps_legacy_shape_inside_assurance_ir_payload() -> None:
+    term = ResourceIdentityTerm.symbol("invoice_id")
+    ir = AssuranceIR(
+        subject=VerificationSubject(
+            repo="example/legacy-identity",
+            base_sha="a",
+            head_sha="b",
+        ),
+        extractor=AssuranceExtractorIdentity(
+            extractor_id="test.interpretation",
+            extractor_version="0.1.0",
+        ),
+        coverage=AssuranceCoverage(
+            status="complete",
+            confidence=1.0,
+        ),
+        resources=[
+            ResourceRef(
+                resource_id="r:invoice",
+                symbol="invoice_id",
+                identity_term=term,
+                origin=_origin(),
+            )
+        ],
+    )
+
+    resource = ir.canonical_payload()["resources"][0]
+    assert resource["identity_term"] == {
+        "kind": "symbol",
+        "value": "invoice_id",
+    }
+
+
 def test_interpretation_constraints_are_canonicalized() -> None:
     interpretation = ResourceInterpretation(
         input_origin=" request.path.backfill_id ",
