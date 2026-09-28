@@ -446,6 +446,390 @@ def _unique_constructor_symbols(
     }
 
 
+def _canonical_fastapi_route_owner_symbols(tree: ast.Module) -> set[str]:
+    owners: set[str] = set()
+    for constructor in ("FastAPI", "APIRouter"):
+        if not _has_unique_direct_import_binding(
+            tree,
+            module="fastapi",
+            name=constructor,
+        ):
+            continue
+        owners.update(
+            _unique_constructor_symbols(
+                tree,
+                constructor=constructor,
+            )
+        )
+    return owners
+
+
+def _meaningful_statements(statements: list[ast.stmt]) -> list[ast.stmt]:
+    body = list(statements)
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        body = body[1:]
+    return body
+
+
+def _operation_id_forwarding_expression(node: ast.AST) -> bool:
+    if isinstance(node, ast.Name) and node.id == "operation_id":
+        return True
+    return (
+        isinstance(node, ast.BoolOp)
+        and isinstance(node.op, ast.Or)
+        and len(node.values) == 2
+        and isinstance(node.values[0], ast.Name)
+        and node.values[0].id == "operation_id"
+        and isinstance(node.values[1], ast.Attribute)
+        and node.values[1].attr == "__name__"
+        and isinstance(node.values[1].value, ast.Name)
+        and node.values[1].value.id == "func"
+    )
+
+
+def _api_route_delegate_proof(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> bool:
+    """Recognize a narrow APIRouter api_route delegation theorem."""
+
+    if (
+        not isinstance(function, ast.FunctionDef)
+        or function.decorator_list
+        or function.args.posonlyargs
+        or function.args.vararg is not None
+        or function.args.kwonlyargs
+        or function.args.kw_defaults
+        or function.args.kwarg is None
+        or function.args.kwarg.arg != "kwargs"
+        or [arg.arg for arg in function.args.args]
+        != ["self", "path", "operation_id"]
+        or len(function.args.defaults) != 1
+        or not isinstance(function.args.defaults[0], ast.Constant)
+        or function.args.defaults[0].value is not None
+    ):
+        return False
+
+    body = _meaningful_statements(function.body)
+    if (
+        len(body) != 2
+        or not isinstance(body[0], ast.FunctionDef)
+        or not isinstance(body[1], ast.Return)
+        or not isinstance(body[1].value, ast.Name)
+        or body[1].value.id != body[0].name
+    ):
+        return False
+
+    decorator = body[0]
+    if (
+        decorator.decorator_list
+        or decorator.args.posonlyargs
+        or decorator.args.vararg is not None
+        or decorator.args.kwonlyargs
+        or decorator.args.kw_defaults
+        or decorator.args.kwarg is not None
+        or [arg.arg for arg in decorator.args.args] != ["func"]
+        or decorator.args.defaults
+    ):
+        return False
+
+    nested = _meaningful_statements(decorator.body)
+    if (
+        len(nested) != 2
+        or not isinstance(nested[0], ast.Expr)
+        or not isinstance(nested[0].value, ast.Call)
+        or not isinstance(nested[1], ast.Return)
+        or not isinstance(nested[1].value, ast.Name)
+        or nested[1].value.id != "func"
+    ):
+        return False
+
+    call = nested[0].value
+    if (
+        not isinstance(call.func, ast.Attribute)
+        or call.func.attr != "add_api_route"
+        or not isinstance(call.func.value, ast.Name)
+        or call.func.value.id != "self"
+        or len(call.args) != 2
+        or not isinstance(call.args[0], ast.Name)
+        or call.args[0].id != "path"
+        or not isinstance(call.args[1], ast.Name)
+        or call.args[1].id != "func"
+        or len(call.keywords) != 2
+    ):
+        return False
+
+    operation_keywords = [
+        keyword
+        for keyword in call.keywords
+        if keyword.arg == "operation_id"
+    ]
+    expansion_keywords = [
+        keyword
+        for keyword in call.keywords
+        if keyword.arg is None
+    ]
+    return (
+        len(operation_keywords) == 1
+        and _operation_id_forwarding_expression(
+            operation_keywords[0].value
+        )
+        and len(expansion_keywords) == 1
+        and isinstance(expansion_keywords[0].value, ast.Name)
+        and expansion_keywords[0].value.id == "kwargs"
+    )
+
+
+def _class_body_binds_name(statement: ast.stmt, names: set[str]) -> bool:
+    if isinstance(
+        statement,
+        (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef),
+    ):
+        return statement.name in names
+    if isinstance(statement, ast.Assign):
+        return any(
+            isinstance(node, ast.Name) and node.id in names
+            for target in statement.targets
+            for node in ast.walk(target)
+        )
+    if isinstance(statement, ast.AnnAssign):
+        return any(
+            isinstance(node, ast.Name) and node.id in names
+            for node in ast.walk(statement.target)
+        )
+    return False
+
+
+def _router_wrapper_class_summaries(
+    path: str,
+    tree: ast.Module,
+) -> tuple[RouterWrapperClassSummary, ...]:
+    """Prove bounded source wrappers that preserve APIRouter registration."""
+
+    if not _has_unique_direct_import_binding(
+        tree,
+        module="fastapi",
+        name="APIRouter",
+    ):
+        return ()
+
+    reserved = set(_HTTP_METHODS) | {
+        "add_api_route",
+        "__getattr__",
+        "__getattribute__",
+        "__setattr__",
+    }
+    found: list[RouterWrapperClassSummary] = []
+
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        if (
+            node.decorator_list
+            or node.keywords
+            or len(node.bases) != 1
+            or not isinstance(node.bases[0], ast.Name)
+            or node.bases[0].id != "APIRouter"
+        ):
+            continue
+
+        body = _meaningful_statements(node.body)
+        if any(
+            _class_body_binds_name(statement, reserved)
+            for statement in body
+        ):
+            continue
+
+        api_route_definitions = [
+            statement
+            for statement in body
+            if isinstance(
+                statement,
+                (ast.FunctionDef, ast.AsyncFunctionDef),
+            )
+            and statement.name == "api_route"
+        ]
+        api_route_other_binding = any(
+            _class_body_binds_name(statement, {"api_route"})
+            and statement not in api_route_definitions
+            for statement in body
+        )
+        if api_route_other_binding or len(api_route_definitions) > 1:
+            continue
+
+        if not api_route_definitions:
+            proof_kind = "direct_apirouter_subclass_v1"
+        elif _api_route_delegate_proof(api_route_definitions[0]):
+            proof_kind = "api_route_delegate_v1"
+        else:
+            continue
+
+        found.append(
+            RouterWrapperClassSummary(
+                class_name=node.name,
+                proof_kind=proof_kind,
+                origin=_origin(path, node),
+            )
+        )
+
+    return tuple(
+        sorted(
+            found,
+            key=lambda item: (item.class_name, item.proof_kind),
+        )
+    )
+
+
+def _unique_imported_symbol_binding(
+    tree: ast.Module,
+    local_name: str,
+) -> tuple[str, str] | None:
+    matches: list[tuple[str, str]] = []
+
+    for statement in tree.body:
+        if isinstance(statement, ast.ImportFrom):
+            for alias in statement.names:
+                bound = alias.asname or alias.name
+                if bound != local_name:
+                    continue
+                if (
+                    statement.level != 0
+                    or not statement.module
+                    or alias.name == "*"
+                ):
+                    return None
+                matches.append((statement.module, alias.name))
+            continue
+
+        if isinstance(statement, ast.Import):
+            for alias in statement.names:
+                bound = alias.asname or alias.name.split(".", 1)[0]
+                if bound == local_name:
+                    return None
+            continue
+
+        if isinstance(
+            statement,
+            (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef),
+        ):
+            if statement.name == local_name:
+                return None
+            continue
+
+        if any(
+            isinstance(node, ast.Name)
+            and node.id == local_name
+            and isinstance(node.ctx, (ast.Store, ast.Del))
+            for node in ast.walk(statement)
+        ):
+            return None
+
+    return matches[0] if len(matches) == 1 else None
+
+
+def _top_level_binding_counts(tree: ast.Module) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for statement in tree.body:
+        names: set[str] = set()
+        if isinstance(statement, ast.Assign):
+            for target in statement.targets:
+                names.update(
+                    node.id
+                    for node in ast.walk(target)
+                    if isinstance(node, ast.Name)
+                )
+        elif isinstance(statement, ast.AnnAssign):
+            names.update(
+                node.id
+                for node in ast.walk(statement.target)
+                if isinstance(node, ast.Name)
+            )
+        elif isinstance(
+            statement,
+            (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef),
+        ):
+            names.add(statement.name)
+        elif isinstance(statement, ast.Import):
+            names.update(
+                alias.asname or alias.name.split(".", 1)[0]
+                for alias in statement.names
+            )
+        elif isinstance(statement, ast.ImportFrom):
+            names.update(
+                alias.asname or alias.name
+                for alias in statement.names
+                if alias.name != "*"
+            )
+        for name in names:
+            counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
+def _imported_constructor_bindings(
+    path: str,
+    tree: ast.Module,
+) -> tuple[ImportedConstructorBindingSummary, ...]:
+    counts = _top_level_binding_counts(tree)
+    found: list[ImportedConstructorBindingSummary] = []
+
+    for statement in tree.body:
+        target: ast.Name | None = None
+        value: ast.AST | None = None
+        if (
+            isinstance(statement, ast.Assign)
+            and len(statement.targets) == 1
+            and isinstance(statement.targets[0], ast.Name)
+        ):
+            target = statement.targets[0]
+            value = statement.value
+        elif (
+            isinstance(statement, ast.AnnAssign)
+            and isinstance(statement.target, ast.Name)
+        ):
+            target = statement.target
+            value = statement.value
+
+        if (
+            target is None
+            or counts.get(target.id) != 1
+            or not isinstance(value, ast.Call)
+            or not isinstance(value.func, ast.Name)
+        ):
+            continue
+
+        imported = _unique_imported_symbol_binding(
+            tree,
+            value.func.id,
+        )
+        if imported is None:
+            continue
+        import_module, import_name = imported
+        found.append(
+            ImportedConstructorBindingSummary(
+                symbol=target.id,
+                constructor_local_name=value.func.id,
+                import_module=import_module,
+                import_name=import_name,
+                origin=_origin(path, statement),
+            )
+        )
+
+    return tuple(
+        sorted(
+            found,
+            key=lambda item: (
+                item.symbol,
+                item.import_module,
+                item.import_name,
+            ),
+        )
+    )
+
+
 def _module_import_summaries(
     tree: ast.Module,
 ) -> tuple[ModuleImportSummary, ...]:
