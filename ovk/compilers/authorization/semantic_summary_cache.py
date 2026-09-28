@@ -24,6 +24,9 @@ from pathlib import Path
 from typing import Any
 
 from ovk import __version__ as OVK_VERSION
+from ovk.compilers.authorization.dependency_factory_interpretation import (
+    DependencyFactoryInterpretationSummary,
+)
 from ovk.compilers.authorization.fastapi_route_summary import (
     CallSummary,
     DependencyParameterSummary,
@@ -58,7 +61,7 @@ from ovk.core.resource_identity import ResourceIdentityTerm
 
 
 SEMANTIC_SUMMARY_CACHE_SCHEMA = "ovk.python_semantic_summary_cache.v1"
-SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.10.0"
+SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.11.0"
 DEFAULT_SEMANTIC_SUMMARY_CACHE_DIR = Path(
     ".verification/cache/python-semantic-summaries"
 )
@@ -239,6 +242,19 @@ def _route_summary_payload(summary: RouteFileSummary) -> dict[str, Any]:
                 "origin": _origin_payload(item.origin),
             }
             for item in summary.include_router_calls
+        ],
+        "dependency_factory_interpretations": [
+            {
+                "factory_name": item.factory_name,
+                "returned_callable_name": item.returned_callable_name,
+                "request_parameter": item.request_parameter,
+                "path_parameter": item.path_parameter,
+                "raw_symbol": item.raw_symbol,
+                "parsed_symbol": item.parsed_symbol,
+                "term": _resource_term_payload(item.term),
+                "origin": _origin_payload(item.origin),
+            }
+            for item in summary.dependency_factory_interpretations
         ],
         "handlers": [
             {
@@ -455,6 +471,19 @@ def _route_summary_from_payload(payload: dict[str, Any]) -> RouteFileSummary:
                 origin=SemanticOrigin.model_validate(item["origin"]),
             )
             for item in payload.get("imported_constructor_bindings") or []
+        ),
+        dependency_factory_interpretations=tuple(
+            DependencyFactoryInterpretationSummary(
+                factory_name=str(item["factory_name"]),
+                returned_callable_name=str(item["returned_callable_name"]),
+                request_parameter=str(item["request_parameter"]),
+                path_parameter=str(item["path_parameter"]),
+                raw_symbol=str(item["raw_symbol"]),
+                parsed_symbol=str(item["parsed_symbol"]),
+                term=ResourceIdentityTerm.model_validate(item["term"]),
+                origin=SemanticOrigin.model_validate(item["origin"]),
+            )
+            for item in payload.get("dependency_factory_interpretations") or []
         ),
         include_router_calls=tuple(
             IncludeRouterCallSummary(
