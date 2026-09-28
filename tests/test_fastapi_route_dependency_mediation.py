@@ -115,7 +115,7 @@ async def mcp_post(request: Request):
     assert guard_check.status == "violated"
 
 
-def test_dependency_factory_is_outside_direct_route_dependency_subset() -> None:
+def test_dependency_factory_is_candidate_with_unproved_effectiveness() -> None:
     source = """
 from fastapi import APIRouter, Depends, Request
 
@@ -128,8 +128,10 @@ async def mcp_post(request: Request):
 
     ir, evaluation = _evaluation(source)
 
-    assert ir.guards == []
-    assert evaluation.status == "fail"
+    assert len(ir.guards) == 1
+    assert ir.guards[0].effectiveness == "unproved"
+    assert ir.guards[0].resource_id == ir.protected_effects[0].resource_id
+    assert evaluation.status == "unknown"
 
 
 def test_route_dependency_cannot_authorize_a_different_static_resource() -> None:
@@ -280,7 +282,7 @@ async def mcp_post(request: Request):
     assert effectiveness.status == "unknown"
 
 
-def test_apirouter_constructor_dependency_factory_is_not_inherited() -> None:
+def test_apirouter_constructor_dependency_factory_is_candidate() -> None:
     source = """
 from fastapi import APIRouter, Depends, Request
 
@@ -293,8 +295,10 @@ async def mcp_post(request: Request):
 
     ir, evaluation = _evaluation(source)
 
-    assert ir.guards == []
-    assert evaluation.status == "fail"
+    assert len(ir.guards) == 1
+    assert ir.guards[0].effectiveness == "unproved"
+    assert ir.guards[0].resource_id == ir.protected_effects[0].resource_id
+    assert evaluation.status == "unknown"
 
 
 def test_apirouter_symbol_reassignment_suppresses_inheritance() -> None:
@@ -403,6 +407,29 @@ app = FastAPI()
 app.include_router(
     stats.router,
     dependencies=[Depends(require_auth)],
+)
+""".strip()
+
+    ir = _compile_include_router(main_source=source)
+    evaluations = evaluate_protected_effect_integrity(ir)
+
+    assert len(ir.guards) == 1
+    assert ir.guards[0].effectiveness == "unproved"
+    assert ir.guards[0].resource_id == ir.protected_effects[0].resource_id
+    assert len(evaluations) == 1
+    assert evaluations[0].status == "unknown"
+    assert evaluations[0].extraction_coverage == "complete"
+
+
+def test_include_router_dependency_factory_is_inherited_as_candidate() -> None:
+    source = """
+from fastapi import Depends, FastAPI
+from app.endpoints import stats
+
+app = FastAPI()
+app.include_router(
+    stats.router,
+    dependencies=[Depends(require_auth(scope="stats"))],
 )
 """.strip()
 
