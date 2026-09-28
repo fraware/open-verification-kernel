@@ -261,7 +261,15 @@ def compile_protected_effect_integrity(ir: AssuranceIR) -> list[ProtectedEffectI
 
             if dominating_guards:
                 presence_statuses.append("established")
+            elif not referenced_guards:
+                # Absence of any represented authorization guard is a concrete
+                # structural violation. Partial coverage may still block PASS
+                # elsewhere, but it does not turn a known missing guard into
+                # benign uncertainty.
+                presence_statuses.append("violated")
             else:
+                # A conditional guard exists, but bounded condition evidence
+                # does not establish that it dominates this effect path.
                 presence_statuses.append(_path_missing_status(ir, path))
 
             principal_matches = [
@@ -274,7 +282,7 @@ def compile_protected_effect_integrity(ir: AssuranceIR) -> list[ProtectedEffectI
             if principal_matches:
                 principal_statuses.append("established")
             elif dominating_guards:
-                principal_statuses.append(_path_missing_status(ir, path))
+                principal_statuses.append("violated")
             else:
                 principal_statuses.append("unknown")
 
@@ -288,7 +296,7 @@ def compile_protected_effect_integrity(ir: AssuranceIR) -> list[ProtectedEffectI
             if effect_matches:
                 effect_statuses.append("established")
             elif principal_matches:
-                effect_statuses.append(_path_missing_status(ir, path))
+                effect_statuses.append("violated")
             else:
                 effect_statuses.append("unknown")
 
@@ -339,7 +347,7 @@ def compile_protected_effect_integrity(ir: AssuranceIR) -> list[ProtectedEffectI
             elif unique_bindings:
                 resource_statuses.append("unknown")
             elif effect_matches:
-                resource_statuses.append(_path_missing_status(ir, path))
+                resource_statuses.append("violated")
             else:
                 resource_statuses.append("unknown")
 
