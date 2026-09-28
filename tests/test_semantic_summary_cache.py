@@ -190,7 +190,7 @@ def pause_backfill(backfill_id: int):
     dependency = route.route_dependencies[0]
     assert dependency.full_name == "requires_access_backfill"
     assert dependency.leaf_name == "requires_access_backfill"
-    assert dependency.factory_call == 'requires_access_backfill(method="PUT")'
+    assert dependency.factory_call == "requires_access_backfill(method='PUT')"
 
 
 def test_corrupt_payload_digest_is_cache_miss_and_rebuilt(tmp_path: Path) -> None:
