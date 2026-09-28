@@ -54,7 +54,13 @@ class DependencyParameterSummary:
 
 @dataclass(frozen=True)
 class RouteDependencySummary:
-    """Direct Depends/Security dependency inherited by one FastAPI route."""
+    """Depends/Security dependency attached to one FastAPI route.
+
+    factory_call is populated when Depends/Security receives the result of a
+    bounded factory call such as require_access(method="PUT"). The factory
+    function is recorded as the dependency name, but the returned callable's
+    effectiveness is a separate proof obligation.
+    """
 
     full_name: str
     leaf_name: str | None
@@ -64,6 +70,7 @@ class RouteDependencySummary:
         "include_router",
     ]
     origin: SemanticOrigin
+    factory_call: str | None = None
 
 
 @dataclass(frozen=True)
@@ -164,7 +171,7 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id=_EXTRACTOR_ID,
-        extractor_version="0.7.0",
+        extractor_version="0.8.0",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -239,14 +246,25 @@ def _direct_dependencies(
         ):
             continue
         target = item.args[0]
-        if not isinstance(target, (ast.Name, ast.Attribute)):
+        factory_call: str | None = None
+        dependency_target: ast.AST
+        if isinstance(target, (ast.Name, ast.Attribute)):
+            dependency_target = target
+        elif (
+            isinstance(target, ast.Call)
+            and isinstance(target.func, (ast.Name, ast.Attribute))
+        ):
+            dependency_target = target.func
+            factory_call = ast.unparse(target)
+        else:
             continue
         found.append(
             RouteDependencySummary(
-                full_name=ast.unparse(target),
-                leaf_name=_name_of(target),
+                full_name=ast.unparse(dependency_target),
+                leaf_name=_name_of(dependency_target),
                 source_kind=source_kind,
                 origin=_origin(path, item),
+                factory_call=factory_call,
             )
         )
     return tuple(found)
