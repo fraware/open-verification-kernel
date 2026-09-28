@@ -82,6 +82,38 @@ class ModuleImportSummary:
 
 
 @dataclass(frozen=True)
+class RouterWrapperClassSummary:
+    """Source-proved FastAPI APIRouter wrapper class."""
+
+    class_name: str
+    proof_kind: Literal[
+        "direct_apirouter_subclass_v1",
+        "api_route_delegate_v1",
+    ]
+    origin: SemanticOrigin
+
+
+@dataclass(frozen=True)
+class ImportedConstructorBindingSummary:
+    """Unique top-level constructor binding imported from another module."""
+
+    symbol: str
+    constructor_local_name: str
+    import_module: str
+    import_name: str
+    origin: SemanticOrigin
+
+
+@dataclass(frozen=True)
+class PathParameterInterpretationSummary:
+    """Bounded path-parameter interpretation candidate independent of owner."""
+
+    parameter_name: str
+    term: ResourceIdentityTerm
+    origin: SemanticOrigin
+
+
+@dataclass(frozen=True)
 class IncludeRouterCallSummary:
     """Profile-independent static FastAPI include_router syntax fact."""
 
@@ -146,6 +178,9 @@ class RouteHandlerSummary:
     route_dependencies: tuple[RouteDependencySummary, ...]
     ownership_assertions: tuple[OwnershipAssertionSummary, ...]
     calls: tuple[CallSummary, ...]
+    path_parameter_interpretations: tuple[
+        PathParameterInterpretationSummary, ...
+    ]
     origin: SemanticOrigin
 
 
@@ -157,6 +192,10 @@ class RouteFileSummary:
     apirouter_symbols: tuple[str, ...] = ()
     module_imports: tuple[ModuleImportSummary, ...] = ()
     include_router_calls: tuple[IncludeRouterCallSummary, ...] = ()
+    router_wrapper_classes: tuple[RouterWrapperClassSummary, ...] = ()
+    imported_constructor_bindings: tuple[
+        ImportedConstructorBindingSummary, ...
+    ] = ()
 
 
 @dataclass(frozen=True)
@@ -171,7 +210,7 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id=_EXTRACTOR_ID,
-        extractor_version="0.9.0",
+        extractor_version="0.10.0",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
