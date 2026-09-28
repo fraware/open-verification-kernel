@@ -43,11 +43,15 @@ def _module_path(
     available_paths: set[str],
 ) -> str | None:
     stem = module.replace(".", "/")
-    candidates = [
-        candidate
-        for candidate in (f"{stem}.py", f"{stem}/__init__.py")
-        if candidate in available_paths
-    ]
+    suffixes = (f"{stem}.py", f"{stem}/__init__.py")
+    candidates = sorted(
+        path
+        for path in available_paths
+        if any(
+            path == suffix or path.endswith("/" + suffix)
+            for suffix in suffixes
+        )
+    )
     return candidates[0] if len(candidates) == 1 else None
 
 
