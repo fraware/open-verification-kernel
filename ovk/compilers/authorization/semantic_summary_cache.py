@@ -33,6 +33,7 @@ from ovk.compilers.authorization.fastapi_route_summary import (
     ExpressionSummary,
     ImportedConstructorBindingSummary,
     IncludeRouterCallSummary,
+    LexicalConditionSummary,
     ModuleImportSummary,
     OwnershipAssertionSummary,
     PathParameterInterpretationSummary,
@@ -61,7 +62,7 @@ from ovk.core.resource_identity import ResourceIdentityTerm
 
 
 SEMANTIC_SUMMARY_CACHE_SCHEMA = "ovk.python_semantic_summary_cache.v1"
-SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.12.0"
+SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.13.0"
 DEFAULT_SEMANTIC_SUMMARY_CACHE_DIR = Path(
     ".verification/cache/python-semantic-summaries"
 )
@@ -321,6 +322,14 @@ def _route_summary_payload(summary: RouteFileSummary) -> dict[str, Any]:
                             for name, argument in call.keyword_arguments
                         ],
                         "origin": _origin_payload(call.origin),
+                        "lexical_conditions": [
+                            {
+                                "expression": condition.expression,
+                                "truth_value": condition.truth_value,
+                                "origin": _origin_payload(condition.origin),
+                            }
+                            for condition in call.lexical_conditions
+                        ],
                     }
                     for call in handler.calls
                 ],
@@ -361,6 +370,18 @@ def _route_summary_from_payload(payload: dict[str, Any]) -> RouteFileSummary:
                         for pair in call.get("keyword_arguments") or []
                     ),
                     origin=SemanticOrigin.model_validate(call["origin"]),
+                    lexical_conditions=tuple(
+                        LexicalConditionSummary(
+                            expression=str(condition["expression"]),
+                            truth_value=bool(condition["truth_value"]),
+                            origin=SemanticOrigin.model_validate(
+                                condition["origin"]
+                            ),
+                        )
+                        for condition in (
+                            call.get("lexical_conditions") or []
+                        )
+                    ),
                 )
             )
 
