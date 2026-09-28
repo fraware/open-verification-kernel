@@ -220,13 +220,13 @@ def test_literal_binding_evidence_records_observed_checker_provenance() -> None:
     binding = evaluation.resource_binding_evidence[0]
     assert binding.engine == "structural"
     assert binding.checker_id == "ovk.resource_binding.v1"
-    assert binding.checker_version == "0.2.0"
+    assert binding.checker_version == "0.3.0"
 
     fingerprint = _fingerprint(evaluation)
     assert fingerprint.binding_checkers == [
         BindingCheckerFingerprint(
             checker_id="ovk.resource_binding.v1",
-            checker_version="0.2.0",
+            checker_version="0.3.0",
             engine="structural",
         )
     ]
