@@ -150,6 +150,15 @@ class OwnershipAssertionSummary:
 
 
 @dataclass(frozen=True)
+class LexicalConditionSummary:
+    """One exact lexical branch atom constraining execution of a source call."""
+
+    expression: str
+    truth_value: bool
+    origin: SemanticOrigin
+
+
+@dataclass(frozen=True)
 class CallSummary:
     full_name: str
     leaf_name: str | None
@@ -157,6 +166,7 @@ class CallSummary:
     positional_arguments: tuple[ExpressionSummary, ...]
     keyword_arguments: tuple[tuple[str, ExpressionSummary], ...]
     origin: SemanticOrigin
+    lexical_conditions: tuple[LexicalConditionSummary, ...] = ()
 
     def keyword(self, name: str) -> ExpressionSummary | None:
         for key, value in self.keyword_arguments:
@@ -217,7 +227,7 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id=_EXTRACTOR_ID,
-        extractor_version="0.12.0",
+        extractor_version="0.13.0",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -1208,18 +1218,121 @@ def _has_control_flow(handler: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     return bool(_unsupported_control_flow_lines(handler))
 
 
-def _body_calls(handler: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.Call]:
-    calls = [
-        node
-        for statement in handler.body
-        for node in ast.walk(statement)
-        if isinstance(node, ast.Call)
-    ]
+def _condition_atoms(
+    node: ast.AST,
+    *,
+    truth_value: bool,
+    path: str,
+) -> tuple[LexicalConditionSummary, ...]:
+    """Decompose only Boolean forms whose conjunction semantics are exact."""
+
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return _condition_atoms(
+            node.operand,
+            truth_value=not truth_value,
+            path=path,
+        )
+
+    if (
+        truth_value
+        and isinstance(node, ast.BoolOp)
+        and isinstance(node.op, ast.And)
+    ):
+        return tuple(
+            atom
+            for value in node.values
+            for atom in _condition_atoms(
+                value,
+                truth_value=True,
+                path=path,
+            )
+        )
+
+    if (
+        not truth_value
+        and isinstance(node, ast.BoolOp)
+        and isinstance(node.op, ast.Or)
+    ):
+        return tuple(
+            atom
+            for value in node.values
+            for atom in _condition_atoms(
+                value,
+                truth_value=False,
+                path=path,
+            )
+        )
+
+    return (
+        LexicalConditionSummary(
+            expression=ast.unparse(node),
+            truth_value=truth_value,
+            origin=_origin(path, node),
+        ),
+    )
+
+
+class _LexicalCallCollector(ast.NodeVisitor):
+    """Collect calls with the exact lexical branch conjunction that contains them."""
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self.conditions: tuple[LexicalConditionSummary, ...] = ()
+        self.calls: list[
+            tuple[ast.Call, tuple[LexicalConditionSummary, ...]]
+        ] = []
+
+    def visit_Call(self, node: ast.Call) -> None:
+        self.calls.append((node, self.conditions))
+        self.generic_visit(node)
+
+    def visit_If(self, node: ast.If) -> None:
+        # Evaluating the predicate itself is constrained only by the outer path.
+        self.visit(node.test)
+
+        outer = self.conditions
+        self.conditions = outer + _condition_atoms(
+            node.test,
+            truth_value=True,
+            path=self.path,
+        )
+        for statement in node.body:
+            self.visit(statement)
+
+        self.conditions = outer + _condition_atoms(
+            node.test,
+            truth_value=False,
+            path=self.path,
+        )
+        for statement in node.orelse:
+            self.visit(statement)
+        self.conditions = outer
+
+
+def _body_calls_with_conditions(
+    path: str,
+    handler: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> list[tuple[ast.Call, tuple[LexicalConditionSummary, ...]]]:
+    collector = _LexicalCallCollector(path)
+    for statement in handler.body:
+        collector.visit(statement)
     return sorted(
-        calls,
+        collector.calls,
         key=lambda item: (
-            getattr(item, "lineno", 0),
-            getattr(item, "col_offset", 0),
+            getattr(item[0], "lineno", 0),
+            getattr(item[0], "col_offset", 0),
+            tuple(
+                (
+                    condition.expression,
+                    condition.truth_value,
+                    (
+                        condition.origin.source_range.start_line
+                        if condition.origin.source_range is not None
+                        else None
+                    ),
+                )
+                for condition in item[1]
+            ),
         ),
     )
 
@@ -1662,7 +1775,10 @@ def summarize_route_file(
         )
 
         calls: list[CallSummary] = []
-        for call in _body_calls(handler):
+        for call, lexical_conditions in _body_calls_with_conditions(
+            path,
+            handler,
+        ):
             keywords: list[tuple[str, ExpressionSummary]] = []
             for keyword in call.keywords:
                 if keyword.arg is None:
@@ -1698,6 +1814,7 @@ def summarize_route_file(
                     ),
                     keyword_arguments=tuple(keywords),
                     origin=_origin(path, call),
+                    lexical_conditions=lexical_conditions,
                 )
             )
 
