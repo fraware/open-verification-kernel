@@ -24,6 +24,9 @@ from ovk.compilers.authorization.base import normalize_path
 from ovk.compilers.authorization.fastapi_include_router_dependencies import (
     infer_include_router_dependencies,
 )
+from ovk.compilers.authorization.fastapi_router_wrappers import (
+    infer_fastapi_router_wrappers,
+)
 from ovk.compilers.authorization.fastapi_route_summary import (
     CallSummary,
     RouteSummaryIndex,
@@ -779,6 +782,19 @@ class FastApiDependencyEffectExtractor:
         include_router_dependencies = infer_include_router_dependencies(
             route_summary_index=route_summaries,
         )
+        router_wrappers = infer_fastapi_router_wrappers(
+            route_summary_index=route_summaries,
+        )
+
+        def route_attachment_digest(path: str) -> str:
+            return content_digest(
+                {
+                    "include_router": (
+                        include_router_dependencies.digest_for(path)
+                    ),
+                    "router_wrappers": router_wrappers.digest_for(path),
+                }
+            )
 
         fragments = {
             path: bind_route_file_summary(
@@ -792,9 +808,10 @@ class FastApiDependencyEffectExtractor:
                         {},
                     )
                 ),
-                route_attachment_digest=(
-                    include_router_dependencies.digest_for(path)
+                external_fastapi_route_owners=(
+                    router_wrappers.owners_for(path)
                 ),
+                route_attachment_digest=route_attachment_digest(path),
             )
             for path, summary in sorted(route_summaries.summaries.items())
             if summary.handlers
