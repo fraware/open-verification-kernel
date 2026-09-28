@@ -167,6 +167,42 @@ def test_fail_closed_dependency_establishes_route_guard_effectiveness() -> None:
     assert evaluations[0].status == "pass"
 
 
+def test_factory_dependency_does_not_reuse_direct_function_effectiveness() -> None:
+    factory_route = """
+from fastapi import APIRouter, Depends
+
+router = APIRouter()
+
+@router.post("", dependencies=[Depends(require_auth())])
+async def endpoint():
+    await handle_jsonrpc_request({})
+""".strip()
+    files = {
+        "routes.py": factory_route,
+        "security.py": SECURE_AUTH,
+    }
+    materials = AuthMaterials(
+        base_files=dict(files),
+        head_files=dict(files),
+        repo="example/factory-route-guard-effectiveness",
+        base_revision="base",
+        head_revision="head",
+    )
+
+    ir = FastApiDependencyEffectExtractor().compile(materials, PROFILE)
+    evaluations = evaluate_protected_effect_integrity(ir)
+
+    # Direct-function evidence exists for the top-level function name, but the
+    # route receives the result of calling that function. Reusing the direct
+    # evidence for the returned callable would cross an unproved call boundary.
+    assert len(ir.guard_effectiveness_evidence) == 1
+    assert len(ir.guards) == 1
+    assert ir.guards[0].effectiveness == "unproved"
+    assert ir.guards[0].effectiveness_evidence_ids == []
+    assert len(evaluations) == 1
+    assert evaluations[0].status == "unknown"
+
+
 def test_fail_open_dependency_remains_benign_open() -> None:
     ir = _compile(auth_source=FAIL_OPEN_AUTH)
     evaluations = evaluate_protected_effect_integrity(ir)
