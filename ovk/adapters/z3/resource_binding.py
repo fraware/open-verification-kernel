@@ -22,7 +22,7 @@ from ovk.core.resource_identity import ResourceIdentityTerm
 
 
 RESOURCE_BINDING_CHECKER_ID = "ovk.resource_binding.v1"
-RESOURCE_BINDING_CHECKER_VERSION = "0.2.0"
+RESOURCE_BINDING_CHECKER_VERSION = "0.3.0"
 
 
 def _checker(engine: str, *, tool_version: str | None = None) -> dict[str, Any]:
@@ -146,6 +146,53 @@ def evaluate_resource_binding_with_z3(ir: AssuranceIR, binding: ResourceBinding)
             "checker": _checker("structural"),
         }
 
+    if left.kind == "symbol" and right.kind == "symbol":
+        left_interpretation = left.interpretation
+        right_interpretation = right.interpretation
+
+        if (
+            left_interpretation is not None
+            and right_interpretation is not None
+            and left_interpretation == right_interpretation
+        ):
+            return {
+                "status": "pass",
+                "reason": (
+                    f"{left_label} and {right_label} derive from the same input "
+                    "under an identical interpretation contract"
+                ),
+                "counterexample": None,
+                "checker": _checker("interpretation"),
+            }
+
+        same_interpreted_origin = (
+            left_interpretation is not None
+            and right_interpretation is not None
+            and left_interpretation.input_origin
+            == right_interpretation.input_origin
+        )
+        same_local_symbol_with_interpretation = (
+            left.value == right.value
+            and (
+                left_interpretation is not None
+                or right_interpretation is not None
+            )
+        )
+        if (
+            same_interpreted_origin
+            or same_local_symbol_with_interpretation
+        ):
+            return {
+                "status": "unknown",
+                "reason": (
+                    "resource terms share an apparent input origin but their "
+                    "interpretation contracts are not identical; decoder "
+                    "equivalence requires explicit evidence"
+                ),
+                "counterexample": None,
+                "checker": _checker("interpretation-unresolved"),
+            }
+
     if left.kind == "literal" and right.kind == "literal":
         return _literal_result(
             left,
@@ -170,8 +217,16 @@ def evaluate_resource_binding_with_z3(ir: AssuranceIR, binding: ResourceBinding)
     def encode(term: ResourceIdentityTerm):
         if term.kind == "literal":
             return z3.StringVal(term.value)
-        symbols.setdefault(term.value, z3.String(f"rid_{len(symbols)}"))
-        return symbols[term.value]
+        symbol_key = (
+            term.value
+            if term.interpretation is None
+            else term.term_id
+        )
+        symbols.setdefault(
+            symbol_key,
+            z3.String(f"rid_{len(symbols)}"),
+        )
+        return symbols[symbol_key]
 
     left_expr = encode(left)
     right_expr = encode(right)
