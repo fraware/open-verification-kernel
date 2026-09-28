@@ -584,26 +584,6 @@ def _api_route_delegate_proof(
     )
 
 
-def _class_body_binds_name(statement: ast.stmt, names: set[str]) -> bool:
-    if isinstance(
-        statement,
-        (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef),
-    ):
-        return statement.name in names
-    if isinstance(statement, ast.Assign):
-        return any(
-            isinstance(node, ast.Name) and node.id in names
-            for target in statement.targets
-            for node in ast.walk(target)
-        )
-    if isinstance(statement, ast.AnnAssign):
-        return any(
-            isinstance(node, ast.Name) and node.id in names
-            for node in ast.walk(statement.target)
-        )
-    return False
-
-
 def _router_wrapper_class_summaries(
     path: str,
     tree: ast.Module,
@@ -617,12 +597,6 @@ def _router_wrapper_class_summaries(
     ):
         return ()
 
-    reserved = set(_HTTP_METHODS) | {
-        "add_api_route",
-        "__getattr__",
-        "__getattribute__",
-        "__setattr__",
-    }
     found: list[RouterWrapperClassSummary] = []
 
     for node in tree.body:
@@ -638,32 +612,19 @@ def _router_wrapper_class_summaries(
             continue
 
         body = _meaningful_statements(node.body)
-        if any(
-            _class_body_binds_name(statement, reserved)
-            for statement in body
+        if body == [next(iter(body), None)] and body and isinstance(
+            body[0],
+            ast.Pass,
         ):
-            continue
-
-        api_route_definitions = [
-            statement
-            for statement in body
-            if isinstance(
-                statement,
-                (ast.FunctionDef, ast.AsyncFunctionDef),
-            )
-            and statement.name == "api_route"
-        ]
-        api_route_other_binding = any(
-            _class_body_binds_name(statement, {"api_route"})
-            and statement not in api_route_definitions
-            for statement in body
-        )
-        if api_route_other_binding or len(api_route_definitions) > 1:
-            continue
-
-        if not api_route_definitions:
             proof_kind = "direct_apirouter_subclass_v1"
-        elif _api_route_delegate_proof(api_route_definitions[0]):
+        elif not body:
+            proof_kind = "direct_apirouter_subclass_v1"
+        elif (
+            len(body) == 1
+            and isinstance(body[0], ast.FunctionDef)
+            and body[0].name == "api_route"
+            and _api_route_delegate_proof(body[0])
+        ):
             proof_kind = "api_route_delegate_v1"
         else:
             continue
