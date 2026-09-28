@@ -456,6 +456,21 @@ class AssuranceIR(BaseModel):
         for field_name, identity_key in collection_keys.items():
             payload[field_name] = sorted(payload[field_name], key=lambda item: item[identity_key])
 
+        resources_by_id = {
+            resource.resource_id: resource
+            for resource in self.resources
+        }
+        for item in payload["resources"]:
+            resource = resources_by_id[item["resource_id"]]
+            if resource.identity_term is not None:
+                item["identity_term"] = resource.identity_term.canonical_payload()
+            if resource.scope_term is not None:
+                item["scope_term"] = resource.scope_term.canonical_payload()
+            item["attribute_terms"] = {
+                name: term.canonical_payload()
+                for name, term in sorted(resource.attribute_terms.items())
+            }
+
         payload["coverage"]["supported_constructs"] = sorted(payload["coverage"]["supported_constructs"])
         payload["coverage"]["unsupported_constructs"] = sorted(payload["coverage"]["unsupported_constructs"])
         payload["coverage"]["assumptions"] = sorted(payload["coverage"]["assumptions"])
