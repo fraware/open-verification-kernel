@@ -119,6 +119,19 @@ class ResourceIdentityTerm(BaseModel):
     def literal(cls, value: str) -> "ResourceIdentityTerm":
         return cls(kind="literal", value=value)
 
+    def canonical_payload(self) -> dict:
+        """Return the stable identity payload used by digests and caches."""
+
+        payload: dict = {
+            "kind": self.kind,
+            "value": self.value,
+        }
+        if self.interpretation is not None:
+            payload["interpretation"] = self.interpretation.model_dump(
+                mode="json"
+            )
+        return payload
+
     @property
     def term_id(self) -> str:
-        return f"rid:{content_digest(self.model_dump(mode='json'))[:16]}"
+        return f"rid:{content_digest(self.canonical_payload())[:16]}"
