@@ -1196,6 +1196,7 @@ _SUPPORTED_CONSTRUCTS = [
     "configured_static_sink_resource",
     "route_dependency_candidate_mediation",
     "straight_line_handler",
+    "lexical_branch_path_conditions",
     "fail_fast_none_guard",
     "configured_service_call_sink",
     "configured_fail_closed_resource_scope_assertion",
