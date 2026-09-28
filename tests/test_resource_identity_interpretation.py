@@ -13,6 +13,7 @@ from ovk.core.assurance_ir import (
     ResourceRef,
     SemanticOrigin,
 )
+from ovk.core.bundle import content_digest
 from ovk.core.models import VerificationSubject
 from ovk.core.resource_identity import (
     ResourceIdentityTerm,
@@ -79,6 +80,17 @@ def _pydantic_nonnegative(name: str) -> ResourceIdentityTerm:
         output_type="NonNegativeInt",
         constraints=("ge=0",),
     )
+
+
+def test_plain_term_canonical_payload_preserves_v1_identity() -> None:
+    term = ResourceIdentityTerm.symbol("invoice_id")
+    payload = {
+        "kind": "symbol",
+        "value": "invoice_id",
+    }
+
+    assert term.canonical_payload() == payload
+    assert term.term_id == f"rid:{content_digest(payload)[:16]}"
 
 
 def test_interpretation_constraints_are_canonicalized() -> None:
