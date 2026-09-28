@@ -72,60 +72,198 @@ def _resolve_resource_check(
         return check, []
 
     bindings = _binding_map(ir)
-    evidence: list[ResourceBindingEvidence] = []
-    for binding_id in obligation.resource_binding_ids:
+    evidence_by_binding: dict[str, ResourceBindingEvidence] = {}
+
+    def evaluate_binding(binding_id: str) -> ResourceBindingEvidence:
+        cached = evidence_by_binding.get(binding_id)
+        if cached is not None:
+            return cached
+
         binding = bindings.get(binding_id)
         if binding is None:
-            evidence.append(
-                ResourceBindingEvidence(
-                    binding_id=binding_id,
-                    status="unknown",
-                    reason="resource-binding obligation is absent from Assurance IR",
-                )
+            result = ResourceBindingEvidence(
+                binding_id=binding_id,
+                status="unknown",
+                reason="resource-binding obligation is absent from Assurance IR",
             )
-            continue
+            evidence_by_binding[binding_id] = result
+            return result
+
         raw = evaluator(ir, binding)
         status = str(raw.get("status", "unknown"))
         if status not in {"pass", "fail", "unknown"}:
             status = "unknown"
-        checker = raw.get("checker") if isinstance(raw.get("checker"), dict) else {}
-        evidence.append(
-            ResourceBindingEvidence(
-                binding_id=binding_id,
-                status=status,
-                reason=str(raw.get("reason", "resource-binding evaluator returned no reason")),
-                counterexample=raw.get("counterexample"),
-                checker_id=checker.get("checker_id"),
-                checker_version=checker.get("checker_version"),
-                engine=checker.get("engine"),
-                tool_version=checker.get("tool_version"),
+        checker = (
+            raw.get("checker")
+            if isinstance(raw.get("checker"), dict)
+            else {}
+        )
+        result = ResourceBindingEvidence(
+            binding_id=binding_id,
+            status=status,
+            reason=str(
+                raw.get(
+                    "reason",
+                    "resource-binding evaluator returned no reason",
+                )
+            ),
+            counterexample=raw.get("counterexample"),
+            checker_id=checker.get("checker_id"),
+            checker_version=checker.get("checker_version"),
+            engine=checker.get("engine"),
+            tool_version=checker.get("tool_version"),
+        )
+        evidence_by_binding[binding_id] = result
+        return result
+
+    # New path-aware obligations require every represented effect path to have
+    # an established resource relation. Within one path, multiple candidate
+    # guards/bindings are alternatives.
+    if obligation.path_ids and (
+        obligation.path_resource_binding_ids
+        or obligation.path_exact_resource_guard_ids
+    ):
+        path_statuses: dict[str, EvaluationStatus] = {}
+        established_evidence_ids: set[str] = set()
+
+        for path_id in obligation.path_ids:
+            exact_guard_ids = obligation.path_exact_resource_guard_ids.get(
+                path_id,
+                [],
             )
+            if exact_guard_ids:
+                path_statuses[path_id] = "pass"
+                established_evidence_ids.update(exact_guard_ids)
+                continue
+
+            binding_ids = obligation.path_resource_binding_ids.get(
+                path_id,
+                [],
+            )
+            path_evidence = [
+                evaluate_binding(binding_id)
+                for binding_id in binding_ids
+            ]
+            if any(item.status == "pass" for item in path_evidence):
+                path_statuses[path_id] = "pass"
+                established_evidence_ids.update(
+                    item.binding_id
+                    for item in path_evidence
+                    if item.status == "pass"
+                )
+            elif path_evidence and all(
+                item.status == "fail" for item in path_evidence
+            ):
+                path_statuses[path_id] = "fail"
+            else:
+                path_statuses[path_id] = "unknown"
+
+        evidence = sorted(
+            evidence_by_binding.values(),
+            key=lambda item: item.binding_id,
         )
 
+        failed_paths = sorted(
+            path_id
+            for path_id, status in path_statuses.items()
+            if status == "fail"
+        )
+        if failed_paths:
+            return (
+                IntegrityCheck(
+                    dimension="resource_binding",
+                    status="violated",
+                    reason=(
+                        "resource binding is refuted on at least one "
+                        "protected-effect path: "
+                        + ", ".join(failed_paths)
+                    ),
+                    evidence_ids=sorted(
+                        item.binding_id
+                        for item in evidence
+                        if item.status == "fail"
+                    ),
+                ),
+                evidence,
+            )
+
+        if path_statuses and all(
+            status == "pass" for status in path_statuses.values()
+        ):
+            return (
+                IntegrityCheck(
+                    dimension="resource_binding",
+                    status="established",
+                    reason=(
+                        "every protected-effect path has at least one "
+                        "established candidate resource binding"
+                    ),
+                    evidence_ids=sorted(established_evidence_ids),
+                ),
+                evidence,
+            )
+
+        unresolved_paths = sorted(
+            path_id
+            for path_id, status in path_statuses.items()
+            if status == "unknown"
+        )
+        return (
+            IntegrityCheck(
+                dimension="resource_binding",
+                status="unknown",
+                reason=(
+                    "resource binding remains unresolved on protected-effect "
+                    "paths: "
+                    + ", ".join(unresolved_paths)
+                ),
+                evidence_ids=sorted(
+                    set(obligation.resource_binding_ids)
+                    | established_evidence_ids
+                ),
+            ),
+            evidence,
+        )
+
+    # Backward-compatible fallback for obligations produced without path-local
+    # binding groups.
+    evidence = [
+        evaluate_binding(binding_id)
+        for binding_id in obligation.resource_binding_ids
+    ]
     if not evidence:
         return check, evidence
 
-    # Candidate authorization guards are alternatives. A single established
-    # binding is sufficient. A violation is conclusive only when every candidate
-    # binding is refuted. Otherwise uncertainty is preserved.
     if any(item.status == "pass" for item in evidence):
         return (
             IntegrityCheck(
                 dimension="resource_binding",
                 status="established",
-                reason="at least one candidate authorization guard has an established resource binding",
-                evidence_ids=sorted(item.binding_id for item in evidence if item.status == "pass"),
+                reason=(
+                    "at least one candidate authorization guard has an "
+                    "established resource binding"
+                ),
+                evidence_ids=sorted(
+                    item.binding_id
+                    for item in evidence
+                    if item.status == "pass"
+                ),
             ),
             evidence,
         )
 
-    if evidence and all(item.status == "fail" for item in evidence):
+    if all(item.status == "fail" for item in evidence):
         return (
             IntegrityCheck(
                 dimension="resource_binding",
                 status="violated",
-                reason="every candidate authorization guard has a refuted resource binding",
-                evidence_ids=sorted(item.binding_id for item in evidence),
+                reason=(
+                    "every candidate authorization guard has a refuted "
+                    "resource binding"
+                ),
+                evidence_ids=sorted(
+                    item.binding_id for item in evidence
+                ),
             ),
             evidence,
         )
@@ -134,8 +272,13 @@ def _resolve_resource_check(
         IntegrityCheck(
             dimension="resource_binding",
             status="unknown",
-            reason="no candidate resource binding is established and at least one remains unresolved",
-            evidence_ids=sorted(item.binding_id for item in evidence),
+            reason=(
+                "no candidate resource binding is established and at least "
+                "one remains unresolved"
+            ),
+            evidence_ids=sorted(
+                item.binding_id for item in evidence
+            ),
         ),
         evidence,
     )
