@@ -268,46 +268,56 @@ def _has_direct_fastapi_import(
     )
 
 
-def _has_direct_pydantic_import(
+def _has_unique_direct_import_binding(
     tree: ast.Module,
+    *,
+    module: str,
     name: str,
 ) -> bool:
-    return any(
-        isinstance(statement, ast.ImportFrom)
-        and statement.module == "pydantic"
-        and statement.level == 0
-        and any(
-            alias.name == name and alias.asname is None
-            for alias in statement.names
-        )
-        for statement in tree.body
-    )
+    """Prove that one module-level name has only the expected import binding."""
 
-
-def _top_level_name_rebound(
-    tree: ast.Module,
-    name: str,
-) -> bool:
-    """Return whether a directly imported semantic name is rebound locally."""
-
+    canonical_bindings = 0
     for statement in tree.body:
-        targets: list[ast.AST] = []
-        if isinstance(statement, ast.Assign):
-            targets.extend(statement.targets)
-        elif isinstance(statement, ast.AnnAssign):
-            targets.append(statement.target)
-        elif isinstance(
+        if isinstance(statement, ast.ImportFrom):
+            for alias in statement.names:
+                bound_name = alias.asname or alias.name
+                if bound_name != name:
+                    continue
+                if (
+                    statement.level == 0
+                    and statement.module == module
+                    and alias.name == name
+                    and alias.asname is None
+                ):
+                    canonical_bindings += 1
+                    continue
+                return False
+            continue
+
+        if isinstance(statement, ast.Import):
+            for alias in statement.names:
+                bound_name = alias.asname or alias.name.split(".", 1)[0]
+                if bound_name == name:
+                    return False
+            continue
+
+        if isinstance(
             statement,
             (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef),
         ):
             if statement.name == name:
-                return True
+                return False
             continue
 
-        for target in targets:
-            if isinstance(target, ast.Name) and target.id == name:
-                return True
-    return False
+        if any(
+            isinstance(node, ast.Name)
+            and node.id == name
+            and isinstance(node.ctx, (ast.Store, ast.Del))
+            for node in ast.walk(statement)
+        ):
+            return False
+
+    return canonical_bindings == 1
 
 
 def _unique_constructor_symbols(
@@ -909,6 +919,7 @@ def _path_parameter_interpretations(
     tree: ast.Module,
     handler: ast.FunctionDef | ast.AsyncFunctionDef,
     route_path: str,
+    router_symbol: str | None,
 ) -> dict[str, ResourceIdentityTerm]:
     """Infer source-grounded interpretation contracts for bounded path types.
 
@@ -922,10 +933,27 @@ def _path_parameter_interpretations(
     independent source evidence.
     """
 
-    if (
-        not _has_direct_pydantic_import(tree, "NonNegativeInt")
-        or _top_level_name_rebound(tree, "NonNegativeInt")
+    if not _has_unique_direct_import_binding(
+        tree,
+        module="pydantic",
+        name="NonNegativeInt",
     ):
+        return {}
+
+    route_owners: set[str] = set()
+    for constructor in ("FastAPI", "APIRouter"):
+        if _has_unique_direct_import_binding(
+            tree,
+            module="fastapi",
+            name=constructor,
+        ):
+            route_owners.update(
+                _unique_constructor_symbols(
+                    tree,
+                    constructor=constructor,
+                )
+            )
+    if router_symbol is None or router_symbol not in route_owners:
         return {}
 
     path_parameters = _path_parameter_names(route_path)
@@ -1185,6 +1213,7 @@ def summarize_route_file(
             tree=tree,
             handler=handler,
             route_path=route_path,
+            router_symbol=router_symbol,
         )
 
         calls: list[CallSummary] = []
