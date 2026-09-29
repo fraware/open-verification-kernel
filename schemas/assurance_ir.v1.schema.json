@@ -103,6 +103,9 @@
     "interpretation_compatibility_evidence": {
       "type": "array"
     },
+    "guard_dominance_evidence": {
+      "type": "array"
+    },
     "protected_effects": {
       "type": "array"
     },

@@ -394,7 +394,7 @@
     {
       "case_id": "unsupported_control_flow_benign_open",
       "repository": "qualification/internal-direct-fastapi",
-      "description": "A semantically benign change outside the v1 control-flow envelope must stay open instead of being overclaimed as established.",
+      "description": "A semantically benign change outside the bounded CFG envelope (unsupported loop) must stay open instead of being overclaimed as established.",
       "validation_class": "synthetic",
       "safety_label": "safe",
       "expected_head_assurance": "not_established",
@@ -405,7 +405,7 @@
         "routes.py": "from fastapi import Depends, FastAPI\napp = FastAPI()\n\n@app.get(\"/workspaces/{workspace_id}/agents/{agent_id}\")\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user = Depends(require_workspace_member),\n):\n    svc = AgentService()\n    agent = await svc.get(agent_id, workspace_id=workspace_id)\n    return agent\n"
       },
       "head_files": {
-        "routes.py": "from fastapi import Depends, FastAPI\napp = FastAPI()\n\n@app.get(\"/workspaces/{workspace_id}/agents/{agent_id}\")\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user = Depends(require_workspace_member),\n    enabled: bool = True,\n):\n    svc = AgentService()\n    if enabled:\n        audit(agent_id)\n    agent = await svc.get(agent_id, workspace_id=workspace_id)\n    return agent\n"
+        "routes.py": "from fastapi import Depends, FastAPI\napp = FastAPI()\n\n@app.get(\"/workspaces/{workspace_id}/agents/{agent_id}\")\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user = Depends(require_workspace_member),\n    tags: list[str] | None = None,\n):\n    svc = AgentService()\n    for tag in tags or []:\n        audit(agent_id, tag)\n    agent = await svc.get(agent_id, workspace_id=workspace_id)\n    return agent\n"
       },
       "guarantee_manifest": {
         "schema_version": "ovk.guarantee_manifest.v1",

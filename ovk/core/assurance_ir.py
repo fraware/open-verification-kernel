@@ -253,6 +253,39 @@ class InterpretationCompatibilityEvidence(BaseModel):
         return self
 
 
+class GuardDominanceEvidence(BaseModel):
+    """Why an authorization guard is concluded to precede a protected effect.
+
+    dominates is true only when the guard CFG node dominates the effect CFG
+    node under a complete sink-reaching coverage region. Incomplete CFG
+    coverage or ambiguous source-range binding must not yield a true PASS.
+    """
+
+    evidence_id: str
+    guard_id: str
+    protected_effect_id: str
+    entrypoint: str
+    guard_cfg_node_id: str | None = None
+    effect_cfg_node_id: str | None = None
+    control_flow_summary_digest: str | None = None
+    dominates: bool = False
+    coverage_status: CoverageStatus = "unknown"
+    origin: SemanticOrigin
+
+    @field_validator(
+        "evidence_id",
+        "guard_id",
+        "protected_effect_id",
+        "entrypoint",
+    )
+    @classmethod
+    def _dominance_fields_non_empty(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("guard-dominance evidence fields must be non-empty")
+        return value
+
+
 class ProtectedEffect(BaseModel):
     """Security-sensitive effect whose execution requires assurance."""
 
@@ -480,6 +513,9 @@ class AssuranceIR(BaseModel):
     interpretation_compatibility_evidence: list[
         InterpretationCompatibilityEvidence
     ] = Field(default_factory=list)
+    guard_dominance_evidence: list[GuardDominanceEvidence] = Field(
+        default_factory=list
+    )
     protected_effects: list[ProtectedEffect] = Field(default_factory=list)
     resource_bindings: list[ResourceBinding] = Field(default_factory=list)
     resource_return_contracts: list[ResourceReturnContract] = Field(default_factory=list)
@@ -501,6 +537,7 @@ class AssuranceIR(BaseModel):
             "guards": "guard_id",
             "guard_effectiveness_evidence": "evidence_id",
             "interpretation_compatibility_evidence": "evidence_id",
+            "guard_dominance_evidence": "evidence_id",
             "protected_effects": "protected_effect_id",
             "resource_bindings": "binding_id",
             "resource_return_contracts": "contract_id",
@@ -579,6 +616,9 @@ class AssuranceIR(BaseModel):
         # interpretation-compatibility evidence extension.
         if not self.interpretation_compatibility_evidence:
             payload.pop("interpretation_compatibility_evidence", None)
+        # Preserve prior identity when no CFG dominance evidence is present.
+        if not self.guard_dominance_evidence:
+            payload.pop("guard_dominance_evidence", None)
         return payload
 
     @property
