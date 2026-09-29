@@ -19,6 +19,9 @@ from ovk.compilers.authorization.fastapi_route_summary import (
     RouteFileSummary,
     RouteHandlerSummary,
 )
+from ovk.compilers.authorization.guard_cfg_dominance import (
+    build_guard_dominance_evidence,
+)
 from ovk.core.assurance_ir import (
     AssuranceCoverage,
     AssuranceExtractorIdentity,
@@ -27,6 +30,7 @@ from ovk.core.assurance_ir import (
     ContractUse,
     EffectRef,
     FunctionContract,
+    GuardDominanceEvidence,
     GuardEffectivenessEvidence,
     PrincipalRef,
     ProtectedEffect,
@@ -337,6 +341,7 @@ class FastApiFileSemanticFragment:
     resources: tuple[ResourceRef, ...] = ()
     effects: tuple[EffectRef, ...] = ()
     guards: tuple[AuthorizationGuard, ...] = ()
+    guard_dominance_evidence: tuple[GuardDominanceEvidence, ...] = ()
     protected_effects: tuple[ProtectedEffect, ...] = ()
     resource_bindings: tuple[ResourceBinding, ...] = ()
     contract_uses: tuple[ContractUse, ...] = ()
@@ -512,6 +517,7 @@ def bind_route_file_summary(
     resources: dict[str, ResourceRef] = {}
     effects: dict[str, EffectRef] = {}
     guards: dict[str, AuthorizationGuard] = {}
+    dominance_evidence: dict[str, GuardDominanceEvidence] = {}
     protected: dict[str, ProtectedEffect] = {}
     bindings: dict[str, ResourceBinding] = {}
     contract_uses: dict[str, ContractUse] = {}
@@ -525,7 +531,14 @@ def bind_route_file_summary(
             handler_summary,
             external_fastapi_route_owners=external_fastapi_route_owners,
         )
-        if handler.has_control_flow:
+        cfg = handler.control_flow
+        if cfg is not None and cfg.unsupported_constructs:
+            for construct in cfg.unsupported_constructs:
+                unsupported.append(
+                    f"{file_summary.path}:{handler.handler_name}:"
+                    f"cfg_unsupported:{construct}"
+                )
+        elif handler.has_control_flow:
             unsupported.append(
                 f"{file_summary.path}:{handler.handler_name}:"
                 "control_flow_outside_profile"
@@ -1038,20 +1051,45 @@ def bind_route_file_summary(
                 unsupported[sink_unsupported_start:]
             )
             if not route_dependency_candidate:
-                for control_line in handler.unsupported_control_flow_lines:
-                    if control_line < call.line:
+                if cfg is not None:
+                    for construct in cfg.unsupported_constructs:
                         local_unsupported.append(
                             f"{file_summary.path}:{handler.handler_name}:"
-                            f"control_flow_before_protected_effect:{control_line}"
+                            f"cfg_unsupported:{construct}"
                         )
+                else:
+                    for control_line in handler.unsupported_control_flow_lines:
+                        if control_line < call.line:
+                            local_unsupported.append(
+                                f"{file_summary.path}:{handler.handler_name}:"
+                                f"control_flow_before_protected_effect:{control_line}"
+                            )
             local_unsupported = sorted(set(local_unsupported))
             local_coverage_status = (
                 "partial" if local_unsupported else "complete"
             )
+            if (
+                cfg is not None
+                and cfg.coverage_status == "partial"
+                and not route_dependency_candidate
+            ):
+                local_coverage_status = "partial"
+
+            entrypoint = f"{handler.method} {handler.route_path}"
+            for guard_id in guard_ids:
+                guard = guards[guard_id]
+                evidence = build_guard_dominance_evidence(
+                    guard=guard,
+                    effect=protected[protected_id],
+                    entrypoint=entrypoint,
+                    cfg=cfg,
+                    origin=handler.origin,
+                )
+                dominance_evidence[evidence.evidence_id] = evidence
 
             paths[path_id] = SemanticPath(
                 path_id=path_id,
-                entrypoint=f"{handler.method} {handler.route_path}",
+                entrypoint=entrypoint,
                 guard_ids=sorted(guard_ids),
                 protected_effect_ids=[protected_id],
                 binding_ids=sorted(binding_ids),
@@ -1083,6 +1121,12 @@ def bind_route_file_summary(
         ),
         guards=tuple(
             sorted(guards.values(), key=lambda item: item.guard_id)
+        ),
+        guard_dominance_evidence=tuple(
+            sorted(
+                dominance_evidence.values(),
+                key=lambda item: item.evidence_id,
+            )
         ),
         protected_effects=tuple(
             sorted(
@@ -1158,6 +1202,7 @@ _SUPPORTED_CONSTRUCTS = [
     "configured_static_sink_resource",
     "route_dependency_candidate_mediation",
     "straight_line_handler",
+    "bounded_handler_cfg",
     "fail_fast_none_guard",
     "configured_service_call_sink",
     "configured_fail_closed_resource_scope_assertion",
@@ -1202,6 +1247,7 @@ def assemble_fastapi_assurance_ir(
     resources: dict[str, ResourceRef] = {}
     effects: dict[str, EffectRef] = {}
     guards: dict[str, AuthorizationGuard] = {}
+    dominance_evidence: dict[str, GuardDominanceEvidence] = {}
     protected: dict[str, ProtectedEffect] = {}
     bindings: dict[str, ResourceBinding] = {}
     contract_uses: dict[str, ContractUse] = {}
@@ -1232,6 +1278,8 @@ def assemble_fastapi_assurance_ir(
             effects.setdefault(item.effect_id, item)
         for item in fragment.guards:
             guards[item.guard_id] = item
+        for item in fragment.guard_dominance_evidence:
+            dominance_evidence[item.evidence_id] = item
         for item in fragment.protected_effects:
             protected[item.protected_effect_id] = item
         for item in fragment.resource_bindings:
@@ -1259,7 +1307,7 @@ def assemble_fastapi_assurance_ir(
         ),
         extractor=AssuranceExtractorIdentity(
             extractor_id="assurance.fastapi.dependency_effects.ast_v1",
-            extractor_version="0.14.0",
+            extractor_version="0.15.0",
             source_profile_id="assurance.fastapi.dependency_effects.ast_v1",
         ),
         coverage=AssuranceCoverage(
@@ -1287,6 +1335,10 @@ def assemble_fastapi_assurance_ir(
         ),
         guard_effectiveness_evidence=sorted(
             guard_effectiveness_evidence or [],
+            key=lambda item: item.evidence_id,
+        ),
+        guard_dominance_evidence=sorted(
+            dominance_evidence.values(),
             key=lambda item: item.evidence_id,
         ),
         protected_effects=sorted(

@@ -35,7 +35,6 @@ _EXTRACTOR_ID = "assurance.fastapi.dependency_effects.ast_v1"
 _EXTRACTOR_VERSION = "0.13.0"
 _HTTP_METHODS = frozenset({"get", "post", "put", "patch", "delete", "options", "head"})
 _CONTROL_FLOW = (
-    ast.If,
     ast.For,
     ast.AsyncFor,
     ast.While,

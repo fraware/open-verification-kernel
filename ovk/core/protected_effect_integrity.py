@@ -20,7 +20,17 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from ovk.core.assurance_ir import AssuranceIR, AuthorizationGuard, ProtectedEffect, ResourceBinding, SemanticPath
+from ovk.core.assurance_ir import (
+    AssuranceIR,
+    AuthorizationGuard,
+    GuardDominanceEvidence,
+    ProtectedEffect,
+    ResourceBinding,
+    SemanticPath,
+)
+from ovk.compilers.authorization.guard_cfg_dominance import (
+    cfg_dominance_is_sufficient,
+)
 
 
 DimensionStatus = Literal["established", "violated", "unknown"]
@@ -128,6 +138,22 @@ def _conditions_imply(
     return required <= known and required <= available_ids
 
 
+def _dominance_evidence_for(
+    ir: AssuranceIR,
+    guard: AuthorizationGuard,
+    effect: ProtectedEffect,
+) -> GuardDominanceEvidence | None:
+    matches = [
+        item
+        for item in ir.guard_dominance_evidence
+        if item.guard_id == guard.guard_id
+        and item.protected_effect_id == effect.protected_effect_id
+    ]
+    if not matches:
+        return None
+    return sorted(matches, key=lambda item: item.evidence_id)[0]
+
+
 def _guard_dominates_effect_on_path(
     *,
     ir: AssuranceIR,
@@ -135,6 +161,17 @@ def _guard_dominates_effect_on_path(
     effect: ProtectedEffect,
     path: SemanticPath,
 ) -> bool:
+    cfg_evidence = _dominance_evidence_for(ir, guard, effect)
+    if (
+        cfg_evidence is not None
+        and cfg_evidence.guard_cfg_node_id is not None
+        and cfg_evidence.effect_cfg_node_id is not None
+    ):
+        # Body-bound CFG evidence is authoritative when both nodes resolve.
+        return cfg_dominance_is_sufficient(
+            cfg_evidence,
+            effectiveness=guard.effectiveness,
+        )
     available = set(effect.condition_ids) | set(path.condition_ids)
     return _conditions_imply(
         ir=ir,
