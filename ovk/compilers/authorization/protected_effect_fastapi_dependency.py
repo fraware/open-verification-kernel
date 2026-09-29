@@ -27,6 +27,10 @@ from ovk.compilers.authorization.fastapi_route_summary import (
     build_route_summary_index,
     route_summary_index_matches_materials,
 )
+from ovk.compilers.authorization.fastapi_semantic_fragment import (
+    assemble_fastapi_assurance_ir,
+    bind_route_file_summary,
+)
 from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.compilers.authorization.python_ast_index import (
     ParsedPythonMaterials,
@@ -41,23 +45,13 @@ from ovk.compilers.authorization.resource_return_contracts import (
     infer_resource_return_contracts,
 )
 from ovk.core.assurance_ir import (
-    AssuranceCoverage,
-    AssuranceExtractorIdentity,
     AssuranceIR,
-    AuthorizationGuard,
     BindingProjection,
     BindingRelation,
-    ContractUse,
-    EffectRef,
-    PrincipalRef,
-    ProtectedEffect,
-    ResourceBinding,
-    ResourceRef,
     SemanticOrigin,
-    SemanticPath,
 )
 from ovk.core.bundle import content_digest
-from ovk.core.models import SourceRange, VerificationSubject
+from ovk.core.models import SourceRange
 from ovk.core.resource_identity import ResourceIdentityTerm
 
 
@@ -526,20 +520,6 @@ class FastApiDependencyEffectExtractor:
         contract_summary_index: ContractSummaryIndex | None = None,
         route_summary_index: RouteSummaryIndex | None = None,
     ) -> AssuranceIR:
-        subject = VerificationSubject(
-            repo=materials.repo or "unknown/repo",
-            base_sha=materials.base_revision,
-            head_sha=materials.head_revision or "unknown",
-        )
-        principals: dict[str, PrincipalRef] = {}
-        resources: dict[str, ResourceRef] = {}
-        effects: dict[str, EffectRef] = {}
-        guards: dict[str, AuthorizationGuard] = {}
-        protected: dict[str, ProtectedEffect] = {}
-        bindings: dict[str, ResourceBinding] = {}
-        contract_uses: dict[str, ContractUse] = {}
-        paths: dict[str, SemanticPath] = {}
-        unsupported: list[str] = []
         if parsed_index is None:
             parsed = parse_head_python_materials(materials)
         else:
@@ -548,6 +528,7 @@ class FastApiDependencyEffectExtractor:
                     "parsed Python index does not match supplied head materials"
                 )
             parsed = parsed_index
+
         if contract_summary_index is None:
             contract_summaries = build_contract_summary_index(
                 materials,
@@ -568,6 +549,14 @@ class FastApiDependencyEffectExtractor:
             materials,
             summary_index=contract_summaries,
         )
+        resource_return_contracts = infer_resource_return_contracts(
+            materials,
+            function_contracts=function_contracts,
+        )
+        contracts_by_name = {
+            contract.qualified_name: contract
+            for contract in function_contracts
+        }
 
         if route_summary_index is None:
             route_summaries = build_route_summary_index(
@@ -584,386 +573,27 @@ class FastApiDependencyEffectExtractor:
                     "route summary index does not match supplied head materials"
                 )
             route_summaries = route_summary_index
-        resource_return_contracts = infer_resource_return_contracts(
-            materials,
-            function_contracts=function_contracts,
-        )
-        contracts_by_name = {
-            contract.qualified_name: contract
-            for contract in function_contracts
+
+        fragments = {
+            path: bind_route_file_summary(
+                summary,
+                profile=profile,
+                contracts_by_name=contracts_by_name,
+            )
+            for path, summary in sorted(route_summaries.summaries.items())
         }
+        missing_route_summaries = [
+            path
+            for path in sorted(materials.head_files)
+            if path not in parsed.syntax_errors
+            and path not in route_summaries.summaries
+        ]
 
-        if not materials.has_head():
-            unsupported.append("head_materials_missing")
-
-        for path, message in sorted(parsed.syntax_errors.items()):
-            unsupported.append(f"{path}:syntax_error:{message}")
-
-        for path in sorted(materials.head_files):
-            if path in parsed.syntax_errors:
-                continue
-            if path not in route_summaries.summaries:
-                unsupported.append(f"{path}:route_summary_missing")
-
-        for path, file_summary in sorted(route_summaries.summaries.items()):
-            for handler in file_summary.handlers:
-                method = handler.method
-                route_path = handler.route_path
-                if handler.has_control_flow:
-                    unsupported.append(
-                        f"{path}:{handler.handler_name}:control_flow_outside_profile"
-                    )
-
-                dependency_by_name = {
-                    item.dependency_name: item
-                    for item in handler.dependencies
-                }
-
-                principal_symbol = profile.principal_parameter
-                principal_id = _semantic_id("principal", principal_symbol)
-                principals.setdefault(
-                    principal_id,
-                    PrincipalRef(
-                        principal_id=principal_id,
-                        symbol=principal_symbol,
-                        principal_type="fastapi_dependency_result",
-                        origin=handler.origin,
-                    ),
-                )
-
-                for call in handler.calls:
-                    sink = profile.sink_effect_names(
-                        call.full_name,
-                        call.leaf_name,
-                    )
-                    if sink is None:
-                        continue
-                    sink_key, effect_name = sink
-                    identity_index = profile.identity_arg(sink_key)
-                    if len(call.positional_arguments) <= identity_index:
-                        unsupported.append(
-                            f"{path}:{handler.handler_name}:"
-                            f"unsupported_sink_identity_signature:{sink_key}"
-                        )
-                        continue
-
-                    identity_expression = call.positional_arguments[identity_index]
-                    identity_term = None
-                    if profile.contract_identity_attribute_for_sink(sink_key) is None:
-                        identity_term = identity_expression.term
-                        if identity_term is None:
-                            unsupported.append(
-                                f"{path}:{handler.handler_name}:"
-                                f"unsupported_sink_identity_expression:{sink_key}"
-                            )
-                            continue
-
-                    scope_term: ResourceIdentityTerm | None = None
-                    contract_attribute_terms: dict[str, ResourceIdentityTerm] = {}
-                    expected_contract_name = profile.contract_for_sink(sink_key)
-                    inferred_contract = None
-                    if expected_contract_name is not None:
-                        if call.resolved_qualified_name != expected_contract_name:
-                            unsupported.append(
-                                f"{path}:{handler.handler_name}:"
-                                f"sink_contract_target_unresolved:"
-                                f"{sink_key}:{expected_contract_name}"
-                            )
-                        else:
-                            inferred_contract = contracts_by_name.get(
-                                expected_contract_name
-                            )
-                            if inferred_contract is None:
-                                unsupported.append(
-                                    f"{path}:{handler.handler_name}:"
-                                    f"required_sink_contract_missing:"
-                                    f"{expected_contract_name}"
-                                )
-
-                    if inferred_contract is not None:
-                        (
-                            contract_attribute_terms,
-                            omitted_contract_attributes,
-                            unresolved_contract_attributes,
-                        ) = _instantiate_contract_attributes_from_summary(
-                            call=call,
-                            contract=inferred_contract,
-                        )
-
-                        scope_attribute = profile.contract_scope_attribute_for_sink(
-                            sink_key
-                        )
-                        if scope_attribute is not None:
-                            scope_post = _typed_contract_projection(
-                                contract=inferred_contract,
-                                return_attribute=scope_attribute,
-                            )
-                            if scope_post is None:
-                                unsupported.append(
-                                    f"{path}:{handler.handler_name}:"
-                                    f"required_scope_postcondition_missing:"
-                                    f"{expected_contract_name}:{scope_attribute}"
-                                )
-                            elif scope_attribute in contract_attribute_terms:
-                                scope_term = contract_attribute_terms[scope_attribute]
-                            elif scope_attribute in omitted_contract_attributes:
-                                scope_term = ResourceIdentityTerm.symbol(
-                                    f"$scope:{path}:{handler.handler_name}:{call.line}"
-                                )
-                            else:
-                                unsupported.append(
-                                    f"{path}:{handler.handler_name}:"
-                                    f"contract_precondition_unproved:"
-                                    f"{expected_contract_name}:{scope_attribute}"
-                                )
-
-                        identity_attribute = (
-                            profile.contract_identity_attribute_for_sink(sink_key)
-                        )
-                        if identity_attribute is not None:
-                            identity_post = _typed_contract_projection(
-                                contract=inferred_contract,
-                                return_attribute=identity_attribute,
-                            )
-                            if identity_post is None:
-                                unsupported.append(
-                                    f"{path}:{handler.handler_name}:"
-                                    f"required_identity_postcondition_missing:"
-                                    f"{expected_contract_name}:{identity_attribute}"
-                                )
-                            elif identity_attribute in contract_attribute_terms:
-                                identity_term = contract_attribute_terms[identity_attribute]
-                            else:
-                                unsupported.append(
-                                    f"{path}:{handler.handler_name}:"
-                                    f"required_identity_argument_or_precondition_unproved:"
-                                    f"{expected_contract_name}:{identity_attribute}"
-                                )
-
-                        # Unselected unresolved contract attributes remain metadata
-                        # and do not reduce extraction coverage.
-                        _ = unresolved_contract_attributes
-                    elif expected_contract_name is None:
-                        scope_keyword = profile.scope_keyword(sink_key)
-                        if scope_keyword is not None:
-                            scope_expression = call.keyword(scope_keyword)
-                            if scope_expression is not None:
-                                scope_term = scope_expression.term
-                                if scope_term is None:
-                                    unsupported.append(
-                                        f"{path}:{handler.handler_name}:"
-                                        f"unsupported_sink_scope_expression:{sink_key}"
-                                    )
-                            elif profile.missing_scope_is_unconstrained(sink_key):
-                                scope_term = ResourceIdentityTerm.symbol(
-                                    f"$scope:{path}:{handler.handler_name}:{call.line}"
-                                )
-                            else:
-                                unsupported.append(
-                                    f"{path}:{handler.handler_name}:"
-                                    f"required_sink_scope_missing:{sink_key}"
-                                )
-
-                    effect_id = _semantic_id("effect", effect_name)
-                    acted_id = _semantic_id(
-                        "resource",
-                        (
-                            f"{path}:{handler.handler_name}:{call.line}:"
-                            f"{identity_expression.rendered}"
-                        ),
-                    )
-                    protected_id = _semantic_id(
-                        "protected",
-                        f"{acted_id}:{effect_name}",
-                    )
-                    effects.setdefault(
-                        effect_id,
-                        EffectRef(
-                            effect_id=effect_id,
-                            name=effect_name,
-                            origin=call.origin,
-                        ),
-                    )
-                    resources[acted_id] = ResourceRef(
-                        resource_id=acted_id,
-                        symbol=identity_expression.rendered,
-                        identity_term=identity_term,
-                        scope_term=scope_term,
-                        attribute_terms=contract_attribute_terms,
-                        origin=identity_expression.origin,
-                    )
-
-                    contract_use_ids: list[str] = []
-                    if inferred_contract is not None:
-                        use_id = _semantic_id(
-                            "contract-use",
-                            (
-                                f"{path}:{handler.handler_name}:{call.line}:"
-                                f"{inferred_contract.contract_id}:{acted_id}"
-                            ),
-                        )
-                        contract_uses[use_id] = ContractUse(
-                            use_id=use_id,
-                            contract_id=inferred_contract.contract_id,
-                            qualified_name=inferred_contract.qualified_name,
-                            resource_id=acted_id,
-                            established_attributes=sorted(contract_attribute_terms),
-                            origin=call.origin,
-                        )
-                        contract_use_ids.append(use_id)
-
-                    guard_ids: list[str] = []
-                    binding_ids: list[str] = []
-                    for dep_name, allowed_effects in profile.dependency_guard_effects.items():
-                        if effect_name not in allowed_effects:
-                            continue
-                        dep_record = dependency_by_name.get(dep_name)
-                        resource_symbol = profile.dependency_guard_resources.get(dep_name)
-                        if dep_record is None or resource_symbol is None:
-                            continue
-                        if dep_record.parameter_name != profile.principal_parameter:
-                            unsupported.append(
-                                f"{path}:{handler.handler_name}:"
-                                f"dependency_principal_mismatch:{dep_name}"
-                            )
-                            continue
-
-                        guard_resource_id = _semantic_id("resource", resource_symbol)
-                        resources.setdefault(
-                            guard_resource_id,
-                            ResourceRef(
-                                resource_id=guard_resource_id,
-                                symbol=resource_symbol,
-                                identity_term=ResourceIdentityTerm.symbol(resource_symbol),
-                                origin=dep_record.origin,
-                            ),
-                        )
-                        guard_id = _semantic_id(
-                            "guard",
-                            (
-                                f"{path}:{handler.handler_name}:{dep_name}:"
-                                f"{effect_name}:{resource_symbol}"
-                            ),
-                        )
-                        guards[guard_id] = AuthorizationGuard(
-                            guard_id=guard_id,
-                            principal_id=principal_id,
-                            effect_id=effect_id,
-                            resource_id=guard_resource_id,
-                            origin=dep_record.origin,
-                        )
-                        guard_ids.append(guard_id)
-
-                        relation = profile.binding_relation_for_sink(sink_key)
-                        authorized_projection = (
-                            profile.binding_authorized_projection_for_sink(sink_key)
-                        )
-                        acted_projection = (
-                            profile.binding_acted_projection_for_sink(sink_key)
-                        )
-                        authorized_attribute = (
-                            profile.binding_authorized_attribute_for_sink(sink_key)
-                        )
-                        acted_attribute = (
-                            profile.binding_acted_attribute_for_sink(sink_key)
-                        )
-                        binding_id = _semantic_id(
-                            "binding",
-                            (
-                                f"{guard_id}:{guard_resource_id}:{acted_id}:"
-                                f"{relation}:{authorized_projection}:{acted_projection}:"
-                                f"{authorized_attribute}:{acted_attribute}"
-                            ),
-                        )
-                        bindings[binding_id] = ResourceBinding(
-                            binding_id=binding_id,
-                            authorized_resource_id=guard_resource_id,
-                            acted_resource_id=acted_id,
-                            relation=relation,
-                            authorized_projection=authorized_projection,
-                            acted_projection=acted_projection,
-                            authorized_attribute=authorized_attribute,
-                            acted_attribute=acted_attribute,
-                            origin=call.origin,
-                        )
-                        binding_ids.append(binding_id)
-
-                    protected[protected_id] = ProtectedEffect(
-                        protected_effect_id=protected_id,
-                        principal_id=principal_id,
-                        effect_id=effect_id,
-                        resource_id=acted_id,
-                        origin=call.origin,
-                    )
-                    path_id = _semantic_id(
-                        "path",
-                        (
-                            f"{method}:{route_path}:"
-                            f"{handler.handler_name}:{protected_id}"
-                        ),
-                    )
-                    paths[path_id] = SemanticPath(
-                        path_id=path_id,
-                        entrypoint=f"{method} {route_path}",
-                        guard_ids=sorted(guard_ids),
-                        protected_effect_ids=[protected_id],
-                        binding_ids=sorted(binding_ids),
-                        contract_use_ids=sorted(contract_use_ids),
-                        origin=handler.origin,
-                    )
-
-        if not materials.has_head():
-            coverage_status = "unknown"
-            confidence = 0.0
-        elif unsupported:
-            coverage_status = "partial"
-            confidence = 0.5
-        else:
-            coverage_status = "complete"
-            confidence = 1.0
-
-        return AssuranceIR(
-            subject=subject,
-            extractor=AssuranceExtractorIdentity(
-                extractor_id=_SOURCE_PROFILE_ID,
-                extractor_version="0.1.0",
-                source_profile_id=_SOURCE_PROFILE_ID,
-            ),
-            coverage=AssuranceCoverage(
-                status=coverage_status,
-                confidence=confidence,
-                supported_constructs=[
-                    "static_fastapi_route_decorator",
-                    "depends_or_security_default_parameter",
-                    "straight_line_handler",
-                    "configured_service_call_sink",
-                    "configured_sink_scope_keyword",
-                    "source_derived_resource_return_contract",
-                    "typed_function_contract",
-                    "return_attribute_projection",
-                    "constructor_alias_to_service_method",
-                ],
-                unsupported_constructs=sorted(set(unsupported)),
-                assumptions=[
-                    "Configured dependency guards authorize the declared route resource for the declared effects.",
-                    "Configured service-call sinks faithfully identify protected effects.",
-                    "Configured sink identity argument denotes the acted resource identity only when no source-derived identity contract is required.",
-                    "Configured sink scope keyword denotes the acted resource scope when no source contract is required.",
-                    "Source-derived function contracts are consumed only after resolving the configured service method.",
-                    "Only profile-selected contract attributes become required identity/scope/binding proof obligations.",
-                    "Conditional return contracts require the caller's non-null argument precondition to be established.",
-                    "Missing scope under a resolved source contract is modeled as unconstrained.",
-                    "Missing manually declared scope marked unconstrained is an explicit conservative over-approximation.",
-                ],
-            ),
-            principals=sorted(principals.values(), key=lambda item: item.principal_id),
-            resources=sorted(resources.values(), key=lambda item: item.resource_id),
-            effects=sorted(effects.values(), key=lambda item: item.effect_id),
-            guards=sorted(guards.values(), key=lambda item: item.guard_id),
-            protected_effects=sorted(protected.values(), key=lambda item: item.protected_effect_id),
-            resource_bindings=sorted(bindings.values(), key=lambda item: item.binding_id),
-            resource_return_contracts=resource_return_contracts,
+        return assemble_fastapi_assurance_ir(
+            materials=materials,
             function_contracts=function_contracts,
-            contract_uses=sorted(contract_uses.values(), key=lambda item: item.use_id),
-            paths=sorted(paths.values(), key=lambda item: item.path_id),
+            resource_return_contracts=resource_return_contracts,
+            fragments=fragments,
+            syntax_errors=parsed.syntax_errors,
+            missing_route_summary_paths=missing_route_summaries,
         )
