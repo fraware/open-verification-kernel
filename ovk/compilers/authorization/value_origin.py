@@ -22,12 +22,42 @@ _HTTP_PARAM_FORBIDDEN_ALIASES = frozenset(
     }
 )
 
+_FASTAPI_PARAM_CALLEES = frozenset(
+    {"Query", "Path", "Header", "Cookie", "Body", "Form"}
+)
+
+
+def _call_func_name(func: ast.AST) -> str | None:
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+def _fastapi_param_call_is_unsupported(call: ast.Call) -> bool:
+    """Refuse non-ordinary FastAPI parameter binding call forms.
+
+    Bare ``Query(...)`` without alias keywords remain ordinary HTTP bindings.
+    Attribute callees (``fastapi.Query``) and alias keywords refuse.
+    """
+
+    callee = _call_func_name(call.func)
+    if callee not in _FASTAPI_PARAM_CALLEES:
+        return False
+    if isinstance(call.func, ast.Attribute):
+        return True
+    for keyword in call.keywords:
+        if keyword.arg in {"alias", "validation_alias", "serialization_alias"}:
+            return True
+    return False
+
 
 def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id="assurance.fastapi.value_origin.ast_v1",
-        extractor_version="0.1.0",
+        extractor_version="0.1.1",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -161,36 +191,36 @@ def classify_expression_origin(
 
 
 def _parameter_has_unsupported_binding(arg: ast.arg, default: ast.AST | None) -> bool:
-    """Refuse alias / Annotated / dynamic FastAPI binding forms."""
+    """Refuse alias / Annotated / dynamic FastAPI binding forms.
+
+    ``typing.Annotated`` / ``fastapi.Query`` Attribute forms are refused the
+    same way as bare names — Unknown > false PASS.
+    """
+
+    def _node_is_unsupported(child: ast.AST) -> bool:
+        if isinstance(child, ast.Name) and child.id in _HTTP_PARAM_FORBIDDEN_ALIASES:
+            return True
+        if isinstance(child, ast.Attribute) and child.attr == "Annotated":
+            return True
+        if isinstance(child, ast.Attribute) and child.attr in {
+            "alias",
+            "validation_alias",
+            "serialization_alias",
+        }:
+            return True
+        if isinstance(child, ast.Call) and _fastapi_param_call_is_unsupported(child):
+            return True
+        return False
 
     annotation = arg.annotation
     if annotation is not None:
         for child in ast.walk(annotation):
-            if isinstance(child, ast.Name) and child.id in _HTTP_PARAM_FORBIDDEN_ALIASES:
+            if _node_is_unsupported(child):
                 return True
-            if isinstance(child, ast.Attribute) and child.attr in {
-                "alias",
-                "validation_alias",
-            }:
-                return True
-            if (
-                isinstance(child, ast.Call)
-                and isinstance(child.func, ast.Name)
-                and child.func.id in {"Query", "Path", "Header", "Cookie", "Body", "Form"}
-            ):
-                for keyword in child.keywords:
-                    if keyword.arg in {"alias", "validation_alias"}:
-                        return True
     if default is not None:
         for child in ast.walk(default):
-            if (
-                isinstance(child, ast.Call)
-                and isinstance(child.func, ast.Name)
-                and child.func.id in {"Query", "Path", "Header", "Cookie", "Body", "Form"}
-            ):
-                for keyword in child.keywords:
-                    if keyword.arg in {"alias", "validation_alias"}:
-                        return True
+            if _node_is_unsupported(child):
+                return True
             if isinstance(child, ast.Name) and child.id == "Annotated":
                 return True
     return False

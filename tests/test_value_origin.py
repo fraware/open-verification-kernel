@@ -110,3 +110,24 @@ def test_derived_expression_is_derived_not_trusted() -> None:
         handler_param_names=frozenset({"flag"}),
     )
     assert derived.origin_kind == "derived_value"
+
+def test_fastapi_attribute_query_alias_is_unknown() -> None:
+    evidence = extract_value_origins_from_source(
+        """
+def handler(bypass: bool = fastapi.Query(False, alias="b")):
+    return bypass
+""".strip()
+    )
+    by_name = {item.source_expression: item for item in evidence}
+    assert by_name["bypass"].origin_kind == "unknown_origin"
+
+
+def test_typing_annotated_attribute_is_unknown() -> None:
+    evidence = extract_value_origins_from_source(
+        """
+def handler(bypass: typing.Annotated[bool, Query()] = False):
+    return bypass
+""".strip()
+    )
+    by_name = {item.source_expression: item for item in evidence}
+    assert by_name["bypass"].origin_kind == "unknown_origin"
