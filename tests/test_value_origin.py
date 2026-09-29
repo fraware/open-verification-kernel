@@ -80,3 +80,33 @@ def apparently_safe_admin_only(flag):
     )
     assert all(item.origin_kind != "server_configuration" for item in evidence)
     assert evidence[0].origin_kind == "externally_bound_http_value"
+
+
+def test_annotated_query_param_refused_as_unknown() -> None:
+    evidence = extract_value_origins_from_source(
+        """
+def handler(bypass_filter: Annotated[bool, Query()] = False):
+    return bypass_filter
+""".strip()
+    )
+    by_name = {item.source_expression: item for item in evidence}
+    assert by_name["bypass_filter"].origin_kind == "unknown_origin"
+
+
+def test_kwargs_does_not_invent_http_origin() -> None:
+    evidence = extract_value_origins_from_source(
+        """
+def handler(**kwargs):
+    return kwargs.get("bypass_filter")
+""".strip()
+    )
+    assert evidence == ()
+
+
+def test_derived_expression_is_derived_not_trusted() -> None:
+    derived = classify_expression_origin(
+        ast.parse("flag or SETTINGS.debug", mode="eval").body,
+        path="h.py",
+        handler_param_names=frozenset({"flag"}),
+    )
+    assert derived.origin_kind == "derived_value"
