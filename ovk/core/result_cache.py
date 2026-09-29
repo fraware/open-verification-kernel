@@ -38,6 +38,7 @@ DEFAULT_TTL_SECONDS = 86400
 NAMESPACE_COMPILED = "compiled"
 NAMESPACE_BACKEND_RESULTS = "backend-results"
 NAMESPACE_AGGREGATE = "aggregate"
+NAMESPACE_SEMANTIC_EVIDENCE = "semantic-evidence"
 
 
 def _source_profile(obligation: VerificationObligation) -> str | None:
@@ -218,7 +219,12 @@ class HardenedResultCache:
         self.ttl_seconds = ttl_seconds
 
     def namespace_dir(self, namespace: str) -> Path:
-        if namespace not in {NAMESPACE_COMPILED, NAMESPACE_BACKEND_RESULTS, NAMESPACE_AGGREGATE}:
+        if namespace not in {
+            NAMESPACE_COMPILED,
+            NAMESPACE_BACKEND_RESULTS,
+            NAMESPACE_AGGREGATE,
+            NAMESPACE_SEMANTIC_EVIDENCE,
+        }:
             raise ValueError(f"unknown cache namespace: {namespace}")
         path = self.root / namespace
         path.mkdir(parents=True, exist_ok=True)
