@@ -23,7 +23,14 @@ from ovk.core.resource_identity import ResourceIdentityTerm
 
 CoverageStatus = Literal["complete", "partial", "unknown", "inapplicable"]
 GuardEffectiveness = Literal["established", "unproved"]
-GuardEffectivenessEvidenceKind = Literal["fail_closed_bearer_match_v1"]
+GuardEffectivenessEvidenceKind = Literal[
+    "fail_closed_bearer_match_v1",
+    "fail_closed_header_shared_secret_v1",
+]
+GuardEffectivenessComparisonKind = Literal[
+    "direct_inequality",
+    "secrets_compare_digest",
+]
 BindingRelation = Literal["equal", "same_tenant", "custom"]
 BindingProjection = Literal["identity", "scope", "attribute"]
 ContractTermKind = Literal["parameter", "return_attribute", "literal"]
@@ -136,8 +143,9 @@ class GuardEffectivenessEvidence(BaseModel):
     dependency_name: str
     evidence_kind: GuardEffectivenessEvidenceKind
     credential_parameter: str
-    credential_attribute: str
+    credential_attribute: str | None = None
     token_expression: str
+    comparison_kind: GuardEffectivenessComparisonKind = "direct_inequality"
     assumptions: list[str] = Field(default_factory=list)
     origin: SemanticOrigin
 
@@ -145,7 +153,6 @@ class GuardEffectivenessEvidence(BaseModel):
         "evidence_id",
         "dependency_name",
         "credential_parameter",
-        "credential_attribute",
         "token_expression",
     )
     @classmethod
@@ -156,6 +163,31 @@ class GuardEffectivenessEvidence(BaseModel):
                 "guard-effectiveness evidence fields must be non-empty"
             )
         return value
+
+    @model_validator(mode="after")
+    def _effectiveness_evidence_shape(self) -> "GuardEffectivenessEvidence":
+        if self.evidence_kind == "fail_closed_bearer_match_v1":
+            if (
+                self.credential_attribute is None
+                or not self.credential_attribute.strip()
+            ):
+                raise ValueError(
+                    "bearer effectiveness evidence requires credential_attribute"
+                )
+            if self.comparison_kind != "direct_inequality":
+                raise ValueError(
+                    "bearer effectiveness evidence requires direct_inequality"
+                )
+        elif self.evidence_kind == "fail_closed_header_shared_secret_v1":
+            if self.credential_attribute is not None:
+                raise ValueError(
+                    "header shared-secret evidence has no credential_attribute"
+                )
+            if self.comparison_kind != "secrets_compare_digest":
+                raise ValueError(
+                    "header shared-secret evidence requires secrets_compare_digest"
+                )
+        return self
 
 
 class ProtectedEffect(BaseModel):
