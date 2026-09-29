@@ -28,6 +28,7 @@ from ovk.compilers.authorization.fastapi_route_summary import (
     CallSummary,
     DependencyParameterSummary,
     ExpressionSummary,
+    OwnershipAssertionSummary,
     RouteFileSummary,
     RouteHandlerSummary,
     RouteSummaryIndex,
@@ -51,7 +52,7 @@ from ovk.core.resource_identity import ResourceIdentityTerm
 
 
 SEMANTIC_SUMMARY_CACHE_SCHEMA = "ovk.python_semantic_summary_cache.v1"
-SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.1.0"
+SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.2.0"
 DEFAULT_SEMANTIC_SUMMARY_CACHE_DIR = Path(
     ".verification/cache/python-semantic-summaries"
 )
@@ -190,6 +191,21 @@ def _route_summary_payload(summary: RouteFileSummary) -> dict[str, Any]:
                 "method": handler.method,
                 "route_path": handler.route_path,
                 "has_control_flow": handler.has_control_flow,
+                "ownership_assertions": [
+                    {
+                        "loader_full_name": item.loader_full_name,
+                        "loader_leaf_name": item.loader_leaf_name,
+                        "loaded_resource_symbol": item.loaded_resource_symbol,
+                        "resource_identity_attribute": item.resource_identity_attribute,
+                        "resource_key": _expression_payload(item.resource_key),
+                        "owner_attribute": item.owner_attribute,
+                        "principal_expression": _expression_payload(item.principal_expression),
+                        "principal_attribute": item.principal_attribute,
+                        "presence_test": item.presence_test,
+                        "origin": _origin_payload(item.origin),
+                    }
+                    for item in handler.ownership_assertions
+                ],
                 "dependencies": [
                     {
                         "parameter_name": dep.parameter_name,
@@ -263,6 +279,25 @@ def _route_summary_from_payload(payload: dict[str, Any]) -> RouteFileSummary:
                 method=str(handler["method"]),
                 route_path=str(handler["route_path"]),
                 has_control_flow=bool(handler["has_control_flow"]),
+                ownership_assertions=tuple(
+                    OwnershipAssertionSummary(
+                        loader_full_name=str(item["loader_full_name"]),
+                        loader_leaf_name=(
+                            str(item["loader_leaf_name"])
+                            if item.get("loader_leaf_name") is not None
+                            else None
+                        ),
+                        loaded_resource_symbol=str(item["loaded_resource_symbol"]),
+                        resource_identity_attribute=str(item["resource_identity_attribute"]),
+                        resource_key=_expression_from_payload(item["resource_key"]),
+                        owner_attribute=str(item["owner_attribute"]),
+                        principal_expression=_expression_from_payload(item["principal_expression"]),
+                        principal_attribute=str(item["principal_attribute"]),
+                        presence_test=str(item["presence_test"]),
+                        origin=SemanticOrigin.model_validate(item["origin"]),
+                    )
+                    for item in handler.get("ownership_assertions") or []
+                ),
                 dependencies=tuple(
                     DependencyParameterSummary(
                         parameter_name=str(dep["parameter_name"]),
