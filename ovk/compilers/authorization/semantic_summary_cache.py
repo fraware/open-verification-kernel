@@ -28,13 +28,16 @@ from ovk.compilers.authorization.fastapi_route_summary import (
     CallSummary,
     DependencyParameterSummary,
     ExpressionSummary,
+    ImportedConstructorBindingSummary,
     IncludeRouterCallSummary,
     ModuleImportSummary,
     OwnershipAssertionSummary,
+    PathParameterInterpretationSummary,
     RouteDependencySummary,
     RouteFileSummary,
     RouteHandlerSummary,
     RouteSummaryIndex,
+    RouterWrapperClassSummary,
     summarize_route_file,
 )
 from ovk.compilers.authorization.material_loader import AuthMaterials
@@ -55,7 +58,7 @@ from ovk.core.resource_identity import ResourceIdentityTerm
 
 
 SEMANTIC_SUMMARY_CACHE_SCHEMA = "ovk.python_semantic_summary_cache.v1"
-SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.9.0"
+SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.10.0"
 DEFAULT_SEMANTIC_SUMMARY_CACHE_DIR = Path(
     ".verification/cache/python-semantic-summaries"
 )
@@ -196,6 +199,24 @@ def _route_summary_payload(summary: RouteFileSummary) -> dict[str, Any]:
             }
             for item in summary.module_imports
         ],
+        "router_wrapper_classes": [
+            {
+                "class_name": item.class_name,
+                "proof_kind": item.proof_kind,
+                "origin": _origin_payload(item.origin),
+            }
+            for item in summary.router_wrapper_classes
+        ],
+        "imported_constructor_bindings": [
+            {
+                "symbol": item.symbol,
+                "constructor_local_name": item.constructor_local_name,
+                "import_module": item.import_module,
+                "import_name": item.import_name,
+                "origin": _origin_payload(item.origin),
+            }
+            for item in summary.imported_constructor_bindings
+        ],
         "include_router_calls": [
             {
                 "app_symbol": item.app_symbol,
@@ -259,6 +280,14 @@ def _route_summary_payload(summary: RouteFileSummary) -> dict[str, Any]:
                         "origin": _origin_payload(dep.origin),
                     }
                     for dep in handler.route_dependencies
+                ],
+                "path_parameter_interpretations": [
+                    {
+                        "parameter_name": item.parameter_name,
+                        "term": _resource_term_payload(item.term),
+                        "origin": _origin_payload(item.origin),
+                    }
+                    for item in handler.path_parameter_interpretations
                 ],
                 "calls": [
                     {
@@ -380,6 +409,16 @@ def _route_summary_from_payload(payload: dict[str, Any]) -> RouteFileSummary:
                     for dep in handler.get("route_dependencies") or []
                 ),
                 calls=tuple(calls),
+                path_parameter_interpretations=tuple(
+                    PathParameterInterpretationSummary(
+                        parameter_name=str(item["parameter_name"]),
+                        term=ResourceIdentityTerm.model_validate(item["term"]),
+                        origin=SemanticOrigin.model_validate(item["origin"]),
+                    )
+                    for item in (
+                        handler.get("path_parameter_interpretations") or []
+                    )
+                ),
                 origin=SemanticOrigin.model_validate(handler["origin"]),
             )
         )
@@ -398,6 +437,24 @@ def _route_summary_from_payload(payload: dict[str, Any]) -> RouteFileSummary:
                 module_name=str(item["module_name"]),
             )
             for item in payload.get("module_imports") or []
+        ),
+        router_wrapper_classes=tuple(
+            RouterWrapperClassSummary(
+                class_name=str(item["class_name"]),
+                proof_kind=str(item["proof_kind"]),
+                origin=SemanticOrigin.model_validate(item["origin"]),
+            )
+            for item in payload.get("router_wrapper_classes") or []
+        ),
+        imported_constructor_bindings=tuple(
+            ImportedConstructorBindingSummary(
+                symbol=str(item["symbol"]),
+                constructor_local_name=str(item["constructor_local_name"]),
+                import_module=str(item["import_module"]),
+                import_name=str(item["import_name"]),
+                origin=SemanticOrigin.model_validate(item["origin"]),
+            )
+            for item in payload.get("imported_constructor_bindings") or []
         ),
         include_router_calls=tuple(
             IncludeRouterCallSummary(

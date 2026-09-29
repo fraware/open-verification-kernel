@@ -8,7 +8,7 @@ remain identical.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 
 from ovk.compilers.authorization.material_loader import AuthMaterials
@@ -418,6 +418,69 @@ def profile_semantic_digest(profile: Any) -> str:
     return content_digest(payload)
 
 
+def _bind_external_router_path_interpretations(
+    handler: RouteHandlerSummary,
+    *,
+    external_fastapi_route_owners: frozenset[str],
+) -> RouteHandlerSummary:
+    """Apply bounded path interpretation after external route-owner proof."""
+
+    if (
+        handler.router_symbol is None
+        or handler.router_symbol not in external_fastapi_route_owners
+        or not handler.path_parameter_interpretations
+    ):
+        return handler
+
+    candidates = {
+        item.parameter_name: item.term
+        for item in handler.path_parameter_interpretations
+    }
+
+    def bind_expression(expression: ExpressionSummary) -> ExpressionSummary:
+        term = expression.term
+        candidate = candidates.get(expression.rendered)
+        if (
+            candidate is None
+            or term is None
+            or term.kind != "symbol"
+            or term.interpretation is not None
+            or term.value != expression.rendered
+        ):
+            return expression
+        return replace(expression, term=candidate)
+
+    calls = tuple(
+        replace(
+            call,
+            positional_arguments=tuple(
+                bind_expression(argument)
+                for argument in call.positional_arguments
+            ),
+            keyword_arguments=tuple(
+                (name, bind_expression(argument))
+                for name, argument in call.keyword_arguments
+            ),
+        )
+        for call in handler.calls
+    )
+    ownership_assertions = tuple(
+        replace(
+            assertion,
+            resource_key=bind_expression(assertion.resource_key),
+            principal_expression=bind_expression(
+                assertion.principal_expression
+            ),
+        )
+        for assertion in handler.ownership_assertions
+    )
+    return replace(
+        handler,
+        calls=calls,
+        ownership_assertions=ownership_assertions,
+    )
+
+
 def bind_route_file_summary(
     file_summary: RouteFileSummary,
     *,
@@ -428,6 +491,7 @@ def bind_route_file_summary(
         str,
         tuple[RouteDependencySummary, ...],
     ] | None = None,
+    external_fastapi_route_owners: frozenset[str] | None = None,
     route_attachment_digest: str | None = None,
 ) -> FastApiFileSemanticFragment:
     """Bind one file summary against current profile and function contracts."""
@@ -435,6 +499,9 @@ def bind_route_file_summary(
     guard_effectiveness_by_name = guard_effectiveness_by_name or {}
     external_route_dependencies_by_router = (
         external_route_dependencies_by_router or {}
+    )
+    external_fastapi_route_owners = (
+        external_fastapi_route_owners or frozenset()
     )
     effective_attachment_digest = (
         route_attachment_digest
@@ -453,7 +520,11 @@ def bind_route_file_summary(
     dependencies: dict[str, str | None] = {}
     guard_effectiveness_dependencies: dict[str, str | None] = {}
 
-    for handler in file_summary.handlers:
+    for handler_summary in file_summary.handlers:
+        handler = _bind_external_router_path_interpretations(
+            handler_summary,
+            external_fastapi_route_owners=external_fastapi_route_owners,
+        )
         if handler.has_control_flow:
             unsupported.append(
                 f"{file_summary.path}:{handler.handler_name}:"
@@ -1082,6 +1153,7 @@ _SUPPORTED_CONSTRUCTS = [
     "direct_route_decorator_dependency",
     "direct_apirouter_constructor_dependency",
     "direct_fastapi_include_router_dependency",
+    "source_proved_apirouter_wrapper",
     "route_dependency_factory_candidate",
     "configured_static_sink_resource",
     "route_dependency_candidate_mediation",
@@ -1187,7 +1259,7 @@ def assemble_fastapi_assurance_ir(
         ),
         extractor=AssuranceExtractorIdentity(
             extractor_id="assurance.fastapi.dependency_effects.ast_v1",
-            extractor_version="0.13.0",
+            extractor_version="0.14.0",
             source_profile_id="assurance.fastapi.dependency_effects.ast_v1",
         ),
         coverage=AssuranceCoverage(

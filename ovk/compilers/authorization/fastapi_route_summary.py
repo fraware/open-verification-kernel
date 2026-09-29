@@ -82,6 +82,38 @@ class ModuleImportSummary:
 
 
 @dataclass(frozen=True)
+class RouterWrapperClassSummary:
+    """Source-proved FastAPI APIRouter wrapper class."""
+
+    class_name: str
+    proof_kind: Literal[
+        "direct_apirouter_subclass_v1",
+        "api_route_delegate_v1",
+    ]
+    origin: SemanticOrigin
+
+
+@dataclass(frozen=True)
+class ImportedConstructorBindingSummary:
+    """Unique top-level constructor binding imported from another module."""
+
+    symbol: str
+    constructor_local_name: str
+    import_module: str
+    import_name: str
+    origin: SemanticOrigin
+
+
+@dataclass(frozen=True)
+class PathParameterInterpretationSummary:
+    """Bounded path-parameter interpretation candidate independent of owner."""
+
+    parameter_name: str
+    term: ResourceIdentityTerm
+    origin: SemanticOrigin
+
+
+@dataclass(frozen=True)
 class IncludeRouterCallSummary:
     """Profile-independent static FastAPI include_router syntax fact."""
 
@@ -146,6 +178,9 @@ class RouteHandlerSummary:
     route_dependencies: tuple[RouteDependencySummary, ...]
     ownership_assertions: tuple[OwnershipAssertionSummary, ...]
     calls: tuple[CallSummary, ...]
+    path_parameter_interpretations: tuple[
+        PathParameterInterpretationSummary, ...
+    ]
     origin: SemanticOrigin
 
 
@@ -157,6 +192,10 @@ class RouteFileSummary:
     apirouter_symbols: tuple[str, ...] = ()
     module_imports: tuple[ModuleImportSummary, ...] = ()
     include_router_calls: tuple[IncludeRouterCallSummary, ...] = ()
+    router_wrapper_classes: tuple[RouterWrapperClassSummary, ...] = ()
+    imported_constructor_bindings: tuple[
+        ImportedConstructorBindingSummary, ...
+    ] = ()
 
 
 @dataclass(frozen=True)
@@ -171,7 +210,7 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id=_EXTRACTOR_ID,
-        extractor_version="0.9.0",
+        extractor_version="0.10.0",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -405,6 +444,348 @@ def _unique_constructor_symbols(
         for name in candidates
         if assignments.get(name) == 1
     }
+
+
+def _canonical_fastapi_route_owner_symbols(tree: ast.Module) -> set[str]:
+    owners: set[str] = set()
+    for constructor in ("FastAPI", "APIRouter"):
+        if not _has_unique_direct_import_binding(
+            tree,
+            module="fastapi",
+            name=constructor,
+        ):
+            continue
+        owners.update(
+            _unique_constructor_symbols(
+                tree,
+                constructor=constructor,
+            )
+        )
+    return owners
+
+
+def _meaningful_statements(statements: list[ast.stmt]) -> list[ast.stmt]:
+    body = list(statements)
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        body = body[1:]
+    return body
+
+
+def _operation_id_forwarding_expression(node: ast.AST) -> bool:
+    if isinstance(node, ast.Name) and node.id == "operation_id":
+        return True
+    return (
+        isinstance(node, ast.BoolOp)
+        and isinstance(node.op, ast.Or)
+        and len(node.values) == 2
+        and isinstance(node.values[0], ast.Name)
+        and node.values[0].id == "operation_id"
+        and isinstance(node.values[1], ast.Attribute)
+        and node.values[1].attr == "__name__"
+        and isinstance(node.values[1].value, ast.Name)
+        and node.values[1].value.id == "func"
+    )
+
+
+def _api_route_delegate_proof(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> bool:
+    """Recognize a narrow APIRouter api_route delegation theorem."""
+
+    if (
+        not isinstance(function, ast.FunctionDef)
+        or function.decorator_list
+        or function.args.posonlyargs
+        or function.args.vararg is not None
+        or function.args.kwonlyargs
+        or function.args.kw_defaults
+        or function.args.kwarg is None
+        or function.args.kwarg.arg != "kwargs"
+        or [arg.arg for arg in function.args.args]
+        != ["self", "path", "operation_id"]
+        or len(function.args.defaults) != 1
+        or not isinstance(function.args.defaults[0], ast.Constant)
+        or function.args.defaults[0].value is not None
+    ):
+        return False
+
+    body = _meaningful_statements(function.body)
+    if (
+        len(body) != 2
+        or not isinstance(body[0], ast.FunctionDef)
+        or not isinstance(body[1], ast.Return)
+        or not isinstance(body[1].value, ast.Name)
+        or body[1].value.id != body[0].name
+    ):
+        return False
+
+    decorator = body[0]
+    if (
+        decorator.decorator_list
+        or decorator.args.posonlyargs
+        or decorator.args.vararg is not None
+        or decorator.args.kwonlyargs
+        or decorator.args.kw_defaults
+        or decorator.args.kwarg is not None
+        or [arg.arg for arg in decorator.args.args] != ["func"]
+        or decorator.args.defaults
+    ):
+        return False
+
+    nested = _meaningful_statements(decorator.body)
+    if (
+        len(nested) != 2
+        or not isinstance(nested[0], ast.Expr)
+        or not isinstance(nested[0].value, ast.Call)
+        or not isinstance(nested[1], ast.Return)
+        or not isinstance(nested[1].value, ast.Name)
+        or nested[1].value.id != "func"
+    ):
+        return False
+
+    call = nested[0].value
+    if (
+        not isinstance(call.func, ast.Attribute)
+        or call.func.attr != "add_api_route"
+        or not isinstance(call.func.value, ast.Name)
+        or call.func.value.id != "self"
+        or len(call.args) != 2
+        or not isinstance(call.args[0], ast.Name)
+        or call.args[0].id != "path"
+        or not isinstance(call.args[1], ast.Name)
+        or call.args[1].id != "func"
+        or len(call.keywords) != 2
+    ):
+        return False
+
+    operation_keywords = [
+        keyword
+        for keyword in call.keywords
+        if keyword.arg == "operation_id"
+    ]
+    expansion_keywords = [
+        keyword
+        for keyword in call.keywords
+        if keyword.arg is None
+    ]
+    return (
+        len(operation_keywords) == 1
+        and _operation_id_forwarding_expression(
+            operation_keywords[0].value
+        )
+        and len(expansion_keywords) == 1
+        and isinstance(expansion_keywords[0].value, ast.Name)
+        and expansion_keywords[0].value.id == "kwargs"
+    )
+
+
+def _router_wrapper_class_summaries(
+    path: str,
+    tree: ast.Module,
+) -> tuple[RouterWrapperClassSummary, ...]:
+    """Prove bounded source wrappers that preserve APIRouter registration."""
+
+    if not _has_unique_direct_import_binding(
+        tree,
+        module="fastapi",
+        name="APIRouter",
+    ):
+        return ()
+
+    found: list[RouterWrapperClassSummary] = []
+
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        if (
+            node.decorator_list
+            or node.keywords
+            or len(node.bases) != 1
+            or not isinstance(node.bases[0], ast.Name)
+            or node.bases[0].id != "APIRouter"
+        ):
+            continue
+
+        body = _meaningful_statements(node.body)
+        if len(body) == 1 and isinstance(body[0], ast.Pass):
+            proof_kind = "direct_apirouter_subclass_v1"
+        elif not body:
+            proof_kind = "direct_apirouter_subclass_v1"
+        elif (
+            len(body) == 1
+            and isinstance(body[0], ast.FunctionDef)
+            and body[0].name == "api_route"
+            and _api_route_delegate_proof(body[0])
+        ):
+            proof_kind = "api_route_delegate_v1"
+        else:
+            continue
+
+        found.append(
+            RouterWrapperClassSummary(
+                class_name=node.name,
+                proof_kind=proof_kind,
+                origin=_origin(path, node),
+            )
+        )
+
+    return tuple(
+        sorted(
+            found,
+            key=lambda item: (item.class_name, item.proof_kind),
+        )
+    )
+
+
+def _unique_imported_symbol_binding(
+    tree: ast.Module,
+    local_name: str,
+) -> tuple[str, str] | None:
+    matches: list[tuple[str, str]] = []
+
+    for statement in tree.body:
+        if isinstance(statement, ast.ImportFrom):
+            for alias in statement.names:
+                bound = alias.asname or alias.name
+                if bound != local_name:
+                    continue
+                if (
+                    statement.level != 0
+                    or not statement.module
+                    or alias.name == "*"
+                ):
+                    return None
+                matches.append((statement.module, alias.name))
+            continue
+
+        if isinstance(statement, ast.Import):
+            for alias in statement.names:
+                bound = alias.asname or alias.name.split(".", 1)[0]
+                if bound == local_name:
+                    return None
+            continue
+
+        if isinstance(
+            statement,
+            (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef),
+        ):
+            if statement.name == local_name:
+                return None
+            continue
+
+        if any(
+            isinstance(node, ast.Name)
+            and node.id == local_name
+            and isinstance(node.ctx, (ast.Store, ast.Del))
+            for node in ast.walk(statement)
+        ):
+            return None
+
+    return matches[0] if len(matches) == 1 else None
+
+
+def _top_level_binding_counts(tree: ast.Module) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for statement in tree.body:
+        names: set[str] = set()
+        if isinstance(statement, ast.Assign):
+            for target in statement.targets:
+                names.update(
+                    node.id
+                    for node in ast.walk(target)
+                    if isinstance(node, ast.Name)
+                )
+        elif isinstance(statement, ast.AnnAssign):
+            names.update(
+                node.id
+                for node in ast.walk(statement.target)
+                if isinstance(node, ast.Name)
+            )
+        elif isinstance(
+            statement,
+            (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef),
+        ):
+            names.add(statement.name)
+        elif isinstance(statement, ast.Import):
+            names.update(
+                alias.asname or alias.name.split(".", 1)[0]
+                for alias in statement.names
+            )
+        elif isinstance(statement, ast.ImportFrom):
+            names.update(
+                alias.asname or alias.name
+                for alias in statement.names
+                if alias.name != "*"
+            )
+        for name in names:
+            counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
+def _imported_constructor_bindings(
+    path: str,
+    tree: ast.Module,
+) -> tuple[ImportedConstructorBindingSummary, ...]:
+    counts = _top_level_binding_counts(tree)
+    found: list[ImportedConstructorBindingSummary] = []
+
+    for statement in tree.body:
+        target: ast.Name | None = None
+        value: ast.AST | None = None
+        if (
+            isinstance(statement, ast.Assign)
+            and len(statement.targets) == 1
+            and isinstance(statement.targets[0], ast.Name)
+        ):
+            target = statement.targets[0]
+            value = statement.value
+        elif (
+            isinstance(statement, ast.AnnAssign)
+            and isinstance(statement.target, ast.Name)
+        ):
+            target = statement.target
+            value = statement.value
+
+        if (
+            target is None
+            or counts.get(target.id) != 1
+            or not isinstance(value, ast.Call)
+            or not isinstance(value.func, ast.Name)
+        ):
+            continue
+
+        imported = _unique_imported_symbol_binding(
+            tree,
+            value.func.id,
+        )
+        if imported is None:
+            continue
+        import_module, import_name = imported
+        found.append(
+            ImportedConstructorBindingSummary(
+                symbol=target.id,
+                constructor_local_name=value.func.id,
+                import_module=import_module,
+                import_name=import_name,
+                origin=_origin(path, statement),
+            )
+        )
+
+    return tuple(
+        sorted(
+            found,
+            key=lambda item: (
+                item.symbol,
+                item.import_module,
+                item.import_name,
+            ),
+        )
+    )
 
 
 def _module_import_summaries(
@@ -977,23 +1358,18 @@ def _path_parameter_names(route_path: str) -> set[str]:
     return names
 
 
-def _path_parameter_interpretations(
+def _path_parameter_interpretation_candidates(
     *,
+    path: str,
     tree: ast.Module,
     handler: ast.FunctionDef | ast.AsyncFunctionDef,
     route_path: str,
-    router_symbol: str | None,
-) -> dict[str, ResourceIdentityTerm]:
-    """Infer source-grounded interpretation contracts for bounded path types.
+) -> dict[str, PathParameterInterpretationSummary]:
+    """Summarize bounded path interpretation independently of route ownership.
 
-    v1 intentionally supports only an unaliased pydantic.NonNegativeInt
-    annotation on a parameter whose name occurs as an exact route-path
-    placeholder. Annotated metadata, Path customization, import aliases,
-    custom validators, and rebound names remain outside this theorem.
-
-    The decoder label records the FastAPI path-parameter boundary. It does not
-    assert equivalence with a separate TypeAdapter/parser call; that requires
-    independent source evidence.
+    The candidate records only local syntax and a canonical Pydantic binding.
+    Semantic binding applies it only after the route owner is established as a
+    canonical FastAPI router or a separately source-proved APIRouter wrapper.
     """
 
     if not _has_unique_direct_import_binding(
@@ -1003,27 +1379,11 @@ def _path_parameter_interpretations(
     ):
         return {}
 
-    route_owners: set[str] = set()
-    for constructor in ("FastAPI", "APIRouter"):
-        if _has_unique_direct_import_binding(
-            tree,
-            module="fastapi",
-            name=constructor,
-        ):
-            route_owners.update(
-                _unique_constructor_symbols(
-                    tree,
-                    constructor=constructor,
-                )
-            )
-    if router_symbol is None or router_symbol not in route_owners:
-        return {}
-
     path_parameters = _path_parameter_names(route_path)
     if not path_parameters:
         return {}
 
-    interpreted: dict[str, ResourceIdentityTerm] = {}
+    interpreted: dict[str, PathParameterInterpretationSummary] = {}
     arguments = (
         list(handler.args.posonlyargs)
         + list(handler.args.args)
@@ -1036,12 +1396,16 @@ def _path_parameter_interpretations(
             or argument.annotation.id != "NonNegativeInt"
         ):
             continue
-        interpreted[argument.arg] = ResourceIdentityTerm.interpreted_symbol(
-            argument.arg,
-            input_origin=f"request.path.{argument.arg}",
-            decoder="fastapi.path_parameter",
-            output_type="pydantic.NonNegativeInt",
-            constraints=("ge=0", "validation_mode=default"),
+        interpreted[argument.arg] = PathParameterInterpretationSummary(
+            parameter_name=argument.arg,
+            term=ResourceIdentityTerm.interpreted_symbol(
+                argument.arg,
+                input_origin=f"request.path.{argument.arg}",
+                decoder="fastapi.path_parameter",
+                output_type="pydantic.NonNegativeInt",
+                constraints=("ge=0", "validation_mode=default"),
+            ),
+            origin=_origin(path, argument.annotation),
         )
     return interpreted
 
@@ -1262,6 +1626,7 @@ def summarize_route_file(
 ) -> RouteFileSummary:
     handlers: list[RouteHandlerSummary] = []
     inherited_by_router = _router_constructor_dependencies(path, tree)
+    canonical_route_owners = _canonical_fastapi_route_owner_symbols(tree)
 
     for handler in tree.body:
         if not isinstance(handler, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -1272,11 +1637,21 @@ def summarize_route_file(
         method, route_path, route_decorator, router_symbol = route
         aliases = _constructor_aliases(handler)
         non_null = _provably_non_null_parameters(handler)
-        interpreted_parameters = _path_parameter_interpretations(
-            tree=tree,
-            handler=handler,
-            route_path=route_path,
-            router_symbol=router_symbol,
+        interpretation_candidates = (
+            _path_parameter_interpretation_candidates(
+                path=path,
+                tree=tree,
+                handler=handler,
+                route_path=route_path,
+            )
+        )
+        interpreted_parameters = (
+            {
+                name: item.term
+                for name, item in interpretation_candidates.items()
+            }
+            if router_symbol in canonical_route_owners
+            else {}
         )
 
         calls: list[CallSummary] = []
@@ -1344,6 +1719,12 @@ def summarize_route_file(
                     interpreted_parameters=interpreted_parameters,
                 ),
                 calls=tuple(calls),
+                path_parameter_interpretations=tuple(
+                    sorted(
+                        interpretation_candidates.values(),
+                        key=lambda item: item.parameter_name,
+                    )
+                ),
                 origin=_origin(path, handler),
             )
         )
@@ -1371,6 +1752,14 @@ def summarize_route_file(
         ),
         module_imports=_module_import_summaries(tree),
         include_router_calls=_include_router_call_summaries(
+            path,
+            tree,
+        ),
+        router_wrapper_classes=_router_wrapper_class_summaries(
+            path,
+            tree,
+        ),
+        imported_constructor_bindings=_imported_constructor_bindings(
             path,
             tree,
         ),
