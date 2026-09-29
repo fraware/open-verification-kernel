@@ -221,6 +221,7 @@ def test_qualification_human_review_requires_explicit_human_flag() -> None:
             case_id="invalid-human-label",
             repository="owner/repo",
             repository_url="https://github.com/owner/repo.git",
+            validation_class="public_upstream_reduction",
             base_sha="a" * 40,
             head_sha="b" * 40,
             safety_label="safe",
