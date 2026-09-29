@@ -64,10 +64,10 @@ async def get_agent(
     return agent
 
 @app.get("/unrelated")
-async def unrelated(flag: bool):
-    if flag:
-        return {"value": 1}
-    return {"value": 2}
+async def unrelated(items: list[int] | None = None):
+    for item in items or []:
+        audit(item)
+    return {"value": 1}
 """.strip()
 
     ir, results = _evaluate(source)
@@ -95,11 +95,11 @@ app = FastAPI()
 async def get_agent(
     workspace_id: str,
     agent_id: str,
-    enabled: bool,
+    tags: list[str] | None,
     user = Depends(require_workspace_member),
 ):
-    if enabled:
-        audit(agent_id)
+    for tag in tags or []:
+        audit(agent_id, tag)
     svc = AgentService()
     agent = await svc.get(agent_id, workspace_id=workspace_id)
     return agent
@@ -133,13 +133,13 @@ app = FastAPI()
 async def get_agent(
     workspace_id: str,
     agent_id: str,
-    enabled: bool,
+    tags: list[str] | None,
     user = Depends(require_workspace_member),
 ):
     svc = AgentService()
     agent = await svc.get(agent_id, workspace_id=workspace_id)
-    if enabled:
-        audit(agent_id)
+    for tag in tags or []:
+        audit(agent_id, tag)
     return agent
 """.strip()
 
@@ -242,10 +242,10 @@ async def get_agent(
     return await svc.get(agent_id, workspace_id=workspace_id)
 
 @app.get("/unrelated")
-async def unrelated(flag: bool):
-    if flag:
-        return 1
-    return 2
+async def unrelated(items: list[int] | None = None):
+    for item in items or []:
+        audit(item)
+    return 1
 """.strip()
     ir, results = _evaluate(source)
     assert results[0].status == "pass"

@@ -22,6 +22,10 @@ from ovk.compilers.authorization.fastapi_route_summary import (
 from ovk.compilers.authorization.guard_cfg_dominance import (
     build_guard_dominance_evidence,
 )
+from ovk.compilers.authorization.handler_control_flow import (
+    coverage_authoritative_for,
+    find_nodes_covering_line,
+)
 from ovk.core.assurance_ir import (
     AssuranceCoverage,
     AssuranceExtractorIdentity,
@@ -1052,11 +1056,24 @@ def bind_route_file_summary(
             )
             if not route_dependency_candidate:
                 if cfg is not None:
-                    for construct in cfg.unsupported_constructs:
-                        local_unsupported.append(
-                            f"{file_summary.path}:{handler.handler_name}:"
-                            f"cfg_unsupported:{construct}"
-                        )
+                    sink_nodes = find_nodes_covering_line(cfg, call.line)
+                    sink_authoritative = bool(sink_nodes) and all(
+                        coverage_authoritative_for(cfg, node.node_id)
+                        for node in sink_nodes
+                    )
+                    if not sink_authoritative:
+                        for construct in cfg.unsupported_constructs:
+                            local_unsupported.append(
+                                f"{file_summary.path}:{handler.handler_name}:"
+                                f"cfg_unsupported:{construct}"
+                            )
+                        # Preserve historical local marker for partial sinks.
+                        for control_line in handler.unsupported_control_flow_lines:
+                            if control_line < call.line:
+                                local_unsupported.append(
+                                    f"{file_summary.path}:{handler.handler_name}:"
+                                    f"control_flow_before_protected_effect:{control_line}"
+                                )
                 else:
                     for control_line in handler.unsupported_control_flow_lines:
                         if control_line < call.line:
@@ -1068,12 +1085,6 @@ def bind_route_file_summary(
             local_coverage_status = (
                 "partial" if local_unsupported else "complete"
             )
-            if (
-                cfg is not None
-                and cfg.coverage_status == "partial"
-                and not route_dependency_candidate
-            ):
-                local_coverage_status = "partial"
 
             entrypoint = f"{handler.method} {handler.route_path}"
             for guard_id in guard_ids:
