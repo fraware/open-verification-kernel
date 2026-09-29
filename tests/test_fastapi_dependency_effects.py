@@ -915,12 +915,12 @@ async def get_agent(
     workspace_id: str,
     agent_id: str,
     user = Depends(require_workspace_member),
-    enabled: bool = True,
+    tags: list[str] | None = None,
 ):
     svc = AgentService()
     agent = await svc.get(agent_id)
-    if enabled:
-        audit(agent_id)
+    for tag in tags or []:
+        audit(agent_id, tag)
     ensure_resource_in_workspace(
         agent.workspace_id,
         workspace_id,
@@ -933,7 +933,7 @@ async def get_agent(
 
     assert ir.coverage.status == "partial"
     assert any(
-        "control_flow_outside_profile" in item
+        "cfg_unsupported:for" in item or "control_flow_outside_profile" in item
         for item in ir.coverage.unsupported_constructs
     )
     assert result.status == "unknown"
