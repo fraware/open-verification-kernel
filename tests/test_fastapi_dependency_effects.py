@@ -122,11 +122,11 @@ async def get_agent(
     workspace_id: str,
     agent_id: str,
     user = Depends(require_workspace_member),
-    enabled: bool = True,
+    tags: list[str] | None = None,
 ):
     svc = AgentService()
-    if enabled:
-        audit(agent_id)
+    for tag in tags or []:
+        audit(agent_id, tag)
     agent = await svc.get(agent_id, workspace_id=workspace_id)
     return agent
 """.strip()
