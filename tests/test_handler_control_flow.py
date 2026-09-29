@@ -313,9 +313,6 @@ def handler(flag, user):
 
 
 def test_persistent_round_trip_preserves_control_flow(tmp_path) -> None:
-    from ovk.compilers.authorization.persistent_fastapi_state import (
-        PersistentFastApiIncrementalStateCache,
-    )
     from ovk.compilers.authorization.semantic_summary_cache import (
         load_persistent_semantic_summaries,
     )

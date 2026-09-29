@@ -466,7 +466,6 @@ def compute_dominators(
     """Standard iterative dominator calculation over reachable nodes."""
 
     node_ids = [node.node_id for node in cfg.nodes]
-    all_nodes = frozenset(node_ids)
     preds = cfg.predecessors()
     reachable = _reachable_from(cfg, cfg.entry_id)
     dom: dict[str, frozenset[str]] = {
