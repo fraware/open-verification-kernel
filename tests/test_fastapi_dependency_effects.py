@@ -663,3 +663,60 @@ class AgentService:
     assert acted.scope_term is not None
     assert acted.scope_term.value.startswith("$scope:")
     assert result.status in {"fail", "unknown"}
+
+
+
+LITERAL_SCOPE_PROFILE = FastApiDependencyEffectProfile(
+    sink_effects={"svc.get": "system.agent.read"},
+    sink_identity_args={"svc.get": 0},
+    sink_contracts={"svc.get": "SystemAgentService.get"},
+    sink_contract_scope_attributes={"svc.get": "workspace_id"},
+    principal_parameter="user",
+)
+
+
+def test_composed_literal_postcondition_instantiates_at_route_call_site() -> None:
+    route_source = """
+from fastapi import FastAPI
+app = FastAPI()
+
+@app.get("/system/agents/{agent_id}")
+async def get_agent(agent_id: str, user):
+    svc = SystemAgentService()
+    agent = await svc.get(agent_id)
+    return agent
+""".strip()
+    service_source = """
+class AgentRepository:
+    async def get(self, agent_id: str, *, workspace_id: str | None = None):
+        agent = await load_agent(agent_id)
+        if workspace_id is not None and agent.workspace_id != workspace_id:
+            return None
+        return agent
+
+class SystemAgentService:
+    def __init__(self):
+        self._repo = AgentRepository()
+
+    async def get(self, agent_id: str):
+        return await self._repo.get(agent_id, workspace_id="system")
+""".strip()
+
+    ir = FastApiDependencyEffectExtractor().compile(
+        _interprocedural_materials(route_source, service_source),
+        LITERAL_SCOPE_PROFILE,
+    )
+    by_name = {contract.qualified_name: contract for contract in ir.function_contracts}
+
+    assert ir.coverage.status == "complete"
+    assert "AgentRepository.get" in by_name
+    assert "SystemAgentService.get" in by_name
+    service_post = by_name["SystemAgentService.get"].postconditions[0]
+    assert service_post.right is not None
+    assert service_post.right.kind == "literal"
+    assert service_post.right.value == "system"
+
+    acted = next(resource for resource in ir.resources if resource.symbol == "agent_id")
+    assert acted.scope_term is not None
+    assert acted.scope_term.kind == "literal"
+    assert acted.scope_term.value == "system"
