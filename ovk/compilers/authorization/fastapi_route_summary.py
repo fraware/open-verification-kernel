@@ -145,12 +145,57 @@ def _route_decorator(
     return None
 
 
-def _has_control_flow(handler: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
-    return any(
-        isinstance(node, _CONTROL_FLOW)
-        for statement in handler.body
-        for node in ast.walk(statement)
+def _is_supported_fail_fast_none_guard(statement: ast.stmt) -> bool:
+    """Return whether a statement only removes a null-valued continuing path.
+
+    The supported form is deliberately narrow:
+
+        if resource is None:
+            raise ...
+
+    The continuing path has exactly the same authorization/resource relations
+    the extractor models, so ignoring this terminating branch does not create a
+    new successful path.
+    """
+    if (
+        not isinstance(statement, ast.If)
+        or statement.orelse
+        or len(statement.body) != 1
+        or not isinstance(statement.body[0], ast.Raise)
+    ):
+        return False
+    test = statement.test
+    if (
+        not isinstance(test, ast.Compare)
+        or len(test.ops) != 1
+        or not isinstance(test.ops[0], ast.Is)
+        or len(test.comparators) != 1
+    ):
+        return False
+
+    left = test.left
+    right = test.comparators[0]
+
+    def _is_none(node: ast.AST) -> bool:
+        return isinstance(node, ast.Constant) and node.value is None
+
+    def _is_resource_expression(node: ast.AST) -> bool:
+        return isinstance(node, (ast.Name, ast.Attribute, ast.Subscript))
+
+    return (
+        _is_resource_expression(left) and _is_none(right)
+    ) or (
+        _is_none(left) and _is_resource_expression(right)
     )
+
+
+def _has_control_flow(handler: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    for statement in handler.body:
+        if _is_supported_fail_fast_none_guard(statement):
+            continue
+        if any(isinstance(node, _CONTROL_FLOW) for node in ast.walk(statement)):
+            return True
+    return False
 
 
 def _body_calls(handler: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.Call]:

@@ -4,6 +4,7 @@ from ovk.compilers.authorization.material_loader import AuthMaterials, materials
 from ovk.compilers.authorization.protected_effect_fastapi_dependency import (
     FastApiDependencyEffectExtractor,
     FastApiDependencyEffectProfile,
+    ResourceScopeAssertionSemantics,
 )
 from ovk.core.protected_effect_evaluation import evaluate_protected_effect_integrity
 
@@ -720,3 +721,220 @@ class SystemAgentService:
     assert acted.scope_term is not None
     assert acted.scope_term.kind == "literal"
     assert acted.scope_term.value == "system"
+
+ASSERTION_PROFILE = FastApiDependencyEffectProfile(
+    sink_effects={
+        "AgentResponse.model_validate": "workspace.agent.read",
+    },
+    sink_identity_args={"AgentResponse.model_validate": 0},
+    sink_missing_scope_unconstrained=frozenset(
+        {"AgentResponse.model_validate"}
+    ),
+    scope_assertions={
+        "ensure_resource_in_workspace": ResourceScopeAssertionSemantics(
+            acted_scope_arg=0,
+            authorized_resource_arg=1,
+            acted_scope_attribute="workspace_id",
+        )
+    },
+    dependency_guard_resources={
+        "require_workspace_member": "workspace_id",
+    },
+    dependency_guard_effects={
+        "require_workspace_member": ("workspace.agent.read",),
+    },
+    principal_parameter="user",
+)
+
+
+def _evaluate_assertion_route(source: str):
+    materials = materials_from_pair(
+        path="routes/agents.py",
+        base_source=source,
+        head_source=source,
+        repo="example/platform",
+        base_revision="base",
+        head_revision="head",
+    )
+    ir = FastApiDependencyEffectExtractor().compile(
+        materials,
+        ASSERTION_PROFILE,
+    )
+    results = evaluate_protected_effect_integrity(ir)
+    assert len(results) == 1
+    return ir, results[0]
+
+
+def test_prior_resource_scope_assertion_establishes_response_binding() -> None:
+    source = """
+from fastapi import Depends, FastAPI, HTTPException
+app = FastAPI()
+
+@app.get("/workspaces/{workspace_id}/agents/{agent_id}")
+async def get_agent(
+    workspace_id: str,
+    agent_id: str,
+    user = Depends(require_workspace_member),
+):
+    svc = AgentService()
+    agent = await svc.get(agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    ensure_resource_in_workspace(
+        agent.workspace_id,
+        workspace_id,
+        label="Agent",
+    )
+    return AgentResponse.model_validate(agent)
+""".strip()
+
+    ir, result = _evaluate_assertion_route(source)
+
+    assert ir.coverage.status == "complete"
+    assert result.status == "pass"
+    acted = next(
+        resource for resource in ir.resources if resource.symbol == "agent"
+    )
+    assert acted.scope_term is not None
+    assert acted.scope_term.value == "workspace_id"
+
+    assertion_line = next(
+        index
+        for index, line in enumerate(source.splitlines(), start=1)
+        if "ensure_resource_in_workspace(" in line
+    )
+    binding = ir.resource_bindings[0]
+    assert binding.origin.source_range is not None
+    assert binding.origin.source_range.start_line == assertion_line
+
+
+def test_missing_resource_scope_assertion_does_not_pass() -> None:
+    source = """
+from fastapi import Depends, FastAPI, HTTPException
+app = FastAPI()
+
+@app.get("/workspaces/{workspace_id}/agents/{agent_id}")
+async def get_agent(
+    workspace_id: str,
+    agent_id: str,
+    user = Depends(require_workspace_member),
+):
+    svc = AgentService()
+    agent = await svc.get(agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return AgentResponse.model_validate(agent)
+""".strip()
+
+    ir, result = _evaluate_assertion_route(source)
+
+    assert ir.coverage.status == "complete"
+    acted = next(
+        resource for resource in ir.resources if resource.symbol == "agent"
+    )
+    assert acted.scope_term is not None
+    assert acted.scope_term.value.startswith("$scope:")
+    assert result.status in {"fail", "unknown"}
+    assert result.status != "pass"
+
+
+def test_resource_scope_assertion_after_response_does_not_authorize_sink() -> None:
+    source = """
+from fastapi import Depends, FastAPI
+app = FastAPI()
+
+@app.get("/workspaces/{workspace_id}/agents/{agent_id}")
+async def get_agent(
+    workspace_id: str,
+    agent_id: str,
+    user = Depends(require_workspace_member),
+):
+    svc = AgentService()
+    agent = await svc.get(agent_id)
+    response = AgentResponse.model_validate(agent)
+    ensure_resource_in_workspace(
+        agent.workspace_id,
+        workspace_id,
+        label="Agent",
+    )
+    return response
+""".strip()
+
+    ir, result = _evaluate_assertion_route(source)
+
+    assert ir.coverage.status == "complete"
+    acted = next(
+        resource for resource in ir.resources if resource.symbol == "agent"
+    )
+    assert acted.scope_term is not None
+    assert acted.scope_term.value.startswith("$scope:")
+    assert result.status in {"fail", "unknown"}
+    assert result.status != "pass"
+
+
+def test_scope_assertion_for_other_resource_does_not_bind_acted_resource() -> None:
+    source = """
+from fastapi import Depends, FastAPI
+app = FastAPI()
+
+@app.get("/workspaces/{workspace_id}/agents/{agent_id}")
+async def get_agent(
+    workspace_id: str,
+    agent_id: str,
+    user = Depends(require_workspace_member),
+):
+    svc = AgentService()
+    agent = await svc.get(agent_id)
+    ensure_resource_in_workspace(
+        other_agent.workspace_id,
+        workspace_id,
+        label="Agent",
+    )
+    return AgentResponse.model_validate(agent)
+""".strip()
+
+    ir, result = _evaluate_assertion_route(source)
+
+    assert ir.coverage.status == "complete"
+    acted = next(
+        resource for resource in ir.resources if resource.symbol == "agent"
+    )
+    assert acted.scope_term is not None
+    assert acted.scope_term.value.startswith("$scope:")
+    assert result.status in {"fail", "unknown"}
+    assert result.status != "pass"
+
+
+def test_arbitrary_control_flow_still_forces_unknown_with_assertion_profile() -> None:
+    source = """
+from fastapi import Depends, FastAPI
+app = FastAPI()
+
+@app.get("/workspaces/{workspace_id}/agents/{agent_id}")
+async def get_agent(
+    workspace_id: str,
+    agent_id: str,
+    user = Depends(require_workspace_member),
+    enabled: bool = True,
+):
+    svc = AgentService()
+    agent = await svc.get(agent_id)
+    if enabled:
+        audit(agent_id)
+    ensure_resource_in_workspace(
+        agent.workspace_id,
+        workspace_id,
+        label="Agent",
+    )
+    return AgentResponse.model_validate(agent)
+""".strip()
+
+    ir, result = _evaluate_assertion_route(source)
+
+    assert ir.coverage.status == "partial"
+    assert any(
+        "control_flow_outside_profile" in item
+        for item in ir.coverage.unsupported_constructs
+    )
+    assert result.status == "unknown"
+
