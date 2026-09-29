@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/protected_effect_profile.schema.json",
+  "title": "OVK Protected Effect FastAPI Profile",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "profile_type",
+    "source_paths",
+    "sink_effects",
+    "dependency_guard_resources",
+    "dependency_guard_effects"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "ovk.protected_effect_profile.v1"
+    },
+    "profile_type": {
+      "type": "string",
+      "const": "fastapi_dependency_effects_v1"
+    },
+    "source_paths": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "max_files": {"type": "integer", "minimum": 1, "maximum": 5000},
+    "max_total_bytes": {"type": "integer", "minimum": 1024, "maximum": 50000000},
+    "sink_effects": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"type": "string", "minLength": 1}
+    },
+    "sink_identity_args": {
+      "type": "object",
+      "additionalProperties": {"type": "integer", "minimum": 0}
+    },
+    "sink_scope_keywords": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "minLength": 1}
+    },
+    "sink_missing_scope_unconstrained": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "scope_assertions": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "acted_scope_arg",
+          "authorized_resource_arg",
+          "acted_scope_attribute"
+        ],
+        "properties": {
+          "acted_scope_arg": {"type": "integer", "minimum": 0},
+          "authorized_resource_arg": {"type": "integer", "minimum": 0},
+          "acted_scope_attribute": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": false
+      }
+    },
+    "sink_contracts": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "minLength": 1}
+    },
+    "sink_contract_scope_attributes": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "minLength": 1}
+    },
+    "sink_contract_identity_attributes": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "minLength": 1}
+    },
+    "sink_binding_relations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "enum": ["equal", "same_tenant", "custom"]
+      }
+    },
+    "sink_binding_authorized_projections": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "enum": ["identity", "scope", "attribute"]
+      }
+    },
+    "sink_binding_acted_projections": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "enum": ["identity", "scope", "attribute"]
+      }
+    },
+    "sink_binding_authorized_attributes": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "minLength": 1}
+    },
+    "sink_binding_acted_attributes": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "minLength": 1}
+    },
+    "dependency_guard_resources": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"type": "string", "minLength": 1}
+    },
+    "dependency_guard_effects": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": {"type": "string", "minLength": 1}
+      }
+    },
+    "principal_parameter": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}

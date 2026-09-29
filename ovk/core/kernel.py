@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ovk.core.authoritative_runtime import execute_authoritative_plan
+from ovk.core.automatic_pr_assurance import build_automatic_pull_request_assurance
 from ovk.core.bundle import make_bundle
 from ovk.core.capabilities import CapabilityRegistry
 from ovk.core.compilation_evidence import compilation_failure_evidence
@@ -180,9 +181,52 @@ def execute_kernel(
     governance = ctx.branch_metadata.get("guarantee_governance", {})
     plan = {**plan, "guarantee_governance": governance}
     markdown = render_bundle_markdown(bundle)
-    governance_markdown = render_guarantee_governance_markdown(governance)
-    if governance_markdown:
-        markdown = markdown.rstrip() + "\n\n" + governance_markdown.rstrip() + "\n"
+
+    automatic_assurance = None
+    automatic_assurance_error: str | None = None
+    if ctx.base_sha and ctx.head_sha:
+        try:
+            automatic_assurance = build_automatic_pull_request_assurance(
+                repo=ctx.repo,
+                base_sha=ctx.base_sha,
+                head_sha=ctx.head_sha,
+                changed_files=list(ctx.changed_files),
+                verification_policy=policy_dict,
+                cache_dir=cache_dir if cache_dir is not None else DEFAULT_CACHE_DIR,
+                use_cache=use_cache,
+            )
+        except Exception as exc:
+            automatic_assurance_error = f"{type(exc).__name__}: {exc}"
+
+    if automatic_assurance is not None:
+        plan = {
+            **plan,
+            "pr_assurance_review": automatic_assurance.model_dump(mode="json"),
+        }
+        if automatic_assurance.markdown:
+            markdown = (
+                markdown.rstrip()
+                + "\n\n"
+                + automatic_assurance.markdown.rstrip()
+                + "\n"
+            )
+    else:
+        if automatic_assurance_error is not None:
+            plan = {
+                **plan,
+                "pr_assurance_review": {
+                    "status": "error",
+                    "reason_codes": [automatic_assurance_error],
+                },
+            }
+        governance_markdown = render_guarantee_governance_markdown(governance)
+        if governance_markdown:
+            markdown = (
+                markdown.rstrip()
+                + "\n\n"
+                + governance_markdown.rstrip()
+                + "\n"
+            )
 
     ranked = rank_intents(plan.get("candidate_intents", []), context=ctx)
     elapsed_ms = (time.perf_counter() - started) * 1000
