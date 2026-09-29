@@ -54,7 +54,13 @@ class DependencyParameterSummary:
 
 @dataclass(frozen=True)
 class RouteDependencySummary:
-    """Direct Depends/Security dependency inherited by one FastAPI route."""
+    """Depends/Security dependency attached to one FastAPI route.
+
+    factory_call is populated when Depends/Security receives the result of a
+    bounded factory call such as require_access(method="PUT"). The factory
+    function is recorded as the dependency name, but the returned callable's
+    effectiveness is a separate proof obligation.
+    """
 
     full_name: str
     leaf_name: str | None
@@ -64,6 +70,7 @@ class RouteDependencySummary:
         "include_router",
     ]
     origin: SemanticOrigin
+    factory_call: str | None = None
 
 
 @dataclass(frozen=True)
@@ -164,7 +171,7 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id=_EXTRACTOR_ID,
-        extractor_version="0.7.0",
+        extractor_version="0.8.0",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -239,14 +246,25 @@ def _direct_dependencies(
         ):
             continue
         target = item.args[0]
-        if not isinstance(target, (ast.Name, ast.Attribute)):
+        factory_call: str | None = None
+        dependency_target: ast.AST
+        if isinstance(target, (ast.Name, ast.Attribute)):
+            dependency_target = target
+        elif (
+            isinstance(target, ast.Call)
+            and isinstance(target.func, (ast.Name, ast.Attribute))
+        ):
+            dependency_target = target.func
+            factory_call = ast.unparse(target)
+        else:
             continue
         found.append(
             RouteDependencySummary(
-                full_name=ast.unparse(target),
-                leaf_name=_name_of(target),
+                full_name=ast.unparse(dependency_target),
+                leaf_name=_name_of(dependency_target),
                 source_kind=source_kind,
                 origin=_origin(path, item),
+                factory_call=factory_call,
             )
         )
     return tuple(found)
@@ -417,23 +435,39 @@ def _include_router_dependencies(
             or not _has_direct_fastapi_import(tree, item.func.id)
             or len(item.args) != 1
             or item.keywords
-            or not isinstance(item.args[0], (ast.Name, ast.Attribute))
         ):
             return None
         target = item.args[0]
+        factory_call: str | None = None
+        dependency_target: ast.AST
+        if isinstance(target, (ast.Name, ast.Attribute)):
+            dependency_target = target
+        elif (
+            isinstance(target, ast.Call)
+            and isinstance(target.func, (ast.Name, ast.Attribute))
+        ):
+            dependency_target = target.func
+            factory_call = ast.unparse(target)
+        else:
+            return None
         found.append(
             RouteDependencySummary(
-                full_name=ast.unparse(target),
-                leaf_name=_name_of(target),
+                full_name=ast.unparse(dependency_target),
+                leaf_name=_name_of(dependency_target),
                 source_kind="include_router",
                 origin=_origin(path, item),
+                factory_call=factory_call,
             )
         )
 
     return tuple(
         sorted(
             found,
-            key=lambda item: (item.full_name, item.leaf_name or ""),
+            key=lambda item: (
+                item.full_name,
+                item.leaf_name or "",
+                item.factory_call or "",
+            ),
         )
     )
 
@@ -556,8 +590,11 @@ def _route_dependencies(
 ) -> tuple[RouteDependencySummary, ...]:
     """Combine inherited router dependencies with direct route dependencies."""
 
-    combined: dict[tuple[str, str | None], RouteDependencySummary] = {
-        (item.full_name, item.leaf_name): item
+    combined: dict[
+        tuple[str, str | None, str | None],
+        RouteDependencySummary,
+    ] = {
+        (item.full_name, item.leaf_name, item.factory_call): item
         for item in inherited
     }
     for item in _direct_dependencies(
@@ -565,7 +602,7 @@ def _route_dependencies(
         decorator,
         source_kind="route_decorator",
     ):
-        combined[(item.full_name, item.leaf_name)] = item
+        combined[(item.full_name, item.leaf_name, item.factory_call)] = item
 
     return tuple(
         sorted(
@@ -573,6 +610,7 @@ def _route_dependencies(
             key=lambda item: (
                 item.full_name,
                 item.leaf_name or "",
+                item.factory_call or "",
                 item.source_kind,
             ),
         )

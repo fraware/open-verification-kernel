@@ -466,10 +466,10 @@ def bind_route_file_summary(
         }
 
         effective_route_dependencies: dict[
-            tuple[str, str | None],
+            tuple[str, str | None, str | None],
             RouteDependencySummary,
         ] = {
-            (item.full_name, item.leaf_name): item
+            (item.full_name, item.leaf_name, item.factory_call): item
             for item in external_route_dependencies_by_router.get(
                 handler.router_symbol or "",
                 (),
@@ -477,7 +477,7 @@ def bind_route_file_summary(
         }
         for item in handler.route_dependencies:
             effective_route_dependencies[
-                (item.full_name, item.leaf_name)
+                (item.full_name, item.leaf_name, item.factory_call)
             ] = item
 
         principal_symbol = profile.principal_parameter
@@ -869,6 +869,7 @@ def bind_route_file_summary(
                 key=lambda item: (
                     item.full_name,
                     item.leaf_name or "",
+                    item.factory_call or "",
                     item.source_kind,
                 ),
             ):
@@ -901,22 +902,28 @@ def bind_route_file_summary(
                         origin=route_dependency.origin,
                     ),
                 )
+                dependency_identity = (
+                    route_dependency.factory_call
+                    or route_guard_key
+                )
                 guard_id = _semantic_id(
                     "guard",
                     (
                         f"{file_summary.path}:{handler.handler_name}:"
-                        f"route-dependency:{route_guard_key}:"
+                        f"route-dependency:{dependency_identity}:"
                         f"{effect_name}:{route_resource_symbol}"
                     ),
                 )
-                effectiveness_evidence = guard_effectiveness_by_name.get(
-                    route_guard_key
-                )
-                guard_effectiveness_dependencies[route_guard_key] = (
-                    effectiveness_evidence.evidence_id
-                    if effectiveness_evidence is not None
-                    else None
-                )
+                effectiveness_evidence = None
+                if route_dependency.factory_call is None:
+                    effectiveness_evidence = (
+                        guard_effectiveness_by_name.get(route_guard_key)
+                    )
+                    guard_effectiveness_dependencies[route_guard_key] = (
+                        effectiveness_evidence.evidence_id
+                        if effectiveness_evidence is not None
+                        else None
+                    )
                 guards[guard_id] = AuthorizationGuard(
                     guard_id=guard_id,
                     principal_id=principal_id,
@@ -1075,6 +1082,7 @@ _SUPPORTED_CONSTRUCTS = [
     "direct_route_decorator_dependency",
     "direct_apirouter_constructor_dependency",
     "direct_fastapi_include_router_dependency",
+    "route_dependency_factory_candidate",
     "configured_static_sink_resource",
     "route_dependency_candidate_mediation",
     "straight_line_handler",
@@ -1091,7 +1099,7 @@ _SUPPORTED_CONSTRUCTS = [
 
 _PROFILE_ASSUMPTIONS = [
     "Configured dependency guards authorize the declared route resource for the declared effects.",
-    "Configured direct route-decorator, APIRouter-constructor, and bounded FastAPI include_router dependencies are candidate entrypoint mediators only; their AuthorizationGuard effectiveness remains unproved until source-derived dependency semantics establish it.",
+    "Configured route-decorator, APIRouter-constructor, and bounded FastAPI include_router dependencies are candidate entrypoint mediators only; factory-produced dependency callables remain unproved until source-derived returned-callable semantics establish their effectiveness.",
     "Configured static sink resources denote endpoint/capability identities independent of request data and handler-local control flow.",
     "Configured service-call sinks faithfully identify protected effects.",
     "Configured sink identity argument denotes the acted resource identity only when no source-derived identity contract is required.",
@@ -1179,7 +1187,7 @@ def assemble_fastapi_assurance_ir(
         ),
         extractor=AssuranceExtractorIdentity(
             extractor_id="assurance.fastapi.dependency_effects.ast_v1",
-            extractor_version="0.11.0",
+            extractor_version="0.12.0",
             source_profile_id="assurance.fastapi.dependency_effects.ast_v1",
         ),
         coverage=AssuranceCoverage(
