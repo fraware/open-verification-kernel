@@ -38,7 +38,10 @@ from ovk.core.evidence_integrity import (
 )
 from ovk.core.incremental_assurance import protected_effect_semantic_digest
 from ovk.core.models import BackendClaim, VerificationEvidence, VerificationStatus
-from ovk.core.protected_effect_evaluation import ProtectedEffectIntegrityEvaluation
+from ovk.core.protected_effect_evaluation import (
+    ProtectedEffectIntegrityEvaluation,
+    protected_effect_coverage,
+)
 from ovk.core.result_cache import (
     HardenedResultCache,
     NAMESPACE_SEMANTIC_EVIDENCE,
@@ -290,6 +293,58 @@ def _execution_artifact(
     }
 
 
+def _protected_effect_coverage_payload(
+    ir: AssuranceIR,
+    protected_effect_id: str,
+) -> dict[str, Any]:
+    """Return the evidence coverage for exactly one Protected Effect claim.
+
+    Path-local coverage is authoritative only when every relevant semantic path
+    declares it. Otherwise this falls back to the historical global IR coverage,
+    matching protected_effect_coverage() and the evaluator's PASS gate.
+    """
+
+    status, assumptions = protected_effect_coverage(
+        ir,
+        protected_effect_id,
+    )
+    relevant_paths = [
+        path
+        for path in ir.paths
+        if protected_effect_id in path.protected_effect_ids
+    ]
+    has_complete_local_metadata = bool(relevant_paths) and all(
+        path.coverage_status is not None
+        for path in relevant_paths
+    )
+    unsupported_constructs = (
+        sorted(
+            {
+                item
+                for path in relevant_paths
+                for item in path.unsupported_constructs
+            }
+        )
+        if has_complete_local_metadata
+        else list(ir.coverage.unsupported_constructs)
+    )
+
+    return {
+        "status": status,
+        "confidence": ir.coverage.confidence,
+        "supported_constructs": list(ir.coverage.supported_constructs),
+        "unsupported_constructs": unsupported_constructs,
+        "assumptions": list(assumptions),
+        "scope": "protected_effect",
+        "protected_effect_id": protected_effect_id,
+        "source": (
+            "path_local"
+            if has_complete_local_metadata
+            else "assurance_ir_global"
+        ),
+    }
+
+
 def protected_effect_evaluation_to_evidence(
     ir: AssuranceIR,
     evaluation: ProtectedEffectIntegrityEvaluation,
@@ -408,7 +463,10 @@ def protected_effect_evaluation_to_evidence(
             "compiler_id": ir.extractor.extractor_id,
             "compiler_version": ir.extractor.extractor_version,
         },
-        coverage=ir.coverage.model_dump(mode="json"),
+        coverage=_protected_effect_coverage_payload(
+            ir,
+            evaluation.protected_effect_id,
+        ),
         aggregation_policy="ovk.protected_effect.shadow.v1",
         routing_enforced=False,
     )
@@ -773,7 +831,10 @@ def reissue_reused_protected_effect_evidence(
             "compiler_id": head_ir.extractor.extractor_id,
             "compiler_version": head_ir.extractor.extractor_version,
         },
-        coverage=head_ir.coverage.model_dump(mode="json"),
+        coverage=_protected_effect_coverage_payload(
+            head_ir,
+            protected_effect_id,
+        ),
         aggregation_policy="ovk.protected_effect.shadow.v1",
         routing_enforced=False,
     )
