@@ -128,3 +128,90 @@ def handler(user, flag):
     )
     assert evidence.dominates is False
     assert evidence.coverage_status == "complete"
+
+
+def test_boolean_short_circuit_call_does_not_pass_dominance() -> None:
+    """Calls inside and/or must not bind as unconditional executed guards."""
+
+    source = """
+def handler(user):
+    if require_access(user) and other(user):
+        return sink(user)
+    return None
+""".strip()
+    cfg = build_handler_control_flow_from_source(source, path="h.py")
+    evidence = build_guard_dominance_evidence(
+        guard=_guard(line=2),
+        effect=_effect(line=3),
+        entrypoint="GET /x",
+        cfg=cfg,
+        origin=_origin("h.py", 1),
+    )
+    assert evidence.guard_cfg_node_id is None
+    assert evidence.dominates is False
+    assert not cfg_dominance_is_sufficient(
+        evidence, effectiveness="established"
+    )
+    assert cfg_dominance_is_unknown(evidence, effectiveness="established")
+
+
+def test_boolean_or_short_circuit_call_does_not_pass_dominance() -> None:
+    source = """
+def handler(user):
+    if other(user) or require_access(user):
+        return sink(user)
+    return None
+""".strip()
+    cfg = build_handler_control_flow_from_source(source, path="h.py")
+    evidence = build_guard_dominance_evidence(
+        guard=_guard(line=2),
+        effect=_effect(line=3),
+        entrypoint="GET /x",
+        cfg=cfg,
+        origin=_origin("h.py", 1),
+    )
+    assert evidence.guard_cfg_node_id is None
+    assert evidence.dominates is False
+
+
+def test_simple_call_condition_may_bind_branch_node() -> None:
+    """A non-BoolOp condition call may bind; short-circuit opacity is about and/or."""
+
+    source = """
+def handler(user):
+    if require_access(user):
+        return sink(user)
+    return None
+""".strip()
+    cfg = build_handler_control_flow_from_source(source, path="h.py")
+    evidence = build_guard_dominance_evidence(
+        guard=_guard(line=2),
+        effect=_effect(line=3),
+        entrypoint="GET /x",
+        cfg=cfg,
+        origin=_origin("h.py", 1),
+    )
+    assert evidence.guard_cfg_node_id is not None
+    assert evidence.dominates is True
+    assert cfg_dominance_is_sufficient(
+        evidence, effectiveness="established"
+    )
+
+
+def test_ambiguous_multi_node_span_refuses_binding() -> None:
+    source = """
+def handler(user):
+    require_access(user); return sink(user)
+""".strip()
+    cfg = build_handler_control_flow_from_source(source, path="h.py")
+    evidence = build_guard_dominance_evidence(
+        guard=_guard(line=2),
+        effect=_effect(line=2),
+        entrypoint="GET /x",
+        cfg=cfg,
+        origin=_origin("h.py", 1),
+    )
+    assert evidence.guard_cfg_node_id is None
+    assert evidence.effect_cfg_node_id is None
+    assert evidence.dominates is False
+    assert evidence.coverage_status == "unknown"

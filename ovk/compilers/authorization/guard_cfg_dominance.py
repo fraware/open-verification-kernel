@@ -8,6 +8,8 @@ effect node. Anything weaker yields insufficient/unknown evidence — never PASS
 
 from __future__ import annotations
 
+import ast
+
 from ovk.compilers.authorization.handler_control_flow import (
     HandlerControlFlowSummary,
     coverage_authoritative_for,
@@ -23,11 +25,32 @@ from ovk.core.assurance_ir import (
 from ovk.core.models import SourceRange
 
 
+def _condition_has_boolean_short_circuit(expression: str | None) -> bool:
+    """True when a branch condition is opaque under short-circuit ``and``/``or``.
+
+    Calls nested inside Boolean operators must not be treated as unconditional
+    guard execution nodes. Unparseable conditions fail closed.
+    """
+
+    if expression is None:
+        return False
+    try:
+        tree = ast.parse(expression, mode="eval")
+    except SyntaxError:
+        return True
+    return any(isinstance(node, ast.BoolOp) for node in ast.walk(tree))
+
+
 def resolve_cfg_node_id(
     cfg: HandlerControlFlowSummary,
     source_range: SourceRange | None,
 ) -> str | None:
-    """Map a source range to exactly one CFG node, else None (ambiguous/missing)."""
+    """Map a source range to exactly one CFG node, else None (ambiguous/missing).
+
+    Branch nodes whose conditions contain ``and``/``or`` are refused: binding a
+    call inside a Boolean expression as an executed guard would violate
+    short-circuit opacity and can produce false dominance PASS.
+    """
 
     if source_range is None or source_range.start_line is None:
         return None
@@ -41,6 +64,10 @@ def resolve_cfg_node_id(
             node.source_range is None
             or source_range.path is None
             or node.source_range.path == source_range.path
+        )
+        and not (
+            node.kind == "branch"
+            and _condition_has_boolean_short_circuit(node.expression)
         )
     ]
     if len(matches) != 1:
