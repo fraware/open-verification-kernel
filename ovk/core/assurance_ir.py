@@ -26,10 +26,12 @@ GuardEffectiveness = Literal["established", "unproved"]
 GuardEffectivenessEvidenceKind = Literal[
     "fail_closed_bearer_match_v1",
     "fail_closed_header_shared_secret_v1",
+    "fail_closed_apikeyheader_shared_secret_v1",
 ]
 GuardEffectivenessComparisonKind = Literal[
     "direct_inequality",
     "secrets_compare_digest",
+    "hmac_compare_digest",
 ]
 BindingRelation = Literal["equal", "same_tenant", "custom"]
 BindingProjection = Literal["identity", "scope", "attribute"]
@@ -186,6 +188,15 @@ class GuardEffectivenessEvidence(BaseModel):
             if self.comparison_kind != "secrets_compare_digest":
                 raise ValueError(
                     "header shared-secret evidence requires secrets_compare_digest"
+                )
+        elif self.evidence_kind == "fail_closed_apikeyheader_shared_secret_v1":
+            if self.credential_attribute is not None:
+                raise ValueError(
+                    "APIKeyHeader shared-secret evidence has no credential_attribute"
+                )
+            if self.comparison_kind != "hmac_compare_digest":
+                raise ValueError(
+                    "APIKeyHeader shared-secret evidence requires hmac_compare_digest"
                 )
         return self
 

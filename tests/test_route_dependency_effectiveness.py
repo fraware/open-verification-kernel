@@ -463,3 +463,233 @@ def test_fail_open_header_dependency_stays_benign_open() -> None:
     assert evaluations[0].status == "unknown"
     assert evaluations[0].extraction_coverage == "complete"
 
+SECURE_APIKEY_AUTH = """
+import hmac
+import os
+from fastapi import Security
+from fastapi.security import APIKeyHeader
+
+API_KEY_ENV_VAR = "C360_API_KEY"
+API_KEY_HEADER_NAME = "X-API-Key"
+_api_key_header = APIKeyHeader(
+    name=API_KEY_HEADER_NAME,
+    auto_error=False,
+)
+
+def require_api_key(
+    provided_key: str | None = Security(_api_key_header),
+) -> None:
+    expected_key = os.environ.get(API_KEY_ENV_VAR)
+    if not expected_key:
+        raise HTTPException(status_code=503)
+    if not provided_key or not hmac.compare_digest(
+        provided_key, expected_key
+    ):
+        raise HTTPException(status_code=401)
+    return None
+""".strip()
+
+
+FAIL_OPEN_APIKEY_AUTH = SECURE_APIKEY_AUTH.replace(
+    "if not expected_key:\n        raise HTTPException(status_code=503)",
+    "if not expected_key:\n        return None",
+)
+
+
+APIKEY_ROUTE = """
+from fastapi import FastAPI, Depends
+
+app = FastAPI()
+
+@app.post("/predict", dependencies=[Depends(require_api_key)])
+def predict(payload: dict):
+    if not payload:
+        raise HTTPException(status_code=400)
+    return predict_model(payload)
+""".strip()
+
+
+APIKEY_PROFILE = FastApiDependencyEffectProfile(
+    sink_effects={"predict_model": "customer360.bp1.predict"},
+    sink_static_resources={
+        "predict_model": "bp1_prediction_execution"
+    },
+    route_dependency_guard_resources={
+        "require_api_key": "bp1_prediction_execution"
+    },
+    route_dependency_guard_effects={
+        "require_api_key": ("customer360.bp1.predict",),
+    },
+    principal_parameter="$api_key_caller",
+)
+
+
+def _apikey_trees(*, auth_source: str) -> dict[str, ast.Module]:
+    return {
+        "routes.py": ast.parse(APIKEY_ROUTE),
+        "security.py": ast.parse(auth_source),
+    }
+
+
+def _compile_apikey(*, auth_source: str):
+    files = {
+        "routes.py": APIKEY_ROUTE,
+        "security.py": auth_source,
+    }
+    materials = AuthMaterials(
+        base_files=dict(files),
+        head_files=dict(files),
+        repo="example/apikey-shared-secret",
+        base_revision="base",
+        head_revision="head",
+    )
+    return FastApiDependencyEffectExtractor().compile(
+        materials,
+        APIKEY_PROFILE,
+    )
+
+
+def test_fail_closed_apikeyheader_shared_secret_emits_evidence() -> None:
+    evidence = infer_route_dependency_effectiveness(
+        parsed_trees=_apikey_trees(auth_source=SECURE_APIKEY_AUTH),
+        dependency_names={"require_api_key"},
+    )
+
+    assert len(evidence) == 1
+    item = evidence[0]
+    assert item.dependency_name == "require_api_key"
+    assert (
+        item.evidence_kind
+        == "fail_closed_apikeyheader_shared_secret_v1"
+    )
+    assert item.credential_parameter == "provided_key"
+    assert item.credential_attribute is None
+    assert item.token_expression == "os.environ.get(API_KEY_ENV_VAR)"
+    assert item.comparison_kind == "hmac_compare_digest"
+
+
+def test_apikeyheader_requires_fail_closed_missing_server_secret() -> None:
+    evidence = infer_route_dependency_effectiveness(
+        parsed_trees=_apikey_trees(auth_source=FAIL_OPEN_APIKEY_AUTH),
+        dependency_names={"require_api_key"},
+    )
+    assert evidence == []
+
+
+def test_apikeyheader_requires_auto_error_false_scheme() -> None:
+    source = SECURE_APIKEY_AUTH.replace(
+        "auto_error=False",
+        "auto_error=True",
+    )
+    evidence = infer_route_dependency_effectiveness(
+        parsed_trees=_apikey_trees(auth_source=source),
+        dependency_names={"require_api_key"},
+    )
+    assert evidence == []
+
+
+def test_apikeyheader_rejects_non_apikey_security_scheme() -> None:
+    source = SECURE_APIKEY_AUTH.replace(
+        "APIKeyHeader(\n    name=API_KEY_HEADER_NAME,\n    auto_error=False,\n)",
+        "HTTPBearer(auto_error=False)",
+    )
+    evidence = infer_route_dependency_effectiveness(
+        parsed_trees=_apikey_trees(auth_source=source),
+        dependency_names={"require_api_key"},
+    )
+    assert evidence == []
+
+
+def test_apikeyheader_requires_hmac_compare_digest() -> None:
+    source = SECURE_APIKEY_AUTH.replace(
+        "hmac.compare_digest",
+        "secrets.compare_digest",
+    )
+    evidence = infer_route_dependency_effectiveness(
+        parsed_trees=_apikey_trees(auth_source=source),
+        dependency_names={"require_api_key"},
+    )
+    assert evidence == []
+
+
+def test_apikeyheader_rejects_environment_secret_fallback() -> None:
+    source = SECURE_APIKEY_AUTH.replace(
+        "os.environ.get(API_KEY_ENV_VAR)",
+        'os.environ.get(API_KEY_ENV_VAR, "development-default")',
+    )
+    evidence = infer_route_dependency_effectiveness(
+        parsed_trees=_apikey_trees(auth_source=source),
+        dependency_names={"require_api_key"},
+    )
+    assert evidence == []
+
+
+def test_apikeyheader_rejects_extra_executable_statement() -> None:
+    source = SECURE_APIKEY_AUTH.replace(
+        "expected_key = os.environ.get(API_KEY_ENV_VAR)",
+        (
+            "expected_key = os.environ.get(API_KEY_ENV_VAR)\n"
+            "    audit_auth_attempt()"
+        ),
+    )
+    evidence = infer_route_dependency_effectiveness(
+        parsed_trees=_apikey_trees(auth_source=source),
+        dependency_names={"require_api_key"},
+    )
+    assert evidence == []
+
+
+def test_fail_closed_apikeyheader_dependency_establishes_guard() -> None:
+    ir = _compile_apikey(auth_source=SECURE_APIKEY_AUTH)
+    evaluations = evaluate_protected_effect_integrity(ir)
+
+    assert len(ir.guard_effectiveness_evidence) == 1
+    evidence = ir.guard_effectiveness_evidence[0]
+    assert (
+        evidence.evidence_kind
+        == "fail_closed_apikeyheader_shared_secret_v1"
+    )
+    assert len(ir.guards) == 1
+    assert ir.guards[0].effectiveness == "established"
+    assert ir.guards[0].effectiveness_evidence_ids == [
+        evidence.evidence_id
+    ]
+    assert len(evaluations) == 1
+    assert evaluations[0].status == "pass"
+    assert evaluations[0].extraction_coverage == "complete"
+
+
+def test_fail_open_apikeyheader_dependency_stays_benign_open() -> None:
+    ir = _compile_apikey(auth_source=FAIL_OPEN_APIKEY_AUTH)
+    evaluations = evaluate_protected_effect_integrity(ir)
+
+    assert ir.guard_effectiveness_evidence == []
+    assert len(ir.guards) == 1
+    assert ir.guards[0].effectiveness == "unproved"
+    assert len(evaluations) == 1
+    assert evaluations[0].status == "unknown"
+    assert evaluations[0].extraction_coverage == "complete"
+
+def test_apikeyheader_rejects_rebound_hmac_module() -> None:
+    source = SECURE_APIKEY_AUTH.replace(
+        "from fastapi import Security",
+        "hmac = fake_hmac\nfrom fastapi import Security",
+    )
+    evidence = infer_route_dependency_effectiveness(
+        parsed_trees=_apikey_trees(auth_source=source),
+        dependency_names={"require_api_key"},
+    )
+    assert evidence == []
+
+
+def test_apikeyheader_requires_canonical_fastapi_scheme_import() -> None:
+    source = SECURE_APIKEY_AUTH.replace(
+        "from fastapi.security import APIKeyHeader",
+        "from custom_security import APIKeyHeader",
+    )
+    evidence = infer_route_dependency_effectiveness(
+        parsed_trees=_apikey_trees(auth_source=source),
+        dependency_names={"require_api_key"},
+    )
+    assert evidence == []
+
