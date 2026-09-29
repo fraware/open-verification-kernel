@@ -4,8 +4,10 @@ Profile-independent CFG construction for FastAPI (and similar) route handlers.
 Security binding happens in later PRs; this module only constructs and queries
 control-flow structure.
 
-Boolean branch conditions remain opaque: calls inside ``and`` / ``or`` are not
-treated as unconditional execution nodes.
+Simple Boolean ``and`` / ``or`` conditions receive a *bounded* short-circuit
+expansion: later operands execute only on the paths required by Python
+semantics and are never marked unconditional. Nested or unsupported BoolOp
+forms remain opaque (partial / refused at the security layer).
 """
 
 from __future__ import annotations
@@ -367,6 +369,15 @@ class _CfgBuilder:
         *,
         branch_value: bool | None = None,
     ) -> str | None:
+        simple = _as_simple_boolop(statement.test)
+        if simple is not None:
+            return self._link_short_circuit_if(
+                statement,
+                predecessor,
+                simple,
+                incoming_branch_value=branch_value,
+            )
+
         branch_id = self._alloc(
             "branch",
             kind="branch",
@@ -411,6 +422,105 @@ class _CfgBuilder:
             self._edge(source_id, join_id, branch_value=label)
         return join_id
 
+    def _link_short_circuit_if(
+        self,
+        statement: ast.If,
+        predecessor: str,
+        boolop: ast.BoolOp,
+        *,
+        incoming_branch_value: bool | None,
+    ) -> str | None:
+        """Expand a flat ``and``/``or`` into short-circuit-aware CFG nodes.
+
+        ``A or B``: B executes only on A-false paths.
+        ``A and B``: B executes only on A-true paths.
+        Operand branch nodes carry the atom expression (including calls) so
+        dominance binds to the short-circuit-aware execution condition — never
+        as an unconditional pre-if statement.
+        """
+
+        is_or = isinstance(boolop.op, ast.Or)
+        true_sources: list[tuple[str, bool | None]] = []
+        false_sources: list[tuple[str, bool | None]] = []
+
+        current_pred = predecessor
+        current_label = incoming_branch_value
+        values = list(boolop.values)
+        for index, atom in enumerate(values):
+            branch_id = self._alloc(
+                "sc_branch",
+                kind="branch",
+                source_range=self._range_of(atom),
+                expression=ast.unparse(atom),
+            )
+            self._edge(current_pred, branch_id, branch_value=current_label)
+            is_last = index == len(values) - 1
+            if is_or:
+                # True short-circuits the remaining operands.
+                true_sources.append((branch_id, True))
+                if is_last:
+                    false_sources.append((branch_id, False))
+                else:
+                    current_pred = branch_id
+                    current_label = False
+            else:
+                # False short-circuits the remaining operands.
+                false_sources.append((branch_id, False))
+                if is_last:
+                    true_sources.append((branch_id, True))
+                else:
+                    current_pred = branch_id
+                    current_label = True
+
+        cond_true = self._alloc(
+            "sc_true",
+            kind="statement",
+            expression="__cfg_boolop_true__",
+        )
+        cond_false = self._alloc(
+            "sc_false",
+            kind="statement",
+            expression="__cfg_boolop_false__",
+        )
+        for source_id, label in true_sources:
+            self._edge(source_id, cond_true, branch_value=label)
+        for source_id, label in false_sources:
+            self._edge(source_id, cond_false, branch_value=label)
+
+        if statement.body:
+            true_fall = self._link_block(statement.body, cond_true)
+        else:
+            true_fall = cond_true
+
+        if not statement.orelse:
+            false_fall: str | None = cond_false
+        else:
+            false_fall = self._link_orelse_from(statement.orelse, cond_false)
+
+        arms_to_join: list[tuple[str | None, bool | None]] = []
+        if true_fall is not None:
+            arms_to_join.append((true_fall, None))
+        if false_fall is not None:
+            arms_to_join.append((false_fall, None))
+        if not arms_to_join:
+            return None
+        join_id = self._alloc("join", kind="statement", expression="__cfg_join__")
+        for source_id, label in arms_to_join:
+            assert source_id is not None
+            self._edge(source_id, join_id, branch_value=label)
+        return join_id
+
+    def _link_orelse_from(
+        self,
+        orelse: Sequence[ast.stmt],
+        predecessor: str,
+    ) -> str | None:
+        """Link orelse after an already-materialized false-condition node."""
+
+        if len(orelse) == 1 and isinstance(orelse[0], ast.If):
+            return self._link_if(orelse[0], predecessor)
+        return self._link_block(orelse, predecessor)
+
     def _link_orelse(
         self,
         orelse: Sequence[ast.stmt],
@@ -427,6 +537,68 @@ class _CfgBuilder:
             branch_id,
             first_branch_value=False,
         )
+
+
+def _is_supported_boolop_atom(node: ast.AST) -> bool:
+    """Atoms admitted by the bounded short-circuit theorem."""
+
+    if isinstance(node, (ast.Name, ast.Constant)):
+        return True
+    if isinstance(node, ast.Attribute):
+        return _is_supported_boolop_atom(node.value)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return _is_supported_boolop_atom(node.operand)
+    if isinstance(node, ast.Call):
+        if not isinstance(node.func, (ast.Name, ast.Attribute)):
+            return False
+        if isinstance(node.func, ast.Attribute) and not _is_supported_boolop_atom(
+            node.func.value
+        ):
+            return False
+        for arg in node.args:
+            if not _is_supported_boolop_atom(arg):
+                return False
+        for keyword in node.keywords:
+            if keyword.arg is None:
+                return False
+            if not _is_supported_boolop_atom(keyword.value):
+                return False
+        return True
+    return False
+
+
+def _as_simple_boolop(test: ast.AST) -> ast.BoolOp | None:
+    """Return a flat And/Or of supported atoms, else None (keep opaque)."""
+
+    if not isinstance(test, ast.BoolOp):
+        return None
+    if not isinstance(test.op, (ast.And, ast.Or)):
+        return None
+    if len(test.values) < 2:
+        return None
+    if any(isinstance(value, ast.BoolOp) for value in test.values):
+        # Nested BoolOp stays opaque / may be partial at security binding.
+        return None
+    if not all(_is_supported_boolop_atom(value) for value in test.values):
+        return None
+    return test
+
+
+def is_unconditionally_executed(
+    cfg: "HandlerControlFlowSummary",
+    node_id: str,
+) -> bool:
+    """True iff every exit-reaching path from entry executes ``node_id``.
+
+    Short-circuit operands after the first BoolOp atom are not unconditional:
+    there exist exit-reaching paths that skip them.
+    """
+
+    if node_id not in {node.node_id for node in cfg.nodes}:
+        return False
+    if not cfg.exit_ids:
+        return False
+    return all(dominates(cfg, node_id, exit_id) for exit_id in cfg.exit_ids)
 
 
 def build_handler_control_flow(
