@@ -22,7 +22,7 @@ from ovk.core.resource_identity import ResourceIdentityTerm
 
 
 RESOURCE_BINDING_CHECKER_ID = "ovk.resource_binding.v1"
-RESOURCE_BINDING_CHECKER_VERSION = "0.3.0"
+RESOURCE_BINDING_CHECKER_VERSION = "0.4.0"
 
 
 def _checker(engine: str, *, tool_version: str | None = None) -> dict[str, Any]:
@@ -171,6 +171,37 @@ def evaluate_resource_binding_with_z3(ir: AssuranceIR, binding: ResourceBinding)
             and left_interpretation.input_origin
             == right_interpretation.input_origin
         )
+        if same_interpreted_origin:
+            compatibility_evidence = sorted(
+                (
+                    item
+                    for item in ir.interpretation_compatibility_evidence
+                    if (
+                        item.relation == "equal_on_acted_domain"
+                        and item.authorized_interpretation
+                        == left_interpretation
+                        and item.acted_interpretation
+                        == right_interpretation
+                    )
+                ),
+                key=lambda item: item.evidence_id,
+            )
+            if compatibility_evidence:
+                return {
+                    "status": "pass",
+                    "reason": (
+                        f"{left_label} agrees with {right_label} over every "
+                        "raw input accepted by the acted interpretation"
+                    ),
+                    "counterexample": None,
+                    "checker": _checker(
+                        "interpretation-compatibility"
+                    ),
+                    "evidence_ids": [
+                        item.evidence_id
+                        for item in compatibility_evidence
+                    ],
+                }
         same_local_symbol_with_partial_interpretation = (
             left.value == right.value
             and (

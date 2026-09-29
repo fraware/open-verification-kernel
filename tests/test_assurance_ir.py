@@ -18,6 +18,7 @@ from ovk.core.assurance_ir import (
     ContractUse,
     EffectRef,
     FunctionContract,
+    InterpretationCompatibilityEvidence,
     PathCondition,
     PrincipalRef,
     ProtectedEffect,
@@ -28,6 +29,7 @@ from ovk.core.assurance_ir import (
     compute_assurance_ir_digest,
 )
 from ovk.core.models import VerificationSubject
+from ovk.core.resource_identity import ResourceInterpretation
 
 
 def _origin(path: str, line: int) -> SemanticOrigin:
@@ -158,6 +160,56 @@ def test_assurance_ir_digest_is_stable_for_set_like_reordering() -> None:
 
     assert original.assurance_ir_digest == reordered.assurance_ir_digest
     assert compute_assurance_ir_digest(original.model_dump(mode="json")) == original.assurance_ir_digest
+
+
+def test_empty_interpretation_evidence_preserves_legacy_canonical_shape() -> None:
+    ir = _ir()
+
+    assert "interpretation_compatibility_evidence" not in ir.canonical_payload()
+
+
+def test_interpretation_evidence_order_is_digest_stable() -> None:
+    ir = _ir()
+    common = {
+        "input_origin": "request.path.invoice_id",
+        "output_type": "InvoiceId",
+    }
+    left = ResourceInterpretation(
+        decoder="authorization.parser",
+        **common,
+    )
+    right = ResourceInterpretation(
+        decoder="execution.parser",
+        **common,
+    )
+    ir.interpretation_compatibility_evidence = [
+        InterpretationCompatibilityEvidence(
+            evidence_id="evidence:b",
+            authorized_interpretation=left,
+            acted_interpretation=right,
+            evidence_kind="interpretation_contract_v1",
+            assumptions=["framework-b", "framework-a"],
+            origin=_origin("contracts/parser.py", 8),
+        ),
+        InterpretationCompatibilityEvidence(
+            evidence_id="evidence:a",
+            authorized_interpretation=left,
+            acted_interpretation=right,
+            evidence_kind="interpretation_contract_v1",
+            assumptions=[],
+            origin=_origin("contracts/parser.py", 9),
+        ),
+    ]
+    reordered = deepcopy(ir)
+    reordered.interpretation_compatibility_evidence.reverse()
+    reordered.interpretation_compatibility_evidence[1].assumptions.reverse()
+
+    assert ir.assurance_ir_digest == reordered.assurance_ir_digest
+    payload = ir.canonical_payload()
+    assert [
+        item["evidence_id"]
+        for item in payload["interpretation_compatibility_evidence"]
+    ] == ["evidence:a", "evidence:b"]
 
 
 def test_assurance_ir_digest_changes_when_semantics_change() -> None:

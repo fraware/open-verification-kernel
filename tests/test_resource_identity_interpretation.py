@@ -9,6 +9,7 @@ from ovk.core.assurance_ir import (
     AssuranceCoverage,
     AssuranceExtractorIdentity,
     AssuranceIR,
+    InterpretationCompatibilityEvidence,
     ResourceBinding,
     ResourceRef,
     SemanticOrigin,
@@ -32,6 +33,10 @@ def _origin() -> SemanticOrigin:
 def _evaluate(
     authorized: ResourceIdentityTerm,
     acted: ResourceIdentityTerm,
+    *,
+    compatibility_evidence: list[
+        InterpretationCompatibilityEvidence
+    ] | None = None,
 ):
     ir = AssuranceIR(
         subject=VerificationSubject(
@@ -46,6 +51,9 @@ def _evaluate(
         coverage=AssuranceCoverage(
             status="complete",
             confidence=1.0,
+        ),
+        interpretation_compatibility_evidence=(
+            compatibility_evidence or []
         ),
         resources=[
             ResourceRef(
@@ -177,6 +185,96 @@ def test_same_input_with_different_decoders_is_unknown() -> None:
     assert result["status"] == "unknown"
     assert result["checker"]["engine"] == "interpretation-unresolved"
     assert "decoder equivalence requires explicit evidence" in result["reason"]
+
+
+def test_directional_compatibility_evidence_establishes_binding() -> None:
+    authorized = ResourceIdentityTerm.interpreted_symbol(
+        "authorization_backfill_id",
+        input_origin="request.path.backfill_id",
+        decoder="pydantic.TypeAdapter.validate_python",
+        output_type="pydantic.NonNegativeInt",
+        constraints=("ge=0", "validation_mode=default"),
+    )
+    acted = ResourceIdentityTerm.interpreted_symbol(
+        "handler_backfill_id",
+        input_origin="request.path.backfill_id",
+        decoder="fastapi.path_parameter",
+        output_type="pydantic.NonNegativeInt",
+        constraints=("ge=0", "validation_mode=default"),
+    )
+    evidence = InterpretationCompatibilityEvidence(
+        evidence_id="interpretation-compat:test",
+        authorized_interpretation=authorized.interpretation,
+        acted_interpretation=acted.interpretation,
+        evidence_kind="interpretation_contract_v1",
+        origin=_origin(),
+    )
+
+    result = _evaluate(
+        authorized,
+        acted,
+        compatibility_evidence=[evidence],
+    )
+
+    assert result["status"] == "pass"
+    assert result["checker"]["engine"] == "interpretation-compatibility"
+    assert result["evidence_ids"] == ["interpretation-compat:test"]
+
+
+def test_compatibility_evidence_is_directional() -> None:
+    authorized = ResourceIdentityTerm.interpreted_symbol(
+        "authorization_id",
+        input_origin="request.path.backfill_id",
+        decoder="authorization.parser",
+        output_type="ResourceId",
+    )
+    acted = ResourceIdentityTerm.interpreted_symbol(
+        "execution_id",
+        input_origin="request.path.backfill_id",
+        decoder="execution.parser",
+        output_type="ResourceId",
+    )
+    reverse_only = InterpretationCompatibilityEvidence(
+        evidence_id="interpretation-compat:reverse",
+        authorized_interpretation=acted.interpretation,
+        acted_interpretation=authorized.interpretation,
+        evidence_kind="interpretation_contract_v1",
+        origin=_origin(),
+    )
+
+    result = _evaluate(
+        authorized,
+        acted,
+        compatibility_evidence=[reverse_only],
+    )
+
+    assert result["status"] == "unknown"
+    assert result["checker"]["engine"] == "interpretation-unresolved"
+
+
+def test_compatibility_evidence_requires_same_raw_input_origin() -> None:
+    authorized = ResourceInterpretation(
+        input_origin="request.path.left_id",
+        decoder="authorization.parser",
+        output_type="ResourceId",
+    )
+    acted = ResourceInterpretation(
+        input_origin="request.path.right_id",
+        decoder="execution.parser",
+        output_type="ResourceId",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="requires the same input_origin",
+    ):
+        InterpretationCompatibilityEvidence(
+            evidence_id="interpretation-compat:invalid",
+            authorized_interpretation=authorized,
+            acted_interpretation=acted,
+            evidence_kind="interpretation_contract_v1",
+            origin=_origin(),
+        )
 
 
 def test_typed_and_untyped_same_symbol_do_not_collapse_to_pass() -> None:
