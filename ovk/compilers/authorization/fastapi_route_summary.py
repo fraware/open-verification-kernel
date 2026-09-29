@@ -16,6 +16,10 @@ from dataclasses import dataclass, field
 from typing import Literal, Mapping
 
 from ovk.compilers.authorization.base import normalize_path
+from ovk.compilers.authorization.dependency_factory_interpretation import (
+    DependencyFactoryInterpretationSummary,
+    summarize_dependency_factory_interpretations,
+)
 from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.core.assurance_ir import SemanticOrigin
 from ovk.core.bundle import content_digest
@@ -196,6 +200,9 @@ class RouteFileSummary:
     imported_constructor_bindings: tuple[
         ImportedConstructorBindingSummary, ...
     ] = ()
+    dependency_factory_interpretations: tuple[
+        DependencyFactoryInterpretationSummary, ...
+    ] = ()
 
 
 @dataclass(frozen=True)
@@ -210,7 +217,7 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id=_EXTRACTOR_ID,
-        extractor_version="0.10.0",
+        extractor_version="0.12.0",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -1762,6 +1769,12 @@ def summarize_route_file(
         imported_constructor_bindings=_imported_constructor_bindings(
             path,
             tree,
+        ),
+        dependency_factory_interpretations=(
+            summarize_dependency_factory_interpretations(
+                path=path,
+                tree=tree,
+            )
         ),
     )
 
