@@ -64,7 +64,7 @@ from ovk.core.resource_identity import ResourceIdentityTerm
 
 
 SEMANTIC_SUMMARY_CACHE_SCHEMA = "ovk.python_semantic_summary_cache.v1"
-SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.13.0"
+SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.14.0"
 DEFAULT_SEMANTIC_SUMMARY_CACHE_DIR = Path(
     ".verification/cache/python-semantic-summaries"
 )

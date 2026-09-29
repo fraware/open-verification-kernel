@@ -225,7 +225,13 @@ def handler(user):
     assert sinks == ()
 
 
-def test_boolean_condition_remains_opaque() -> None:
+def test_boolean_short_circuit_expands_atoms() -> None:
+    """Flat ``and``/``or`` expand into per-atom branches, not one opaque BoolOp."""
+
+    from ovk.compilers.authorization.handler_control_flow import (
+        is_unconditionally_executed,
+    )
+
     cfg = build_handler_control_flow_from_source(
         """
 def handler(user):
@@ -234,21 +240,24 @@ def handler(user):
     return None
 """.strip()
     )
-    # Condition is opaque on the branch node; no unconditional guard statement.
-    branch_nodes = [node for node in cfg.nodes if node.kind == "branch"]
-    assert branch_nodes
-    assert "require_access(user) and other(user)" in (
-        branch_nodes[0].expression or ""
+    branch_exprs = [
+        node.expression
+        for node in cfg.nodes
+        if node.kind == "branch" and node.expression
+    ]
+    assert "require_access(user)" in branch_exprs
+    assert "other(user)" in branch_exprs
+    assert not any(
+        expr is not None and " and " in expr for expr in branch_exprs
     )
-    # No separate statement node that executes require_access unconditionally.
-    stmt_guards = [
+    # No unconditional statement that always executes require_access.
+    other_nodes = [
         node
         for node in cfg.nodes
-        if node.kind == "statement"
-        and node.expression
-        and node.expression.startswith("require_access")
+        if node.expression == "other(user)"
     ]
-    assert stmt_guards == []
+    assert other_nodes
+    assert is_unconditionally_executed(cfg, other_nodes[0].node_id) is False
 
 
 def test_control_flow_round_trip_payload() -> None:
@@ -289,7 +298,7 @@ async def get_item(item_id: str, flag: bool):
     handler = summary.handlers[0]
     assert handler.control_flow is not None
     assert handler.control_flow.coverage_status == "complete"
-    assert handler.origin.extractor_version == "0.13.0"
+    assert handler.origin.extractor_version == "0.14.0"
 
 
 def test_branch_structure_change_invalidates_cfg_digest() -> None:
