@@ -10,6 +10,8 @@ def test_check_ci_secrets_diff_blocks() -> None:
     assert recommendation == "block"
     assert result.elapsed_ms < 15000
     assert result.jobs
+    assert "Guarantee Diff" in result.markdown
+    assert "guarantee_governance" in result.plan
 
 
 def test_check_doctor_passes_without_verification_dir() -> None:

@@ -17,7 +17,7 @@ from ovk.core.lane_compiler import build_plan_from_inputs
 from ovk.core.models import EvidenceBundle
 from ovk.core.obligation_compiler import ObligationCompilerRegistry
 from ovk.core.policy_config import bundle_decision_options
-from ovk.core.render import render_bundle_markdown
+from ovk.core.render import render_bundle_markdown, render_guarantee_governance_markdown
 from ovk.core.repo_memory import router_historical_priors
 from ovk.core.result_cache import DEFAULT_CACHE_DIR
 from ovk.core.risk_ranker import rank_intents
@@ -177,6 +177,13 @@ def execute_kernel(
         )
         bundle = make_bundle(evidence_items, **decision_options)
 
+    governance = ctx.branch_metadata.get("guarantee_governance", {})
+    plan = {**plan, "guarantee_governance": governance}
+    markdown = render_bundle_markdown(bundle)
+    governance_markdown = render_guarantee_governance_markdown(governance)
+    if governance_markdown:
+        markdown = markdown.rstrip() + "\n\n" + governance_markdown.rstrip() + "\n"
+
     ranked = rank_intents(plan.get("candidate_intents", []), context=ctx)
     elapsed_ms = (time.perf_counter() - started) * 1000
     return KernelResult(
@@ -186,6 +193,6 @@ def execute_kernel(
         ranked_intents=ranked,
         routing=routing,
         obligations=obligations,
-        markdown=render_bundle_markdown(bundle),
+        markdown=markdown,
         elapsed_ms=elapsed_ms,
     )

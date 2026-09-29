@@ -169,3 +169,89 @@ def render_bundle_markdown(bundle: EvidenceBundle) -> str:
         for obligation in bundle.open_obligations:
             lines.append(f"- {obligation}")
     return "\n".join(lines).strip() + "\n"
+
+
+def render_guarantee_governance_markdown(
+    governance: dict | None,
+) -> str:
+    """Render repository guarantee-governance state for pull-request review."""
+
+    if not governance:
+        return ""
+
+    lines = ["## Guarantee Diff", ""]
+    lines.append(
+        "Assurance target source: "
+        + f"`{governance.get('active_source', 'unknown')}`"
+    )
+    lines.append(
+        "Assurance target available: "
+        + f"`{bool(governance.get('assurance_target_available'))}`"
+    )
+    lines.append(
+        "Governance review required: "
+        + f"`{bool(governance.get('governance_review_required'))}`"
+    )
+
+    if governance.get("change_detection_mismatch"):
+        lines.append(
+            "Change metadata mismatch: base/head guarantee content differs "
+            "although the manifest path was not reported as changed."
+        )
+    if governance.get("warning"):
+        lines.append(f"Warning: {governance['warning']}")
+
+    if not governance.get("proposal_valid", True):
+        lines.extend(
+            [
+                "",
+                "Proposed head manifest: `invalid`",
+                str(governance.get("proposal_error") or "validation failed"),
+            ]
+        )
+    else:
+        diff = governance.get("diff") or {}
+        added = list(diff.get("added_guarantee_ids") or [])
+        removed = list(diff.get("removed_guarantee_ids") or [])
+        modified = list(diff.get("modified_guarantees") or [])
+        unchanged = list(diff.get("unchanged_guarantee_ids") or [])
+
+        lines.append("")
+        if not added and not removed and not modified:
+            lines.append("No semantic guarantee-manifest change.")
+        else:
+            if added:
+                lines.append(
+                    "Added guarantees: "
+                    + ", ".join(f"`{item}`" for item in added)
+                )
+            if removed:
+                lines.append(
+                    "Removed guarantees: "
+                    + ", ".join(f"`{item}`" for item in removed)
+                )
+            if modified:
+                lines.append("Modified guarantees:")
+                for item in modified:
+                    fields = ", ".join(item.get("changed_fields") or [])
+                    lines.append(
+                        f"- `{item.get('guarantee_id')}`: "
+                        f"{fields or 'definition changed'}"
+                    )
+            if unchanged:
+                lines.append(
+                    "Unchanged guarantees: "
+                    + ", ".join(f"`{item}`" for item in unchanged)
+                )
+
+    lines.extend(
+        [
+            "",
+            (
+                "Guarantee proposals are review metadata only for the current "
+                "pull request. The trusted base manifest remains the active "
+                "assurance target."
+            ),
+        ]
+    )
+    return "\n".join(lines)
