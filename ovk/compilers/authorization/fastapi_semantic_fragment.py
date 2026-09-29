@@ -1025,6 +1025,7 @@ _SUPPORTED_CONSTRUCTS = [
     "static_fastapi_route_decorator",
     "depends_or_security_default_parameter",
     "direct_route_decorator_dependency",
+    "direct_apirouter_constructor_dependency",
     "configured_static_sink_resource",
     "route_dependency_candidate_mediation",
     "straight_line_handler",
@@ -1129,7 +1130,7 @@ def assemble_fastapi_assurance_ir(
         ),
         extractor=AssuranceExtractorIdentity(
             extractor_id="assurance.fastapi.dependency_effects.ast_v1",
-            extractor_version="0.6.0",
+            extractor_version="0.7.0",
             source_profile_id="assurance.fastapi.dependency_effects.ast_v1",
         ),
         coverage=AssuranceCoverage(

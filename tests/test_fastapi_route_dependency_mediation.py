@@ -249,3 +249,101 @@ async def mcp_post(request: Request):
     )
     assert effectiveness.status == "unknown"
 
+def test_apirouter_constructor_dependency_is_inherited_as_candidate_guard() -> None:
+    source = """
+from fastapi import APIRouter, Depends, Request
+
+router = APIRouter(dependencies=[Depends(require_auth)])
+
+@router.post("")
+async def mcp_post(request: Request):
+    if request.headers.get("x-stop"):
+        return None
+    await handle_jsonrpc_request(await request.json())
+""".strip()
+
+    ir, evaluation = _evaluation(source)
+
+    assert len(ir.guards) == 1
+    assert ir.guards[0].effectiveness == "unproved"
+    assert ir.guards[0].resource_id == ir.protected_effects[0].resource_id
+    assert evaluation.status == "unknown"
+    assert evaluation.extraction_coverage == "complete"
+    effectiveness = next(
+        check
+        for check in evaluation.checks
+        if check.dimension == "guard_effectiveness"
+    )
+    assert effectiveness.status == "unknown"
+
+
+def test_apirouter_constructor_dependency_factory_is_not_inherited() -> None:
+    source = """
+from fastapi import APIRouter, Depends, Request
+
+router = APIRouter(dependencies=[Depends(require_auth())])
+
+@router.post("")
+async def mcp_post(request: Request):
+    await handle_jsonrpc_request(await request.json())
+""".strip()
+
+    ir, evaluation = _evaluation(source)
+
+    assert ir.guards == []
+    assert evaluation.status == "fail"
+
+
+def test_apirouter_symbol_reassignment_suppresses_inheritance() -> None:
+    source = """
+from fastapi import APIRouter, Depends, Request
+
+router = APIRouter(dependencies=[Depends(require_auth)])
+router = APIRouter()
+
+@router.post("")
+async def mcp_post(request: Request):
+    await handle_jsonrpc_request(await request.json())
+""".strip()
+
+    ir, evaluation = _evaluation(source)
+
+    assert ir.guards == []
+    assert evaluation.status == "fail"
+
+
+def test_dependency_on_different_router_is_not_inherited() -> None:
+    source = """
+from fastapi import APIRouter, Depends, Request
+
+guarded = APIRouter(dependencies=[Depends(require_auth)])
+public = APIRouter()
+
+@public.post("")
+async def mcp_post(request: Request):
+    await handle_jsonrpc_request(await request.json())
+""".strip()
+
+    ir, evaluation = _evaluation(source)
+
+    assert ir.guards == []
+    assert evaluation.status == "fail"
+
+
+def test_direct_route_dependency_deduplicates_constructor_dependency() -> None:
+    source = """
+from fastapi import APIRouter, Depends, Request
+
+router = APIRouter(dependencies=[Depends(require_auth)])
+
+@router.post("", dependencies=[Depends(require_auth)])
+async def mcp_post(request: Request):
+    await handle_jsonrpc_request(await request.json())
+""".strip()
+
+    ir, evaluation = _evaluation(source)
+
+    assert len(ir.guards) == 1
+    assert ir.guards[0].effectiveness == "unproved"
+    assert evaluation.status == "unknown"
+
