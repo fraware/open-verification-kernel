@@ -269,3 +269,124 @@ def test_fragment_reuse_is_bound_to_profile_and_contract_versions() -> None:
 
     assert second.stats.rebound_file_count == 1
     assert second.stats.reused_fragment_count == 3
+
+
+
+def _composed_files(repo_attribute: str = "workspace_id") -> dict[str, str]:
+    return {
+        "routes.py": """
+from fastapi import Depends, FastAPI
+app = FastAPI()
+
+@app.get("/workspaces/{workspace_id}/agents/{agent_id}")
+async def get_agent(
+    workspace_id: str,
+    agent_id: str,
+    user = Depends(require_workspace_member),
+):
+    svc = AgentFacade()
+    return await svc.get(agent_id, workspace_id=workspace_id)
+""".strip(),
+        "repo.py": f"""
+class AgentRepository:
+    async def get(self, agent_id: str, *, workspace_id: str | None = None):
+        agent = await load_agent(agent_id)
+        if workspace_id is not None and agent.{repo_attribute} != workspace_id:
+            return None
+        return agent
+""".strip(),
+        "service.py": """
+class AgentService:
+    def __init__(self):
+        self._repo = AgentRepository()
+
+    async def get(self, agent_id: str, *, workspace_id: str | None = None):
+        return await self._repo.get(agent_id, workspace_id=workspace_id)
+""".strip(),
+        "facade.py": """
+class AgentFacade:
+    def __init__(self):
+        self._service = AgentService()
+
+    async def get(self, agent_id: str, *, workspace_id: str | None = None):
+        return await self._service.get(agent_id, workspace_id=workspace_id)
+""".strip(),
+        "unrelated.py": "VALUE = 1\n",
+    }
+
+
+def _composed_materials(
+    repo_attribute: str = "workspace_id",
+    *,
+    revision: str,
+) -> AuthMaterials:
+    files = _composed_files(repo_attribute)
+    return AuthMaterials(
+        base_files=dict(files),
+        head_files=files,
+        repo="example/composed-app",
+        base_revision="base",
+        head_revision=revision,
+    )
+
+
+def _composed_profile() -> FastApiDependencyEffectProfile:
+    return FastApiDependencyEffectProfile(
+        sink_effects={"svc.get": "workspace.agent.read"},
+        sink_identity_args={"svc.get": 0},
+        sink_contracts={"svc.get": "AgentFacade.get"},
+        sink_contract_scope_attributes={"svc.get": "workspace_id"},
+        dependency_guard_resources={"require_workspace_member": "workspace_id"},
+        dependency_guard_effects={
+            "require_workspace_member": ("workspace.agent.read",),
+        },
+        principal_parameter="user",
+    )
+
+
+def test_incremental_composition_and_fragment_reuse_share_dependency_closure() -> None:
+    base = _composed_materials(revision="base-head")
+    profile = _composed_profile()
+    first = _incremental(base, profile)
+    first_full = _full(base, profile)
+
+    assert first.ir.canonical_payload() == first_full.canonical_payload()
+    assert first.stats.recomposed_contract_count == 2
+    assert first.stats.reused_composed_contract_count == 0
+
+    unchanged = _composed_materials(revision="unchanged-head")
+    second = _incremental(
+        unchanged,
+        profile,
+        previous_state=first.state,
+    )
+    second_full = _full(unchanged, profile)
+
+    assert second.ir.canonical_payload() == second_full.canonical_payload()
+    assert second.stats.recomposed_contract_count == 0
+    assert second.stats.reused_composed_contract_count == 2
+    assert second.stats.rebound_file_count == 0
+    assert second.stats.reused_fragment_count == 5
+
+    changed = _composed_materials(
+        repo_attribute="tenant_id",
+        revision="changed-repo-contract",
+    )
+    third = _incremental(
+        changed,
+        profile,
+        previous_state=second.state,
+    )
+    third_full = _full(changed, profile)
+
+    assert third.ir.canonical_payload() == third_full.canonical_payload()
+    assert third.stats.changed_contract_names == (
+        "AgentFacade.get",
+        "AgentRepository.get",
+        "AgentService.get",
+    )
+    assert third.stats.contract_invalidated_name_count == 3
+    assert third.stats.recomposed_contract_count == 2
+    assert third.stats.reused_composed_contract_count == 0
+    assert third.stats.rebound_file_count == 2
+    assert third.stats.reused_fragment_count == 3
