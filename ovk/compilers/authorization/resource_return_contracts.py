@@ -22,7 +22,13 @@ from __future__ import annotations
 import ast
 
 from ovk.compilers.authorization.material_loader import AuthMaterials
-from ovk.core.assurance_ir import ResourceReturnContract, SemanticOrigin
+from ovk.core.assurance_ir import (
+    ContractPredicate,
+    ContractTerm,
+    FunctionContract,
+    ResourceReturnContract,
+    SemanticOrigin,
+)
 from ovk.core.bundle import content_digest
 from ovk.core.models import SourceRange
 
@@ -141,7 +147,7 @@ def _infer_method_contract(
     path: str,
     class_name: str,
     method: ast.FunctionDef | ast.AsyncFunctionDef,
-) -> ResourceReturnContract | None:
+) -> FunctionContract | None:
     if any(
         isinstance(item, _UNSUPPORTED_CONTROL_FLOW)
         for statement in method.body
@@ -170,37 +176,71 @@ def _infer_method_contract(
         requires_non_null = _contains_non_null_guard(statement.test, parameter)
         candidates.append((scope_attribute, parameter, requires_non_null, statement))
 
-    if len(candidates) != 1:
+    if not candidates:
         return None
 
-    scope_attribute, parameter, requires_non_null, guard = candidates[0]
+    # One method may establish several return relations, such as
+    # return.id == agent_id and return.workspace_id == workspace_id.
+    unique_pairs = {(attribute, parameter) for attribute, parameter, _, _ in candidates}
+    if len(unique_pairs) != len(candidates):
+        return None
+
     qualified_name = f"{class_name}.{method.name}"
+    positional_parameters = [
+        arg.arg
+        for arg in (list(method.args.posonlyargs) + list(method.args.args))
+        if arg.arg not in {"self", "cls"}
+    ]
+
+    preconditions = []
+    postconditions = []
+    for attribute, parameter, requires_non_null, _guard in candidates:
+        if requires_non_null:
+            predicate = ContractPredicate(
+                relation="non_null",
+                left=ContractTerm.parameter(parameter),
+            )
+            if predicate not in preconditions:
+                preconditions.append(predicate)
+        postconditions.append(
+            ContractPredicate(
+                relation="eq",
+                left=ContractTerm.return_attribute(attribute),
+                right=ContractTerm.parameter(parameter),
+            )
+        )
+
     contract_id = (
         "contract:"
         + content_digest(
             {
                 "qualified_name": qualified_name,
-                "return_scope_parameter": parameter,
-                "return_scope_attribute": scope_attribute,
-                "requires_non_null_argument": requires_non_null,
+                "positional_parameters": positional_parameters,
+                "preconditions": [
+                    predicate.model_dump(mode="json") for predicate in preconditions
+                ],
+                "postconditions": [
+                    predicate.model_dump(mode="json") for predicate in postconditions
+                ],
                 "path": path,
             }
         )[:16]
     )
-    return ResourceReturnContract(
+    origin_node = min(candidates, key=lambda item: getattr(item[3], "lineno", 0))[3]
+    return FunctionContract(
         contract_id=contract_id,
         qualified_name=qualified_name,
-        return_scope_parameter=parameter,
-        return_scope_attribute=scope_attribute,
-        requires_non_null_argument=requires_non_null,
-        origin=_origin(path, guard),
+        positional_parameters=positional_parameters,
+        preconditions=preconditions,
+        postconditions=postconditions,
+        origin=_origin(path, origin_node),
     )
 
 
-def infer_resource_return_contracts(materials: AuthMaterials) -> list[ResourceReturnContract]:
-    """Infer all v1 resource-return contracts from the head revision."""
+def infer_function_contracts(materials: AuthMaterials) -> list[FunctionContract]:
+    """Infer all v1 typed function contracts from the head revision."""
 
-    contracts: list[ResourceReturnContract] = []
+    contracts: list[FunctionContract] = []
     for path, source in sorted(materials.head_files.items()):
         try:
             tree = ast.parse(source, filename=path)
@@ -220,3 +260,66 @@ def infer_resource_return_contracts(materials: AuthMaterials) -> list[ResourceRe
                 if contract is not None:
                     contracts.append(contract)
     return sorted(contracts, key=lambda item: item.contract_id)
+
+
+def _legacy_resource_return_contract(
+    contract: FunctionContract,
+) -> ResourceReturnContract | None:
+    """Project a v1 typed contract into the compatibility scope contract."""
+
+    if len(contract.postconditions) != 1:
+        return None
+    post = contract.postconditions[0]
+    if (
+        post.relation != "eq"
+        or post.right is None
+        or post.left.kind != "return_attribute"
+        or post.right.kind != "parameter"
+        or post.left.name is None
+        or post.right.name is None
+    ):
+        return None
+
+    # Compatibility is intentionally limited to the original semantic scope.
+    # Generic parent/ownership attributes remain typed FunctionContract data and
+    # are never relabeled as a tenant/workspace return-scope contract.
+    if post.left.name not in {"workspace_id", "tenant_id"}:
+        return None
+
+    requires_non_null = any(
+        predicate.relation == "non_null"
+        and predicate.left.kind == "parameter"
+        and predicate.left.name == post.right.name
+        for predicate in contract.preconditions
+    )
+    unsupported_preconditions = [
+        predicate
+        for predicate in contract.preconditions
+        if not (
+            predicate.relation == "non_null"
+            and predicate.left.kind == "parameter"
+            and predicate.left.name == post.right.name
+        )
+    ]
+    if unsupported_preconditions:
+        return None
+
+    return ResourceReturnContract(
+        contract_id=contract.contract_id,
+        qualified_name=contract.qualified_name,
+        return_scope_parameter=post.right.name,
+        return_scope_attribute=post.left.name,
+        requires_non_null_argument=requires_non_null,
+        origin=contract.origin,
+    )
+
+
+def infer_resource_return_contracts(materials: AuthMaterials) -> list[ResourceReturnContract]:
+    """Compatibility projection of typed contracts into scope-return contracts."""
+
+    projected = [
+        legacy
+        for contract in infer_function_contracts(materials)
+        if (legacy := _legacy_resource_return_contract(contract)) is not None
+    ]
+    return sorted(projected, key=lambda item: item.contract_id)

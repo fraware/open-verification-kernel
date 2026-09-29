@@ -187,3 +187,89 @@ def test_cross_tenant_binding_fails_on_distinct_literal_scopes() -> None:
     assert result["status"] == "fail"
     assert result["counterexample"]["authorized_value"] == "workspace-a"
     assert result["counterexample"]["acted_value"] == "workspace-b"
+
+
+
+def test_attribute_projection_binding_passes_for_matching_parent_id() -> None:
+    ir = AssuranceIR(
+        subject=VerificationSubject(repo="example/docs", base_sha="a", head_sha="b"),
+        extractor=AssuranceExtractorIdentity(
+            extractor_id="test.extractor",
+            extractor_version="0.1.0",
+        ),
+        coverage=AssuranceCoverage(status="complete", confidence=1.0),
+        resources=[
+            ResourceRef(
+                resource_id="r:project",
+                symbol="project_id",
+                identity_term=ResourceIdentityTerm.literal("project-a"),
+                origin=_origin(),
+            ),
+            ResourceRef(
+                resource_id="r:document",
+                symbol="document_id",
+                identity_term=ResourceIdentityTerm.literal("doc-1"),
+                attribute_terms={
+                    "project_id": ResourceIdentityTerm.literal("project-a"),
+                },
+                origin=_origin(),
+            ),
+        ],
+    )
+    binding = ResourceBinding(
+        binding_id="binding:document-project",
+        authorized_resource_id="r:project",
+        acted_resource_id="r:document",
+        relation="equal",
+        authorized_projection="identity",
+        acted_projection="attribute",
+        acted_attribute="project_id",
+        origin=_origin(),
+    )
+
+    result = evaluate_resource_binding_with_z3(ir, binding)
+
+    assert result["status"] == "pass"
+
+
+def test_attribute_projection_binding_fails_for_different_parent_id() -> None:
+    ir = AssuranceIR(
+        subject=VerificationSubject(repo="example/docs", base_sha="a", head_sha="b"),
+        extractor=AssuranceExtractorIdentity(
+            extractor_id="test.extractor",
+            extractor_version="0.1.0",
+        ),
+        coverage=AssuranceCoverage(status="complete", confidence=1.0),
+        resources=[
+            ResourceRef(
+                resource_id="r:project",
+                symbol="project_id",
+                identity_term=ResourceIdentityTerm.literal("project-a"),
+                origin=_origin(),
+            ),
+            ResourceRef(
+                resource_id="r:document",
+                symbol="document_id",
+                identity_term=ResourceIdentityTerm.literal("doc-1"),
+                attribute_terms={
+                    "project_id": ResourceIdentityTerm.literal("project-b"),
+                },
+                origin=_origin(),
+            ),
+        ],
+    )
+    binding = ResourceBinding(
+        binding_id="binding:document-project",
+        authorized_resource_id="r:project",
+        acted_resource_id="r:document",
+        relation="equal",
+        authorized_projection="identity",
+        acted_projection="attribute",
+        acted_attribute="project_id",
+        origin=_origin(),
+    )
+
+    result = evaluate_resource_binding_with_z3(ir, binding)
+
+    assert result["status"] == "fail"
+    assert result["counterexample"]["acted_projection"] == "acted.attribute[project_id]"

@@ -23,7 +23,9 @@ from ovk.core.resource_identity import ResourceIdentityTerm
 
 CoverageStatus = Literal["complete", "partial", "unknown", "inapplicable"]
 BindingRelation = Literal["equal", "same_tenant", "custom"]
-BindingProjection = Literal["identity", "scope"]
+BindingProjection = Literal["identity", "scope", "attribute"]
+ContractTermKind = Literal["parameter", "return_attribute", "literal"]
+ContractRelation = Literal["eq", "non_null"]
 ClaimKind = Literal[
     "protected_effect_integrity",
     "authorization",
@@ -70,6 +72,7 @@ class ResourceRef(BaseModel):
     tenant_symbol: str | None = None
     identity_term: ResourceIdentityTerm | None = None
     scope_term: ResourceIdentityTerm | None = None
+    attribute_terms: dict[str, ResourceIdentityTerm] = Field(default_factory=dict)
     origin: SemanticOrigin | None = None
 
 
@@ -127,6 +130,79 @@ class ProtectedEffect(BaseModel):
     origin: SemanticOrigin
 
 
+class ContractTerm(BaseModel):
+    """Serializable term used in interprocedural pre/postconditions."""
+
+    kind: ContractTermKind
+    name: str | None = None
+    value: str | None = None
+
+    @model_validator(mode="after")
+    def _shape_is_valid(self) -> "ContractTerm":
+        if self.kind in {"parameter", "return_attribute"}:
+            if self.name is None or not self.name.strip():
+                raise ValueError(f"{self.kind} contract term requires name")
+            if self.value is not None:
+                raise ValueError(f"{self.kind} contract term does not accept value")
+        elif self.kind == "literal":
+            if self.value is None:
+                raise ValueError("literal contract term requires value")
+            if self.name is not None:
+                raise ValueError("literal contract term does not accept name")
+        return self
+
+    @classmethod
+    def parameter(cls, name: str) -> "ContractTerm":
+        return cls(kind="parameter", name=name)
+
+    @classmethod
+    def return_attribute(cls, name: str) -> "ContractTerm":
+        return cls(kind="return_attribute", name=name)
+
+    @classmethod
+    def literal(cls, value: str) -> "ContractTerm":
+        return cls(kind="literal", value=value)
+
+
+class ContractPredicate(BaseModel):
+    """Decidable predicate in the v1 interprocedural contract language."""
+
+    relation: ContractRelation
+    left: ContractTerm
+    right: ContractTerm | None = None
+
+    @model_validator(mode="after")
+    def _predicate_shape(self) -> "ContractPredicate":
+        if self.relation == "non_null":
+            if self.right is not None:
+                raise ValueError("non_null predicate is unary")
+            if self.left.kind != "parameter":
+                raise ValueError("v1 non_null predicate requires a parameter term")
+        elif self.relation == "eq":
+            if self.right is None:
+                raise ValueError("eq predicate requires right term")
+        return self
+
+
+class FunctionContract(BaseModel):
+    """Named, source-grounded pre/post contract for a callable."""
+
+    contract_id: str
+    qualified_name: str
+    positional_parameters: list[str] = Field(default_factory=list)
+    preconditions: list[ContractPredicate] = Field(default_factory=list)
+    postconditions: list[ContractPredicate] = Field(default_factory=list)
+    origin: SemanticOrigin
+
+    @field_validator("qualified_name")
+    @classmethod
+    def _qualified_name_non_empty(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("function contract qualified_name must be non-empty")
+        return value
+
+
 class ResourceReturnContract(BaseModel):
     """Source-derived postcondition for a function returning a resource."""
 
@@ -155,14 +231,26 @@ class ResourceBinding(BaseModel):
     relation: BindingRelation = "equal"
     authorized_projection: BindingProjection = "identity"
     acted_projection: BindingProjection = "identity"
+    authorized_attribute: str | None = None
+    acted_attribute: str | None = None
     predicate: str | None = None
     condition_ids: list[str] = Field(default_factory=list)
     origin: SemanticOrigin
 
     @model_validator(mode="after")
-    def _custom_requires_predicate(self) -> "ResourceBinding":
+    def _binding_shape(self) -> "ResourceBinding":
         if self.relation == "custom" and (self.predicate is None or not self.predicate.strip()):
             raise ValueError("custom resource binding requires predicate")
+        if self.authorized_projection == "attribute":
+            if self.authorized_attribute is None or not self.authorized_attribute.strip():
+                raise ValueError("authorized attribute projection requires authorized_attribute")
+        elif self.authorized_attribute is not None:
+            raise ValueError("authorized_attribute requires attribute projection")
+        if self.acted_projection == "attribute":
+            if self.acted_attribute is None or not self.acted_attribute.strip():
+                raise ValueError("acted attribute projection requires acted_attribute")
+        elif self.acted_attribute is not None:
+            raise ValueError("acted_attribute requires attribute projection")
         return self
 
 
@@ -230,6 +318,7 @@ class AssuranceIR(BaseModel):
     protected_effects: list[ProtectedEffect] = Field(default_factory=list)
     resource_bindings: list[ResourceBinding] = Field(default_factory=list)
     resource_return_contracts: list[ResourceReturnContract] = Field(default_factory=list)
+    function_contracts: list[FunctionContract] = Field(default_factory=list)
     paths: list[SemanticPath] = Field(default_factory=list)
     claims: list[AssuranceClaim] = Field(default_factory=list)
     assumptions: dict[str, str] = Field(default_factory=dict)
@@ -247,6 +336,7 @@ class AssuranceIR(BaseModel):
             "protected_effects": "protected_effect_id",
             "resource_bindings": "binding_id",
             "resource_return_contracts": "contract_id",
+            "function_contracts": "contract_id",
             "paths": "path_id",
             "claims": "claim_id",
         }
@@ -266,6 +356,16 @@ class AssuranceIR(BaseModel):
             item["guard_ids"] = sorted(item["guard_ids"])
             item["protected_effect_ids"] = sorted(item["protected_effect_ids"])
             item["binding_ids"] = sorted(item["binding_ids"])
+
+        for item in payload["function_contracts"]:
+            item["preconditions"] = sorted(
+                item["preconditions"],
+                key=lambda pred: content_digest(pred),
+            )
+            item["postconditions"] = sorted(
+                item["postconditions"],
+                key=lambda pred: content_digest(pred),
+            )
 
         for item in payload["claims"]:
             item["subject_ids"] = sorted(item["subject_ids"])

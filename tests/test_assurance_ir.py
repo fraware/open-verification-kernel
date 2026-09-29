@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
+from pathlib import Path
 
+import jsonschema
 import pytest
 
 from ovk.core.assurance_ir import (
@@ -10,7 +13,10 @@ from ovk.core.assurance_ir import (
     AssuranceExtractorIdentity,
     AssuranceIR,
     AuthorizationGuard,
+    ContractPredicate,
+    ContractTerm,
     EffectRef,
+    FunctionContract,
     PathCondition,
     PrincipalRef,
     ProtectedEffect,
@@ -186,3 +192,39 @@ def test_assurance_ir_is_descriptive_not_a_merge_decision() -> None:
 
     assert "decision" not in payload
     assert payload["coverage"]["status"] == "complete"
+
+
+
+def test_assurance_ir_schema_accepts_typed_contracts_and_attribute_bindings() -> None:
+    ir = _ir()
+    ir.function_contracts = [
+        FunctionContract(
+            contract_id="contract:document-get",
+            qualified_name="DocumentService.get",
+            positional_parameters=["document_id"],
+            postconditions=[
+                ContractPredicate(
+                    relation="eq",
+                    left=ContractTerm.return_attribute("project_id"),
+                    right=ContractTerm.parameter("project_id"),
+                )
+            ],
+            origin=_origin("services/documents.py", 21),
+        )
+    ]
+    ir.resources[1].attribute_terms = {}
+    ir.resource_bindings[0] = ResourceBinding(
+        binding_id="binding:document-project",
+        authorized_resource_id="resource:authorized-invoice",
+        acted_resource_id="resource:acted-invoice",
+        relation="equal",
+        authorized_projection="identity",
+        acted_projection="attribute",
+        acted_attribute="project_id",
+        origin=_origin("app/routes.py", 16),
+    )
+
+    schema = json.loads(
+        Path("schemas/assurance_ir.v1.schema.json").read_text(encoding="utf-8")
+    )
+    jsonschema.validate(ir.model_dump(mode="json"), schema)

@@ -25,11 +25,17 @@ def _resource_map(ir: AssuranceIR) -> dict[str, ResourceRef]:
     return {resource.resource_id: resource for resource in ir.resources}
 
 
-def _projection(resource: ResourceRef, name: str) -> ResourceIdentityTerm | None:
+def _projection(
+    resource: ResourceRef,
+    name: str,
+    attribute: str | None,
+) -> ResourceIdentityTerm | None:
     if name == "identity":
         return resource.identity_term
     if name == "scope":
         return resource.scope_term
+    if name == "attribute" and attribute is not None:
+        return resource.attribute_terms.get(attribute)
     return None
 
 
@@ -83,8 +89,16 @@ def evaluate_resource_binding_with_z3(ir: AssuranceIR, binding: ResourceBinding)
             "counterexample": None,
         }
 
-    left = _projection(authorized, binding.authorized_projection)
-    right = _projection(acted, binding.acted_projection)
+    left = _projection(
+        authorized,
+        binding.authorized_projection,
+        binding.authorized_attribute,
+    )
+    right = _projection(
+        acted,
+        binding.acted_projection,
+        binding.acted_attribute,
+    )
     if left is None or right is None:
         return {
             "status": "unknown",
@@ -95,8 +109,16 @@ def evaluate_resource_binding_with_z3(ir: AssuranceIR, binding: ResourceBinding)
             "counterexample": None,
         }
 
-    left_label = f"authorized.{binding.authorized_projection}"
-    right_label = f"acted.{binding.acted_projection}"
+    left_label = (
+        f"authorized.attribute[{binding.authorized_attribute}]"
+        if binding.authorized_projection == "attribute"
+        else f"authorized.{binding.authorized_projection}"
+    )
+    right_label = (
+        f"acted.attribute[{binding.acted_attribute}]"
+        if binding.acted_projection == "attribute"
+        else f"acted.{binding.acted_projection}"
+    )
 
     if left == right:
         return {
@@ -166,6 +188,8 @@ def evaluate_resource_binding_with_z3(ir: AssuranceIR, binding: ResourceBinding)
             "relation": binding.relation,
             "authorized_projection": binding.authorized_projection,
             "acted_projection": binding.acted_projection,
+            "authorized_attribute": binding.authorized_attribute,
+            "acted_attribute": binding.acted_attribute,
             "authorized_term": left.model_dump(mode="json"),
             "acted_term": right.model_dump(mode="json"),
             "symbol_assignment": assignment,
