@@ -16,6 +16,10 @@ OVK is an open interoperability layer. Contributions should make formal methods 
 - Do not add a backend without a capability manifest.
 - Do not return a bare boolean from an adapter.
 - Do not collapse `unknown`, `error`, or `skipped` into `pass`.
+- Prefer UNKNOWN over a false PASS when Assurance IR extraction, CFG coverage,
+  value-origin, or closed-world bypass accounting is incomplete.
+- Do not rewrite frozen external-candidate registry labels to match later
+  implementation progress. Development replay is not held-out success.
 - Do not claim generic verification without assumptions and limits.
 - Prefer narrow, useful property templates over broad unverifiable claims.
 - Keep OVK backend-neutral: every adapter must state what its pass/fail results mean.

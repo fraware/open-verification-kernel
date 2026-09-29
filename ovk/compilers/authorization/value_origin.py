@@ -61,7 +61,7 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id="assurance.fastapi.value_origin.ast_v1",
-        extractor_version="0.3.0",
+        extractor_version="0.4.0",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -104,13 +104,24 @@ def _is_request_state_attribute(node: ast.AST) -> tuple[bool, str | None]:
 
 
 def _looks_like_config_name(name: str) -> bool:
-    upper = name.upper()
+    """True for bounded config-binding names — never bare ALL_CAPS alone.
+
+    Supported forms:
+    - explicit module/object names ``settings`` / ``config`` / ``SETTINGS`` /
+      ``CONFIG`` (Attribute bases such as ``settings.X``);
+    - conventional config suffixes/prefixes ``*_CONFIG``, ``*_SETTINGS``,
+      ``CONFIG_*``.
+
+    Bare identifiers such as ``BYPASS_FILTER``, ``ALLOW_ALL``, or ``DEBUG``
+    are not proved ``server_configuration`` merely because they are ALL_CAPS.
+    Prefer ``unknown_origin`` over a false authorizing PASS.
+    """
+
     return (
         name.endswith("_CONFIG")
         or name.endswith("_SETTINGS")
         or name.startswith("CONFIG_")
         or name in {"settings", "config", "SETTINGS", "CONFIG"}
-        or upper == name and "_" in name and not name.startswith("_")
     )
 
 

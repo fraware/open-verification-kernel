@@ -35,7 +35,7 @@ from ovk.core.resource_identity import ResourceIdentityTerm
 
 
 _EXTRACTOR_ID = "assurance.fastapi.dependency_effects.ast_v1"
-_EXTRACTOR_VERSION = "0.16.0"
+_EXTRACTOR_VERSION = "0.17.0"
 _HTTP_METHODS = frozenset({"get", "post", "put", "patch", "delete", "options", "head"})
 _CONTROL_FLOW = (
     ast.For,

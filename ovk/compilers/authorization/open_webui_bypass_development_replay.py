@@ -1,4 +1,4 @@
-"""Open WebUI bypass development-replay report (#125 / residual live pins).
+"""Open WebUI bypass development-replay report.
 
 This is an explicitly labeled **development replay**. It does not mutate the
 frozen round-2 registry and must not be counted as held-out success.

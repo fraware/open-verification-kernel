@@ -1,4 +1,4 @@
-"""Tests for Open WebUI bypass development replay (#125 / live-pin residual)."""
+"""Tests for Open WebUI bypass development replay."""
 
 from __future__ import annotations
 
@@ -30,10 +30,8 @@ def handler(request, user):
 
 
 REPAIR = """
-SETTINGS_ALLOW_BYPASS = False
-
 def middleware(request):
-    request.state.bypass_filter = SETTINGS_ALLOW_BYPASS
+    request.state.bypass_filter = settings.allow_bypass
 
 def handler(request, user):
     if request.state.bypass_filter:

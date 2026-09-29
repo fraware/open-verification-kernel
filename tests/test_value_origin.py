@@ -1,4 +1,4 @@
-"""Tests for FastAPI value-origin provenance (#123) and alias/SSA residual."""
+"""Tests for FastAPI value-origin provenance and bounded Name alias tracking."""
 
 from __future__ import annotations
 
@@ -38,6 +38,35 @@ def test_literal_and_config_kinds() -> None:
         handler_param_names=frozenset(),
     )
     assert cfg.origin_kind == "server_configuration"
+
+    settings_attr = classify_expression_origin(
+        ast.parse("settings.ALLOW", mode="eval").body,
+        path="h.py",
+        handler_param_names=frozenset(),
+    )
+    assert settings_attr.origin_kind == "server_configuration"
+
+
+def test_bare_allcaps_name_is_unknown_not_server_configuration() -> None:
+    """ALL_CAPS alone must not invent server_configuration provenance."""
+
+    for bare in ("BYPASS_FILTER", "ALLOW_ALL", "DEBUG", "SETTINGS_ALLOW"):
+        evidence = classify_expression_origin(
+            ast.parse(bare, mode="eval").body,
+            path="h.py",
+            handler_param_names=frozenset(),
+        )
+        assert evidence.origin_kind == "unknown_origin", bare
+
+
+def test_conventional_config_suffix_name_remains_server_configuration() -> None:
+    for name in ("APP_SETTINGS", "SERVER_CONFIG", "CONFIG_FLAG"):
+        evidence = classify_expression_origin(
+            ast.parse(name, mode="eval").body,
+            path="h.py",
+            handler_param_names=frozenset(),
+        )
+        assert evidence.origin_kind == "server_configuration", name
 
 
 def test_request_state_is_not_trusted() -> None:
@@ -254,12 +283,10 @@ def test_branch_local_alias_rebind_is_poisoned_not_authorized() -> None:
 
     findings = analyze_bypass_authority(
         """
-SETTINGS_ALLOW = True
-
 def middleware(request, bypass_filter: bool = False, server_mode: bool = False):
     x = bypass_filter
     if server_mode:
-        x = SETTINGS_ALLOW
+        x = settings.ALLOW
     request.state.bypass_filter = x
 
 def handler(request):
