@@ -1,0 +1,605 @@
+{
+  "schema_version": "ovk.assurance_qualification_suite.v1",
+  "suite_id": "protected-effect-product-qualification-v1",
+  "description": "Production-shaped qualification of automatic durable assurance. Contains no independent external pilot cases.",
+  "cases": [
+    {
+      "case_id": "docs_only_semantic_reuse",
+      "repository": "qualification/internal-direct-fastapi",
+      "description": "Unrelated documentation change should preserve the durable guarantee and reuse authenticated semantic evidence.",
+      "validation_class": "production_shaped_internal",
+      "safety_label": "safe",
+      "expected_head_assurance": "established",
+      "provenance": {
+        "kind": "internal_production_shaped"
+      },
+      "base_files": {
+        "routes.py": "from fastapi import Depends, FastAPI\napp = FastAPI()\n\n@app.get(\"/workspaces/{workspace_id}/agents/{agent_id}\")\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user = Depends(require_workspace_member),\n):\n    svc = AgentService()\n    agent = await svc.get(agent_id, workspace_id=workspace_id)\n    return agent\n"
+      },
+      "head_files": {
+        "routes.py": "from fastapi import Depends, FastAPI\napp = FastAPI()\n\n@app.get(\"/workspaces/{workspace_id}/agents/{agent_id}\")\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user = Depends(require_workspace_member),\n):\n    svc = AgentService()\n    agent = await svc.get(agent_id, workspace_id=workspace_id)\n    return agent\n",
+        "README.md": "documentation update\\n"
+      },
+      "guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-WORKSPACE-AGENT-READ",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Agent reads are authorized for the acted workspace.",
+            "selector": {
+              "effect_name": "workspace.agent.read"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "owner": "security"
+            }
+          }
+        ]
+      },
+      "protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "routes.py"
+        ],
+        "sink_effects": {
+          "svc.get": "workspace.agent.read"
+        },
+        "sink_identity_args": {
+          "svc.get": 0
+        },
+        "sink_scope_keywords": {
+          "svc.get": "workspace_id"
+        },
+        "sink_missing_scope_unconstrained": [
+          "svc.get"
+        ],
+        "dependency_guard_resources": {
+          "require_workspace_member": "workspace_id"
+        },
+        "dependency_guard_effects": {
+          "require_workspace_member": [
+            "workspace.agent.read"
+          ]
+        },
+        "principal_parameter": "user"
+      },
+      "human_adjudicated": false,
+      "human_review_minutes": null
+    },
+    {
+      "case_id": "direct_scope_omission_regression",
+      "repository": "qualification/internal-direct-fastapi",
+      "description": "Removing the workspace scope argument must prevent assurance establishment.",
+      "validation_class": "production_shaped_internal",
+      "safety_label": "unsafe",
+      "expected_head_assurance": "not_established",
+      "provenance": {
+        "kind": "internal_production_shaped"
+      },
+      "base_files": {
+        "routes.py": "from fastapi import Depends, FastAPI\napp = FastAPI()\n\n@app.get(\"/workspaces/{workspace_id}/agents/{agent_id}\")\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user = Depends(require_workspace_member),\n):\n    svc = AgentService()\n    agent = await svc.get(agent_id, workspace_id=workspace_id)\n    return agent\n"
+      },
+      "head_files": {
+        "routes.py": "from fastapi import Depends, FastAPI\napp = FastAPI()\n\n@app.get(\"/workspaces/{workspace_id}/agents/{agent_id}\")\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user = Depends(require_workspace_member),\n):\n    svc = AgentService()\n    agent = await svc.get(agent_id)\n    return agent\n"
+      },
+      "guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-WORKSPACE-AGENT-READ",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Agent reads are authorized for the acted workspace.",
+            "selector": {
+              "effect_name": "workspace.agent.read"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "owner": "security"
+            }
+          }
+        ]
+      },
+      "protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "routes.py"
+        ],
+        "sink_effects": {
+          "svc.get": "workspace.agent.read"
+        },
+        "sink_identity_args": {
+          "svc.get": 0
+        },
+        "sink_scope_keywords": {
+          "svc.get": "workspace_id"
+        },
+        "sink_missing_scope_unconstrained": [
+          "svc.get"
+        ],
+        "dependency_guard_resources": {
+          "require_workspace_member": "workspace_id"
+        },
+        "dependency_guard_effects": {
+          "require_workspace_member": [
+            "workspace.agent.read"
+          ]
+        },
+        "principal_parameter": "user"
+      },
+      "human_adjudicated": false,
+      "human_review_minutes": null
+    },
+    {
+      "case_id": "transitive_repository_contract_regression",
+      "repository": "qualification/internal-interprocedural-fastapi",
+      "description": "Unchanged route and facade lose assurance when the repository stops enforcing workspace scope.",
+      "validation_class": "production_shaped_internal",
+      "safety_label": "unsafe",
+      "expected_head_assurance": "not_established",
+      "provenance": {
+        "kind": "internal_production_shaped",
+        "mechanism": "route-service-repository contract composition"
+      },
+      "base_files": {
+        "routes.py": "from fastapi import Depends, FastAPI\napp = FastAPI()\n\n@app.get(\"/workspaces/{workspace_id}/agents/{agent_id}\")\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user = Depends(require_workspace_member),\n):\n    svc = AgentFacade()\n    return await svc.get(agent_id, workspace_id=workspace_id)\n",
+        "repo.py": "class AgentRepository:\n    async def get(self, agent_id: str, *, workspace_id: str | None = None):\n        agent = await load_agent(agent_id)\n        if workspace_id is not None and agent.workspace_id != workspace_id:\n            return None\n        return agent\n",
+        "service.py": "class AgentService:\n    def __init__(self):\n        self._repo = AgentRepository()\n\n    async def get(self, agent_id: str, *, workspace_id: str | None = None):\n        return await self._repo.get(agent_id, workspace_id=workspace_id)\n",
+        "facade.py": "class AgentFacade:\n    def __init__(self):\n        self._service = AgentService()\n\n    async def get(self, agent_id: str, *, workspace_id: str | None = None):\n        return await self._service.get(agent_id, workspace_id=workspace_id)\n"
+      },
+      "head_files": {
+        "routes.py": "from fastapi import Depends, FastAPI\napp = FastAPI()\n\n@app.get(\"/workspaces/{workspace_id}/agents/{agent_id}\")\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user = Depends(require_workspace_member),\n):\n    svc = AgentFacade()\n    return await svc.get(agent_id, workspace_id=workspace_id)\n",
+        "repo.py": "class AgentRepository:\n    async def get(self, agent_id: str, *, workspace_id: str | None = None):\n        agent = await load_agent(agent_id)\n        return agent\n",
+        "service.py": "class AgentService:\n    def __init__(self):\n        self._repo = AgentRepository()\n\n    async def get(self, agent_id: str, *, workspace_id: str | None = None):\n        return await self._repo.get(agent_id, workspace_id=workspace_id)\n",
+        "facade.py": "class AgentFacade:\n    def __init__(self):\n        self._service = AgentService()\n\n    async def get(self, agent_id: str, *, workspace_id: str | None = None):\n        return await self._service.get(agent_id, workspace_id=workspace_id)\n"
+      },
+      "guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-WORKSPACE-AGENT-READ",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Agent reads are authorized for the acted workspace.",
+            "selector": {
+              "effect_name": "workspace.agent.read"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "owner": "security"
+            }
+          }
+        ]
+      },
+      "protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "routes.py",
+          "repo.py",
+          "service.py",
+          "facade.py"
+        ],
+        "sink_effects": {
+          "svc.get": "workspace.agent.read"
+        },
+        "sink_identity_args": {
+          "svc.get": 0
+        },
+        "sink_contracts": {
+          "svc.get": "AgentFacade.get"
+        },
+        "sink_contract_scope_attributes": {
+          "svc.get": "workspace_id"
+        },
+        "dependency_guard_resources": {
+          "require_workspace_member": "workspace_id"
+        },
+        "dependency_guard_effects": {
+          "require_workspace_member": [
+            "workspace.agent.read"
+          ]
+        },
+        "principal_parameter": "user"
+      },
+      "human_adjudicated": false,
+      "human_review_minutes": null
+    },
+    {
+      "case_id": "guarantee_self_redefinition_attack",
+      "repository": "qualification/internal-governance-attack",
+      "description": "A vulnerable code change plus proposed guarantee retargeting is still judged under the trusted base guarantee.",
+      "validation_class": "synthetic",
+      "safety_label": "unsafe",
+      "expected_head_assurance": "not_established",
+      "provenance": {
+        "kind": "adversarial_governance_case"
+      },
+      "base_files": {
+        "routes.py": "from fastapi import Depends, FastAPI\napp = FastAPI()\n\n@app.get(\"/workspaces/{workspace_id}/agents/{agent_id}\")\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user = Depends(require_workspace_member),\n):\n    svc = AgentService()\n    agent = await svc.get(agent_id, workspace_id=workspace_id)\n    return agent\n"
+      },
+      "head_files": {
+        "routes.py": "from fastapi import Depends, FastAPI\napp = FastAPI()\n\n@app.get(\"/workspaces/{workspace_id}/agents/{agent_id}\")\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user = Depends(require_workspace_member),\n):\n    svc = AgentService()\n    agent = await svc.get(agent_id)\n    return agent\n"
+      },
+      "guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-WORKSPACE-AGENT-READ",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Agent reads are authorized for the acted workspace.",
+            "selector": {
+              "effect_name": "workspace.agent.read"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "owner": "security"
+            }
+          }
+        ]
+      },
+      "head_guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-WORKSPACE-AGENT-READ",
+            "spec_version": "2",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Agent delete operations are authorized for the acted workspace.",
+            "selector": {
+              "effect_name": "workspace.agent.delete"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "owner": "security"
+            }
+          }
+        ]
+      },
+      "protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "routes.py"
+        ],
+        "sink_effects": {
+          "svc.get": "workspace.agent.read"
+        },
+        "sink_identity_args": {
+          "svc.get": 0
+        },
+        "sink_scope_keywords": {
+          "svc.get": "workspace_id"
+        },
+        "sink_missing_scope_unconstrained": [
+          "svc.get"
+        ],
+        "dependency_guard_resources": {
+          "require_workspace_member": "workspace_id"
+        },
+        "dependency_guard_effects": {
+          "require_workspace_member": [
+            "workspace.agent.read"
+          ]
+        },
+        "principal_parameter": "user"
+      },
+      "human_adjudicated": false,
+      "human_review_minutes": null
+    },
+    {
+      "case_id": "profile_self_redefinition_attack",
+      "repository": "qualification/internal-governance-attack",
+      "description": "A vulnerable code change plus proposed extraction-profile retargeting is still judged under the trusted base profile.",
+      "validation_class": "synthetic",
+      "safety_label": "unsafe",
+      "expected_head_assurance": "not_established",
+      "provenance": {
+        "kind": "adversarial_governance_case"
+      },
+      "base_files": {
+        "routes.py": "from fastapi import Depends, FastAPI\napp = FastAPI()\n\n@app.get(\"/workspaces/{workspace_id}/agents/{agent_id}\")\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user = Depends(require_workspace_member),\n):\n    svc = AgentService()\n    agent = await svc.get(agent_id, workspace_id=workspace_id)\n    return agent\n"
+      },
+      "head_files": {
+        "routes.py": "from fastapi import Depends, FastAPI\napp = FastAPI()\n\n@app.get(\"/workspaces/{workspace_id}/agents/{agent_id}\")\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user = Depends(require_workspace_member),\n):\n    svc = AgentService()\n    agent = await svc.get(agent_id)\n    return agent\n"
+      },
+      "guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-WORKSPACE-AGENT-READ",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Agent reads are authorized for the acted workspace.",
+            "selector": {
+              "effect_name": "workspace.agent.read"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "owner": "security"
+            }
+          }
+        ]
+      },
+      "protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "routes.py"
+        ],
+        "sink_effects": {
+          "svc.get": "workspace.agent.read"
+        },
+        "sink_identity_args": {
+          "svc.get": 0
+        },
+        "sink_scope_keywords": {
+          "svc.get": "workspace_id"
+        },
+        "sink_missing_scope_unconstrained": [
+          "svc.get"
+        ],
+        "dependency_guard_resources": {
+          "require_workspace_member": "workspace_id"
+        },
+        "dependency_guard_effects": {
+          "require_workspace_member": [
+            "workspace.agent.read"
+          ]
+        },
+        "principal_parameter": "user"
+      },
+      "head_protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "routes.py"
+        ],
+        "sink_effects": {
+          "svc.get": "workspace.agent.delete"
+        },
+        "sink_identity_args": {
+          "svc.get": 0
+        },
+        "sink_scope_keywords": {
+          "svc.get": "workspace_id"
+        },
+        "sink_missing_scope_unconstrained": [
+          "svc.get"
+        ],
+        "dependency_guard_resources": {
+          "require_workspace_member": "workspace_id"
+        },
+        "dependency_guard_effects": {
+          "require_workspace_member": [
+            "workspace.agent.delete"
+          ]
+        },
+        "principal_parameter": "user"
+      },
+      "human_adjudicated": false,
+      "human_review_minutes": null
+    },
+    {
+      "case_id": "unsupported_control_flow_benign_open",
+      "repository": "qualification/internal-direct-fastapi",
+      "description": "A semantically benign change outside the v1 control-flow envelope must stay open instead of being overclaimed as established.",
+      "validation_class": "synthetic",
+      "safety_label": "safe",
+      "expected_head_assurance": "not_established",
+      "provenance": {
+        "kind": "supported-envelope-boundary"
+      },
+      "base_files": {
+        "routes.py": "from fastapi import Depends, FastAPI\napp = FastAPI()\n\n@app.get(\"/workspaces/{workspace_id}/agents/{agent_id}\")\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user = Depends(require_workspace_member),\n):\n    svc = AgentService()\n    agent = await svc.get(agent_id, workspace_id=workspace_id)\n    return agent\n"
+      },
+      "head_files": {
+        "routes.py": "from fastapi import Depends, FastAPI\napp = FastAPI()\n\n@app.get(\"/workspaces/{workspace_id}/agents/{agent_id}\")\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user = Depends(require_workspace_member),\n    enabled: bool = True,\n):\n    svc = AgentService()\n    if enabled:\n        audit(agent_id)\n    agent = await svc.get(agent_id, workspace_id=workspace_id)\n    return agent\n"
+      },
+      "guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-WORKSPACE-AGENT-READ",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Agent reads are authorized for the acted workspace.",
+            "selector": {
+              "effect_name": "workspace.agent.read"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "owner": "security"
+            }
+          }
+        ]
+      },
+      "protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "routes.py"
+        ],
+        "sink_effects": {
+          "svc.get": "workspace.agent.read"
+        },
+        "sink_identity_args": {
+          "svc.get": 0
+        },
+        "sink_scope_keywords": {
+          "svc.get": "workspace_id"
+        },
+        "sink_missing_scope_unconstrained": [
+          "svc.get"
+        ],
+        "dependency_guard_resources": {
+          "require_workspace_member": "workspace_id"
+        },
+        "dependency_guard_effects": {
+          "require_workspace_member": [
+            "workspace.agent.read"
+          ]
+        },
+        "principal_parameter": "user"
+      },
+      "human_adjudicated": false,
+      "human_review_minutes": null
+    },
+    {
+      "case_id": "praisonai_public_regression",
+      "repository": "MervinPraison/PraisonAI",
+      "description": "Public upstream repaired route regressed to the historical vulnerable route shape.",
+      "validation_class": "public_upstream_reduction",
+      "safety_label": "unsafe",
+      "expected_head_assurance": "not_established",
+      "provenance": {
+        "contamination_status": "public_development_case",
+        "vulnerable_revision": "402d7ed9fc5926babaa70c97a6ee5353e3d0dd62",
+        "fixed_revision": "179cab02dbec0c1e9b601507a65908e079876004"
+      },
+      "base_files": {
+        "routes/agents.py": "from fastapi import APIRouter, Depends, HTTPException\n\nrouter = APIRouter(prefix=\"/workspaces/{workspace_id}/agents\")\n\n@router.get(\"/{agent_id}\", response_model=AgentResponse)\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user: AuthIdentity = Depends(require_workspace_member),\n    session: AsyncSession = Depends(get_db),\n):\n    svc = AgentService(session)\n    agent = await svc.get(agent_id)\n    if agent is None:\n        raise HTTPException(status_code=404, detail=\"Agent not found\")\n    ensure_resource_in_workspace(agent.workspace_id, workspace_id, label=\"Agent\")\n    return AgentResponse.model_validate(agent)\n"
+      },
+      "head_files": {
+        "routes/agents.py": "from fastapi import APIRouter, Depends, HTTPException\n\nrouter = APIRouter(prefix=\"/workspaces/{workspace_id}/agents\")\n\n@router.get(\"/{agent_id}\", response_model=AgentResponse)\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user: AuthIdentity = Depends(require_workspace_member),\n    session: AsyncSession = Depends(get_db),\n):\n    svc = AgentService(session)\n    agent = await svc.get(agent_id)\n    if agent is None:\n        raise HTTPException(status_code=404, detail=\"Agent not found\")\n    return AgentResponse.model_validate(agent)\n"
+      },
+      "guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-WORKSPACE-AGENT-READ",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Agent reads are authorized for the acted workspace.",
+            "selector": {
+              "effect_name": "workspace.agent.read"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "owner": "security"
+            }
+          }
+        ]
+      },
+      "protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "routes/agents.py"
+        ],
+        "sink_effects": {
+          "AgentResponse.model_validate": "workspace.agent.read"
+        },
+        "sink_identity_args": {
+          "AgentResponse.model_validate": 0
+        },
+        "sink_missing_scope_unconstrained": [
+          "AgentResponse.model_validate"
+        ],
+        "scope_assertions": {
+          "ensure_resource_in_workspace": {
+            "acted_scope_arg": 0,
+            "authorized_resource_arg": 1,
+            "acted_scope_attribute": "workspace_id"
+          }
+        },
+        "dependency_guard_resources": {
+          "require_workspace_member": "workspace_id"
+        },
+        "dependency_guard_effects": {
+          "require_workspace_member": [
+            "workspace.agent.read"
+          ]
+        },
+        "principal_parameter": "user"
+      },
+      "human_adjudicated": false,
+      "human_review_minutes": null
+    },
+    {
+      "case_id": "praisonai_public_repair",
+      "repository": "MervinPraison/PraisonAI",
+      "description": "Historical vulnerable route shape repaired with the upstream workspace assertion.",
+      "validation_class": "public_upstream_reduction",
+      "safety_label": "safe",
+      "expected_head_assurance": "established",
+      "provenance": {
+        "contamination_status": "public_development_case",
+        "vulnerable_revision": "402d7ed9fc5926babaa70c97a6ee5353e3d0dd62",
+        "fixed_revision": "179cab02dbec0c1e9b601507a65908e079876004"
+      },
+      "base_files": {
+        "routes/agents.py": "from fastapi import APIRouter, Depends, HTTPException\n\nrouter = APIRouter(prefix=\"/workspaces/{workspace_id}/agents\")\n\n@router.get(\"/{agent_id}\", response_model=AgentResponse)\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user: AuthIdentity = Depends(require_workspace_member),\n    session: AsyncSession = Depends(get_db),\n):\n    svc = AgentService(session)\n    agent = await svc.get(agent_id)\n    if agent is None:\n        raise HTTPException(status_code=404, detail=\"Agent not found\")\n    return AgentResponse.model_validate(agent)\n"
+      },
+      "head_files": {
+        "routes/agents.py": "from fastapi import APIRouter, Depends, HTTPException\n\nrouter = APIRouter(prefix=\"/workspaces/{workspace_id}/agents\")\n\n@router.get(\"/{agent_id}\", response_model=AgentResponse)\nasync def get_agent(\n    workspace_id: str,\n    agent_id: str,\n    user: AuthIdentity = Depends(require_workspace_member),\n    session: AsyncSession = Depends(get_db),\n):\n    svc = AgentService(session)\n    agent = await svc.get(agent_id)\n    if agent is None:\n        raise HTTPException(status_code=404, detail=\"Agent not found\")\n    ensure_resource_in_workspace(agent.workspace_id, workspace_id, label=\"Agent\")\n    return AgentResponse.model_validate(agent)\n"
+      },
+      "guarantee_manifest": {
+        "schema_version": "ovk.guarantee_manifest.v1",
+        "guarantees": [
+          {
+            "guarantee_id": "G-WORKSPACE-AGENT-READ",
+            "spec_version": "1",
+            "guarantee_type": "protected_effect_integrity_v1",
+            "statement": "Agent reads are authorized for the acted workspace.",
+            "selector": {
+              "effect_name": "workspace.agent.read"
+            },
+            "assumptions": [],
+            "dependencies": [],
+            "origin_intent": {
+              "owner": "security"
+            }
+          }
+        ]
+      },
+      "protected_effect_profile": {
+        "schema_version": "ovk.protected_effect_profile.v1",
+        "profile_type": "fastapi_dependency_effects_v1",
+        "source_paths": [
+          "routes/agents.py"
+        ],
+        "sink_effects": {
+          "AgentResponse.model_validate": "workspace.agent.read"
+        },
+        "sink_identity_args": {
+          "AgentResponse.model_validate": 0
+        },
+        "sink_missing_scope_unconstrained": [
+          "AgentResponse.model_validate"
+        ],
+        "scope_assertions": {
+          "ensure_resource_in_workspace": {
+            "acted_scope_arg": 0,
+            "authorized_resource_arg": 1,
+            "acted_scope_attribute": "workspace_id"
+          }
+        },
+        "dependency_guard_resources": {
+          "require_workspace_member": "workspace_id"
+        },
+        "dependency_guard_effects": {
+          "require_workspace_member": [
+            "workspace.agent.read"
+          ]
+        },
+        "principal_parameter": "user"
+      },
+      "human_adjudicated": false,
+      "human_review_minutes": null
+    }
+  ]
+}

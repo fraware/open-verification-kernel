@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/schemas/assurance.qualification.suite.schema.json",
+  "title": "OVK Assurance Product Qualification Suite",
+  "type": "object",
+  "required": ["schema_version", "suite_id", "cases"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "ovk.assurance_qualification_suite.v1"},
+    "suite_id": {"type": "string", "minLength": 1},
+    "description": {"type": "string"},
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "case_id",
+          "repository",
+          "validation_class",
+          "safety_label",
+          "expected_head_assurance",
+          "base_files",
+          "head_files",
+          "guarantee_manifest",
+          "protected_effect_profile"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "case_id": {"type": "string", "minLength": 1},
+          "repository": {"type": "string", "minLength": 1},
+          "description": {"type": "string"},
+          "validation_class": {
+            "type": "string",
+            "enum": [
+              "synthetic",
+              "production_shaped_internal",
+              "public_upstream_reduction",
+              "independent_external"
+            ]
+          },
+          "safety_label": {
+            "type": "string",
+            "enum": ["safe", "unsafe"]
+          },
+          "expected_head_assurance": {
+            "type": "string",
+            "enum": ["established", "not_established", "any"]
+          },
+          "provenance": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "base_files": {
+            "type": "object",
+            "additionalProperties": {"type": "string"}
+          },
+          "head_files": {
+            "type": "object",
+            "additionalProperties": {"type": "string"}
+          },
+          "guarantee_manifest": {"type": "object"},
+          "head_guarantee_manifest": {"type": ["object", "null"]},
+          "protected_effect_profile": {"type": "object"},
+          "head_protected_effect_profile": {"type": ["object", "null"]},
+          "human_adjudicated": {"type": "boolean"},
+          "human_review_minutes": {
+            "type": ["number", "null"],
+            "minimum": 0
+          }
+        }
+      }
+    }
+  }
+}
