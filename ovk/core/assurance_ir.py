@@ -26,6 +26,7 @@ BindingRelation = Literal["equal", "same_tenant", "custom"]
 BindingProjection = Literal["identity", "scope", "attribute"]
 ContractTermKind = Literal["parameter", "return_attribute", "literal"]
 ContractRelation = Literal["eq", "non_null"]
+ContractDerivation = Literal["direct", "composed"]
 ClaimKind = Literal[
     "protected_effect_integrity",
     "authorization",
@@ -189,6 +190,8 @@ class FunctionContract(BaseModel):
 
     contract_id: str
     qualified_name: str
+    derivation: ContractDerivation = "direct"
+    depends_on: list[str] = Field(default_factory=list)
     positional_parameters: list[str] = Field(default_factory=list)
     preconditions: list[ContractPredicate] = Field(default_factory=list)
     postconditions: list[ContractPredicate] = Field(default_factory=list)
@@ -200,6 +203,25 @@ class FunctionContract(BaseModel):
         value = value.strip()
         if not value:
             raise ValueError("function contract qualified_name must be non-empty")
+        return value
+
+
+class ContractUse(BaseModel):
+    """One source-grounded consumption of a FunctionContract."""
+
+    use_id: str
+    contract_id: str
+    qualified_name: str
+    resource_id: str
+    established_attributes: list[str] = Field(default_factory=list)
+    origin: SemanticOrigin
+
+    @field_validator("use_id", "contract_id", "qualified_name", "resource_id")
+    @classmethod
+    def _contract_use_fields_non_empty(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("contract use fields must be non-empty")
         return value
 
 
@@ -262,6 +284,7 @@ class SemanticPath(BaseModel):
     guard_ids: list[str] = Field(default_factory=list)
     protected_effect_ids: list[str] = Field(default_factory=list)
     binding_ids: list[str] = Field(default_factory=list)
+    contract_use_ids: list[str] = Field(default_factory=list)
     condition_ids: list[str] = Field(default_factory=list)
     origin: SemanticOrigin | None = None
 
@@ -319,6 +342,7 @@ class AssuranceIR(BaseModel):
     resource_bindings: list[ResourceBinding] = Field(default_factory=list)
     resource_return_contracts: list[ResourceReturnContract] = Field(default_factory=list)
     function_contracts: list[FunctionContract] = Field(default_factory=list)
+    contract_uses: list[ContractUse] = Field(default_factory=list)
     paths: list[SemanticPath] = Field(default_factory=list)
     claims: list[AssuranceClaim] = Field(default_factory=list)
     assumptions: dict[str, str] = Field(default_factory=dict)
@@ -337,6 +361,7 @@ class AssuranceIR(BaseModel):
             "resource_bindings": "binding_id",
             "resource_return_contracts": "contract_id",
             "function_contracts": "contract_id",
+            "contract_uses": "use_id",
             "paths": "path_id",
             "claims": "claim_id",
         }
@@ -356,8 +381,10 @@ class AssuranceIR(BaseModel):
             item["guard_ids"] = sorted(item["guard_ids"])
             item["protected_effect_ids"] = sorted(item["protected_effect_ids"])
             item["binding_ids"] = sorted(item["binding_ids"])
+            item["contract_use_ids"] = sorted(item["contract_use_ids"])
 
         for item in payload["function_contracts"]:
+            item["depends_on"] = sorted(item["depends_on"])
             item["preconditions"] = sorted(
                 item["preconditions"],
                 key=lambda pred: content_digest(pred),
@@ -366,6 +393,9 @@ class AssuranceIR(BaseModel):
                 item["postconditions"],
                 key=lambda pred: content_digest(pred),
             )
+
+        for item in payload["contract_uses"]:
+            item["established_attributes"] = sorted(item["established_attributes"])
 
         for item in payload["claims"]:
             item["subject_ids"] = sorted(item["subject_ids"])

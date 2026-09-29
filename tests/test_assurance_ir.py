@@ -15,6 +15,7 @@ from ovk.core.assurance_ir import (
     AuthorizationGuard,
     ContractPredicate,
     ContractTerm,
+    ContractUse,
     EffectRef,
     FunctionContract,
     PathCondition,
@@ -213,6 +214,16 @@ def test_assurance_ir_schema_accepts_typed_contracts_and_attribute_bindings() ->
         )
     ]
     ir.resources[1].attribute_terms = {}
+    ir.contract_uses = [
+        ContractUse(
+            use_id="use:document-get",
+            contract_id="contract:document-get",
+            qualified_name="DocumentService.get",
+            resource_id="resource:acted-invoice",
+            established_attributes=["project_id"],
+            origin=_origin("app/routes.py", 16),
+        )
+    ]
     ir.resource_bindings[0] = ResourceBinding(
         binding_id="binding:document-project",
         authorized_resource_id="resource:authorized-invoice",

@@ -550,6 +550,8 @@ def _compose_forwarded_contract(
     return FunctionContract(
         contract_id=contract_id,
         qualified_name=qualified_name,
+        derivation="composed",
+        depends_on=[callee.qualified_name],
         positional_parameters=positional_parameters,
         preconditions=preconditions,
         postconditions=postconditions,
