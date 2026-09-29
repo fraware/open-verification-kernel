@@ -140,7 +140,7 @@ def handler(request):
 
 
 def test_absence_of_external_write_is_not_trusted() -> None:
-    """No discovered writer must remain UNKNOWN — never an authorized PASS."""
+    """No discovered writer must remain UNKNOWN ΓÇö never an authorized PASS."""
 
     findings = analyze_bypass_authority(
         """
@@ -153,6 +153,26 @@ def handler(request):
     assert findings[0].status == "unknown"
     assert findings[0].write_count == 0
     assert findings[0].reason == "unresolved_writer_provenance"
+
+def test_nested_client_overwrite_is_not_authorized() -> None:
+    findings = analyze_bypass_authority(
+        """
+SETTINGS_ALLOW = True
+
+def middleware(request, bypass_filter: bool = False, flag: bool = False):
+    request.state.bypass_filter = SETTINGS_ALLOW
+    if flag:
+        request.state.bypass_filter = bypass_filter
+
+def handler(request):
+    return request.state.bypass_filter
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+    )
+    assert findings[0].status == "violated"
+    assert findings[0].reason == "client_controlled_bypass_write"
+    assert findings[0].write_count >= 2
+
 
 def test_request_state_setattr_method_is_unknown() -> None:
     findings = analyze_bypass_authority(
@@ -188,3 +208,4 @@ def handler(request):
     )
     assert findings[0].status == "violated"
     assert findings[0].write_count >= 2
+

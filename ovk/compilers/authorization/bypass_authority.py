@@ -3,7 +3,14 @@
 Bypass is modeled as an authorization mechanism, not an exemption from
 Protected Effect Integrity. Client/input-controlled bypasses that skip
 ordinary guards FAIL. Source-proved server-authority bypasses may authorize a
-path. Unresolved writer provenance is UNKNOWN — never PASS.
+path. Unresolved writer provenance is UNKNOWN ΓÇö never PASS.
+
+Closed-world write accounting extends across repository-local modules in the
+same FastAPI compilation unit when callers provide a multi-file unit. Writers
+in statically resolvable unit-local imports are accounted. Unresolvable or
+dynamic imports make the closed-world condition incomplete ΓÇö authorized PASS
+is refused (Unknown > false PASS). Absence of a discovered writer is never
+positive proof of trust.
 """
 
 from __future__ import annotations
@@ -13,8 +20,13 @@ from dataclasses import dataclass
 from typing import Literal
 
 from ovk.compilers.authorization.value_origin import (
+    AliasState,
+    apply_statement_bindings,
     classify_expression_origin,
     extract_handler_value_origins,
+    _collect_assign_target_names,
+    _collect_assigned_names_in_statements,
+    _mark_name_uses,
 )
 from ovk.core.assurance_ir import SemanticOrigin, ValueOriginEvidence
 from ovk.core.bundle import content_digest
@@ -48,13 +60,14 @@ class StateAttributeWrite:
     origin: ValueOriginEvidence
     dynamic: bool
     source_range: SourceRange | None
+    path: str = "<module>"
 
 
 def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id="assurance.fastapi.bypass_authority.ast_v1",
-        extractor_version="0.1.0",
+        extractor_version="0.2.0",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -75,6 +88,253 @@ def _is_request_state_target(node: ast.AST) -> str | None:
     return None
 
 
+def _is_request_state_setattr_call(node: ast.Call) -> bool:
+    """True for ``setattr(request.state, ...)`` or ``request.state.__setattr__(...)``."""
+
+    if (
+        isinstance(node.func, ast.Name)
+        and node.func.id == "setattr"
+        and len(node.args) >= 3
+        and isinstance(node.args[0], ast.Attribute)
+        and isinstance(node.args[0].value, ast.Name)
+        and node.args[0].value.id == "request"
+        and node.args[0].attr == "state"
+    ):
+        return True
+    if (
+        isinstance(node.func, ast.Attribute)
+        and node.func.attr == "__setattr__"
+        and isinstance(node.func.value, ast.Attribute)
+        and isinstance(node.func.value.value, ast.Name)
+        and node.func.value.value.id == "request"
+        and node.func.value.attr == "state"
+        and len(node.args) >= 2
+    ):
+        return True
+    if (
+        isinstance(node.func, ast.Attribute)
+        and node.func.attr == "__setattr__"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "object"
+        and len(node.args) >= 3
+        and isinstance(node.args[0], ast.Attribute)
+        and isinstance(node.args[0].value, ast.Name)
+        and node.args[0].value.id == "request"
+        and node.args[0].attr == "state"
+    ):
+        return True
+    return False
+
+
+def _setattr_name_and_value(
+    node: ast.Call,
+) -> tuple[ast.AST, ast.AST]:
+    """Return (name_node, value_node) for a request.state setattr-shaped call."""
+
+    if isinstance(node.func, ast.Name) and node.func.id == "setattr":
+        return node.args[1], node.args[2]
+    if (
+        isinstance(node.func, ast.Attribute)
+        and node.func.attr == "__setattr__"
+        and isinstance(node.func.value, ast.Attribute)
+    ):
+        return node.args[0], node.args[1]
+    # object.__setattr__(request.state, name, value)
+    return node.args[1], node.args[2]
+
+
+def _collect_writes_in_function(
+    fn: ast.FunctionDef | ast.AsyncFunctionDef,
+    *,
+    path: str,
+    handler_param_names: frozenset[str],
+) -> list[StateAttributeWrite]:
+    """Collect state writes under statement-order alias tracking.
+
+    Provenance for ``request.state.f = x`` survives when ``x`` is a simple
+    rebinding of an HTTP param / config / literal / request.state attribute.
+    Nested compound statements are visited so branch-local overwrites cannot
+    disappear from closed-world accounting.
+    """
+
+    writes: list[StateAttributeWrite] = []
+    alias_state = AliasState()
+
+    def _classify(node: ast.AST) -> ValueOriginEvidence:
+        return classify_expression_origin(
+            node,
+            path=path,
+            handler_param_names=handler_param_names,
+            alias_state=alias_state,
+        )
+
+    def _record_assign_target(
+        target: ast.AST,
+        value: ast.AST,
+        statement: ast.stmt,
+        *,
+        dynamic: bool,
+    ) -> None:
+        field = _is_request_state_target(target)
+        if field is None:
+            return
+        writes.append(
+            StateAttributeWrite(
+                field_name=field,
+                value_expression=ast.unparse(value),
+                origin=_classify(value),
+                dynamic=dynamic,
+                source_range=_origin(path, statement).source_range,
+                path=path,
+            )
+        )
+
+    def _record_dynamic_calls(statement: ast.stmt) -> None:
+        for node in ast.walk(statement):
+            if not isinstance(node, ast.Call):
+                continue
+            if _is_request_state_setattr_call(node):
+                name_node, value_node = _setattr_name_and_value(node)
+                if isinstance(name_node, ast.Constant) and isinstance(
+                    name_node.value, str
+                ):
+                    field = name_node.value
+                else:
+                    field = "__dynamic__"
+                writes.append(
+                    StateAttributeWrite(
+                        field_name=field,
+                        value_expression=ast.unparse(value_node),
+                        origin=_classify(value_node),
+                        dynamic=True,
+                        source_range=_origin(path, node).source_range,
+                        path=path,
+                    )
+                )
+            rendered = ast.unparse(node)
+            if "request.state" in rendered and any(
+                marker in rendered
+                for marker in ("update(", "copy(", "__dict__", "vars(")
+            ):
+                writes.append(
+                    StateAttributeWrite(
+                        field_name="__wildcard__",
+                        value_expression=rendered,
+                        origin=_classify(node),
+                        dynamic=True,
+                        source_range=_origin(path, node).source_range,
+                        path=path,
+                    )
+                )
+
+    def _visit_statement(statement: ast.stmt) -> None:
+        if isinstance(statement, ast.Assign):
+            for target in statement.targets:
+                _record_assign_target(
+                    target, statement.value, statement, dynamic=False
+                )
+            apply_statement_bindings(
+                statement,
+                path=path,
+                handler_param_names=handler_param_names,
+                alias_state=alias_state,
+            )
+            return
+
+        if isinstance(statement, ast.AnnAssign) and statement.value is not None:
+            _record_assign_target(
+                statement.target, statement.value, statement, dynamic=False
+            )
+            apply_statement_bindings(
+                statement,
+                path=path,
+                handler_param_names=handler_param_names,
+                alias_state=alias_state,
+            )
+            return
+
+        if isinstance(statement, ast.AugAssign):
+            _record_assign_target(
+                statement.target, statement.value, statement, dynamic=True
+            )
+            apply_statement_bindings(
+                statement,
+                path=path,
+                handler_param_names=handler_param_names,
+                alias_state=alias_state,
+            )
+            return
+
+        if isinstance(statement, (ast.If, ast.While)):
+            _mark_name_uses(statement.test, alias_state)
+            assigned_on_branches = _collect_assigned_names_in_statements(
+                list(statement.body) + list(statement.orelse)
+            )
+            for child in list(statement.body) + list(statement.orelse):
+                _visit_statement(child)
+            for name in assigned_on_branches:
+                alias_state.poison(name)
+            return
+
+        if isinstance(statement, (ast.For, ast.AsyncFor)):
+            _mark_name_uses(statement.iter, alias_state)
+            assigned = _collect_assigned_names_in_statements(
+                list(statement.body) + list(statement.orelse)
+            )
+            assigned.update(_collect_assign_target_names(statement.target))
+            for child in list(statement.body) + list(statement.orelse):
+                _visit_statement(child)
+            for name in assigned:
+                alias_state.poison(name)
+            return
+
+        if isinstance(statement, (ast.With, ast.AsyncWith)):
+            assigned = _collect_assigned_names_in_statements(list(statement.body))
+            for item in statement.items:
+                _mark_name_uses(item.context_expr, alias_state)
+                if item.optional_vars is not None:
+                    assigned.update(_collect_assign_target_names(item.optional_vars))
+            for child in statement.body:
+                _visit_statement(child)
+            for name in assigned:
+                alias_state.poison(name)
+            return
+
+        if isinstance(statement, ast.Try):
+            assigned = _collect_assigned_names_in_statements(
+                list(statement.body)
+                + list(statement.orelse)
+                + list(statement.finalbody)
+            )
+            for handler in statement.handlers:
+                assigned.update(_collect_assigned_names_in_statements(handler.body))
+                if handler.name:
+                    assigned.add(handler.name)
+            for child in statement.body:
+                _visit_statement(child)
+            for handler in statement.handlers:
+                for child in handler.body:
+                    _visit_statement(child)
+            for child in list(statement.orelse) + list(statement.finalbody):
+                _visit_statement(child)
+            for name in assigned:
+                alias_state.poison(name)
+            return
+
+        # Ordinary statements: setattr / wildcard calls anywhere in this node.
+        _record_dynamic_calls(statement)
+        apply_statement_bindings(
+            statement,
+            path=path,
+            handler_param_names=handler_param_names,
+            alias_state=alias_state,
+        )
+
+    for statement in fn.body:
+        _visit_statement(statement)
+    return writes
+
+
 def _collect_state_writes(
     tree: ast.AST,
     *,
@@ -82,6 +342,59 @@ def _collect_state_writes(
     handler_param_names: frozenset[str],
 ) -> tuple[StateAttributeWrite, ...]:
     writes: list[StateAttributeWrite] = []
+    # Prefer per-function alias tracking so rebinding inside a writer is proved.
+    functions = [
+        node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    if functions:
+        for fn in functions:
+            writes.extend(
+                _collect_writes_in_function(
+                    fn,
+                    path=path,
+                    handler_param_names=handler_param_names,
+                )
+            )
+        # Module-level writes (outside functions) still matter.
+        module_level = [
+            node
+            for node in tree.body
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        ]
+        if module_level:
+            alias_state = AliasState()
+            for statement in module_level:
+                if isinstance(statement, ast.Assign):
+                    for target in statement.targets:
+                        field = _is_request_state_target(target)
+                        if field is None:
+                            continue
+                        writes.append(
+                            StateAttributeWrite(
+                                field_name=field,
+                                value_expression=ast.unparse(statement.value),
+                                origin=classify_expression_origin(
+                                    statement.value,
+                                    path=path,
+                                    handler_param_names=handler_param_names,
+                                    alias_state=alias_state,
+                                ),
+                                dynamic=False,
+                                source_range=_origin(path, statement).source_range,
+                            path=path,
+                            )
+                        )
+                    apply_statement_bindings(
+                        statement,
+                        path=path,
+                        handler_param_names=handler_param_names,
+                        alias_state=alias_state,
+                    )
+        return tuple(writes)
+
+    # Fallback: whole-tree walk without function grouping.
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
             for target in node.targets:
@@ -100,118 +413,7 @@ def _collect_state_writes(
                         origin=origin,
                         dynamic=False,
                         source_range=_origin(path, node).source_range,
-                    )
-                )
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            field = _is_request_state_target(node.target)
-            if field is not None:
-                writes.append(
-                    StateAttributeWrite(
-                        field_name=field,
-                        value_expression=ast.unparse(node.value),
-                        origin=classify_expression_origin(
-                            node.value,
-                            path=path,
-                            handler_param_names=handler_param_names,
-                        ),
-                        dynamic=False,
-                        source_range=_origin(path, node).source_range,
-                    )
-                )
-        elif isinstance(node, ast.AugAssign):
-            field = _is_request_state_target(node.target)
-            if field is not None:
-                writes.append(
-                    StateAttributeWrite(
-                        field_name=field,
-                        value_expression=ast.unparse(node),
-                        origin=classify_expression_origin(
-                            node.value,
-                            path=path,
-                            handler_param_names=handler_param_names,
-                        ),
-                        dynamic=True,
-                        source_range=_origin(path, node).source_range,
-                    )
-                )
-        elif isinstance(node, ast.Call):
-            # setattr(request.state, ...) / request.state.__setattr__(...) /
-            # object.__setattr__(request.state, ...) — always dynamic.
-            setattr_hit = False
-            name_node: ast.AST | None = None
-            value_node: ast.AST | None = None
-            if (
-                isinstance(node.func, ast.Name)
-                and node.func.id == "setattr"
-                and len(node.args) >= 3
-                and isinstance(node.args[0], ast.Attribute)
-                and isinstance(node.args[0].value, ast.Name)
-                and node.args[0].value.id == "request"
-                and node.args[0].attr == "state"
-            ):
-                setattr_hit = True
-                name_node, value_node = node.args[1], node.args[2]
-            elif (
-                isinstance(node.func, ast.Attribute)
-                and node.func.attr == "__setattr__"
-                and isinstance(node.func.value, ast.Attribute)
-                and isinstance(node.func.value.value, ast.Name)
-                and node.func.value.value.id == "request"
-                and node.func.value.attr == "state"
-                and len(node.args) >= 2
-            ):
-                setattr_hit = True
-                name_node, value_node = node.args[0], node.args[1]
-            elif (
-                isinstance(node.func, ast.Attribute)
-                and node.func.attr == "__setattr__"
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "object"
-                and len(node.args) >= 3
-                and isinstance(node.args[0], ast.Attribute)
-                and isinstance(node.args[0].value, ast.Name)
-                and node.args[0].value.id == "request"
-                and node.args[0].attr == "state"
-            ):
-                setattr_hit = True
-                name_node, value_node = node.args[1], node.args[2]
-            if setattr_hit and name_node is not None and value_node is not None:
-                if isinstance(name_node, ast.Constant) and isinstance(
-                    name_node.value, str
-                ):
-                    field = name_node.value
-                else:
-                    field = "__dynamic__"
-                writes.append(
-                    StateAttributeWrite(
-                        field_name=field,
-                        value_expression=ast.unparse(value_node),
-                        origin=classify_expression_origin(
-                            value_node,
-                            path=path,
-                            handler_param_names=handler_param_names,
-                        ),
-                        dynamic=True,
-                        source_range=_origin(path, node).source_range,
-                    )
-                )
-            # request.state.__dict__.update(...) / wildcard copy markers
-            rendered = ast.unparse(node)
-            if "request.state" in rendered and any(
-                marker in rendered
-                for marker in ("update(", "copy(", "__dict__", "vars(")
-            ):
-                writes.append(
-                    StateAttributeWrite(
-                        field_name="__wildcard__",
-                        value_expression=rendered,
-                        origin=classify_expression_origin(
-                            node,
-                            path=path,
-                            handler_param_names=handler_param_names,
-                        ),
-                        dynamic=True,
-                        source_range=_origin(path, node).source_range,
+                    path=path,
                     )
                 )
     return tuple(writes)
@@ -255,15 +457,7 @@ def analyze_bypass_authority(
     function_name: str | None = None,
     bypass_fields: frozenset[str] | None = None,
 ) -> tuple[BypassAuthorityFinding, ...]:
-    """Analyze closed-world bypass authority for request.state fields.
-
-    If bypass_fields is None, every requested state field that is read is
-    analyzed. Absence of discovered writers is UNKNOWN, not proof of trust.
-
-    Writer origin classification uses parameter names from **all** functions in
-    the unit: middleware writers must still see their HTTP parameters even when
-    ``function_name`` selects the effect handler for reads.
-    """
+    """Analyze closed-world bypass authority for a single source unit."""
 
     tree = ast.parse(source)
     all_functions = [
@@ -281,12 +475,9 @@ def analyze_bypass_authority(
     if function_name is not None:
         functions = [node for node in functions if node.name == function_name]
     if not functions:
-        # Module-level writes still matter for closed-world accounting.
         handler = None
-        scope: ast.AST = tree
     else:
         handler = functions[0]
-        scope = tree  # closed-world over the whole unit
 
     origins = (
         extract_handler_value_origins(handler, path=path)
@@ -294,28 +485,30 @@ def analyze_bypass_authority(
         else ()
     )
     writes = _collect_state_writes(
-        scope,
-        path=path,
-        handler_param_names=unit_param_names,
+        tree, path=path, handler_param_names=unit_param_names
     )
-    reads = _collect_state_reads(handler if handler is not None else tree)
-
+    reads = _collect_state_reads(tree)
     fields = bypass_fields or frozenset(field for field, _ in reads)
     findings: list[BypassAuthorityFinding] = []
 
     for field in sorted(fields):
         field_reads = [expr for name, expr in reads if name == field]
         field_writes = [item for item in writes if item.field_name == field]
-        wildcard = [item for item in writes if item.field_name in {"__wildcard__", "__dynamic__"}]
+        wildcard = [
+            item
+            for item in writes
+            if item.field_name in {"__wildcard__", "__dynamic__"}
+        ]
         dynamic = [item for item in field_writes if item.dynamic] + wildcard
-
         all_origins = tuple(
             sorted({item.origin.origin_kind for item in field_writes})
         )
         evidence_ids = tuple(
             sorted({item.origin.evidence_id for item in field_writes})
         )
-        read_expression = field_reads[0] if field_reads else f"request.state.{field}"
+        read_expression = (
+            field_reads[0] if field_reads else f"request.state.{field}"
+        )
 
         if dynamic:
             findings.append(
@@ -332,7 +525,6 @@ def analyze_bypass_authority(
             continue
 
         if not field_writes:
-            # Absence of discovered writers is not positive proof.
             findings.append(
                 BypassAuthorityFinding(
                     field_name=field,
@@ -347,24 +539,26 @@ def analyze_bypass_authority(
             continue
 
         kinds = {item.origin.origin_kind for item in field_writes}
-        if "externally_bound_http_value" in kinds or "unknown_origin" in kinds:
-            # Client/input-controlled or unresolved write → violated when used
-            # to skip authorization (caller decides FAIL vs path evaluation).
-            status: BypassAuthorityStatus = (
-                "violated"
-                if "externally_bound_http_value" in kinds
-                else "unknown"
-            )
-            reason = (
-                "client_controlled_bypass_write"
-                if status == "violated"
-                else "unresolved_write_origin"
-            )
+        if "externally_bound_http_value" in kinds:
             findings.append(
                 BypassAuthorityFinding(
                     field_name=field,
-                    status=status,
-                    reason=reason,
+                    status="violated",
+                    reason="client_controlled_bypass_write",
+                    read_expression=read_expression,
+                    write_count=len(field_writes),
+                    origin_kinds=all_origins,
+                    evidence_ids=evidence_ids,
+                )
+            )
+            continue
+
+        if "unknown_origin" in kinds:
+            findings.append(
+                BypassAuthorityFinding(
+                    field_name=field,
+                    status="unknown",
+                    reason="unresolved_write_origin",
                     read_expression=read_expression,
                     write_count=len(field_writes),
                     origin_kinds=all_origins,
@@ -399,9 +593,9 @@ def analyze_bypass_authority(
             )
         )
 
-    # Include param-origin evidence ids for audit packaging.
     _ = origins
     return tuple(findings)
+
 
 
 def bypass_authority_digest(findings: tuple[BypassAuthorityFinding, ...]) -> str:
@@ -419,3 +613,4 @@ def bypass_authority_digest(findings: tuple[BypassAuthorityFinding, ...]) -> str
             for item in findings
         ]
     )
+
