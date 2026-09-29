@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from ovk.compilers.authorization.material_loader import materials_from_pair
+from ovk.compilers.authorization.material_loader import (
+    AuthMaterials,
+    materials_from_pair,
+)
 from ovk.compilers.authorization.protected_effect_fastapi_dependency import (
     FastApiDependencyEffectExtractor,
     FastApiDependencyEffectProfile,
@@ -346,4 +349,199 @@ async def mcp_post(request: Request):
     assert len(ir.guards) == 1
     assert ir.guards[0].effectiveness == "unproved"
     assert evaluation.status == "unknown"
+
+INCLUDE_ROUTER_PROFILE = FastApiDependencyEffectProfile(
+    sink_effects={"protected_call": "stats.sample.generate"},
+    sink_static_resources={"protected_call": "stats_sampling_service"},
+    route_dependency_guard_resources={
+        "require_auth": "stats_sampling_service"
+    },
+    route_dependency_guard_effects={
+        "require_auth": ("stats.sample.generate",),
+    },
+    principal_parameter="$api_key_caller",
+)
+
+
+def _compile_include_router(
+    *,
+    main_source: str,
+    route_source: str | None = None,
+):
+    route_source = route_source or """
+from fastapi import APIRouter
+
+router = APIRouter()
+
+@router.post("/sample")
+async def sample():
+    return protected_call()
+""".strip()
+    files = {
+        "app/main.py": main_source.strip(),
+        "app/endpoints/stats.py": route_source.strip(),
+    }
+    materials = AuthMaterials(
+        base_files=dict(files),
+        head_files=files,
+        repo="example/include-router",
+        base_revision="base",
+        head_revision="head",
+    )
+    return FastApiDependencyEffectExtractor().compile(
+        materials,
+        INCLUDE_ROUTER_PROFILE,
+    )
+
+
+def test_include_router_dependency_is_inherited_as_candidate_guard() -> None:
+    source = """
+from fastapi import Depends, FastAPI
+from app.endpoints import stats
+
+app = FastAPI()
+app.include_router(
+    stats.router,
+    dependencies=[Depends(require_auth)],
+)
+""".strip()
+
+    ir = _compile_include_router(main_source=source)
+    evaluations = evaluate_protected_effect_integrity(ir)
+
+    assert len(ir.guards) == 1
+    assert ir.guards[0].effectiveness == "unproved"
+    assert ir.guards[0].resource_id == ir.protected_effects[0].resource_id
+    assert len(evaluations) == 1
+    assert evaluations[0].status == "unknown"
+    assert evaluations[0].extraction_coverage == "complete"
+
+
+def test_include_router_dependency_requires_literal_dependency_list() -> None:
+    source = """
+from fastapi import Depends, FastAPI
+from app.endpoints import stats
+
+app = FastAPI()
+deps = [Depends(require_auth)]
+app.include_router(stats.router, dependencies=deps)
+""".strip()
+
+    ir = _compile_include_router(main_source=source)
+    evaluations = evaluate_protected_effect_integrity(ir)
+
+    assert ir.guards == []
+    assert evaluations[0].status == "fail"
+
+
+def test_include_router_dependency_requires_canonical_fastapi_app() -> None:
+    source = """
+from custom_framework import FastAPI
+from fastapi import Depends
+from app.endpoints import stats
+
+app = FastAPI()
+app.include_router(
+    stats.router,
+    dependencies=[Depends(require_auth)],
+)
+""".strip()
+
+    ir = _compile_include_router(main_source=source)
+    evaluations = evaluate_protected_effect_integrity(ir)
+
+    assert ir.guards == []
+    assert evaluations[0].status == "fail"
+
+
+def test_include_router_app_reassignment_suppresses_inheritance() -> None:
+    source = """
+from fastapi import Depends, FastAPI
+from app.endpoints import stats
+
+app = FastAPI()
+app = FastAPI()
+app.include_router(
+    stats.router,
+    dependencies=[Depends(require_auth)],
+)
+""".strip()
+
+    ir = _compile_include_router(main_source=source)
+    evaluations = evaluate_protected_effect_integrity(ir)
+
+    assert ir.guards == []
+    assert evaluations[0].status == "fail"
+
+
+def test_include_router_target_router_reassignment_suppresses_inheritance() -> None:
+    main_source = """
+from fastapi import Depends, FastAPI
+from app.endpoints import stats
+
+app = FastAPI()
+app.include_router(
+    stats.router,
+    dependencies=[Depends(require_auth)],
+)
+""".strip()
+    route_source = """
+from fastapi import APIRouter
+
+router = APIRouter()
+router = APIRouter()
+
+@router.post("/sample")
+async def sample():
+    return protected_call()
+""".strip()
+
+    ir = _compile_include_router(
+        main_source=main_source,
+        route_source=route_source,
+    )
+    evaluations = evaluate_protected_effect_integrity(ir)
+
+    assert ir.guards == []
+    assert evaluations[0].status == "fail"
+
+def test_include_router_rejects_non_fastapi_depends_symbol() -> None:
+    source = """
+from fastapi import FastAPI
+from custom_framework import Depends
+from app.endpoints import stats
+
+app = FastAPI()
+app.include_router(
+    stats.router,
+    dependencies=[Depends(require_auth)],
+)
+""".strip()
+
+    ir = _compile_include_router(main_source=source)
+    evaluations = evaluate_protected_effect_integrity(ir)
+
+    assert ir.guards == []
+    assert evaluations[0].status == "fail"
+
+
+def test_multiple_include_router_mounts_suppress_inheritance() -> None:
+    source = """
+from fastapi import Depends, FastAPI
+from app.endpoints import stats
+
+app = FastAPI()
+app.include_router(
+    stats.router,
+    prefix="/guarded",
+    dependencies=[Depends(require_auth)],
+)
+app.include_router(stats.router, prefix="/public")
+""".strip()
+
+    ir = _compile_include_router(main_source=source)
+    evaluations = evaluate_protected_effect_integrity(ir)
+
+    assert ir.guards == []
+    assert evaluations[0].status == "fail"
 

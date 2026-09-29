@@ -58,7 +58,30 @@ class RouteDependencySummary:
 
     full_name: str
     leaf_name: str | None
-    source_kind: Literal["route_decorator", "router_constructor"]
+    source_kind: Literal[
+        "route_decorator",
+        "router_constructor",
+        "include_router",
+    ]
+    origin: SemanticOrigin
+
+
+@dataclass(frozen=True)
+class ModuleImportSummary:
+    """Direct absolute module import usable for cross-file resolution."""
+
+    local_name: str
+    module_name: str
+
+
+@dataclass(frozen=True)
+class IncludeRouterCallSummary:
+    """Profile-independent static FastAPI include_router syntax fact."""
+
+    app_symbol: str
+    module_alias: str
+    router_symbol: str
+    dependencies: tuple[RouteDependencySummary, ...] | None
     origin: SemanticOrigin
 
 
@@ -109,6 +132,7 @@ class RouteHandlerSummary:
     handler_name: str
     method: str
     route_path: str
+    router_symbol: str | None
     has_control_flow: bool
     unsupported_control_flow_lines: tuple[int, ...]
     dependencies: tuple[DependencyParameterSummary, ...]
@@ -123,6 +147,9 @@ class RouteFileSummary:
     path: str
     source_digest: str
     handlers: tuple[RouteHandlerSummary, ...] = ()
+    apirouter_symbols: tuple[str, ...] = ()
+    module_imports: tuple[ModuleImportSummary, ...] = ()
+    include_router_calls: tuple[IncludeRouterCallSummary, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -137,7 +164,7 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id=_EXTRACTOR_ID,
-        extractor_version="0.5.0",
+        extractor_version="0.6.0",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -225,23 +252,32 @@ def _direct_dependencies(
     return tuple(found)
 
 
-def _router_constructor_dependencies(
-    path: str,
+def _has_direct_fastapi_import(
     tree: ast.Module,
-) -> dict[str, tuple[RouteDependencySummary, ...]]:
-    """Return dependencies for uniquely assigned top-level APIRouter symbols.
+    name: str,
+) -> bool:
+    return any(
+        isinstance(statement, ast.ImportFrom)
+        and statement.module == "fastapi"
+        and statement.level == 0
+        and any(
+            alias.name == name and alias.asname is None
+            for alias in statement.names
+        )
+        for statement in tree.body
+    )
 
-    The supported inheritance form is deliberately narrow:
 
-        router = APIRouter(dependencies=[Depends(require_auth)])
-
-    Any second top-level assignment to the same symbol makes the binding
-    ambiguous and suppresses inherited dependency semantics for that symbol.
-    """
+def _unique_constructor_symbols(
+    tree: ast.Module,
+    *,
+    constructor: str,
+) -> set[str]:
+    if not _has_direct_fastapi_import(tree, constructor):
+        return set()
 
     assignments: dict[str, int] = {}
-    candidates: dict[str, tuple[RouteDependencySummary, ...]] = {}
-
+    candidates: set[str] = set()
     for statement in tree.body:
         target: ast.Name | None = None
         value: ast.AST | None = None
@@ -262,23 +298,203 @@ def _router_constructor_dependencies(
         if target is None:
             continue
         assignments[target.id] = assignments.get(target.id, 0) + 1
-
         if (
             isinstance(value, ast.Call)
-            and _name_of(value.func) == "APIRouter"
+            and isinstance(value.func, ast.Name)
+            and value.func.id == constructor
         ):
-            candidates[target.id] = _direct_dependencies(
-                path,
-                value,
-                source_kind="router_constructor",
-            )
+            candidates.add(target.id)
 
     return {
-        name: dependencies
-        for name, dependencies in candidates.items()
+        name
+        for name in candidates
         if assignments.get(name) == 1
     }
 
+
+def _module_import_summaries(
+    tree: ast.Module,
+) -> tuple[ModuleImportSummary, ...]:
+    found: list[ModuleImportSummary] = []
+    for statement in tree.body:
+        if (
+            not isinstance(statement, ast.ImportFrom)
+            or statement.level != 0
+            or not statement.module
+        ):
+            continue
+        for alias in statement.names:
+            if alias.name == "*":
+                continue
+            found.append(
+                ModuleImportSummary(
+                    local_name=alias.asname or alias.name,
+                    module_name=f"{statement.module}.{alias.name}",
+                )
+            )
+    return tuple(
+        sorted(
+            found,
+            key=lambda item: (item.local_name, item.module_name),
+        )
+    )
+
+
+def _include_router_dependencies(
+    path: str,
+    tree: ast.Module,
+    call: ast.Call,
+) -> tuple[RouteDependencySummary, ...] | None:
+    values = [
+        keyword.value
+        for keyword in call.keywords
+        if keyword.arg == "dependencies"
+    ]
+    if len(values) != 1:
+        return None
+    node = values[0]
+    if not isinstance(node, (ast.List, ast.Tuple)):
+        return None
+
+    found: list[RouteDependencySummary] = []
+    for item in node.elts:
+        if (
+            not isinstance(item, ast.Call)
+            or not isinstance(item.func, ast.Name)
+            or item.func.id not in {"Depends", "Security"}
+            or not _has_direct_fastapi_import(tree, item.func.id)
+            or len(item.args) != 1
+            or item.keywords
+            or not isinstance(item.args[0], (ast.Name, ast.Attribute))
+        ):
+            return None
+        target = item.args[0]
+        found.append(
+            RouteDependencySummary(
+                full_name=ast.unparse(target),
+                leaf_name=_name_of(target),
+                source_kind="include_router",
+                origin=_origin(path, item),
+            )
+        )
+
+    return tuple(
+        sorted(
+            found,
+            key=lambda item: (item.full_name, item.leaf_name or ""),
+        )
+    )
+
+
+def _include_router_call_summaries(
+    path: str,
+    tree: ast.Module,
+) -> tuple[IncludeRouterCallSummary, ...]:
+    app_symbols = _unique_constructor_symbols(
+        tree,
+        constructor="FastAPI",
+    )
+    if not app_symbols:
+        return ()
+
+    found: list[IncludeRouterCallSummary] = []
+    for statement in tree.body:
+        if not isinstance(statement, ast.Expr):
+            continue
+        call = statement.value
+        if (
+            not isinstance(call, ast.Call)
+            or not isinstance(call.func, ast.Attribute)
+            or call.func.attr != "include_router"
+            or not isinstance(call.func.value, ast.Name)
+            or call.func.value.id not in app_symbols
+            or not call.args
+            or not isinstance(call.args[0], ast.Attribute)
+            or not isinstance(call.args[0].value, ast.Name)
+        ):
+            continue
+
+        found.append(
+            IncludeRouterCallSummary(
+                app_symbol=call.func.value.id,
+                module_alias=call.args[0].value.id,
+                router_symbol=call.args[0].attr,
+                dependencies=_include_router_dependencies(
+                    path,
+                    tree,
+                    call,
+                ),
+                origin=_origin(path, call),
+            )
+        )
+
+    return tuple(
+        sorted(
+            found,
+            key=lambda item: (
+                item.module_alias,
+                item.router_symbol,
+                item.origin.source_range.start_line
+                if item.origin.source_range is not None
+                and item.origin.source_range.start_line is not None
+                else 0,
+            ),
+        )
+    )
+
+
+def _router_constructor_dependencies(
+    path: str,
+    tree: ast.Module,
+) -> dict[str, tuple[RouteDependencySummary, ...]]:
+    """Return dependencies for uniquely assigned top-level APIRouter symbols.
+
+    The supported inheritance form is deliberately narrow:
+
+        router = APIRouter(dependencies=[Depends(require_auth)])
+
+    Any second top-level assignment to the same symbol makes the binding
+    ambiguous and suppresses inherited dependency semantics for that symbol.
+    """
+
+    valid_symbols = _unique_constructor_symbols(
+        tree,
+        constructor="APIRouter",
+    )
+    candidates: dict[str, tuple[RouteDependencySummary, ...]] = {}
+
+    for statement in tree.body:
+        target: ast.Name | None = None
+        value: ast.AST | None = None
+        if (
+            isinstance(statement, ast.Assign)
+            and len(statement.targets) == 1
+            and isinstance(statement.targets[0], ast.Name)
+        ):
+            target = statement.targets[0]
+            value = statement.value
+        elif (
+            isinstance(statement, ast.AnnAssign)
+            and isinstance(statement.target, ast.Name)
+        ):
+            target = statement.target
+            value = statement.value
+
+        if (
+            target is None
+            or target.id not in valid_symbols
+            or not isinstance(value, ast.Call)
+            or not isinstance(value.func, ast.Name)
+            or value.func.id != "APIRouter"
+        ):
+            continue
+        candidates[target.id] = _direct_dependencies(
+            path,
+            value,
+            source_kind="router_constructor",
+        )
+
+    return candidates
 
 def _route_dependencies(
     path: str,
@@ -882,6 +1098,7 @@ def summarize_route_file(
                 handler_name=handler.name,
                 method=method,
                 route_path=route_path,
+                router_symbol=router_symbol,
                 has_control_flow=_has_control_flow(handler),
                 unsupported_control_flow_lines=_unsupported_control_flow_lines(handler),
                 dependencies=_dependency_parameters(path, handler),
@@ -916,6 +1133,19 @@ def summarize_route_file(
                     item.handler_name,
                 ),
             )
+        ),
+        apirouter_symbols=tuple(
+            sorted(
+                _unique_constructor_symbols(
+                    tree,
+                    constructor="APIRouter",
+                )
+            )
+        ),
+        module_imports=_module_import_summaries(tree),
+        include_router_calls=_include_router_call_summaries(
+            path,
+            tree,
         ),
     )
 

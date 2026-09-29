@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ovk.compilers.authorization.fastapi_include_router_dependencies import (
+    infer_include_router_dependencies,
+)
 from ovk.compilers.authorization.fastapi_route_summary import RouteSummaryIndex
 from ovk.compilers.authorization.incremental_contract_composition import (
     IncrementalContractCompositionState,
@@ -140,6 +143,10 @@ def compile_incremental_fastapi_assurance(
         route_summary_index=route_summary_index,
     )
 
+    include_router_dependencies = infer_include_router_dependencies(
+        route_summary_index=route_summary_index,
+    )
+
     guard_effectiveness_evidence = infer_route_dependency_effectiveness(
         parsed_trees=parsed_index.trees,
         dependency_names=profile.route_dependency_guard_resources,
@@ -203,6 +210,9 @@ def compile_incremental_fastapi_assurance(
                 profile=profile,
                 contracts_by_name=contracts_by_name,
                 guard_effectiveness_by_name=guard_effectiveness_by_name,
+                route_attachment_digest=(
+                    include_router_dependencies.digest_for(path)
+                ),
             )
         ):
             fragments[path] = prior
@@ -214,6 +224,15 @@ def compile_incremental_fastapi_assurance(
             profile=profile,
             contracts_by_name=contracts_by_name,
             guard_effectiveness_by_name=guard_effectiveness_by_name,
+            external_route_dependencies_by_router=(
+                include_router_dependencies.dependencies_by_target.get(
+                    path,
+                    {},
+                )
+            ),
+            route_attachment_digest=(
+                include_router_dependencies.digest_for(path)
+            ),
         )
         rebound += 1
 

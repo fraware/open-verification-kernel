@@ -335,3 +335,105 @@ def test_missing_repo_identity_disables_higher_level_state_persistence(
     assert result.previous_state_loaded is False
     assert result.state_written is False
     assert list(state_root.glob("*.json")) == []
+
+def _persistent_include_router_files(*, guarded: bool) -> dict[str, str]:
+    dependency = (
+        ", dependencies=[Depends(require_auth)]"
+        if guarded
+        else ""
+    )
+    return {
+        "app/main.py": f"""
+from fastapi import Depends, FastAPI
+from app.endpoints import stats
+
+app = FastAPI()
+app.include_router(stats.router{dependency})
+""".strip(),
+        "app/endpoints/stats.py": """
+from fastapi import APIRouter
+
+router = APIRouter()
+
+@router.post("/sample")
+async def sample():
+    return protected_call()
+""".strip(),
+    }
+
+
+def _persistent_include_router_materials(
+    *,
+    guarded: bool,
+    revision: str,
+) -> AuthMaterials:
+    files = _persistent_include_router_files(guarded=guarded)
+    return AuthMaterials(
+        base_files=dict(files),
+        head_files=files,
+        repo="example/persistent-include-router",
+        base_revision="base",
+        head_revision=revision,
+    )
+
+
+def _persistent_include_router_profile() -> FastApiDependencyEffectProfile:
+    return FastApiDependencyEffectProfile(
+        sink_effects={"protected_call": "stats.sample.generate"},
+        sink_static_resources={
+            "protected_call": "stats_sampling_service"
+        },
+        route_dependency_guard_resources={
+            "require_auth": "stats_sampling_service"
+        },
+        route_dependency_guard_effects={
+            "require_auth": ("stats.sample.generate",)
+        },
+        principal_parameter="$api_key_caller",
+    )
+
+
+def test_fresh_worker_include_router_change_rebinds_cached_target(
+    tmp_path,
+) -> None:
+    summary_root = tmp_path / "summaries"
+    state_root = tmp_path / "state"
+    profile = _persistent_include_router_profile()
+
+    base = _persistent_include_router_materials(
+        guarded=False,
+        revision="head-1",
+    )
+    first = compile_persistent_incremental_fastapi_assurance(
+        base,
+        profile,
+        semantic_summary_cache=PersistentPythonSemanticSummaryCache(
+            summary_root
+        ),
+        state_cache=PersistentFastApiIncrementalStateCache(state_root),
+    )
+    assert first.compilation.ir.guards == []
+
+    head = _persistent_include_router_materials(
+        guarded=True,
+        revision="head-2",
+    )
+    second = compile_persistent_incremental_fastapi_assurance(
+        head,
+        profile,
+        semantic_summary_cache=PersistentPythonSemanticSummaryCache(
+            summary_root
+        ),
+        state_cache=PersistentFastApiIncrementalStateCache(state_root),
+    )
+    full = FastApiDependencyEffectExtractor().compile(head, profile)
+
+    assert second.compilation.ir.canonical_payload() == full.canonical_payload()
+    assert second.previous_state_loaded is True
+    assert second.semantic_summary_stats.parse_count == 1
+    assert second.semantic_summary_stats.hits == 1
+    assert second.compilation.stats.rebound_file_count == 1
+    assert second.compilation.stats.reused_fragment_count == 0
+    assert len(second.compilation.ir.guards) == 1
+    assert second.compilation.ir.guards[0].effectiveness == "unproved"
+
