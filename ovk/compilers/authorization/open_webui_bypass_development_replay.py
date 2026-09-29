@@ -221,9 +221,11 @@ def analyze_handler_source_for_bypass_replay(
         notes.append("sink_not_located_in_cfg")
 
     authorized: bool | None = None
+    bypass_status: str | None = None
     if not dominates:
         matching = [item for item in bypass_findings if item.field_name == bypass_field]
         if matching:
+            bypass_status = matching[0].status
             authorized = matching[0].status == "authorized"
             if matching[0].status == "violated":
                 notes.append("client_controlled_bypass")
@@ -237,6 +239,8 @@ def analyze_handler_source_for_bypass_replay(
         reason = "ordinary_guard_dominates"
     elif authorized:
         reason = "bypass_independently_authorized"
+    elif bypass_status == "violated":
+        reason = "client_controlled_bypass_not_authorized"
     elif not cfg_complete:
         reason = "cfg_coverage_incomplete"
     elif not origin_established:
