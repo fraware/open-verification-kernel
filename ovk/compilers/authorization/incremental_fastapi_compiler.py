@@ -51,6 +51,7 @@ class IncrementalFastApiCompilationStats:
     """Deterministic work counts for one incremental semantic compile."""
 
     total_route_summary_files: int
+    semantic_fragment_file_count: int
     rebound_file_count: int
     reused_fragment_count: int
     removed_fragment_count: int
@@ -170,7 +171,13 @@ def compile_incremental_fastapi_assurance(
     rebound = 0
     reused = 0
 
-    for path, summary in sorted(route_summary_index.summaries.items()):
+    semantic_summaries = {
+        path: summary
+        for path, summary in route_summary_index.summaries.items()
+        if summary.handlers
+    }
+
+    for path, summary in sorted(semantic_summaries.items()):
         prior = (
             previous_state.fragments.get(path)
             if previous_state is not None
@@ -201,7 +208,7 @@ def compile_incremental_fastapi_assurance(
         if previous_state is not None
         else set()
     )
-    removed = len(previous_paths - set(route_summary_index.summaries))
+    removed = len(previous_paths - set(semantic_summaries))
 
     missing_route_summaries = [
         path
@@ -232,6 +239,7 @@ def compile_incremental_fastapi_assurance(
         state=state,
         stats=IncrementalFastApiCompilationStats(
             total_route_summary_files=len(route_summary_index.summaries),
+            semantic_fragment_file_count=len(semantic_summaries),
             rebound_file_count=rebound,
             reused_fragment_count=reused,
             removed_fragment_count=removed,

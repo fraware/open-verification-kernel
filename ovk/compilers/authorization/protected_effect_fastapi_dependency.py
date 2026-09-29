@@ -581,6 +581,7 @@ class FastApiDependencyEffectExtractor:
                 contracts_by_name=contracts_by_name,
             )
             for path, summary in sorted(route_summaries.summaries.items())
+            if summary.handlers
         }
         missing_route_summaries = [
             path
