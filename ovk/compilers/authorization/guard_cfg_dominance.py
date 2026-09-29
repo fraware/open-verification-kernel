@@ -37,6 +37,11 @@ def resolve_cfg_node_id(
         for node in find_nodes_covering_line(cfg, line)
         if node.kind in {"statement", "branch", "return", "raise"}
         and node.expression != "__cfg_join__"
+        and (
+            node.source_range is None
+            or source_range.path is None
+            or node.source_range.path == source_range.path
+        )
     ]
     if len(matches) != 1:
         return None
