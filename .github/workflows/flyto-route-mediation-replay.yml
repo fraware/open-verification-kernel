@@ -1,0 +1,78 @@
+name: Flyto Route Mediation Replay
+
+on:
+  pull_request:
+    paths:
+      - 'ovk/core/external_assurance_replay.py'
+      - 'ovk/core/protected_effect_profile.py'
+      - 'ovk/compilers/authorization/**'
+      - 'benchmarks/assurance_qualification/external/flyto_mcp_route_auth.v1.json'
+      - 'schemas/assurance.external_replay.*.json'
+      - 'schemas/protected_effect_profile.schema.json'
+      - 'scripts/run_external_assurance_replay.py'
+      - '.github/workflows/flyto-route-mediation-replay.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  flyto-development-replay:
+    if: github.head_ref == 'feature/fastapi-route-dependency-complete-mediation'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+      - name: Install OVK with solver dependencies
+        run: |
+          python scripts/sync_package_data.py
+          pip install --no-cache-dir -e '.[dev,solvers]'
+      - name: Replay pinned flyto MCP authorization repair
+        run: |
+          python scripts/run_external_assurance_replay.py \
+            benchmarks/assurance_qualification/external/flyto_mcp_route_auth.v1.json \
+            --output .verification/flyto-mcp-route-auth-replay.json
+      - name: Assert no false assurance before dependency proof support
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(
+              Path(".verification/flyto-mcp-route-auth-replay.json").read_text()
+          )
+          assert report["cases_total"] == 2
+          results = {
+              item["case_id"]: item["qualification_result"]
+              for item in report["results"]
+          }
+
+          vulnerable = results["flyto-mcp-route-auth-vulnerable-snapshot"]
+          assert vulnerable["validation_class"] == "public_upstream_reduction"
+          assert vulnerable["safety_label"] == "unsafe"
+          assert vulnerable["expectation_met"] is True
+          assert vulnerable["head_established"] is False
+          assert vulnerable["unsafe_false_assurance"] is False
+
+          repaired = results["flyto-mcp-route-auth-repair"]
+          assert repaired["validation_class"] == "public_upstream_reduction"
+          assert repaired["safety_label"] == "safe"
+          # The repaired route is still open because the dependency function's
+          # effectiveness (and its startup invariants) are not yet proved.
+          assert repaired["expectation_met"] is False
+          assert repaired["head_established"] is False
+          # Extraction fully represents the route dependency and static effect.
+          # The open result is a proof gap, not a coverage gap.
+          assert repaired["semantic_coverage_complete"] is True
+          assert repaired["benign_open"] is True
+          assert repaired["unsafe_false_assurance"] is False
+          PY
+      - name: Upload external development report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: flyto-mcp-route-auth-development-replay
+          path: .verification/flyto-mcp-route-auth-replay.json
+          retention-days: 90

@@ -194,6 +194,10 @@ def test_automatic_review_reuses_unchanged_secure_head(
     assert result.head_fresh_effects == []
     assert result.head_reused_effects
     assert result.review.assurance_diff.available is True
+    assert result.base_effective_coverage_statuses
+    assert result.head_effective_coverage_statuses
+    assert set(result.base_effective_coverage_statuses.values()) == {"complete"}
+    assert set(result.head_effective_coverage_statuses.values()) == {"complete"}
     delta = result.review.assurance_diff.deltas[0]
     assert delta.guarantee_id == "G-WORKSPACE-AGENT-READ"
     assert delta.head_status == "established"

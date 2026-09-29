@@ -119,6 +119,9 @@ class FastApiDependencyEffectProfile:
 
     sink_effects: dict[str, str]
     sink_identity_args: dict[str, int] = field(default_factory=dict)
+    # Sink key -> static capability/resource identity. When present, no source
+    # argument is interpreted as resource identity for that sink.
+    sink_static_resources: dict[str, str] = field(default_factory=dict)
     sink_scope_keywords: dict[str, str] = field(default_factory=dict)
     sink_missing_scope_unconstrained: frozenset[str] = frozenset()
     # Helper name -> explicit fail-closed resource-scope assertion semantics.
@@ -148,7 +151,83 @@ class FastApiDependencyEffectProfile:
     # Dependency name -> effect names the dependency authorizes in this profile.
     dependency_guard_effects: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
+    # Direct route-decorator dependency name -> candidate static capability/resource.
+    # This mapping identifies intended mediation only. It does not establish
+    # that the dependency implementation is an effective authorization check.
+    route_dependency_guard_resources: dict[str, str] = field(default_factory=dict)
+    # Direct route-decorator dependency name -> effects it is intended to mediate.
+    route_dependency_guard_effects: dict[str, tuple[str, ...]] = field(default_factory=dict)
+
     principal_parameter: str = "user"
+
+    def __post_init__(self) -> None:
+        static_sinks = set(self.sink_static_resources)
+        conflicting_maps = {
+            "sink_identity_args": set(self.sink_identity_args),
+            "sink_scope_keywords": set(self.sink_scope_keywords),
+            "sink_missing_scope_unconstrained": set(
+                self.sink_missing_scope_unconstrained
+            ),
+            "sink_contracts": set(self.sink_contracts),
+            "sink_contract_scope_attributes": set(
+                self.sink_contract_scope_attributes
+            ),
+            "sink_contract_identity_attributes": set(
+                self.sink_contract_identity_attributes
+            ),
+            "sink_binding_relations": set(self.sink_binding_relations),
+            "sink_binding_authorized_projections": set(
+                self.sink_binding_authorized_projections
+            ),
+            "sink_binding_acted_projections": set(
+                self.sink_binding_acted_projections
+            ),
+            "sink_binding_authorized_attributes": set(
+                self.sink_binding_authorized_attributes
+            ),
+            "sink_binding_acted_attributes": set(
+                self.sink_binding_acted_attributes
+            ),
+        }
+        for label, keys in conflicting_maps.items():
+            conflict = sorted(static_sinks & keys)
+            if conflict:
+                raise ValueError(
+                    "static sink resources cannot combine with "
+                    f"{label}: " + ", ".join(conflict)
+                )
+
+        if any(
+            not str(value).strip()
+            for value in self.sink_static_resources.values()
+        ):
+            raise ValueError("static sink resources must be non-empty")
+
+        route_resource_keys = set(self.route_dependency_guard_resources)
+        route_effect_keys = set(self.route_dependency_guard_effects)
+        if route_resource_keys != route_effect_keys:
+            raise ValueError(
+                "route dependency guard resource/effect keys must match"
+            )
+        modeled_effects = set(self.sink_effects.values())
+        for dependency, resource in (
+            self.route_dependency_guard_resources.items()
+        ):
+            if not dependency.strip() or not resource.strip():
+                raise ValueError(
+                    "route dependency guard names/resources must be non-empty"
+                )
+            effects = self.route_dependency_guard_effects[dependency]
+            if not effects or any(not effect.strip() for effect in effects):
+                raise ValueError(
+                    "route dependency guard effects must be non-empty"
+                )
+            unknown = sorted(set(effects) - modeled_effects)
+            if unknown:
+                raise ValueError(
+                    "route dependency guard effects absent from sink model: "
+                    + ", ".join(unknown)
+                )
 
     def sink_effect_names(
         self,
@@ -168,6 +247,29 @@ class FastApiDependencyEffectProfile:
 
     def identity_arg(self, sink_key: str) -> int:
         return int(self.sink_identity_args.get(sink_key, 0))
+
+    def static_resource_for_sink(self, sink_key: str) -> str | None:
+        return self.sink_static_resources.get(sink_key)
+
+    def route_dependency_guard_names(
+        self,
+        full_name: str,
+        leaf_name: str | None,
+    ) -> tuple[str, str, tuple[str, ...]] | None:
+        """Resolve governed route-level candidate-mediation intent.
+
+        The returned mapping is not proof that the dependency fails closed.
+        Source-derived dependency semantics must establish effectiveness before
+        a Protected Effect claim can pass.
+        """
+        for key in (full_name, leaf_name):
+            if not key:
+                continue
+            resource = self.route_dependency_guard_resources.get(key)
+            effects = self.route_dependency_guard_effects.get(key)
+            if resource is not None and effects is not None:
+                return key, resource, effects
+        return None
 
     def scope_keyword(self, sink_key: str) -> str | None:
         return self.sink_scope_keywords.get(sink_key)
@@ -318,7 +420,10 @@ def _keyword_value(call: ast.Call, name: str) -> ast.AST | None:
 
 def _symbol_term(node: ast.AST) -> ResourceIdentityTerm | None:
     if isinstance(node, ast.Constant) and isinstance(node.value, (str, int, bool)):
-        return ResourceIdentityTerm.literal(str(node.value))
+        rendered = str(node.value)
+        if not rendered.strip():
+            return None
+        return ResourceIdentityTerm.literal(rendered)
     if isinstance(node, (ast.Name, ast.Attribute, ast.Subscript)):
         return ResourceIdentityTerm.symbol(ast.unparse(node))
     return None

@@ -54,11 +54,59 @@ It declares:
 - resource identity and scope argument semantics;
 - source-derived contract bindings;
 - explicit scope-assertion helper semantics;
-- dependency guards and the effects they authorize;
+- parameter dependency guards and the effects they authorize;
+- direct route-decorator dependencies for bounded static capability mediation;
+- static sink capability/resource identities;
 - resource-binding projection/relation semantics;
 - bounded source file and byte limits.
 
 OVK does not infer these semantics heuristically from naming conventions.
+
+### Route-level candidate mediation
+
+The supported route-level syntax subset is intentionally narrow. A profile may
+declare a protected sink as acting on a static endpoint/capability resource and
+associate a direct FastAPI route dependency with that same static resource and
+effect.
+
+For example:
+
+    @router.post("", dependencies=[Depends(require_auth)])
+    async def endpoint(request):
+        ...
+        await dispatch(...)
+
+FastAPI evaluates the direct route dependency before entering the handler, so
+its presence is source-grounded evidence of handler-entry mediation. That fact
+does **not** establish that `require_auth` is an effective authorization
+decision. A dependency may return normally in an unauthenticated configuration,
+delegate to helpers with unresolved semantics, or rely on startup invariants
+outside the handler.
+
+OVK therefore records the dependency as a candidate guard with:
+
+    effectiveness = unproved
+
+Protected Effect Integrity carries a separate `guard_effectiveness` proof
+obligation. Source coverage can be complete when the route-dependency syntax,
+static resource, effect, and entrypoint dominance are all represented, while the
+security claim remains UNKNOWN until source-derived semantics establish the
+dependency's fail-closed authorization behavior.
+
+This separation is deliberate: extraction coverage measures representational
+completeness; guard effectiveness measures proof discharge. An unresolved proof
+must not be disguised as missing source coverage.
+
+The extractor does not generalize the syntax rule to dependency factories,
+dynamic dependency collections, or request-derived resource authorization.
+Static sink configuration is mutually exclusive with dynamic sink identity,
+scope, source-contract, and resource-binding declarations.
+
+Repository-wide coverage may remain partial because of unsupported code outside
+the relevant claim. Protected Effect evaluation, sealed evidence, and product
+qualification use effect-local coverage only when every relevant semantic path
+carries explicit local coverage metadata; otherwise they fall back to global
+Assurance IR coverage.
 
 ## Exact source acquisition
 

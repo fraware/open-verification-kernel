@@ -46,11 +46,23 @@ cost. The metric intentionally captures that burden.
 
 ### Semantic coverage
 
+Qualification scores semantic coverage at the same claim boundary used by
+Protected Effect evaluation and sealed evidence:
+
     semantic_coverage_rate
-      = cases with complete head source-to-Assurance-IR coverage
+      = cases whose represented head Protected Effects all have complete
+        effective coverage
         / all cases
 
-Unsupported semantics are not removed from the denominator.
+Effect-local coverage is authoritative only when every semantic path relevant
+to that Protected Effect carries explicit local coverage metadata. Otherwise
+evaluation, evidence, and qualification all fall back to repository-wide
+Assurance IR coverage.
+
+This distinction matters for source files that contain unsupported semantics
+outside the protected effect's path. Repository-wide coverage remains available
+as a diagnostic and is never rewritten to complete. Unsupported qualification
+cases remain in the denominator.
 
 ### Verification work
 
@@ -88,6 +100,21 @@ Every case is labeled as exactly one of:
 - `independent_external`
 
 Only the last category contributes to production-gate eligibility.
+
+External replay additionally carries a contamination status:
+
+- `public_development_case`
+- `held_out_independent`
+
+The admissible pairings are enforced:
+
+- `public_upstream_reduction + public_development_case`
+- `independent_external + held_out_independent`
+
+A public case that influences implementation cannot later be relabeled as
+independent evidence. Failed held-out attempts are preserved as evaluation
+history; subsequent reruns after implementation changes are development
+evidence.
 
 The committed v1 suite contains internal production-shaped cases, adversarial
 synthetic cases, and the public PraisonAI upstream reduction. It contains zero
