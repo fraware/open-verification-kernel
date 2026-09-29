@@ -3,12 +3,12 @@
 Bypass is modeled as an authorization mechanism, not an exemption from
 Protected Effect Integrity. Client/input-controlled bypasses that skip
 ordinary guards FAIL. Source-proved server-authority bypasses may authorize a
-path. Unresolved writer provenance is UNKNOWN ΓÇö never PASS.
+path. Unresolved writer provenance is UNKNOWN — never PASS.
 
 Closed-world write accounting extends across repository-local modules in the
 same FastAPI compilation unit when callers provide a multi-file unit. Writers
 in statically resolvable unit-local imports are accounted. Unresolvable or
-dynamic imports make the closed-world condition incomplete ΓÇö authorized PASS
+dynamic imports make the closed-world condition incomplete — authorized PASS
 is refused (Unknown > false PASS). Absence of a discovered writer is never
 positive proof of trust.
 """
@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Mapping
 
 from ovk.compilers.authorization.value_origin import (
     AliasState,
@@ -41,6 +41,16 @@ BypassAuthorityStatus = Literal[
 
 
 @dataclass(frozen=True)
+class ClosedWorldCondition:
+    """Explicit closed-world accounting status for one analysis unit."""
+
+    complete: bool
+    accounted_paths: tuple[str, ...]
+    unresolvable_imports: tuple[str, ...]
+    reason: str
+
+
+@dataclass(frozen=True)
 class BypassAuthorityFinding:
     """Closed-world finding for one request.state field used as a bypass."""
 
@@ -51,6 +61,7 @@ class BypassAuthorityFinding:
     write_count: int
     origin_kinds: tuple[str, ...]
     evidence_ids: tuple[str, ...]
+    closed_world: ClosedWorldCondition | None = None
 
 
 @dataclass(frozen=True)
@@ -450,44 +461,168 @@ def _collect_state_reads(tree: ast.AST) -> tuple[tuple[str, str], ...]:
     return tuple(unique)
 
 
-def analyze_bypass_authority(
-    source: str,
+def _normalize_unit_path(path: str) -> str:
+    return path.replace("\\", "/")
+
+
+def _module_path_in_unit(
+    module: str,
     *,
-    path: str = "<module>",
-    function_name: str | None = None,
-    bypass_fields: frozenset[str] | None = None,
+    available_paths: set[str],
+) -> str | None:
+    """Resolve an absolute module name to a unique path in the unit, else None."""
+
+    stem = module.replace(".", "/")
+    suffixes = (f"{stem}.py", f"{stem}/__init__.py")
+    candidates = sorted(
+        path
+        for path in available_paths
+        if any(
+            path == suffix or path.endswith("/" + suffix)
+            for suffix in suffixes
+        )
+    )
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _unit_package_roots(available_paths: set[str]) -> frozenset[str]:
+    """Top-level package/module names present in the compilation unit."""
+
+    roots: set[str] = set()
+    for path in available_paths:
+        parts = path.split("/")
+        if not parts:
+            continue
+        if parts[0].endswith(".py"):
+            roots.add(parts[0][:-3])
+        else:
+            roots.add(parts[0])
+    return frozenset(roots)
+
+
+def _import_module_name(
+    node: ast.ImportFrom,
+    *,
+    importer_path: str,
+) -> str | None:
+    """Resolve ImportFrom to an absolute module name within the unit, if possible."""
+
+    if node.level and node.level > 0:
+        # Relative import: resolve against importer package.
+        importer = _normalize_unit_path(importer_path)
+        if importer.endswith(".py"):
+            importer = importer[: -len(".py")]
+        parts = importer.split("/")
+        if parts and parts[-1] == "__init__":
+            parts = parts[:-1]
+        # Go up ``level`` packages from the containing package.
+        package_parts = parts[:-1] if parts else []
+        if node.level - 1 > len(package_parts):
+            return None
+        if node.level > 1:
+            package_parts = package_parts[: -(node.level - 1)]
+        if node.module:
+            package_parts = list(package_parts) + node.module.split(".")
+        return ".".join(package_parts) if package_parts else None
+    return node.module
+
+
+def _evaluate_closed_world(
+    files: Mapping[str, str],
+) -> ClosedWorldCondition:
+    """Establish whether the unit's import graph is closed and resolvable.
+
+    Repository-local imports whose top-level package is present in the unit
+    must resolve to a unit path. Unresolvable local imports, star imports, and
+    dynamic import forms make the closed-world condition incomplete — never an
+    authorized PASS. Third-party / stdlib imports (top-level not in the unit)
+    are outside this closed world and do not, by themselves, complete or break
+    it; absence of writers outside the unit is still not positive proof.
+    """
+
+    available = {_normalize_unit_path(path) for path in files}
+    roots = _unit_package_roots(available)
+    unresolvable: list[str] = []
+    accounted = tuple(sorted(available))
+
+    for path, source in sorted(files.items()):
+        norm = _normalize_unit_path(path)
+        try:
+            tree = ast.parse(source, filename=path)
+        except SyntaxError:
+            unresolvable.append(f"{norm}:syntax_error")
+            continue
+        for node in tree.body:
+            if isinstance(node, ast.ImportFrom):
+                if any(alias.name == "*" for alias in node.names):
+                    unresolvable.append(f"{norm}:star_import")
+                    continue
+                module_name = _import_module_name(node, importer_path=norm)
+                if module_name is None:
+                    unresolvable.append(f"{norm}:unresolved_relative_import")
+                    continue
+                top = module_name.split(".", 1)[0]
+                if top not in roots:
+                    # External to the compilation unit — out of closed-world
+                    # writer accounting (explicitly not positive proof).
+                    continue
+                resolved = _module_path_in_unit(
+                    module_name, available_paths=available
+                )
+                if resolved is None:
+                    unresolvable.append(
+                        f"{norm}:unresolvable_local_import:{module_name}"
+                    )
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    top = alias.name.split(".", 1)[0]
+                    if top not in roots:
+                        continue
+                    resolved = _module_path_in_unit(
+                        alias.name, available_paths=available
+                    )
+                    if resolved is None:
+                        unresolvable.append(
+                            f"{norm}:unresolvable_local_import:{alias.name}"
+                        )
+
+        # Dynamic imports anywhere in the module (including nested function
+        # bodies) make the closed world incomplete — Unknown > false PASS.
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if isinstance(func, ast.Name) and func.id in {
+                "__import__",
+                "import_module",
+            }:
+                unresolvable.append(f"{norm}:dynamic_import")
+                break
+            if isinstance(func, ast.Attribute) and func.attr == "import_module":
+                unresolvable.append(f"{norm}:dynamic_import")
+                break
+
+    complete = not unresolvable
+    reason = (
+        "closed_world_complete_over_unit"
+        if complete
+        else "closed_world_incomplete_unresolvable_imports"
+    )
+    return ClosedWorldCondition(
+        complete=complete,
+        accounted_paths=accounted,
+        unresolvable_imports=tuple(sorted(set(unresolvable))),
+        reason=reason,
+    )
+
+
+def _findings_for_writes_and_reads(
+    *,
+    writes: tuple[StateAttributeWrite, ...],
+    reads: tuple[tuple[str, str], ...],
+    bypass_fields: frozenset[str] | None,
+    closed_world: ClosedWorldCondition,
 ) -> tuple[BypassAuthorityFinding, ...]:
-    """Analyze closed-world bypass authority for a single source unit."""
-
-    tree = ast.parse(source)
-    all_functions = [
-        node
-        for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    ]
-    unit_param_names = frozenset(
-        arg.arg
-        for fn in all_functions
-        for arg in list(fn.args.posonlyargs) + list(fn.args.args)
-        if arg.arg not in {"self", "cls"}
-    )
-    functions = list(all_functions)
-    if function_name is not None:
-        functions = [node for node in functions if node.name == function_name]
-    if not functions:
-        handler = None
-    else:
-        handler = functions[0]
-
-    origins = (
-        extract_handler_value_origins(handler, path=path)
-        if handler is not None
-        else ()
-    )
-    writes = _collect_state_writes(
-        tree, path=path, handler_param_names=unit_param_names
-    )
-    reads = _collect_state_reads(tree)
     fields = bypass_fields or frozenset(field for field, _ in reads)
     findings: list[BypassAuthorityFinding] = []
 
@@ -500,6 +635,7 @@ def analyze_bypass_authority(
             if item.field_name in {"__wildcard__", "__dynamic__"}
         ]
         dynamic = [item for item in field_writes if item.dynamic] + wildcard
+
         all_origins = tuple(
             sorted({item.origin.origin_kind for item in field_writes})
         )
@@ -510,92 +646,191 @@ def analyze_bypass_authority(
             field_reads[0] if field_reads else f"request.state.{field}"
         )
 
-        if dynamic:
+        def _emit(
+            status: BypassAuthorityStatus,
+            reason: str,
+            *,
+            write_count: int,
+            origin_kinds: tuple[str, ...] = (),
+            ids: tuple[str, ...] = (),
+        ) -> None:
             findings.append(
                 BypassAuthorityFinding(
                     field_name=field,
-                    status="unknown",
-                    reason="dynamic_or_wildcard_state_mutation",
+                    status=status,
+                    reason=reason,
                     read_expression=read_expression,
-                    write_count=len(field_writes) + len(wildcard),
-                    origin_kinds=all_origins,
-                    evidence_ids=evidence_ids,
+                    write_count=write_count,
+                    origin_kinds=origin_kinds,
+                    evidence_ids=ids,
+                    closed_world=closed_world,
                 )
+            )
+
+        if dynamic:
+            _emit(
+                "unknown",
+                "dynamic_or_wildcard_state_mutation",
+                write_count=len(field_writes) + len(wildcard),
+                origin_kinds=all_origins,
+                ids=evidence_ids,
             )
             continue
 
         if not field_writes:
-            findings.append(
-                BypassAuthorityFinding(
-                    field_name=field,
-                    status="unknown",
-                    reason="unresolved_writer_provenance",
-                    read_expression=read_expression,
-                    write_count=0,
-                    origin_kinds=(),
-                    evidence_ids=(),
-                )
+            # Absence of discovered writers is not positive proof.
+            _emit(
+                "unknown",
+                "unresolved_writer_provenance",
+                write_count=0,
             )
             continue
 
         kinds = {item.origin.origin_kind for item in field_writes}
         if "externally_bound_http_value" in kinds:
-            findings.append(
-                BypassAuthorityFinding(
-                    field_name=field,
-                    status="violated",
-                    reason="client_controlled_bypass_write",
-                    read_expression=read_expression,
-                    write_count=len(field_writes),
-                    origin_kinds=all_origins,
-                    evidence_ids=evidence_ids,
-                )
+            # Definite client control — still violated even if closed-world
+            # is incomplete (Unknown > false PASS, but FAIL is sound).
+            _emit(
+                "violated",
+                "client_controlled_bypass_write",
+                write_count=len(field_writes),
+                origin_kinds=all_origins,
+                ids=evidence_ids,
             )
             continue
 
         if "unknown_origin" in kinds:
-            findings.append(
-                BypassAuthorityFinding(
-                    field_name=field,
-                    status="unknown",
-                    reason="unresolved_write_origin",
-                    read_expression=read_expression,
-                    write_count=len(field_writes),
-                    origin_kinds=all_origins,
-                    evidence_ids=evidence_ids,
-                )
+            _emit(
+                "unknown",
+                "unresolved_write_origin",
+                write_count=len(field_writes),
+                origin_kinds=all_origins,
+                ids=evidence_ids,
             )
             continue
 
         if kinds <= {"server_configuration", "literal_constant"}:
-            findings.append(
-                BypassAuthorityFinding(
-                    field_name=field,
-                    status="authorized",
-                    reason="source_proved_server_authority_write",
-                    read_expression=read_expression,
+            if not closed_world.complete:
+                # Cannot authorize when local import graph is incomplete —
+                # missing modules may contain client writers.
+                _emit(
+                    "unknown",
+                    "closed_world_incomplete",
                     write_count=len(field_writes),
                     origin_kinds=all_origins,
-                    evidence_ids=evidence_ids,
+                    ids=evidence_ids,
                 )
+                continue
+            _emit(
+                "authorized",
+                "source_proved_server_authority_write",
+                write_count=len(field_writes),
+                origin_kinds=all_origins,
+                ids=evidence_ids,
             )
             continue
 
-        findings.append(
-            BypassAuthorityFinding(
-                field_name=field,
-                status="unknown",
-                reason="unsupported_write_origin_mix",
-                read_expression=read_expression,
-                write_count=len(field_writes),
-                origin_kinds=all_origins,
-                evidence_ids=evidence_ids,
+        _emit(
+            "unknown",
+            "unsupported_write_origin_mix",
+            write_count=len(field_writes),
+            origin_kinds=all_origins,
+            ids=evidence_ids,
+        )
+
+    return tuple(findings)
+
+
+def analyze_bypass_authority_unit(
+    files: Mapping[str, str],
+    *,
+    entry_path: str,
+    function_name: str | None = None,
+    bypass_fields: frozenset[str] | None = None,
+) -> tuple[BypassAuthorityFinding, ...]:
+    """Closed-world bypass analysis over a multi-file compilation unit.
+
+    Writers in every unit file are accounted. The closed-world condition is
+    complete only when repository-local imports resolve inside the unit.
+    ``entry_path`` selects where bypass reads are observed.
+    """
+
+    if not files:
+        raise ValueError("compilation unit must contain at least one file")
+    normalized = {
+        _normalize_unit_path(path): source for path, source in files.items()
+    }
+    entry = _normalize_unit_path(entry_path)
+    if entry not in normalized:
+        raise ValueError(f"entry_path {entry_path!r} not in compilation unit")
+
+    closed_world = _evaluate_closed_world(normalized)
+
+    unit_param_names: set[str] = set()
+    for path, source in sorted(normalized.items()):
+        tree = ast.parse(source, filename=path)
+        for fn in tree.body:
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for arg in list(fn.args.posonlyargs) + list(fn.args.args):
+                if arg.arg not in {"self", "cls"}:
+                    unit_param_names.add(arg.arg)
+
+    param_names = frozenset(unit_param_names)
+    all_writes: list[StateAttributeWrite] = []
+    for path, source in sorted(normalized.items()):
+        tree = ast.parse(source, filename=path)
+        all_writes.extend(
+            _collect_state_writes(
+                tree,
+                path=path,
+                handler_param_names=param_names,
             )
         )
 
-    _ = origins
-    return tuple(findings)
+    entry_tree = ast.parse(normalized[entry], filename=entry)
+    entry_functions = [
+        node
+        for node in entry_tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    if function_name is not None:
+        entry_functions = [
+            node for node in entry_functions if node.name == function_name
+        ]
+    handler = entry_functions[0] if entry_functions else None
+    reads = _collect_state_reads(handler if handler is not None else entry_tree)
+    # Keep extract call for audit packaging symmetry with single-file path.
+    if handler is not None:
+        extract_handler_value_origins(handler, path=entry)
 
+    return _findings_for_writes_and_reads(
+        writes=tuple(all_writes),
+        reads=reads,
+        bypass_fields=bypass_fields,
+        closed_world=closed_world,
+    )
+
+
+def analyze_bypass_authority(
+    source: str,
+    *,
+    path: str = "<module>",
+    function_name: str | None = None,
+    bypass_fields: frozenset[str] | None = None,
+) -> tuple[BypassAuthorityFinding, ...]:
+    """Analyze closed-world bypass authority for a single source unit.
+
+    Prefer :func:`analyze_bypass_authority_unit` when the FastAPI compilation
+    unit spans multiple repository-local modules.
+    """
+
+    return analyze_bypass_authority_unit(
+        {path: source},
+        entry_path=path,
+        function_name=function_name,
+        bypass_fields=bypass_fields,
+    )
 
 
 def bypass_authority_digest(findings: tuple[BypassAuthorityFinding, ...]) -> str:
@@ -609,8 +844,19 @@ def bypass_authority_digest(findings: tuple[BypassAuthorityFinding, ...]) -> str
                 "write_count": item.write_count,
                 "origin_kinds": list(item.origin_kinds),
                 "evidence_ids": list(item.evidence_ids),
+                "closed_world": (
+                    {
+                        "complete": item.closed_world.complete,
+                        "accounted_paths": list(item.closed_world.accounted_paths),
+                        "unresolvable_imports": list(
+                            item.closed_world.unresolvable_imports
+                        ),
+                        "reason": item.closed_world.reason,
+                    }
+                    if item.closed_world is not None
+                    else None
+                ),
             }
             for item in findings
         ]
     )
-
