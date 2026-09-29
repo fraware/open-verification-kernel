@@ -140,7 +140,7 @@ def handler(request):
 
 
 def test_absence_of_external_write_is_not_trusted() -> None:
-    """No discovered writer must remain UNKNOWN ΓÇö never an authorized PASS."""
+    """No discovered writer must remain UNKNOWN — never an authorized PASS."""
 
     findings = analyze_bypass_authority(
         """
@@ -153,6 +153,94 @@ def handler(request):
     assert findings[0].status == "unknown"
     assert findings[0].write_count == 0
     assert findings[0].reason == "unresolved_writer_provenance"
+
+
+def test_cross_file_trusted_write_is_authorized() -> None:
+    from ovk.compilers.authorization.bypass_authority import (
+        analyze_bypass_authority_unit,
+    )
+
+    findings = analyze_bypass_authority_unit(
+        {
+            "app/middleware.py": """
+SETTINGS_ALLOW = True
+
+def attach(request):
+    request.state.bypass_filter = SETTINGS_ALLOW
+""".strip(),
+            "app/handler.py": """
+from app.middleware import attach
+
+def handler(request):
+    if request.state.bypass_filter:
+        return sink()
+    require_access()
+    return sink()
+""".strip(),
+        },
+        entry_path="app/handler.py",
+        function_name="handler",
+        bypass_fields=frozenset({"bypass_filter"}),
+    )
+    assert findings[0].status == "authorized"
+    assert findings[0].closed_world is not None
+    assert findings[0].closed_world.complete is True
+    assert findings[0].write_count >= 1
+
+
+def test_cross_file_client_write_is_violated() -> None:
+    from ovk.compilers.authorization.bypass_authority import (
+        analyze_bypass_authority_unit,
+    )
+
+    findings = analyze_bypass_authority_unit(
+        {
+            "app/middleware.py": """
+def attach(request, bypass_filter: bool = False):
+    request.state.bypass_filter = bypass_filter
+""".strip(),
+            "app/handler.py": """
+from app.middleware import attach
+
+def handler(request):
+    if request.state.bypass_filter:
+        return sink()
+""".strip(),
+        },
+        entry_path="app/handler.py",
+        bypass_fields=frozenset({"bypass_filter"}),
+    )
+    assert findings[0].status == "violated"
+    assert findings[0].reason == "client_controlled_bypass_write"
+
+
+def test_unresolvable_local_import_refuses_authorized() -> None:
+    from ovk.compilers.authorization.bypass_authority import (
+        analyze_bypass_authority_unit,
+    )
+
+    findings = analyze_bypass_authority_unit(
+        {
+            "app/handler.py": """
+from app.missing_middleware import attach
+
+SETTINGS_ALLOW = True
+
+def handler(request):
+    request.state.bypass_filter = SETTINGS_ALLOW
+    if request.state.bypass_filter:
+        return sink()
+""".strip(),
+        },
+        entry_path="app/handler.py",
+        bypass_fields=frozenset({"bypass_filter"}),
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason == "closed_world_incomplete"
+    assert findings[0].closed_world is not None
+    assert findings[0].closed_world.complete is False
+    assert findings[0].closed_world.unresolvable_imports
+
 
 def test_nested_client_overwrite_is_not_authorized() -> None:
     findings = analyze_bypass_authority(
@@ -209,3 +297,58 @@ def handler(request):
     assert findings[0].status == "violated"
     assert findings[0].write_count >= 2
 
+
+def test_in_function_dynamic_import_refuses_authorized() -> None:
+    from ovk.compilers.authorization.bypass_authority import (
+        analyze_bypass_authority_unit,
+    )
+
+    findings = analyze_bypass_authority_unit(
+        {
+            "app/handler.py": """
+SETTINGS_ALLOW = True
+
+def handler(request):
+    __import__("secret_mod")
+    request.state.bypass_filter = SETTINGS_ALLOW
+    return request.state.bypass_filter
+""".strip(),
+        },
+        entry_path="app/handler.py",
+        bypass_fields=frozenset({"bypass_filter"}),
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason == "closed_world_incomplete"
+    assert findings[0].closed_world is not None
+    assert findings[0].closed_world.complete is False
+
+
+def test_star_import_refuses_authorized() -> None:
+    from ovk.compilers.authorization.bypass_authority import (
+        analyze_bypass_authority_unit,
+    )
+
+    findings = analyze_bypass_authority_unit(
+        {
+            "app/middleware.py": """
+SETTINGS_ALLOW = True
+
+def attach(request):
+    request.state.bypass_filter = SETTINGS_ALLOW
+""".strip(),
+            "app/handler.py": """
+from app.middleware import *
+
+def handler(request):
+    return request.state.bypass_filter
+""".strip(),
+        },
+        entry_path="app/handler.py",
+        bypass_fields=frozenset({"bypass_filter"}),
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason == "closed_world_incomplete"
+    assert findings[0].closed_world is not None
+    assert any(
+        "star_import" in item for item in findings[0].closed_world.unresolvable_imports
+    )
