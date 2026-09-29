@@ -558,3 +558,108 @@ class DocumentService:
         evidence = result.resource_binding_evidence[0]
         assert evidence.counterexample is not None
         assert evidence.counterexample["acted_attribute"] == "project_id"
+
+
+
+COMPOSED_SCOPE_PROFILE = FastApiDependencyEffectProfile(
+    sink_effects={"svc.get": "workspace.agent.read"},
+    sink_identity_args={"svc.get": 0},
+    sink_contracts={"svc.get": "AgentService.get"},
+    sink_contract_scope_attributes={"svc.get": "workspace_id"},
+    dependency_guard_resources={"require_workspace_member": "workspace_id"},
+    dependency_guard_effects={
+        "require_workspace_member": ("workspace.agent.read",),
+    },
+    principal_parameter="user",
+)
+
+
+def test_route_consumes_service_contract_composed_from_repository_contract() -> None:
+    route_source = """
+from fastapi import Depends, FastAPI
+app = FastAPI()
+
+@app.get("/workspaces/{workspace_id}/agents/{agent_id}")
+async def get_agent(
+    workspace_id: str,
+    agent_id: str,
+    user = Depends(require_workspace_member),
+):
+    svc = AgentService()
+    agent = await svc.get(agent_id, workspace_id=workspace_id)
+    return agent
+""".strip()
+    service_source = """
+class AgentRepository:
+    async def get(self, agent_id: str, *, workspace_id: str | None = None):
+        agent = await load_agent(agent_id)
+        if workspace_id is not None and agent.workspace_id != workspace_id:
+            return None
+        return agent
+
+class AgentService:
+    def __init__(self):
+        self._repo = AgentRepository()
+
+    async def get(self, agent_id: str, *, workspace_id: str | None = None):
+        return await self._repo.get(agent_id, workspace_id=workspace_id)
+""".strip()
+
+    ir = FastApiDependencyEffectExtractor().compile(
+        _interprocedural_materials(route_source, service_source),
+        COMPOSED_SCOPE_PROFILE,
+    )
+    result = evaluate_protected_effect_integrity(ir)[0]
+    by_name = {contract.qualified_name: contract for contract in ir.function_contracts}
+
+    assert ir.coverage.status == "complete"
+    assert "AgentRepository.get" in by_name
+    assert "AgentService.get" in by_name
+    acted = next(resource for resource in ir.resources if resource.symbol == "agent_id")
+    assert acted.scope_term is not None
+    assert acted.scope_term.value == "workspace_id"
+    assert result.status == "pass"
+
+
+def test_route_omitting_scope_still_refutes_composed_contract_binding() -> None:
+    route_source = """
+from fastapi import Depends, FastAPI
+app = FastAPI()
+
+@app.get("/workspaces/{workspace_id}/agents/{agent_id}")
+async def get_agent(
+    workspace_id: str,
+    agent_id: str,
+    user = Depends(require_workspace_member),
+):
+    svc = AgentService()
+    agent = await svc.get(agent_id)
+    return agent
+""".strip()
+    service_source = """
+class AgentRepository:
+    async def get(self, agent_id: str, *, workspace_id: str | None = None):
+        agent = await load_agent(agent_id)
+        if workspace_id is not None and agent.workspace_id != workspace_id:
+            return None
+        return agent
+
+class AgentService:
+    def __init__(self):
+        self._repo = AgentRepository()
+
+    async def get(self, agent_id: str, *, workspace_id: str | None = None):
+        return await self._repo.get(agent_id, workspace_id=workspace_id)
+""".strip()
+
+    ir = FastApiDependencyEffectExtractor().compile(
+        _interprocedural_materials(route_source, service_source),
+        COMPOSED_SCOPE_PROFILE,
+    )
+    result = evaluate_protected_effect_integrity(ir)[0]
+
+    assert ir.coverage.status == "complete"
+    acted = next(resource for resource in ir.resources if resource.symbol == "agent_id")
+    assert acted.scope_term is not None
+    assert acted.scope_term.value.startswith("$scope:")
+    assert result.status in {"fail", "unknown"}

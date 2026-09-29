@@ -322,8 +322,11 @@ def _typed_contract_projection(
             and predicate.right is not None
             and predicate.left.kind == "return_attribute"
             and predicate.left.name == return_attribute
-            and predicate.right.kind == "parameter"
-            and predicate.right.name is not None
+            and predicate.right.kind in {"parameter", "literal"}
+            and (
+                (predicate.right.kind == "parameter" and predicate.right.name is not None)
+                or (predicate.right.kind == "literal" and predicate.right.value is not None)
+            )
         ):
             matches.append(predicate)
     if len(matches) != 1:
@@ -370,7 +373,14 @@ def _instantiate_contract_attributes(
             continue
 
         attribute = predicate.left.name
+
+        if predicate.right.kind == "literal":
+            assert predicate.right.value is not None
+            terms[attribute] = ResourceIdentityTerm.literal(predicate.right.value)
+            continue
+
         parameter = predicate.right.name
+        assert parameter is not None
         argument = _actual_argument_for_parameter(
             call,
             parameter_name=parameter,
