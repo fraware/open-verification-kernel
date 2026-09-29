@@ -164,7 +164,7 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id=_EXTRACTOR_ID,
-        extractor_version="0.6.0",
+        extractor_version="0.7.0",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -266,6 +266,58 @@ def _has_direct_fastapi_import(
         )
         for statement in tree.body
     )
+
+
+def _has_unique_direct_import_binding(
+    tree: ast.Module,
+    *,
+    module: str,
+    name: str,
+) -> bool:
+    """Prove that one module-level name has only the expected import binding."""
+
+    canonical_bindings = 0
+    for statement in tree.body:
+        if isinstance(statement, ast.ImportFrom):
+            for alias in statement.names:
+                bound_name = alias.asname or alias.name
+                if bound_name != name:
+                    continue
+                if (
+                    statement.level == 0
+                    and statement.module == module
+                    and alias.name == name
+                    and alias.asname is None
+                ):
+                    canonical_bindings += 1
+                    continue
+                return False
+            continue
+
+        if isinstance(statement, ast.Import):
+            for alias in statement.names:
+                bound_name = alias.asname or alias.name.split(".", 1)[0]
+                if bound_name == name:
+                    return False
+            continue
+
+        if isinstance(
+            statement,
+            (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef),
+        ):
+            if statement.name == name:
+                return False
+            continue
+
+        if any(
+            isinstance(node, ast.Name)
+            and node.id == name
+            and isinstance(node.ctx, (ast.Store, ast.Del))
+            for node in ast.walk(statement)
+        ):
+            return False
+
+    return canonical_bindings == 1
 
 
 def _unique_constructor_symbols(
@@ -842,15 +894,113 @@ def _symbol_term(node: ast.AST) -> ResourceIdentityTerm | None:
     return None
 
 
+def _path_parameter_names(route_path: str) -> set[str]:
+    """Return exact whole-segment FastAPI path-parameter names.
+
+    Converter syntax such as path converters and mixed literal/parameter
+    segments are outside this bounded interpretation extractor.
+    """
+
+    names: set[str] = set()
+    for segment in route_path.split("/"):
+        if (
+            len(segment) >= 3
+            and segment.startswith("{")
+            and segment.endswith("}")
+        ):
+            name = segment[1:-1]
+            if name.isidentifier():
+                names.add(name)
+    return names
+
+
+def _path_parameter_interpretations(
+    *,
+    tree: ast.Module,
+    handler: ast.FunctionDef | ast.AsyncFunctionDef,
+    route_path: str,
+    router_symbol: str | None,
+) -> dict[str, ResourceIdentityTerm]:
+    """Infer source-grounded interpretation contracts for bounded path types.
+
+    v1 intentionally supports only an unaliased pydantic.NonNegativeInt
+    annotation on a parameter whose name occurs as an exact route-path
+    placeholder. Annotated metadata, Path customization, import aliases,
+    custom validators, and rebound names remain outside this theorem.
+
+    The decoder label records the FastAPI path-parameter boundary. It does not
+    assert equivalence with a separate TypeAdapter/parser call; that requires
+    independent source evidence.
+    """
+
+    if not _has_unique_direct_import_binding(
+        tree,
+        module="pydantic",
+        name="NonNegativeInt",
+    ):
+        return {}
+
+    route_owners: set[str] = set()
+    for constructor in ("FastAPI", "APIRouter"):
+        if _has_unique_direct_import_binding(
+            tree,
+            module="fastapi",
+            name=constructor,
+        ):
+            route_owners.update(
+                _unique_constructor_symbols(
+                    tree,
+                    constructor=constructor,
+                )
+            )
+    if router_symbol is None or router_symbol not in route_owners:
+        return {}
+
+    path_parameters = _path_parameter_names(route_path)
+    if not path_parameters:
+        return {}
+
+    interpreted: dict[str, ResourceIdentityTerm] = {}
+    arguments = (
+        list(handler.args.posonlyargs)
+        + list(handler.args.args)
+        + list(handler.args.kwonlyargs)
+    )
+    for argument in arguments:
+        if (
+            argument.arg not in path_parameters
+            or not isinstance(argument.annotation, ast.Name)
+            or argument.annotation.id != "NonNegativeInt"
+        ):
+            continue
+        interpreted[argument.arg] = ResourceIdentityTerm.interpreted_symbol(
+            argument.arg,
+            input_origin=f"request.path.{argument.arg}",
+            decoder="fastapi.path_parameter",
+            output_type="pydantic.NonNegativeInt",
+            constraints=("ge=0", "validation_mode=default"),
+        )
+    return interpreted
+
+
 def _expression_summary(
     path: str,
     node: ast.AST,
     *,
     non_null_parameters: set[str],
+    interpreted_parameters: Mapping[str, ResourceIdentityTerm] | None = None,
 ) -> ExpressionSummary:
+    term = _symbol_term(node)
+    if (
+        isinstance(node, ast.Name)
+        and interpreted_parameters is not None
+        and node.id in interpreted_parameters
+    ):
+        term = interpreted_parameters[node.id]
+
     return ExpressionSummary(
         rendered=ast.unparse(node),
-        term=_symbol_term(node),
+        term=term,
         provably_non_null=(
             (isinstance(node, ast.Constant) and node.value is not None)
             or (
@@ -873,6 +1023,7 @@ def _loader_resource_candidates(
     handler: ast.FunctionDef | ast.AsyncFunctionDef,
     *,
     non_null_parameters: set[str],
+    interpreted_parameters: Mapping[str, ResourceIdentityTerm] | None = None,
 ) -> dict[str, list[tuple[str, str | None, str, ExpressionSummary, int]]]:
     """Summarize top-level loaded-resource assignments by route key.
 
@@ -950,6 +1101,7 @@ def _loader_resource_candidates(
                     path,
                     resource_node,
                     non_null_parameters=non_null_parameters,
+                    interpreted_parameters=interpreted_parameters,
                 )
                 if resource_summary.term is None:
                     continue
@@ -970,11 +1122,13 @@ def _ownership_assertion_summaries(
     handler: ast.FunctionDef | ast.AsyncFunctionDef,
     *,
     non_null_parameters: set[str],
+    interpreted_parameters: Mapping[str, ResourceIdentityTerm] | None = None,
 ) -> tuple[OwnershipAssertionSummary, ...]:
     loaders = _loader_resource_candidates(
         path,
         handler,
         non_null_parameters=non_null_parameters,
+        interpreted_parameters=interpreted_parameters,
     )
     found: list[OwnershipAssertionSummary] = []
 
@@ -994,6 +1148,7 @@ def _ownership_assertion_summaries(
             path,
             principal_node,
             non_null_parameters=non_null_parameters,
+            interpreted_parameters=interpreted_parameters,
         )
         if principal.term is None:
             continue
@@ -1054,6 +1209,12 @@ def summarize_route_file(
         method, route_path, route_decorator, router_symbol = route
         aliases = _constructor_aliases(handler)
         non_null = _provably_non_null_parameters(handler)
+        interpreted_parameters = _path_parameter_interpretations(
+            tree=tree,
+            handler=handler,
+            route_path=route_path,
+            router_symbol=router_symbol,
+        )
 
         calls: list[CallSummary] = []
         for call in _body_calls(handler):
@@ -1068,6 +1229,7 @@ def summarize_route_file(
                             path,
                             keyword.value,
                             non_null_parameters=non_null,
+                            interpreted_parameters=interpreted_parameters,
                         ),
                     )
                 )
@@ -1085,6 +1247,7 @@ def summarize_route_file(
                             path,
                             argument,
                             non_null_parameters=non_null,
+                            interpreted_parameters=interpreted_parameters,
                         )
                         for argument in call.args
                     ),
@@ -1115,6 +1278,7 @@ def summarize_route_file(
                     path,
                     handler,
                     non_null_parameters=non_null,
+                    interpreted_parameters=interpreted_parameters,
                 ),
                 calls=tuple(calls),
                 origin=_origin(path, handler),
