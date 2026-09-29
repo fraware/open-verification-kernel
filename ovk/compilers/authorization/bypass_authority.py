@@ -102,6 +102,22 @@ def _collect_state_writes(
                         source_range=_origin(path, node).source_range,
                     )
                 )
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            field = _is_request_state_target(node.target)
+            if field is not None:
+                writes.append(
+                    StateAttributeWrite(
+                        field_name=field,
+                        value_expression=ast.unparse(node.value),
+                        origin=classify_expression_origin(
+                            node.value,
+                            path=path,
+                            handler_param_names=handler_param_names,
+                        ),
+                        dynamic=False,
+                        source_range=_origin(path, node).source_range,
+                    )
+                )
         elif isinstance(node, ast.AugAssign):
             field = _is_request_state_target(node.target)
             if field is not None:
@@ -119,7 +135,11 @@ def _collect_state_writes(
                     )
                 )
         elif isinstance(node, ast.Call):
-            # setattr(request.state, name, value) — dynamic unless name is literal.
+            # setattr(request.state, ...) / request.state.__setattr__(...) /
+            # object.__setattr__(request.state, ...) — always dynamic.
+            setattr_hit = False
+            name_node: ast.AST | None = None
+            value_node: ast.AST | None = None
             if (
                 isinstance(node.func, ast.Name)
                 and node.func.id == "setattr"
@@ -129,16 +149,39 @@ def _collect_state_writes(
                 and node.args[0].value.id == "request"
                 and node.args[0].attr == "state"
             ):
-                name_node = node.args[1]
-                value_node = node.args[2]
+                setattr_hit = True
+                name_node, value_node = node.args[1], node.args[2]
+            elif (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "__setattr__"
+                and isinstance(node.func.value, ast.Attribute)
+                and isinstance(node.func.value.value, ast.Name)
+                and node.func.value.value.id == "request"
+                and node.func.value.attr == "state"
+                and len(node.args) >= 2
+            ):
+                setattr_hit = True
+                name_node, value_node = node.args[0], node.args[1]
+            elif (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "__setattr__"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "object"
+                and len(node.args) >= 3
+                and isinstance(node.args[0], ast.Attribute)
+                and isinstance(node.args[0].value, ast.Name)
+                and node.args[0].value.id == "request"
+                and node.args[0].attr == "state"
+            ):
+                setattr_hit = True
+                name_node, value_node = node.args[1], node.args[2]
+            if setattr_hit and name_node is not None and value_node is not None:
                 if isinstance(name_node, ast.Constant) and isinstance(
                     name_node.value, str
                 ):
                     field = name_node.value
-                    dynamic = False
                 else:
                     field = "__dynamic__"
-                    dynamic = True
                 writes.append(
                     StateAttributeWrite(
                         field_name=field,
@@ -148,7 +191,7 @@ def _collect_state_writes(
                             path=path,
                             handler_param_names=handler_param_names,
                         ),
-                        dynamic=dynamic or True,  # setattr is always closed-world fragile
+                        dynamic=True,
                         source_range=_origin(path, node).source_range,
                     )
                 )

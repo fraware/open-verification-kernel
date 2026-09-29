@@ -153,3 +153,38 @@ def handler(request):
     assert findings[0].status == "unknown"
     assert findings[0].write_count == 0
     assert findings[0].reason == "unresolved_writer_provenance"
+
+def test_request_state_setattr_method_is_unknown() -> None:
+    findings = analyze_bypass_authority(
+        """
+SETTINGS_ALLOW = True
+
+def middleware(request, bypass_filter: bool = False):
+    request.state.bypass_filter = SETTINGS_ALLOW
+    request.state.__setattr__("bypass_filter", bypass_filter)
+
+def handler(request):
+    return request.state.bypass_filter
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason == "dynamic_or_wildcard_state_mutation"
+
+
+def test_annassign_client_overwrite_is_violated() -> None:
+    findings = analyze_bypass_authority(
+        """
+SETTINGS_ALLOW = True
+
+def middleware(request, bypass_filter: bool = False):
+    request.state.bypass_filter = SETTINGS_ALLOW
+    request.state.bypass_filter: bool = bypass_filter
+
+def handler(request):
+    return request.state.bypass_filter
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+    )
+    assert findings[0].status == "violated"
+    assert findings[0].write_count >= 2
