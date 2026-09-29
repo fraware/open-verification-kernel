@@ -49,10 +49,10 @@
     }
   },
   "timing_ms": {
-    "p50": 0.1798169999958077,
-    "p95": 22.790796000002445,
-    "max": 42.492447999997296
+    "p50": 0.1715650000022606,
+    "p95": 22.934956999996814,
+    "max": 41.42954000000287
   },
-  "benchmark_source_sha": "af6c70dabe0a1d4bc5dc9486f3ada554ba798018",
+  "benchmark_source_sha": "ae8632b1bd1f9d15cab799e61a62a161a587be5a",
   "provenance_note": "Cite benchmark_source_sha for FormalPR-Bench measurement identity. Cite verified_source_sha only when a complete required-workflow set was observed for that commit; do not treat a later [skip ci] badge commit as verified."
 }
