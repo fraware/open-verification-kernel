@@ -43,6 +43,7 @@ from ovk.core.assurance_ir import (
     ResourceReturnContract,
     SemanticOrigin,
     SemanticPath,
+    ValueOriginEvidence,
 )
 from ovk.core.bundle import content_digest
 from ovk.core.models import VerificationSubject
@@ -346,6 +347,7 @@ class FastApiFileSemanticFragment:
     effects: tuple[EffectRef, ...] = ()
     guards: tuple[AuthorizationGuard, ...] = ()
     guard_dominance_evidence: tuple[GuardDominanceEvidence, ...] = ()
+    value_origin_evidence: tuple[ValueOriginEvidence, ...] = ()
     protected_effects: tuple[ProtectedEffect, ...] = ()
     resource_bindings: tuple[ResourceBinding, ...] = ()
     contract_uses: tuple[ContractUse, ...] = ()
@@ -522,6 +524,7 @@ def bind_route_file_summary(
     effects: dict[str, EffectRef] = {}
     guards: dict[str, AuthorizationGuard] = {}
     dominance_evidence: dict[str, GuardDominanceEvidence] = {}
+    value_origins: dict[str, ValueOriginEvidence] = {}
     protected: dict[str, ProtectedEffect] = {}
     bindings: dict[str, ResourceBinding] = {}
     contract_uses: dict[str, ContractUse] = {}
@@ -547,6 +550,9 @@ def bind_route_file_summary(
                 f"{file_summary.path}:{handler.handler_name}:"
                 "control_flow_outside_profile"
             )
+
+        for origin_item in handler.value_origins:
+            value_origins[origin_item.evidence_id] = origin_item
 
         dependency_by_name = {
             item.dependency_name: item
@@ -1139,6 +1145,12 @@ def bind_route_file_summary(
                 key=lambda item: item.evidence_id,
             )
         ),
+        value_origin_evidence=tuple(
+            sorted(
+                value_origins.values(),
+                key=lambda item: item.evidence_id,
+            )
+        ),
         protected_effects=tuple(
             sorted(
                 protected.values(),
@@ -1259,6 +1271,7 @@ def assemble_fastapi_assurance_ir(
     effects: dict[str, EffectRef] = {}
     guards: dict[str, AuthorizationGuard] = {}
     dominance_evidence: dict[str, GuardDominanceEvidence] = {}
+    value_origins: dict[str, ValueOriginEvidence] = {}
     protected: dict[str, ProtectedEffect] = {}
     bindings: dict[str, ResourceBinding] = {}
     contract_uses: dict[str, ContractUse] = {}
@@ -1291,6 +1304,8 @@ def assemble_fastapi_assurance_ir(
             guards[item.guard_id] = item
         for item in fragment.guard_dominance_evidence:
             dominance_evidence[item.evidence_id] = item
+        for item in fragment.value_origin_evidence:
+            value_origins[item.evidence_id] = item
         for item in fragment.protected_effects:
             protected[item.protected_effect_id] = item
         for item in fragment.resource_bindings:
@@ -1318,7 +1333,7 @@ def assemble_fastapi_assurance_ir(
         ),
         extractor=AssuranceExtractorIdentity(
             extractor_id="assurance.fastapi.dependency_effects.ast_v1",
-            extractor_version="0.15.0",
+            extractor_version="0.17.0",
             source_profile_id="assurance.fastapi.dependency_effects.ast_v1",
         ),
         coverage=AssuranceCoverage(
@@ -1350,6 +1365,10 @@ def assemble_fastapi_assurance_ir(
         ),
         guard_dominance_evidence=sorted(
             dominance_evidence.values(),
+            key=lambda item: item.evidence_id,
+        ),
+        value_origin_evidence=sorted(
+            value_origins.values(),
             key=lambda item: item.evidence_id,
         ),
         protected_effects=sorted(

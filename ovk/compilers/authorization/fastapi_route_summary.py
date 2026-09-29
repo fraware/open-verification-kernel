@@ -25,14 +25,17 @@ from ovk.compilers.authorization.handler_control_flow import (
     build_handler_control_flow,
 )
 from ovk.compilers.authorization.material_loader import AuthMaterials
-from ovk.core.assurance_ir import SemanticOrigin
+from ovk.compilers.authorization.value_origin import (
+    extract_handler_value_origins,
+)
+from ovk.core.assurance_ir import SemanticOrigin, ValueOriginEvidence
 from ovk.core.bundle import content_digest
 from ovk.core.models import SourceRange
 from ovk.core.resource_identity import ResourceIdentityTerm
 
 
 _EXTRACTOR_ID = "assurance.fastapi.dependency_effects.ast_v1"
-_EXTRACTOR_VERSION = "0.14.0"
+_EXTRACTOR_VERSION = "0.16.0"
 _HTTP_METHODS = frozenset({"get", "post", "put", "patch", "delete", "options", "head"})
 _CONTROL_FLOW = (
     ast.For,
@@ -191,8 +194,10 @@ class RouteHandlerSummary:
     ]
     origin: SemanticOrigin
     # Bounded CFG attached to the source-summary unit for cache invalidation.
-    # Not part of AssuranceIR canonical identity until a later binding PR.
     control_flow: HandlerControlFlowSummary | None = None
+    # Value-origin evidence for handler params / simple aliases / request.state.
+    # Assembled into AssuranceIR when material; empty omits from digests.
+    value_origins: tuple[ValueOriginEvidence, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1741,6 +1746,7 @@ def summarize_route_file(
                 ),
                 origin=_origin(path, handler),
                 control_flow=build_handler_control_flow(handler, path=path),
+                value_origins=extract_handler_value_origins(handler, path=path),
             )
         )
 

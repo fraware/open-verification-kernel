@@ -58,13 +58,14 @@ from ovk.core.assurance_ir import (
     ContractTerm,
     FunctionContract,
     SemanticOrigin,
+    ValueOriginEvidence,
 )
 from ovk.core.bundle import content_digest
 from ovk.core.resource_identity import ResourceIdentityTerm
 
 
 SEMANTIC_SUMMARY_CACHE_SCHEMA = "ovk.python_semantic_summary_cache.v1"
-SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.14.0"
+SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.16.0"
 DEFAULT_SEMANTIC_SUMMARY_CACHE_DIR = Path(
     ".verification/cache/python-semantic-summaries"
 )
@@ -332,6 +333,9 @@ def _route_summary_payload(summary: RouteFileSummary) -> dict[str, Any]:
                     if handler.control_flow is None
                     else handler.control_flow.canonical_payload()
                 ),
+                "value_origins": [
+                    item.model_dump(mode="json") for item in handler.value_origins
+                ],
                 "origin": _origin_payload(handler.origin),
             }
             for handler in summary.handlers
@@ -447,6 +451,10 @@ def _route_summary_from_payload(payload: dict[str, Any]) -> RouteFileSummary:
                     control_flow_from_payload(handler["control_flow"])
                     if handler.get("control_flow") is not None
                     else None
+                ),
+                value_origins=tuple(
+                    ValueOriginEvidence.model_validate(item)
+                    for item in handler.get("value_origins") or []
                 ),
                 origin=SemanticOrigin.model_validate(handler["origin"]),
             )
