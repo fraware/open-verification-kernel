@@ -6,6 +6,9 @@ on:
     paths:
       - 'ovk/core/automatic_pr_assurance.py'
       - 'ovk/core/assurance_qualification.py'
+      - 'ovk/core/assurance_ir.py'
+      - 'ovk/core/resource_identity.py'
+      - 'ovk/adapters/z3/resource_binding.py'
       - 'ovk/core/guarantee_**'
       - 'ovk/core/protected_effect_**'
       - 'ovk/compilers/authorization/**'

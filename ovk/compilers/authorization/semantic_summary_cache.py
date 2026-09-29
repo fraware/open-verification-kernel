@@ -88,7 +88,7 @@ def _term_payload(term: ContractTerm | None) -> dict[str, Any] | None:
 def _resource_term_payload(
     term: ResourceIdentityTerm | None,
 ) -> dict[str, Any] | None:
-    return None if term is None else term.model_dump(mode="json")
+    return None if term is None else term.canonical_payload()
 
 
 def _contract_summary_payload(summary: ContractFileSummary) -> dict[str, Any]:
