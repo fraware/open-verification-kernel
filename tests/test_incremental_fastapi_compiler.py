@@ -398,3 +398,90 @@ def test_incremental_composition_and_fragment_reuse_share_dependency_closure() -
     assert third.stats.semantic_fragment_file_count == 1
     assert third.stats.rebound_file_count == 1
     assert third.stats.reused_fragment_count == 0
+
+def _route_guard_files(auth_source: str) -> dict[str, str]:
+    return {
+        "routes.py": """
+from fastapi import APIRouter, Depends
+router = APIRouter()
+
+@router.post("", dependencies=[Depends(require_auth)])
+async def endpoint():
+    await handle_jsonrpc_request({})
+""".strip(),
+        "security.py": auth_source.strip(),
+    }
+
+
+def _route_guard_materials(auth_source: str, *, revision: str) -> AuthMaterials:
+    files = _route_guard_files(auth_source)
+    return AuthMaterials(
+        base_files=dict(files),
+        head_files=files,
+        repo="example/route-guard-incremental",
+        base_revision="base",
+        head_revision=revision,
+    )
+
+
+def _route_guard_profile() -> FastApiDependencyEffectProfile:
+    return FastApiDependencyEffectProfile(
+        sink_effects={"handle_jsonrpc_request": "mcp.jsonrpc.dispatch"},
+        sink_static_resources={
+            "handle_jsonrpc_request": "mcp_transport"
+        },
+        route_dependency_guard_resources={
+            "require_auth": "mcp_transport"
+        },
+        route_dependency_guard_effects={
+            "require_auth": ("mcp.jsonrpc.dispatch",)
+        },
+        principal_parameter="$authenticated_caller",
+    )
+
+
+def test_dependency_body_change_invalidates_unchanged_route_fragment() -> None:
+    secure = """
+from fastapi import Depends
+
+async def require_auth(credentials = Depends(_bearer_scheme)):
+    if _active_token is None:
+        raise HTTPException(status_code=503)
+    if not credentials or credentials.credentials != _active_token:
+        raise HTTPException(status_code=401)
+"""
+    fail_open = """
+from fastapi import Depends
+
+async def require_auth(credentials = Depends(_bearer_scheme)):
+    if _active_token is None:
+        return
+    if not credentials or credentials.credentials != _active_token:
+        raise HTTPException(status_code=401)
+"""
+
+    profile = _route_guard_profile()
+    first_materials = _route_guard_materials(
+        secure,
+        revision="secure-head",
+    )
+    first = _incremental(first_materials, profile)
+    assert first.ir.guards[0].effectiveness == "established"
+
+    second_materials = _route_guard_materials(
+        fail_open,
+        revision="fail-open-head",
+    )
+    second = _incremental(
+        second_materials,
+        profile,
+        previous_state=first.state,
+    )
+    full = _full(second_materials, profile)
+
+    assert second.ir.canonical_payload() == full.canonical_payload()
+    assert second.ir.guards[0].effectiveness == "unproved"
+    assert second.stats.semantic_fragment_file_count == 1
+    assert second.stats.rebound_file_count == 1
+    assert second.stats.reused_fragment_count == 0
+

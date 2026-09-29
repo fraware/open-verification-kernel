@@ -26,6 +26,7 @@ from ovk.core.assurance_ir import (
     ContractUse,
     EffectRef,
     FunctionContract,
+    GuardEffectivenessEvidence,
     PrincipalRef,
     ProtectedEffect,
     ResourceBinding,
@@ -324,6 +325,9 @@ class FastApiFileSemanticFragment:
     source_digest: str
     profile_digest: str
     contract_dependencies: dict[str, str | None] = field(default_factory=dict)
+    guard_effectiveness_dependencies: dict[str, str | None] = field(
+        default_factory=dict
+    )
     unsupported_constructs: tuple[str, ...] = ()
     principals: tuple[PrincipalRef, ...] = ()
     resources: tuple[ResourceRef, ...] = ()
@@ -415,9 +419,11 @@ def bind_route_file_summary(
     *,
     profile: Any,
     contracts_by_name: Mapping[str, FunctionContract],
+    guard_effectiveness_by_name: Mapping[str, GuardEffectivenessEvidence] | None = None,
 ) -> FastApiFileSemanticFragment:
     """Bind one file summary against current profile and function contracts."""
 
+    guard_effectiveness_by_name = guard_effectiveness_by_name or {}
     principals: dict[str, PrincipalRef] = {}
     resources: dict[str, ResourceRef] = {}
     effects: dict[str, EffectRef] = {}
@@ -428,6 +434,7 @@ def bind_route_file_summary(
     paths: dict[str, SemanticPath] = {}
     unsupported: list[str] = []
     dependencies: dict[str, str | None] = {}
+    guard_effectiveness_dependencies: dict[str, str | None] = {}
 
     for handler in file_summary.handlers:
         if handler.has_control_flow:
@@ -863,12 +870,29 @@ def bind_route_file_summary(
                         f"{effect_name}:{route_resource_symbol}"
                     ),
                 )
+                effectiveness_evidence = guard_effectiveness_by_name.get(
+                    route_guard_key
+                )
+                guard_effectiveness_dependencies[route_guard_key] = (
+                    effectiveness_evidence.evidence_id
+                    if effectiveness_evidence is not None
+                    else None
+                )
                 guards[guard_id] = AuthorizationGuard(
                     guard_id=guard_id,
                     principal_id=principal_id,
                     effect_id=effect_id,
                     resource_id=guard_resource_id,
-                    effectiveness="unproved",
+                    effectiveness=(
+                        "established"
+                        if effectiveness_evidence is not None
+                        else "unproved"
+                    ),
+                    effectiveness_evidence_ids=(
+                        [effectiveness_evidence.evidence_id]
+                        if effectiveness_evidence is not None
+                        else []
+                    ),
                     origin=route_dependency.origin,
                 )
                 guard_ids.append(guard_id)
@@ -926,6 +950,9 @@ def bind_route_file_summary(
         source_digest=file_summary.source_digest,
         profile_digest=profile_semantic_digest(profile),
         contract_dependencies=dict(sorted(dependencies.items())),
+        guard_effectiveness_dependencies=dict(
+            sorted(guard_effectiveness_dependencies.items())
+        ),
         unsupported_constructs=tuple(sorted(set(unsupported))),
         principals=tuple(
             sorted(principals.values(), key=lambda item: item.principal_id)
@@ -962,9 +989,11 @@ def fragment_dependencies_match(
     *,
     profile: Any,
     contracts_by_name: Mapping[str, FunctionContract],
+    guard_effectiveness_by_name: Mapping[str, GuardEffectivenessEvidence] | None = None,
 ) -> bool:
     """Return whether profile and consumed contract versions are unchanged."""
 
+    guard_effectiveness_by_name = guard_effectiveness_by_name or {}
     if fragment.profile_digest != profile_semantic_digest(profile):
         return False
     current = {
@@ -975,7 +1004,20 @@ def fragment_dependencies_match(
         )
         for name in fragment.contract_dependencies
     }
-    return current == fragment.contract_dependencies
+    if current != fragment.contract_dependencies:
+        return False
+    current_guard_effectiveness = {
+        name: (
+            guard_effectiveness_by_name[name].evidence_id
+            if name in guard_effectiveness_by_name
+            else None
+        )
+        for name in fragment.guard_effectiveness_dependencies
+    }
+    return (
+        current_guard_effectiveness
+        == fragment.guard_effectiveness_dependencies
+    )
 
 
 
@@ -1020,6 +1062,7 @@ def assemble_fastapi_assurance_ir(
     function_contracts: list[FunctionContract],
     resource_return_contracts: list[ResourceReturnContract],
     fragments: Mapping[str, FastApiFileSemanticFragment],
+    guard_effectiveness_evidence: list[GuardEffectivenessEvidence] | None = None,
     syntax_errors: Mapping[str, str] | None = None,
     missing_route_summary_paths: list[str] | None = None,
 ) -> AssuranceIR:
@@ -1086,7 +1129,7 @@ def assemble_fastapi_assurance_ir(
         ),
         extractor=AssuranceExtractorIdentity(
             extractor_id="assurance.fastapi.dependency_effects.ast_v1",
-            extractor_version="0.5.0",
+            extractor_version="0.6.0",
             source_profile_id="assurance.fastapi.dependency_effects.ast_v1",
         ),
         coverage=AssuranceCoverage(
@@ -1111,6 +1154,10 @@ def assemble_fastapi_assurance_ir(
         guards=sorted(
             guards.values(),
             key=lambda item: item.guard_id,
+        ),
+        guard_effectiveness_evidence=sorted(
+            guard_effectiveness_evidence or [],
+            key=lambda item: item.evidence_id,
         ),
         protected_effects=sorted(
             protected.values(),
