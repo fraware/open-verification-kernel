@@ -28,7 +28,19 @@ extractor emits a required equality ResourceBinding. The binding itself is not
 proof. Protected Effect Integrity keeps that dimension UNKNOWN until a verifier
 establishes the relationship.
 
-The profile marks control flow, dynamic guard effect names, unsupported call
-signatures, syntax errors, and missing head material as unsupported semantics.
-A strict product surface must not upgrade partial or unknown extraction coverage
-to an allow decision.
+Supported handlers may attach a bounded CFG summary. When guard and sink spans
+resolve to CFG nodes and sink-local coverage is complete, guard dominance can
+become authoritative; otherwise the result stays UNKNOWN rather than a false
+PASS. Flat `and`/`or` BoolOps expand into short-circuit-aware branches; nested
+or opaque BoolOps remain outside the envelope.
+
+Value-origin provenance classifies ordinary FastAPI parameters and
+`request.state` attributes. Closed-world bypass authority accounts for
+`request.state` writers across a compilation unit and refuses authorized PASS
+when the world is incomplete. Open WebUI bypass checks are development replay
+only and do not rewrite frozen external-candidate labels.
+
+The profile marks unsupported loops/try/match/with, dynamic guard effect names,
+unsupported call signatures, syntax errors, and missing head material as
+unsupported semantics. A strict product surface must not upgrade partial or
+unknown extraction coverage to an allow decision.

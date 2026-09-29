@@ -298,7 +298,7 @@ async def get_item(item_id: str, flag: bool):
     handler = summary.handlers[0]
     assert handler.control_flow is not None
     assert handler.control_flow.coverage_status == "complete"
-    assert handler.origin.extractor_version == "0.16.0"
+    assert handler.origin.extractor_version == "0.17.0"
 
 
 def test_branch_structure_change_invalidates_cfg_digest() -> None:

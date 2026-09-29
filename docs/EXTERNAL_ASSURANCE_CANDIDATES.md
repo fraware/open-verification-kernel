@@ -111,3 +111,47 @@ A candidate must not be changed from unsupported_semantics to supported_now by
 declaring a convenient but unsound source-profile mapping. The status changes
 only after the general source semantics have been extended and validated as a
 reusable capability.
+
+Frozen registry labels, denominators, and reviewed revisions must not be rewritten
+to match later implementation progress. Prefer UNKNOWN over a false PASS when
+source evidence is incomplete.
+
+## Related reusable source semantics
+
+Later FastAPI Protected Effect work adds reusable extraction that is relevant to
+external candidates without rewriting frozen triage labels:
+
+- bounded handler control-flow graphs (CFG) with iterative dominance;
+- guard-to-sink CFG dominance evidence (incomplete coverage stays UNKNOWN);
+- value-origin provenance for FastAPI parameters and `request.state` attributes;
+- closed-world trusted bypass authority over `request.state` writers, including
+  repository-local multi-module units when the import world is complete;
+- bounded flat `and`/`or` short-circuit CFG expansion (nested or opaque BoolOp
+  remains UNKNOWN);
+- value-origin evidence assembled into FastAPI IR digests when material.
+
+Bare ALL_CAPS identifiers are not treated as proved server configuration.
+Attribute forms under conventional settings/config bindings and literals remain
+in scope.
+
+### Open WebUI development replay
+
+Open WebUI bypass analysis is an explicitly labeled **development replay**.
+Reports set `held_out_success=false` and `frozen_registry_mutated=false`. Default
+CI uses synthetic fixtures. An optional gated live pin path
+(`OVK_OPEN_WEBUI_LIVE_REPLAY=1`) answers the same questions from pinned public
+revisions. Development replay is not held-out success and does not change frozen
+registry classifications.
+
+### Apache Airflow obligations (parked)
+
+Apache Airflow backfill parser/authorization obligations remain parked. Support
+is not claimed. Remaining work includes, without implying current coverage:
+
+- dependency-factory parser term → resource lookup argument;
+- resource lookup result → authorization resource / DAG identity;
+- authorization helper → fail-closed security meaning;
+- handler-side parser ↔ authorization-side parser compatibility;
+- compatibility evidence → dependency/framework semantic identity.
+
+No `output_type == "pydantic.NonNegativeInt"` equivalence shortcut.

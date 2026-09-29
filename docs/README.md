@@ -37,6 +37,8 @@ Use this index as the canonical entry point. Each guide covers one topic; cross-
 | [BACKENDS.md](BACKENDS.md) | Backend requirements in CI, install matrix, fallback semantics |
 | [POLICY.md](POLICY.md) | Verification routing configuration for `.verification/config.yml` |
 | [EXTERNAL_VALIDATION.md](EXTERNAL_VALIDATION.md) | Weekly external validation matrix |
+| [EXTERNAL_ASSURANCE_CANDIDATES.md](EXTERNAL_ASSURANCE_CANDIDATES.md) | External candidate triage registry and related semantics |
+| [EXTERNAL_ASSURANCE_REPLAY.md](EXTERNAL_ASSURANCE_REPLAY.md) | Pinned public-repo assurance replay harness |
 | [CONSUMER_VALIDATION_CHECKLIST.md](CONSUMER_VALIDATION_CHECKLIST.md) | Immutable-pin consumer validation checklist (scaffolding) |
 | [FORMALPR_HOLDOUT_GOVERNANCE.md](FORMALPR_HOLDOUT_GOVERNANCE.md) | Private FormalPR-Holdout governance stub (no corpus) |
 | [HOLDOUT_LABEL_SEPARATION.md](HOLDOUT_LABEL_SEPARATION.md) | Sprint 8 label-separated prediction/eval checklist |
