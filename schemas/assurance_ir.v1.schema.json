@@ -106,6 +106,9 @@
     "guard_dominance_evidence": {
       "type": "array"
     },
+    "value_origin_evidence": {
+      "type": "array"
+    },
     "protected_effects": {
       "type": "array"
     },
