@@ -216,28 +216,33 @@ def analyze_bypass_authority(
 
     If bypass_fields is None, every requested state field that is read is
     analyzed. Absence of discovered writers is UNKNOWN, not proof of trust.
+
+    Writer origin classification uses parameter names from **all** functions in
+    the unit: middleware writers must still see their HTTP parameters even when
+    ``function_name`` selects the effect handler for reads.
     """
 
     tree = ast.parse(source)
-    functions = [
+    all_functions = [
         node
         for node in tree.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     ]
+    unit_param_names = frozenset(
+        arg.arg
+        for fn in all_functions
+        for arg in list(fn.args.posonlyargs) + list(fn.args.args)
+        if arg.arg not in {"self", "cls"}
+    )
+    functions = list(all_functions)
     if function_name is not None:
         functions = [node for node in functions if node.name == function_name]
     if not functions:
         # Module-level writes still matter for closed-world accounting.
         handler = None
-        handler_params: frozenset[str] = frozenset()
         scope: ast.AST = tree
     else:
         handler = functions[0]
-        handler_params = frozenset(
-            arg.arg
-            for arg in list(handler.args.posonlyargs) + list(handler.args.args)
-            if arg.arg not in {"self", "cls"}
-        )
         scope = tree  # closed-world over the whole unit
 
     origins = (
@@ -248,7 +253,7 @@ def analyze_bypass_authority(
     writes = _collect_state_writes(
         scope,
         path=path,
-        handler_param_names=handler_params,
+        handler_param_names=unit_param_names,
     )
     reads = _collect_state_reads(handler if handler is not None else tree)
 
