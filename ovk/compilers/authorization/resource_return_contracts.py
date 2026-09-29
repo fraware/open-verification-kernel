@@ -20,6 +20,7 @@ infer persistence-framework semantics such as primary-key identity.
 from __future__ import annotations
 
 import ast
+from collections.abc import Mapping
 
 from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.core.assurance_ir import (
@@ -559,19 +560,33 @@ def _compose_forwarded_contract(
     )
 
 
-def infer_function_contracts(materials: AuthMaterials) -> list[FunctionContract]:
-    """Infer direct and forwarding-composed typed contracts to a fixed point."""
+def infer_function_contracts(
+    materials: AuthMaterials,
+    *,
+    parsed_trees: Mapping[str, ast.Module] | None = None,
+) -> list[FunctionContract]:
+    """Infer direct and forwarding-composed typed contracts to a fixed point.
+
+    Callers that already parsed the head revision may supply parsed_trees to
+    avoid duplicate AST construction.
+    """
 
     methods: list[
         tuple[str, ast.ClassDef, ast.FunctionDef | ast.AsyncFunctionDef]
     ] = []
     contracts_by_name: dict[str, FunctionContract] = {}
 
-    for path, source in sorted(materials.head_files.items()):
-        try:
-            tree = ast.parse(source, filename=path)
-        except SyntaxError:
-            continue
+    if parsed_trees is None:
+        trees: dict[str, ast.Module] = {}
+        for path, source in sorted(materials.head_files.items()):
+            try:
+                trees[path] = ast.parse(source, filename=path)
+            except SyntaxError:
+                continue
+    else:
+        trees = dict(parsed_trees)
+
+    for path, tree in sorted(trees.items()):
         for node in tree.body:
             if not isinstance(node, ast.ClassDef):
                 continue
@@ -663,12 +678,26 @@ def _legacy_resource_return_contract(
     )
 
 
-def infer_resource_return_contracts(materials: AuthMaterials) -> list[ResourceReturnContract]:
-    """Compatibility projection of typed contracts into scope-return contracts."""
+def infer_resource_return_contracts(
+    materials: AuthMaterials,
+    *,
+    function_contracts: list[FunctionContract] | None = None,
+    parsed_trees: Mapping[str, ast.Module] | None = None,
+) -> list[ResourceReturnContract]:
+    """Compatibility projection of typed contracts into scope-return contracts.
 
+    Supplying function_contracts reuses an already inferred semantic contract
+    set. parsed_trees is used only when contracts still need to be inferred.
+    """
+
+    contracts = (
+        function_contracts
+        if function_contracts is not None
+        else infer_function_contracts(materials, parsed_trees=parsed_trees)
+    )
     projected = [
         legacy
-        for contract in infer_function_contracts(materials)
+        for contract in contracts
         if (legacy := _legacy_resource_return_contract(contract)) is not None
     ]
     return sorted(projected, key=lambda item: item.contract_id)
