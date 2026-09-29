@@ -26,6 +26,14 @@ from ovk.core.resource_identity import (
 
 CoverageStatus = Literal["complete", "partial", "unknown", "inapplicable"]
 GuardEffectiveness = Literal["established", "unproved"]
+ValueOriginKind = Literal[
+    "externally_bound_http_value",
+    "server_configuration",
+    "literal_constant",
+    "derived_value",
+    "request_state_attribute",
+    "unknown_origin",
+]
 GuardEffectivenessEvidenceKind = Literal[
     "fail_closed_bearer_match_v1",
     "fail_closed_header_shared_secret_v1",
@@ -286,6 +294,28 @@ class GuardDominanceEvidence(BaseModel):
         return value
 
 
+class ValueOriginEvidence(BaseModel):
+    """Evidence-bearing classification of where a runtime value came from.
+
+    This is not a trusted/untrusted Boolean and does not authorize bypasses.
+    """
+
+    evidence_id: str
+    value_id: str
+    origin_kind: ValueOriginKind
+    source_expression: str
+    dependencies: list[str] = Field(default_factory=list)
+    origin: SemanticOrigin
+
+    @field_validator("evidence_id", "value_id", "source_expression")
+    @classmethod
+    def _origin_fields_non_empty(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("value-origin evidence fields must be non-empty")
+        return value
+
+
 class ProtectedEffect(BaseModel):
     """Security-sensitive effect whose execution requires assurance."""
 
@@ -516,6 +546,9 @@ class AssuranceIR(BaseModel):
     guard_dominance_evidence: list[GuardDominanceEvidence] = Field(
         default_factory=list
     )
+    value_origin_evidence: list[ValueOriginEvidence] = Field(
+        default_factory=list
+    )
     protected_effects: list[ProtectedEffect] = Field(default_factory=list)
     resource_bindings: list[ResourceBinding] = Field(default_factory=list)
     resource_return_contracts: list[ResourceReturnContract] = Field(default_factory=list)
@@ -538,6 +571,7 @@ class AssuranceIR(BaseModel):
             "guard_effectiveness_evidence": "evidence_id",
             "interpretation_compatibility_evidence": "evidence_id",
             "guard_dominance_evidence": "evidence_id",
+            "value_origin_evidence": "evidence_id",
             "protected_effects": "protected_effect_id",
             "resource_bindings": "binding_id",
             "resource_return_contracts": "contract_id",
@@ -619,6 +653,8 @@ class AssuranceIR(BaseModel):
         # Preserve prior identity when no CFG dominance evidence is present.
         if not self.guard_dominance_evidence:
             payload.pop("guard_dominance_evidence", None)
+        if not self.value_origin_evidence:
+            payload.pop("value_origin_evidence", None)
         return payload
 
     @property
