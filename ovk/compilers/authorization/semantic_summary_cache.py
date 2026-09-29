@@ -27,6 +27,9 @@ from ovk import __version__ as OVK_VERSION
 from ovk.compilers.authorization.dependency_factory_interpretation import (
     DependencyFactoryInterpretationSummary,
 )
+from ovk.compilers.authorization.handler_control_flow import (
+    control_flow_from_payload,
+)
 from ovk.compilers.authorization.fastapi_route_summary import (
     CallSummary,
     DependencyParameterSummary,
@@ -61,7 +64,7 @@ from ovk.core.resource_identity import ResourceIdentityTerm
 
 
 SEMANTIC_SUMMARY_CACHE_SCHEMA = "ovk.python_semantic_summary_cache.v1"
-SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.12.0"
+SEMANTIC_SUMMARY_IMPLEMENTATION_VERSION = "0.13.0"
 DEFAULT_SEMANTIC_SUMMARY_CACHE_DIR = Path(
     ".verification/cache/python-semantic-summaries"
 )
@@ -324,6 +327,11 @@ def _route_summary_payload(summary: RouteFileSummary) -> dict[str, Any]:
                     }
                     for call in handler.calls
                 ],
+                "control_flow": (
+                    None
+                    if handler.control_flow is None
+                    else handler.control_flow.canonical_payload()
+                ),
                 "origin": _origin_payload(handler.origin),
             }
             for handler in summary.handlers
@@ -434,6 +442,11 @@ def _route_summary_from_payload(payload: dict[str, Any]) -> RouteFileSummary:
                     for item in (
                         handler.get("path_parameter_interpretations") or []
                     )
+                ),
+                control_flow=(
+                    control_flow_from_payload(handler["control_flow"])
+                    if handler.get("control_flow") is not None
+                    else None
                 ),
                 origin=SemanticOrigin.model_validate(handler["origin"]),
             )

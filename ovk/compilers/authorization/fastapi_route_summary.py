@@ -20,6 +20,10 @@ from ovk.compilers.authorization.dependency_factory_interpretation import (
     DependencyFactoryInterpretationSummary,
     summarize_dependency_factory_interpretations,
 )
+from ovk.compilers.authorization.handler_control_flow import (
+    HandlerControlFlowSummary,
+    build_handler_control_flow,
+)
 from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.core.assurance_ir import SemanticOrigin
 from ovk.core.bundle import content_digest
@@ -28,6 +32,7 @@ from ovk.core.resource_identity import ResourceIdentityTerm
 
 
 _EXTRACTOR_ID = "assurance.fastapi.dependency_effects.ast_v1"
+_EXTRACTOR_VERSION = "0.13.0"
 _HTTP_METHODS = frozenset({"get", "post", "put", "patch", "delete", "options", "head"})
 _CONTROL_FLOW = (
     ast.If,
@@ -186,6 +191,9 @@ class RouteHandlerSummary:
         PathParameterInterpretationSummary, ...
     ]
     origin: SemanticOrigin
+    # Bounded CFG attached to the source-summary unit for cache invalidation.
+    # Not part of AssuranceIR canonical identity until a later binding PR.
+    control_flow: HandlerControlFlowSummary | None = None
 
 
 @dataclass(frozen=True)
@@ -217,7 +225,7 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id=_EXTRACTOR_ID,
-        extractor_version="0.12.0",
+        extractor_version=_EXTRACTOR_VERSION,
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -1733,6 +1741,7 @@ def summarize_route_file(
                     )
                 ),
                 origin=_origin(path, handler),
+                control_flow=build_handler_control_flow(handler, path=path),
             )
         )
 
