@@ -55,12 +55,13 @@ from ovk.core.assurance_ir import (
     ResourceBinding,
     ResourceRef,
     SemanticPath,
+    ValueOriginEvidence,
 )
 from ovk.core.bundle import content_digest
 
 
 PERSISTENT_FASTAPI_STATE_SCHEMA = "ovk.fastapi_incremental_state_cache.v1"
-PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION = "0.17.0"
+PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION = "0.19.0"
 DEFAULT_PERSISTENT_FASTAPI_STATE_DIR = Path(
     ".verification/cache/fastapi-incremental-state"
 )
@@ -96,6 +97,7 @@ def _fragment_payload(fragment: FastApiFileSemanticFragment) -> dict[str, Any]:
         "effects": _models(fragment.effects),
         "guards": _models(fragment.guards),
         "guard_dominance_evidence": _models(fragment.guard_dominance_evidence),
+        "value_origin_evidence": _models(fragment.value_origin_evidence),
         "protected_effects": _models(fragment.protected_effects),
         "resource_bindings": _models(fragment.resource_bindings),
         "contract_uses": _models(fragment.contract_uses),
@@ -144,6 +146,10 @@ def _fragment_from_payload(payload: dict[str, Any]) -> FastApiFileSemanticFragme
         guard_dominance_evidence=tuple(
             GuardDominanceEvidence.model_validate(item)
             for item in payload.get("guard_dominance_evidence") or []
+        ),
+        value_origin_evidence=tuple(
+            ValueOriginEvidence.model_validate(item)
+            for item in payload.get("value_origin_evidence") or []
         ),
         protected_effects=tuple(
             ProtectedEffect.model_validate(item)
