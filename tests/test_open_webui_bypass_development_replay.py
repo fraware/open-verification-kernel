@@ -76,7 +76,7 @@ def test_development_replay_answers_both_revisions_separately() -> None:
     assert vul.remaining_human_review_reason == (
         "client_controlled_bypass_not_authorized"
     )
-    assert "client_controlled_bypass" in report.vulnerable.notes
+    assert "client_controlled_http_param_bypass" in report.vulnerable.notes
 
     rep = report.repair.answers
     _assert_all_seven_questions_present(rep)
