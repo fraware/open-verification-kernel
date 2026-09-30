@@ -9,7 +9,6 @@ from ovk.compilers.authorization.handler_control_flow import (
     build_handler_control_flow_from_source,
 )
 from ovk.compilers.authorization.trusted_bypass_authorization import (
-    build_bypass_authority_evidence,
     evaluate_trusted_bypass_authorizations,
     read_origin_for_path,
     resolve_bypass_control_point_edge,
