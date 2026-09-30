@@ -18,7 +18,6 @@ from ovk.compilers.authorization.protected_effect_fastapi_dependency import (
     FastApiDependencyEffectProfile,
 )
 from ovk.core.assurance_ir import (
-    AuthorizationControlPointEvidence,
     AuthorizationCutSetEvidence,
     AuthorizationGuard,
     BypassAuthorityEvidence,
