@@ -93,7 +93,7 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id="assurance.fastapi.bypass_authority.ast_v1",
-        extractor_version="0.6.0",
+        extractor_version="0.7.0",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -102,54 +102,201 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     )
 
 
-def _is_request_state_target(node: ast.AST) -> str | None:
-    if (
-        isinstance(node, ast.Attribute)
-        and isinstance(node.value, ast.Attribute)
-        and isinstance(node.value.value, ast.Name)
-        and node.value.value.id == "request"
-        and node.value.attr == "state"
-    ):
-        return node.attr
+@dataclass
+class _RequestStateAliasEnv:
+    """Track names proved to alias ``request`` or ``request.state`` (#153).
+
+    Seeded with the literal parameter/name ``request``. Assignments such as
+    ``req = request`` and ``state = request.state`` extend the supported alias
+    theorem. Any other ``*.state.<field>`` mutation is still recorded so it
+    cannot be omitted from closed-world accounting (Unknown > false PASS).
+    """
+
+    request_names: set[str]
+    state_names: set[str]
+
+    @classmethod
+    def seed(cls, *, param_names: frozenset[str]) -> "_RequestStateAliasEnv":
+        request_names = {"request"} if "request" in param_names else set()
+        # Module-level walks may have no params; still recognize bare ``request``.
+        if not param_names:
+            request_names.add("request")
+        return cls(request_names=set(request_names), state_names=set())
+
+    def note_binding(self, target: ast.AST, value: ast.AST) -> None:
+        if not isinstance(target, ast.Name):
+            # Complex targets poison nothing specific; leave env unchanged.
+            return
+        name = target.id
+        if self._is_request_expr(value):
+            self.request_names.add(name)
+            self.state_names.discard(name)
+            return
+        if self._is_state_expr(value):
+            self.state_names.add(name)
+            self.request_names.discard(name)
+            return
+        # Rebind of a previously aliased name to an unrelated value.
+        self.request_names.discard(name)
+        self.state_names.discard(name)
+
+    def poison_names(self, names: set[str]) -> None:
+        for name in names:
+            self.request_names.discard(name)
+            self.state_names.discard(name)
+
+    def _is_request_expr(self, value: ast.AST) -> bool:
+        return isinstance(value, ast.Name) and value.id in self.request_names
+
+    def _is_state_expr(self, value: ast.AST) -> bool:
+        if isinstance(value, ast.Name) and value.id in self.state_names:
+            return True
+        if (
+            isinstance(value, ast.Attribute)
+            and value.attr == "state"
+            and isinstance(value.value, ast.Name)
+            and value.value.id in self.request_names
+        ):
+            return True
+        return False
+
+    def is_state_expr(self, value: ast.AST) -> bool:
+        return self._is_state_expr(value)
+
+    def field_from_assign_target(self, target: ast.AST) -> tuple[str | None, bool]:
+        """Return ``(field, exact_or_supported_alias)`` for a store target.
+
+        When the second element is False, the write is still counted but marked
+        dynamic/unknown so closure cannot authorize while omitting it.
+        """
+
+        # request.state.field / req.state.field
+        if (
+            isinstance(target, ast.Attribute)
+            and isinstance(target.value, ast.Attribute)
+            and target.value.attr == "state"
+            and isinstance(target.value.value, ast.Name)
+        ):
+            field = target.attr
+            base = target.value.value.id
+            if base in self.request_names:
+                return field, True
+            # Plausible Request-like alias (e.g. parameter ``req``) — record,
+            # but do not treat as the supported exact theorem.
+            return field, False
+
+        # state.field where state aliases request.state
+        if (
+            isinstance(target, ast.Attribute)
+            and isinstance(target.value, ast.Name)
+            and target.value.id in self.state_names
+        ):
+            return target.attr, True
+
+        # request.state[field] / req.state[field] / state[field]
+        if isinstance(target, ast.Subscript):
+            field = _constant_str_key(target.slice)
+            if field is None:
+                if self._container_is_state(target.value):
+                    return "__dynamic__", False
+                return None, False
+            if self._container_is_state(target.value):
+                exact = self._container_is_supported_state(target.value)
+                return field, exact
+            return None, False
+
+        return None, False
+
+    def _container_is_state(self, node: ast.AST) -> bool:
+        if self._is_state_expr(node):
+            return True
+        if (
+            isinstance(node, ast.Attribute)
+            and node.attr == "state"
+            and isinstance(node.value, ast.Name)
+        ):
+            # Any Name.state — plausible even when Name is not proved request.
+            return True
+        return False
+
+    def _container_is_supported_state(self, node: ast.AST) -> bool:
+        return self._is_state_expr(node)
+
+
+def _constant_str_key(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
     return None
 
 
-def _is_request_state_setattr_call(node: ast.Call) -> bool:
-    """True for ``setattr(request.state, ...)`` or ``request.state.__setattr__(...)``."""
+def _is_request_state_target(
+    node: ast.AST,
+    *,
+    aliases: _RequestStateAliasEnv | None = None,
+) -> str | None:
+    """Return governed field name for a store target, or None.
 
-    if (
-        isinstance(node.func, ast.Name)
-        and node.func.id == "setattr"
-        and len(node.args) >= 3
-        and isinstance(node.args[0], ast.Attribute)
-        and isinstance(node.args[0].value, ast.Name)
-        and node.args[0].value.id == "request"
-        and node.args[0].attr == "state"
-    ):
-        return True
+    Without ``aliases``, only exact ``request.state.<field>`` matches (legacy).
+    With ``aliases``, plausible ``*.state.<field>`` and state-alias stores are
+    included so writers cannot be omitted from closed-world accounting.
+    """
+
+    env = aliases or _RequestStateAliasEnv(request_names={"request"}, state_names=set())
+    field, exact = env.field_from_assign_target(node)
+    if field is None or field.startswith("__"):
+        return None
+    if aliases is None:
+        return field if exact else None
+    return field
+
+
+def _is_request_state_setattr_call(
+    node: ast.Call,
+    *,
+    aliases: _RequestStateAliasEnv | None = None,
+) -> tuple[bool, bool]:
+    """Return ``(is_setattr_on_state, supported_alias)``.
+
+    ``supported_alias`` is True only for the exact/alias theorem; False means
+    a plausible state setattr that must still poison closed-world UNKNOWN.
+    """
+
+    env = aliases or _RequestStateAliasEnv(request_names={"request"}, state_names=set())
+
+    def _state_arg(arg: ast.AST) -> tuple[bool, bool]:
+        if env._is_state_expr(arg):
+            return True, True
+        if (
+            isinstance(arg, ast.Attribute)
+            and arg.attr == "state"
+            and isinstance(arg.value, ast.Name)
+        ):
+            if arg.value.id in env.request_names:
+                return True, True
+            return True, False
+        if isinstance(arg, ast.Name) and arg.id in env.state_names:
+            return True, True
+        return False, False
+
+    if isinstance(node.func, ast.Name) and node.func.id == "setattr" and len(node.args) >= 3:
+        return _state_arg(node.args[0])
     if (
         isinstance(node.func, ast.Attribute)
         and node.func.attr == "__setattr__"
-        and isinstance(node.func.value, ast.Attribute)
-        and isinstance(node.func.value.value, ast.Name)
-        and node.func.value.value.id == "request"
-        and node.func.value.attr == "state"
         and len(node.args) >= 2
     ):
-        return True
-    if (
-        isinstance(node.func, ast.Attribute)
-        and node.func.attr == "__setattr__"
-        and isinstance(node.func.value, ast.Name)
-        and node.func.value.id == "object"
-        and len(node.args) >= 3
-        and isinstance(node.args[0], ast.Attribute)
-        and isinstance(node.args[0].value, ast.Name)
-        and node.args[0].value.id == "request"
-        and node.args[0].attr == "state"
-    ):
-        return True
-    return False
+        # request.state.__setattr__(name, value) / state.__setattr__(...)
+        is_state, exact = _state_arg(node.func.value)
+        if is_state:
+            return True, exact
+        # object.__setattr__(request.state, name, value)
+        if (
+            isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "object"
+            and len(node.args) >= 3
+        ):
+            return _state_arg(node.args[0])
+    return False, False
 
 
 def _setattr_name_and_value(
@@ -164,6 +311,14 @@ def _setattr_name_and_value(
         and node.func.attr == "__setattr__"
         and isinstance(node.func.value, ast.Attribute)
     ):
+        return node.args[0], node.args[1]
+    if (
+        isinstance(node.func, ast.Attribute)
+        and node.func.attr == "__setattr__"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id != "object"
+    ):
+        # state.__setattr__(name, value)
         return node.args[0], node.args[1]
     # object.__setattr__(request.state, name, value)
     return node.args[1], node.args[2]
@@ -181,10 +336,20 @@ def _collect_writes_in_function(
     rebinding of an HTTP param / config / literal / request.state attribute.
     Nested compound statements are visited so branch-local overwrites cannot
     disappear from closed-world accounting.
+
+    Request/state name aliases (``req = request``, ``state = request.state``)
+    participate in the supported write theorem. Other ``*.state.<field>``
+    mutations are still recorded (as dynamic) so they cannot be omitted.
     """
 
     writes: list[StateAttributeWrite] = []
     alias_state = AliasState()
+    fn_params = frozenset(
+        arg.arg
+        for arg in list(fn.args.posonlyargs) + list(fn.args.args)
+        if arg.arg not in {"self", "cls"}
+    )
+    request_aliases = _RequestStateAliasEnv.seed(param_names=fn_params)
 
     def _classify(node: ast.AST) -> ValueOriginEvidence:
         return classify_expression_origin(
@@ -202,7 +367,7 @@ def _collect_writes_in_function(
         dynamic: bool,
         control_dependent: bool,
     ) -> None:
-        field = _is_request_state_target(target)
+        field, exact = request_aliases.field_from_assign_target(target)
         if field is None:
             return
         writes.append(
@@ -210,7 +375,7 @@ def _collect_writes_in_function(
                 field_name=field,
                 value_expression=ast.unparse(value),
                 origin=_classify(value),
-                dynamic=dynamic,
+                dynamic=dynamic or (not exact) or field.startswith("__"),
                 source_range=_origin(path, statement).source_range,
                 path=path,
                 control_dependent=control_dependent,
@@ -225,7 +390,10 @@ def _collect_writes_in_function(
         for node in ast.walk(statement):
             if not isinstance(node, ast.Call):
                 continue
-            if _is_request_state_setattr_call(node):
+            is_setattr, _exact = _is_request_state_setattr_call(
+                node, aliases=request_aliases
+            )
+            if is_setattr:
                 name_node, value_node = _setattr_name_and_value(node)
                 if isinstance(name_node, ast.Constant) and isinstance(
                     name_node.value, str
@@ -245,9 +413,14 @@ def _collect_writes_in_function(
                     )
                 )
             rendered = ast.unparse(node)
-            if "request.state" in rendered and any(
-                marker in rendered
-                for marker in ("update(", "copy(", "__dict__", "vars(")
+            state_markers = (
+                ["request.state"]
+                + [f"{name}.state" for name in sorted(request_aliases.request_names)]
+                + sorted(request_aliases.state_names)
+            )
+            if any(marker in rendered for marker in state_markers) and any(
+                token in rendered
+                for token in ("update(", "copy(", "__dict__", "vars(")
             ):
                 writes.append(
                     StateAttributeWrite(
@@ -260,6 +433,13 @@ def _collect_writes_in_function(
                         control_dependent=control_dependent,
                     )
                 )
+
+    def _note_alias_bindings(statement: ast.stmt) -> None:
+        if isinstance(statement, ast.Assign):
+            for target in statement.targets:
+                request_aliases.note_binding(target, statement.value)
+        elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+            request_aliases.note_binding(statement.target, statement.value)
 
     def _visit_statement(
         statement: ast.stmt,
@@ -275,6 +455,7 @@ def _collect_writes_in_function(
                     dynamic=False,
                     control_dependent=control_dependent,
                 )
+            _note_alias_bindings(statement)
             apply_statement_bindings(
                 statement,
                 path=path,
@@ -291,6 +472,7 @@ def _collect_writes_in_function(
                 dynamic=False,
                 control_dependent=control_dependent,
             )
+            _note_alias_bindings(statement)
             apply_statement_bindings(
                 statement,
                 path=path,
@@ -324,6 +506,7 @@ def _collect_writes_in_function(
                 _visit_statement(child, control_dependent=True)
             for name in assigned_on_branches:
                 alias_state.poison(name)
+            request_aliases.poison_names(assigned_on_branches)
             return
 
         if isinstance(statement, (ast.For, ast.AsyncFor)):
@@ -336,6 +519,7 @@ def _collect_writes_in_function(
                 _visit_statement(child, control_dependent=True)
             for name in assigned:
                 alias_state.poison(name)
+            request_aliases.poison_names(assigned)
             return
 
         if isinstance(statement, (ast.With, ast.AsyncWith)):
@@ -351,6 +535,7 @@ def _collect_writes_in_function(
                 )
             for name in assigned:
                 alias_state.poison(name)
+            request_aliases.poison_names(assigned)
             return
 
         if isinstance(statement, ast.Try):
@@ -372,6 +557,7 @@ def _collect_writes_in_function(
                 _visit_statement(child, control_dependent=True)
             for name in assigned:
                 alias_state.poison(name)
+            request_aliases.poison_names(assigned)
             return
 
         # Ordinary statements: setattr / wildcard calls anywhere in this node.
@@ -430,10 +616,11 @@ def _collect_state_writes(
         ]
         if module_level:
             alias_state = AliasState()
+            request_aliases = _RequestStateAliasEnv.seed(param_names=frozenset())
             for statement in module_level:
                 if isinstance(statement, ast.Assign):
                     for target in statement.targets:
-                        field = _is_request_state_target(target)
+                        field, exact = request_aliases.field_from_assign_target(target)
                         if field is None:
                             continue
                         writes.append(
@@ -446,11 +633,13 @@ def _collect_state_writes(
                                     handler_param_names=frozenset(),
                                     alias_state=alias_state,
                                 ),
-                                dynamic=False,
+                                dynamic=(not exact) or field.startswith("__"),
                                 source_range=_origin(path, statement).source_range,
                                 path=path,
                             )
                         )
+                    for target in statement.targets:
+                        request_aliases.note_binding(target, statement.value)
                     apply_statement_bindings(
                         statement,
                         path=path,
@@ -460,10 +649,11 @@ def _collect_state_writes(
         return tuple(writes)
 
     # Fallback: whole-tree walk without function grouping.
+    request_aliases = _RequestStateAliasEnv.seed(param_names=frozenset())
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
             for target in node.targets:
-                field = _is_request_state_target(target)
+                field, exact = request_aliases.field_from_assign_target(target)
                 if field is None:
                     continue
                 origin = classify_expression_origin(
@@ -476,11 +666,13 @@ def _collect_state_writes(
                         field_name=field,
                         value_expression=ast.unparse(node.value),
                         origin=origin,
-                        dynamic=False,
+                        dynamic=(not exact) or field.startswith("__"),
                         source_range=_origin(path, node).source_range,
                         path=path,
                     )
                 )
+            for target in node.targets:
+                request_aliases.note_binding(target, node.value)
     return tuple(writes)
 
 
