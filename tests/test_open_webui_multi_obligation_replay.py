@@ -210,8 +210,8 @@ async def handler(request, user):
     assert report.final_protected_effect_status == "UNKNOWN"
 
 
-def test_ordinary_guard_dominance_composition_pass() -> None:
-    """Composition: ordinary dominating guard yields PASS without bypass."""
+def test_ordinary_guard_dominance_is_not_pe_pass_while_bindings_unknown() -> None:
+    """Structural dominance alone is not a Protected Effect PASS."""
 
     report = analyze_open_webui_multi_obligation_revision(
         revision_sha=OPEN_WEBUI_REPAIR_SHA,
@@ -223,7 +223,14 @@ def test_ordinary_guard_dominance_composition_pass() -> None:
     obligations = report.obligation_map()
     assert obligations["ordinary_guard_effectiveness"].status == "established"
     assert obligations["collective_path_coverage"].status == "established"
-    assert report.final_protected_effect_status == "PASS"
+    assert obligations["principal_binding"].status == "unknown"
+    assert obligations["effect_binding"].status == "unknown"
+    assert obligations["resource_binding"].status == "unknown"
+    assert report.final_protected_effect_status == "UNKNOWN"
+    assert (
+        obligations["final_protected_effect_status"].reason
+        == "ordinary_guard_structural_dominance_not_pe_pass"
+    )
     top = build_open_webui_multi_obligation_development_replay(
         vulnerable_files=_vulnerable_unit(),
         repair_files=_ordinary_guard_unit(),
@@ -239,6 +246,7 @@ def test_ordinary_guard_dominance_composition_pass() -> None:
     assert top.held_out_success is False
     assert top.frozen_registry_mutated is False
     assert top.canonical_payload()["held_out_success"] is False
+    assert top.repair.final_protected_effect_status == "UNKNOWN"
 
 
 def test_live_multi_obligation_requires_explicit_gate() -> None:
@@ -268,5 +276,5 @@ def test_live_multi_obligation_pins_when_gated() -> None:
     assert tuple(item.name for item in report.vulnerable.obligations) == (
         OBLIGATION_NAMES
     )
-    # Repair may stay UNKNOWN when provenance/closure is incomplete.
-    assert report.repair.final_protected_effect_status in {"PASS", "UNKNOWN", "FAIL"}
+    # Repair stays UNKNOWN while PE bindings are unresolved in development replay.
+    assert report.repair.final_protected_effect_status in {"UNKNOWN", "FAIL"}
