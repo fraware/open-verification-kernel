@@ -130,9 +130,10 @@ external candidates without rewriting frozen triage labels:
   remains UNKNOWN);
 - value-origin evidence assembled into FastAPI IR digests when material.
 
-Bare ALL_CAPS identifiers are not treated as proved server configuration.
-Attribute forms under conventional settings/config bindings and literals remain
-in scope.
+Identifier shape is never sufficient to establish server-controlled provenance.
+Bare ALL_CAPS names, conventional config-shaped names, and settings/config
+attributes remain unresolved unless a separate source proof binds them. Literal
+values remain in the bounded provenance subset.
 
 ### Open WebUI development replay
 
