@@ -30,9 +30,12 @@ The v1 model includes principals, resources, namespaced effects, path conditions
 authorization guards, protected effects, resource bindings, semantic paths,
 assurance claims, abstraction coverage, assumptions, and source provenance.
 
-Later collections also carry optional guard-dominance evidence and value-origin
-evidence. Empty collections omit from the canonical digest so prior identity is
-preserved until material evidence appears.
+Later collections also carry optional guard-dominance evidence,
+authorization cut-set evidence, and value-origin evidence. Cut-set evidence
+records only structural CFG coverage by a candidate guard-node set; it does not
+establish guard effectiveness or principal/effect/resource compatibility. Empty
+collections omit from the canonical digest so prior identity is preserved until
+material evidence appears.
 
 Effects are open namespaced strings rather than a closed enum. This lets
 application profiles introduce domain semantics such as billing.invoice.refund
