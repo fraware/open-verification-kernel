@@ -109,6 +109,9 @@
     "authorization_cut_set_evidence": {
       "type": "array"
     },
+    "authorization_control_point_evidence": {
+      "type": "array"
+    },
     "value_origin_evidence": {
       "type": "array"
     },

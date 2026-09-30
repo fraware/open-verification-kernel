@@ -296,6 +296,48 @@ class GuardDominanceEvidence(BaseModel):
         return value
 
 
+class AuthorizationControlPointEvidence(BaseModel):
+    """Explicit security identity for one authorizing control-flow point.
+
+    Raw handler-local edge strings are not security identities. An authorizing
+    cut member must bind guard, protected effect, principal/effect/resource,
+    CFG digest, entrypoint, and the local edge endpoints together.
+    """
+
+    evidence_id: str
+    guard_id: str
+    protected_effect_id: str
+    principal_id: str
+    effect_id: str
+    resource_id: str
+    entrypoint: str
+    control_flow_summary_digest: str
+    edge_id: str
+    scoped_edge_id: str
+    origin: SemanticOrigin
+
+    @field_validator(
+        "evidence_id",
+        "guard_id",
+        "protected_effect_id",
+        "principal_id",
+        "effect_id",
+        "resource_id",
+        "entrypoint",
+        "control_flow_summary_digest",
+        "edge_id",
+        "scoped_edge_id",
+    )
+    @classmethod
+    def _control_point_fields_non_empty(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError(
+                "authorization control-point evidence fields must be non-empty"
+            )
+        return value
+
+
 class AuthorizationCutSetEvidence(BaseModel):
     """Structural evidence that control points intercept sink-reaching paths.
 
@@ -526,6 +568,10 @@ class BypassAuthorityEvidence(BaseModel):
     Status alone does not authorize a Protected Effect. Authorization requires
     governed profile mapping, proved writers, and a bound branch-outcome
     control point. Field names never imply security meaning.
+
+    ``control_point_edge_id`` is the handler-local CFG edge id used by the
+    cut-set graph theorem. Cross-handler security matching must use
+    ``AuthorizationControlPointEvidence`` (CFG digest + entrypoint + binding).
     """
 
     evidence_id: str
@@ -534,6 +580,8 @@ class BypassAuthorityEvidence(BaseModel):
     read_origin: SemanticOrigin
     status: BypassAuthorityEvidenceStatus = "unknown"
     control_point_edge_id: str | None = None
+    control_flow_summary_digest: str | None = None
+    entrypoint: str | None = None
     writer_evidence_ids: list[str] = Field(default_factory=list)
     closed_world_scope_digest: str | None = None
     assumptions: list[str] = Field(default_factory=list)
@@ -553,7 +601,12 @@ class BypassAuthorityEvidence(BaseModel):
             raise ValueError("bypass-authority evidence fields must be non-empty")
         return value
 
-    @field_validator("control_point_edge_id", "closed_world_scope_digest")
+    @field_validator(
+        "control_point_edge_id",
+        "closed_world_scope_digest",
+        "control_flow_summary_digest",
+        "entrypoint",
+    )
     @classmethod
     def _bypass_optional_non_empty(cls, value: str | None) -> str | None:
         if value is None:
@@ -575,6 +628,14 @@ class BypassAuthorityEvidence(BaseModel):
             if self.control_point_edge_id is None:
                 raise ValueError(
                     "established bypass-authority evidence requires a control-point edge"
+                )
+            if self.control_flow_summary_digest is None:
+                raise ValueError(
+                    "established bypass-authority evidence requires a CFG digest"
+                )
+            if self.entrypoint is None:
+                raise ValueError(
+                    "established bypass-authority evidence requires an entrypoint"
                 )
             if not self.writer_evidence_ids:
                 raise ValueError(
@@ -820,6 +881,9 @@ class AssuranceIR(BaseModel):
     authorization_cut_set_evidence: list[AuthorizationCutSetEvidence] = Field(
         default_factory=list
     )
+    authorization_control_point_evidence: list[
+        AuthorizationControlPointEvidence
+    ] = Field(default_factory=list)
     value_origin_evidence: list[ValueOriginEvidence] = Field(
         default_factory=list
     )
@@ -849,6 +913,7 @@ class AssuranceIR(BaseModel):
             "interpretation_compatibility_evidence": "evidence_id",
             "guard_dominance_evidence": "evidence_id",
             "authorization_cut_set_evidence": "evidence_id",
+            "authorization_control_point_evidence": "evidence_id",
             "value_origin_evidence": "evidence_id",
             "bypass_authority_evidence": "evidence_id",
             "protected_effects": "protected_effect_id",
@@ -951,6 +1016,8 @@ class AssuranceIR(BaseModel):
             payload.pop("guard_dominance_evidence", None)
         if not self.authorization_cut_set_evidence:
             payload.pop("authorization_cut_set_evidence", None)
+        if not self.authorization_control_point_evidence:
+            payload.pop("authorization_control_point_evidence", None)
         if not self.value_origin_evidence:
             payload.pop("value_origin_evidence", None)
         if not self.bypass_authority_evidence:

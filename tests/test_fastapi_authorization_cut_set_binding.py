@@ -123,7 +123,7 @@ async def create_run(
 """.strip()
 
     ir = _compile(source)
-    assert ir.extractor.extractor_version == "0.24.0"
+    assert ir.extractor.extractor_version == "0.25.0"
     assert len(ir.authorization_cut_set_evidence) == 1
     evidence = ir.authorization_cut_set_evidence[0]
     assert evidence.covers_all_paths is True
