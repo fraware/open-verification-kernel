@@ -129,8 +129,8 @@ def test_profile_body_authorization_helpers_round_trip() -> None:
     assert "body_authorization_helpers" in config.canonical_payload()
 
 
-def test_sequential_body_helper_is_cut_candidate_and_pe_pass() -> None:
-    """Positive: profile-declared sequential body helper covers sink."""
+def test_sequential_body_helper_bound_but_unproved_never_pe_pass() -> None:
+    """#151: profile binds the helper guard, but reachable-raise stays unproved."""
 
     source = f"""
 from fastapi import Depends, FastAPI, HTTPException
@@ -150,15 +150,15 @@ async def handler(request, user = Depends(get_current_user)):
     assert ir.extractor.extractor_version == "0.26.0"
     assert len(ir.guards) == 1
     assert ir.guards[0].origin.source_range is not None
-    assert len(ir.authorization_cut_set_evidence) == 1
-    cut = ir.authorization_cut_set_evidence[0]
-    assert cut.covers_all_paths is True
-    assert cut.coverage_status == "complete"
-    assert cut.guard_ids == [ir.guards[0].guard_id]
-    assert cut.node_control_points
+    assert ir.guards[0].effectiveness == "unproved"
+    # Unproved helpers are not cut candidates / do not cover the sink.
+    assert ir.authorization_cut_set_evidence == [] or all(
+        not cut.covers_all_paths or cut.guard_ids == []
+        for cut in ir.authorization_cut_set_evidence
+    )
     evaluation = evaluate_protected_effect_integrity(ir)
     assert len(evaluation) == 1
-    assert evaluation[0].status == "pass"
+    assert evaluation[0].status != "pass"
 
 
 def test_near_miss_helper_outside_profile_stays_unknown() -> None:
@@ -191,8 +191,8 @@ async def handler(request, user = Depends(get_current_user)):
     assert evaluation[0].status != "pass"
 
 
-def test_bypass_else_body_helper_compose_cut_node_and_edge() -> None:
-    """Composition: proved bypass edge + body helper jointly cover sink."""
+def test_bypass_else_body_helper_cannot_compose_while_helper_unproved() -> None:
+    """#151: proved bypass edge alone cannot compose with an unproved helper."""
 
     files = {
         "app/middleware.py": """
@@ -219,29 +219,25 @@ async def handler(request, user = Depends(get_current_user)):
         repo="example/body-auth",
         head_revision="rev1",
     )
-    assert len(ir.authorization_cut_set_evidence) == 1
-    cut = ir.authorization_cut_set_evidence[0]
-    body_guards = [
-        guard
+    assert all(
+        guard.effectiveness != "established"
         for guard in ir.guards
-        if "body_auth" in guard.guard_id or guard.guard_id in cut.guard_ids
-    ]
-    assert len(cut.guard_ids) == 1
-    assert cut.guard_ids[0] in {guard.guard_id for guard in body_guards}
-    assert cut.node_control_points
-    assert cut.edge_control_points
-    assert cut.covers_all_paths is True
-    assert cut.coverage_status == "complete"
+        if "body_auth" in guard.guard_id
+    )
+    # Bypass may still be established; body helper is not a cut member.
     assert any(
         item.status == "established" and item.control_point_edge_id is not None
         for item in ir.bypass_authority_evidence
     )
+    if ir.authorization_cut_set_evidence:
+        cut = ir.authorization_cut_set_evidence[0]
+        assert cut.covers_all_paths is False or not cut.node_control_points
     evaluation = evaluate_protected_effect_integrity(ir)
-    assert evaluation[0].status == "pass"
+    assert evaluation[0].status != "pass"
 
 
 def test_body_helper_alone_does_not_cover_bypass_true_branch() -> None:
-    """Near-miss: body helper without proved bypass leaves true branch open."""
+    """Near-miss: unproved body helper without proved bypass leaves branch open."""
 
     source = f"""
 from fastapi import Depends, FastAPI, HTTPException
@@ -261,9 +257,10 @@ async def handler(request, user = Depends(get_current_user)):
         {"app/routes.py": source},
         profile=_body_helper_profile(with_bypass=False),
     )
-    cut = ir.authorization_cut_set_evidence[0]
-    assert cut.covers_all_paths is False
-    assert cut.coverage_status == "complete"
+    assert all(guard.effectiveness != "established" for guard in ir.guards)
+    if ir.authorization_cut_set_evidence:
+        cut = ir.authorization_cut_set_evidence[0]
+        assert cut.covers_all_paths is False
     evaluation = evaluate_protected_effect_integrity(ir)
     assert evaluation[0].status != "pass"
 
@@ -297,9 +294,11 @@ async def handler(request, user = Depends(get_current_user)):
         head_revision=None,
     )
     assert all(item.status != "established" for item in ir.bypass_authority_evidence)
-    cut = ir.authorization_cut_set_evidence[0]
-    # Without established bypass edge merge, body helper alone cannot cover.
-    assert cut.covers_all_paths is False or not cut.edge_control_points
+    assert all(guard.effectiveness != "established" for guard in ir.guards)
+    if ir.authorization_cut_set_evidence:
+        cut = ir.authorization_cut_set_evidence[0]
+        # Without established bypass edge merge, body helper alone cannot cover.
+        assert cut.covers_all_paths is False or not cut.edge_control_points
     evaluation = evaluate_protected_effect_integrity(ir)
     assert evaluation[0].status != "pass"
 
