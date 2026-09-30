@@ -25,6 +25,7 @@ from ovk.core.resource_identity import (
 
 
 CoverageStatus = Literal["complete", "partial", "unknown", "inapplicable"]
+AuthorizationCutSetCoverageStatus = Literal["complete", "partial", "unknown"]
 GuardEffectiveness = Literal["established", "unproved"]
 ValueOriginKind = Literal[
     "externally_bound_http_value",
@@ -294,6 +295,81 @@ class GuardDominanceEvidence(BaseModel):
         return value
 
 
+class AuthorizationCutSetEvidence(BaseModel):
+    """Structural evidence that a guard-node set intercepts sink-reaching paths.
+
+    This object records graph coverage only. Membership in guard_ids does not
+    establish authorization effectiveness or principal/effect/resource binding.
+    Those remain separate verification obligations.
+    """
+
+    evidence_id: str
+    protected_effect_id: str
+    entrypoint: str
+    guard_ids: list[str] = Field(default_factory=list)
+    guard_cfg_node_ids: dict[str, str] = Field(default_factory=dict)
+    effect_cfg_node_id: str
+    control_flow_summary_digest: str
+    covers_all_paths: bool = False
+    coverage_status: AuthorizationCutSetCoverageStatus = "unknown"
+    uncovered_path_node_ids: list[str] = Field(default_factory=list)
+    origin: SemanticOrigin
+
+    @field_validator(
+        "evidence_id",
+        "protected_effect_id",
+        "entrypoint",
+        "effect_cfg_node_id",
+        "control_flow_summary_digest",
+    )
+    @classmethod
+    def _cut_set_fields_non_empty(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("authorization cut-set evidence fields must be non-empty")
+        return value
+
+    @model_validator(mode="after")
+    def _cut_set_shape(self) -> "AuthorizationCutSetEvidence":
+        if len(set(self.guard_ids)) != len(self.guard_ids):
+            raise ValueError("authorization cut-set guard_ids must be unique")
+        if set(self.guard_cfg_node_ids) != set(self.guard_ids):
+            raise ValueError(
+                "authorization cut-set guard node map must match guard_ids"
+            )
+        if any(not guard_id.strip() for guard_id in self.guard_ids):
+            raise ValueError("authorization cut-set guard ids must be non-empty")
+        if any(
+            not node_id.strip()
+            for node_id in self.guard_cfg_node_ids.values()
+        ):
+            raise ValueError(
+                "authorization cut-set guard CFG node ids must be non-empty"
+            )
+        if self.effect_cfg_node_id in set(self.guard_cfg_node_ids.values()):
+            raise ValueError(
+                "authorization cut-set cannot use the effect node as a guard"
+            )
+        if self.covers_all_paths:
+            if self.coverage_status != "complete":
+                raise ValueError(
+                    "positive authorization cut-set evidence requires complete coverage"
+                )
+            if not self.guard_ids:
+                raise ValueError(
+                    "positive authorization cut-set evidence requires guards"
+                )
+            if self.uncovered_path_node_ids:
+                raise ValueError(
+                    "positive authorization cut-set evidence cannot carry an uncovered path"
+                )
+        elif self.coverage_status == "complete" and not self.uncovered_path_node_ids:
+            raise ValueError(
+                "complete negative authorization cut-set evidence requires an uncovered path"
+            )
+        return self
+
+
 class ValueOriginEvidence(BaseModel):
     """Evidence-bearing classification of where a runtime value came from.
 
@@ -546,6 +622,9 @@ class AssuranceIR(BaseModel):
     guard_dominance_evidence: list[GuardDominanceEvidence] = Field(
         default_factory=list
     )
+    authorization_cut_set_evidence: list[AuthorizationCutSetEvidence] = Field(
+        default_factory=list
+    )
     value_origin_evidence: list[ValueOriginEvidence] = Field(
         default_factory=list
     )
@@ -571,6 +650,7 @@ class AssuranceIR(BaseModel):
             "guard_effectiveness_evidence": "evidence_id",
             "interpretation_compatibility_evidence": "evidence_id",
             "guard_dominance_evidence": "evidence_id",
+            "authorization_cut_set_evidence": "evidence_id",
             "value_origin_evidence": "evidence_id",
             "protected_effects": "protected_effect_id",
             "resource_bindings": "binding_id",
@@ -617,6 +697,12 @@ class AssuranceIR(BaseModel):
         for item in payload["interpretation_compatibility_evidence"]:
             item["assumptions"] = sorted(item["assumptions"])
 
+        for item in payload["authorization_cut_set_evidence"]:
+            item["guard_ids"] = sorted(item["guard_ids"])
+            item["guard_cfg_node_ids"] = dict(
+                sorted(item["guard_cfg_node_ids"].items())
+            )
+
         for item in payload["paths"]:
             item["guard_ids"] = sorted(item["guard_ids"])
             item["protected_effect_ids"] = sorted(item["protected_effect_ids"])
@@ -653,6 +739,8 @@ class AssuranceIR(BaseModel):
         # Preserve prior identity when no CFG dominance evidence is present.
         if not self.guard_dominance_evidence:
             payload.pop("guard_dominance_evidence", None)
+        if not self.authorization_cut_set_evidence:
+            payload.pop("authorization_cut_set_evidence", None)
         if not self.value_origin_evidence:
             payload.pop("value_origin_evidence", None)
         return payload
