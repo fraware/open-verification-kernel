@@ -17,6 +17,9 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from ovk.compilers.authorization.authorization_cut_set import (
+    evaluate_authorization_cut_set,
+)
 from ovk.compilers.authorization.bypass_authority import (
     BypassAuthorityFinding,
     ClosedWorldScopeProof,
@@ -331,6 +334,14 @@ def effect_bindings_from_ir(ir: AssuranceIR) -> dict[str, tuple[str, str]]:
     return mapping
 
 
+_REPO_CLOSURE_IMPORT_STATUSES = frozenset(
+    {
+        "authenticated_head_materials_v1",
+        "unit_local_static_imports_v1",
+    }
+)
+
+
 def enrich_assurance_ir_with_trusted_bypass(
     ir: AssuranceIR,
     *,
@@ -339,6 +350,7 @@ def enrich_assurance_ir_with_trusted_bypass(
     route_cfgs: Mapping[tuple[str, str], HandlerControlFlowSummary | None],
     principal_id: str,
     scope_proof: ClosedWorldScopeProof | None = None,
+    import_resolution_status: str | None = None,
 ) -> AssuranceIR:
     """Attach bypass-authority evidence and synthetic guards to an assembled IR.
 
@@ -346,14 +358,22 @@ def enrich_assurance_ir_with_trusted_bypass(
     false PASS). Empty profile mapping yields no enrichment.
 
     Established synthetic guards are attached to matching semantic paths and
-    their authorizing edges are merged into existing cut-set evidence without
-    inventing cover (covers_all_paths is never upgraded here without CFG
-    re-evaluation). Ownership cuts are not replaced; a separate bypass-edge
-    member is added so PE can qualify via BypassAuthorityEvidence.
+    their authorizing edges are merged into existing cut-set evidence. Cover is
+    re-evaluated against the handler CFG when an edge is added so a body-node
+    cut plus a proved bypass edge can jointly cover. Synthetic bypass guards
+    are not inserted into cut ``guard_ids`` (exact identity of body members is
+    preserved); PE qualifies edge members via BypassAuthorityEvidence.
     """
 
     if not trusted_bypass_authorities:
         return ir
+
+    # Sparse / workspace materials are not repository closed-world. Refuse
+    # established bypass so PE cannot false-PASS on incomplete closure.
+    refuse_established = (
+        import_resolution_status is not None
+        and import_resolution_status not in _REPO_CLOSURE_IMPORT_STATUSES
+    )
 
     effect_bindings = effect_bindings_from_ir(ir)
     evidence_by_id = {
@@ -361,6 +381,12 @@ def enrich_assurance_ir_with_trusted_bypass(
     }
     guards_by_id = {item.guard_id: item for item in ir.guards}
     emitted_guards: list[AuthorizationGuard] = []
+
+    cfg_by_digest = {
+        cfg.digest(): cfg
+        for cfg in route_cfgs.values()
+        if cfg is not None
+    }
 
     for (path, function_name), cfg in sorted(route_cfgs.items()):
         if path not in materials:
@@ -378,8 +404,13 @@ def enrich_assurance_ir_with_trusted_bypass(
             scope_proof=scope_proof,
         )
         for evidence in result.evidence:
+            if refuse_established and evidence.status == "established":
+                evidence.status = "unknown"
+                evidence.reason = "sparse_or_workspace_scope_not_repo_closure"
             evidence_by_id[evidence.evidence_id] = evidence
         for guard in result.guards:
+            if refuse_established:
+                continue
             guards_by_id[guard.guard_id] = guard
             emitted_guards.append(guard)
 
@@ -433,12 +464,48 @@ def enrich_assurance_ir_with_trusted_bypass(
             for cut in matching:
                 # Merge the authorizing edge into structural cut points only.
                 # Do not add synthetic bypass guards into guard_ids of an
-                # existing ownership cut (exact identity + guard_cfg map).
+                # existing body/ownership cut (exact identity + guard_cfg map).
                 if edge_id not in cut.edge_control_points:
                     cut.edge_control_points = sorted(
                         [*cut.edge_control_points, edge_id]
                     )
-                # Never invent cover: adding edges can only shrink reachability.
+                if cut.unresolved_guard_ids:
+                    continue
+                if cut.effect_cfg_node_id is None:
+                    continue
+                if cut.coverage_status == "unknown" and cut.unresolved_guard_ids:
+                    continue
+                cfg = None
+                if cut.control_flow_summary_digest is not None:
+                    cfg = cfg_by_digest.get(cut.control_flow_summary_digest)
+                if cfg is None:
+                    continue
+                cut_nodes = frozenset(
+                    cut.node_control_points
+                    or list(cut.guard_cfg_node_ids.values())
+                )
+                cut_edges = frozenset(cut.edge_control_points)
+                # Re-evaluate: adding edges can only shrink reachability, so
+                # cover may upgrade from uncovered to covered without inventing
+                # false cover over unresolved bindings.
+                result = evaluate_authorization_cut_set(
+                    cfg,
+                    sink_node_id=cut.effect_cfg_node_id,
+                    cut_node_ids=cut_nodes,
+                    cut_edge_ids=cut_edges,
+                )
+                cut.covers_all_paths = result.covers_all_paths
+                cut.coverage_status = result.coverage_status
+                cut.reason = result.reason
+                if (
+                    result.coverage_status == "complete"
+                    and not result.covers_all_paths
+                ):
+                    cut.uncovered_path_node_ids = list(
+                        result.uncovered_path_node_ids
+                    )
+                else:
+                    cut.uncovered_path_node_ids = []
     ir.authorization_cut_set_evidence = sorted(
         cut_by_id.values(),
         key=lambda item: item.evidence_id,

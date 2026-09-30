@@ -161,6 +161,22 @@
       }
     },
     "principal_parameter": {"type": "string", "minLength": 1},
+    "body_authorization_helpers": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["effects"],
+        "properties": {
+          "effects": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          }
+        },
+        "additionalProperties": false
+      }
+    },
     "trusted_bypass_authorities": {
       "type": "object",
       "additionalProperties": {

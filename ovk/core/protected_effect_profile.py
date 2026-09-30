@@ -79,6 +79,32 @@ class OwnershipAssertionConfig(BaseModel):
         return normalized
 
 
+class BodyAuthorizationHelperConfig(BaseModel):
+    """Governed mapping from a handler-body helper call to authorized effects.
+
+    Helper keys are source call names (full or leaf). English names such as
+    ``require_access`` / ``check_access`` never imply authorization without
+    an explicit profile entry. Near-miss helpers outside the profile stay
+    unbound (Unknown).
+    """
+
+    effects: list[str]
+
+    @field_validator("effects")
+    @classmethod
+    def _effects_non_empty(cls, values: list[str]) -> list[str]:
+        normalized = [value.strip() for value in values if value.strip()]
+        if not normalized:
+            raise ValueError(
+                "body authorization helper effects must be non-empty"
+            )
+        if len(normalized) != len(set(normalized)):
+            raise ValueError(
+                "body authorization helper effects must be unique"
+            )
+        return normalized
+
+
 class TrustedBypassAuthorityConfig(BaseModel):
     """Governed mapping from a source-grounded bypass field to effects.
 
@@ -156,6 +182,9 @@ class ProtectedEffectProfileConfig(BaseModel):
     route_dependency_guard_resources: dict[str, str] = Field(default_factory=dict)
     route_dependency_guard_effects: dict[str, list[str]] = Field(default_factory=dict)
     principal_parameter: str = "user"
+    body_authorization_helpers: dict[str, BodyAuthorizationHelperConfig] = Field(
+        default_factory=dict
+    )
     trusted_bypass_authorities: dict[str, TrustedBypassAuthorityConfig] = Field(
         default_factory=dict
     )
@@ -360,6 +389,21 @@ class ProtectedEffectProfileConfig(BaseModel):
                     "from sink_effects: " + ", ".join(unknown_effects)
                 )
 
+        for helper_key, helper in self.body_authorization_helpers.items():
+            if not helper_key.strip():
+                raise ValueError(
+                    "body authorization helper keys must be non-empty"
+                )
+            unknown_effects = sorted(
+                set(helper.effects) - modeled_effects
+            )
+            if unknown_effects:
+                raise ValueError(
+                    f"body authorization helper {helper_key} authorizes "
+                    "effects absent from sink_effects: "
+                    + ", ".join(unknown_effects)
+                )
+
         for sink, projection in self.sink_binding_authorized_projections.items():
             if (
                 projection == "attribute"
@@ -403,6 +447,15 @@ class ProtectedEffectProfileConfig(BaseModel):
             key: sorted(values)
             for key, values in sorted(
                 payload["route_dependency_guard_effects"].items()
+            )
+        }
+        payload["body_authorization_helpers"] = {
+            key: {
+                **value,
+                "effects": sorted(value["effects"]),
+            }
+            for key, value in sorted(
+                payload["body_authorization_helpers"].items()
             )
         }
         payload["trusted_bypass_authorities"] = {
@@ -481,6 +534,10 @@ class ProtectedEffectProfileConfig(BaseModel):
                 for key, values in self.route_dependency_guard_effects.items()
             },
             principal_parameter=self.principal_parameter,
+            body_authorization_helpers={
+                key: tuple(value.effects)
+                for key, value in self.body_authorization_helpers.items()
+            },
             trusted_bypass_authorities={
                 key: tuple(value.effects)
                 for key, value in self.trusted_bypass_authorities.items()

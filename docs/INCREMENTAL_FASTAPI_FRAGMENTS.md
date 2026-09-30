@@ -13,7 +13,8 @@ Each FastApiFileSemanticFragment records:
 - unsupported constructs found during binding;
 - principals, resources, effects, guards;
 - guard-dominance evidence and authorization cut-set evidence
-  (node and edge control points);
+  (node and edge control points; body cut candidates include ownership
+  assertions and profile-declared body authorization helpers);
 - Protected Effects and resource bindings;
 - contract uses;
 - semantic paths.

@@ -179,6 +179,11 @@ class FastApiDependencyEffectProfile:
     trusted_bypass_authorities: dict[str, tuple[str, ...]] = field(
         default_factory=dict
     )
+    # Handler-body helper call name -> authorized effect names. Matched by
+    # profile key (full or leaf call name), never by English security meaning.
+    body_authorization_helpers: dict[str, tuple[str, ...]] = field(
+        default_factory=dict
+    )
 
     def __post_init__(self) -> None:
         static_sinks = set(self.sink_static_resources)
@@ -249,6 +254,22 @@ class FastApiDependencyEffectProfile:
                     + ", ".join(unknown)
                 )
 
+        for helper_key, effects in self.body_authorization_helpers.items():
+            if not helper_key.strip():
+                raise ValueError(
+                    "body authorization helper names must be non-empty"
+                )
+            if not effects or any(not effect.strip() for effect in effects):
+                raise ValueError(
+                    "body authorization helper effects must be non-empty"
+                )
+            unknown = sorted(set(effects) - modeled_effects)
+            if unknown:
+                raise ValueError(
+                    "body authorization helper effects absent from sink model: "
+                    + ", ".join(unknown)
+                )
+
     def sink_effect_names(
         self,
         full_name: str,
@@ -316,6 +337,22 @@ class FastApiDependencyEffectProfile:
         for key in (full_name, leaf_name):
             if key and key in self.ownership_assertions:
                 return key, self.ownership_assertions[key]
+        return None
+
+    def body_authorization_helper_names(
+        self,
+        full_name: str,
+        leaf_name: str | None,
+    ) -> tuple[str, tuple[str, ...]] | None:
+        """Resolve profile-declared body authorization helpers.
+
+        Matching is by governed profile key only. Helper names never imply
+        authorization by themselves.
+        """
+
+        for key in (full_name, leaf_name):
+            if key and key in self.body_authorization_helpers:
+                return key, self.body_authorization_helpers[key]
         return None
 
     def contract_for_sink(self, sink_key: str) -> str | None:
@@ -878,8 +915,10 @@ class FastApiDependencyEffectExtractor:
                     ),
                 )
                 scope_proof = derived_scope.as_closed_world_scope_proof()
+                import_resolution_status = derived_scope.import_resolution_status
             except ValueError:
                 scope_proof = None
+                import_resolution_status = "workspace_materials_not_repo_closure"
             ir = enrich_assurance_ir_with_trusted_bypass(
                 ir,
                 materials=materials.head_files,
@@ -887,5 +926,6 @@ class FastApiDependencyEffectExtractor:
                 route_cfgs=route_cfgs,
                 principal_id=principal_id,
                 scope_proof=scope_proof,
+                import_resolution_status=import_resolution_status,
             )
         return ir

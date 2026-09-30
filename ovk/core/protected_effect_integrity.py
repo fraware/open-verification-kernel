@@ -188,6 +188,38 @@ def _bypass_authority_proves_guard(
     return False
 
 
+def _edge_control_points_independently_proved(
+    *,
+    ir: AssuranceIR,
+    cut_evidence: AuthorizationCutSetEvidence,
+) -> bool:
+    """Prove bypass-claimed cut edges; admit body-derived edges via guards.
+
+    Edges mentioned by BypassAuthorityEvidence must be independently
+    established (Unknown > false PASS on sparse/unproved bypass). Edges never
+    claimed by bypass evidence are treated as structural projections of body
+    guard members (for example ownership branch-outcome edges) and rely on
+    guard-member qualification instead.
+    """
+
+    if not cut_evidence.edge_control_points:
+        return True
+    proved_edges = {
+        item.control_point_edge_id
+        for item in ir.bypass_authority_evidence
+        if item.status == "established" and item.control_point_edge_id is not None
+    }
+    claimed_by_bypass = {
+        item.control_point_edge_id
+        for item in ir.bypass_authority_evidence
+        if item.control_point_edge_id is not None
+    }
+    for edge_id in cut_evidence.edge_control_points:
+        if edge_id in claimed_by_bypass and edge_id not in proved_edges:
+            return False
+    return True
+
+
 def _guard_fully_qualifies_for_collective_cut(
     *,
     ir: AssuranceIR,
@@ -280,6 +312,11 @@ def _collective_cut_on_path(
             continue
         # Prefer cuts whose members are present on the path under evaluation.
         if any(guard_id not in path.guard_ids for guard_id in evidence.guard_ids):
+            continue
+        if not _edge_control_points_independently_proved(
+            ir=ir,
+            cut_evidence=evidence,
+        ):
             continue
         members = [guards_by_id[guard_id] for guard_id in evidence.guard_ids]
         if not all(
