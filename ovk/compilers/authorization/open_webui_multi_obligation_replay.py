@@ -270,6 +270,7 @@ def analyze_open_webui_multi_obligation_revision(
             source_roots=source_roots,
             analyzed_paths=tuple(unit),
             field_searched=bypass_field,
+            import_resolution_status="sparse_unit_not_repo_closure",
         )
         scope_proof = derived_scope.as_closed_world_scope_proof()
         bypass_findings = analyze_bypass_authority_unit(
@@ -356,11 +357,22 @@ def analyze_open_webui_multi_obligation_revision(
         )
         notes.append(finding.reason)
     elif finding is not None and finding.status == "authorized" and not http_param:
-        writer_closure = ObligationResult(
-            name="writer_closure",
-            status="established",
-            reason=finding.reason,
-        )
+        # Sparse development units are not repository closure. Writer search
+        # over the supplied pin/fixture set alone must not establish closed
+        # world (Unknown > false PASS when writers may exist outside the unit).
+        if derived_scope.import_resolution_status == "sparse_unit_not_repo_closure":
+            writer_closure = ObligationResult(
+                name="writer_closure",
+                status="unknown",
+                reason="sparse_unit_not_repo_closure",
+            )
+            notes.append("sparse_unit_not_repo_closure")
+        else:
+            writer_closure = ObligationResult(
+                name="writer_closure",
+                status="established",
+                reason=finding.reason,
+            )
     elif http_param:
         # Route-bound HTTP parameters are client-controlled even when the
         # closed-world writer search remains unresolved.
@@ -527,22 +539,22 @@ def analyze_open_webui_multi_obligation_revision(
         reason=collective_reason,
     )
 
-    # Development replay does not claim full FastAPI PE IR binding unless the
-    # synthetic unit explicitly carries principal/effect/resource identities.
+    # Development replay does not claim FastAPI PE IR principal/effect/resource
+    # binding. Supplied replay identifiers are labels only — stay UNKNOWN.
     principal_binding = ObligationResult(
         name="principal_binding",
-        status="established" if principal_id else "unknown",
-        reason="replay_principal_supplied" if principal_id else "missing",
+        status="unknown",
+        reason="development_replay_bindings_not_ir_proved",
     )
     effect_binding = ObligationResult(
         name="effect_binding",
-        status="established" if effect_id else "unknown",
-        reason="replay_effect_supplied" if effect_id else "missing",
+        status="unknown",
+        reason="development_replay_bindings_not_ir_proved",
     )
     resource_binding = ObligationResult(
         name="resource_binding",
-        status="established" if resource_id else "unknown",
-        reason="replay_resource_supplied" if resource_id else "missing",
+        status="unknown",
+        reason="development_replay_bindings_not_ir_proved",
     )
 
     # Final three-valued PE classification for the development case.

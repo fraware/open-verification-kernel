@@ -117,8 +117,43 @@ def test_vulnerable_pin_fixture_is_concrete_fail() -> None:
     assert obligations["value_origin"].status == "established"
     assert obligations["ordinary_guard_effectiveness"].status == "violated"
     assert obligations["writer_closure"].status == "violated"
+    assert obligations["principal_binding"].status == "unknown"
+    assert obligations["effect_binding"].status == "unknown"
+    assert obligations["resource_binding"].status == "unknown"
     assert report.final_protected_effect_status == "FAIL"
     assert obligations["final_protected_effect_status"].status == "violated"
+
+
+def test_sparse_unit_never_establishes_writer_closure() -> None:
+    """Adversarial: pin/fixture unit search is not repository closed-world."""
+
+    files = {
+        "backend/open_webui/utils/chat.py": """
+def attach(request):
+    request.state.bypass_filter = True
+""".strip(),
+        "backend/open_webui/routers/openai.py": """
+async def handler(request, user):
+    if request.state.bypass_filter:
+        return sink(user)
+    require_access(user)
+    return sink(user)
+""".strip(),
+    }
+    report = analyze_open_webui_multi_obligation_revision(
+        revision_sha=OPEN_WEBUI_REPAIR_SHA,
+        files=files,
+        entry_path="backend/open_webui/routers/openai.py",
+        function_name="handler",
+        source_roots=("backend",),
+        trusted_bypass_authorities={
+            "request.state.bypass_filter": ["model.invoke"],
+        },
+    )
+    obligations = report.obligation_map()
+    assert obligations["writer_closure"].status == "unknown"
+    assert obligations["writer_closure"].reason == "sparse_unit_not_repo_closure"
+    assert report.final_protected_effect_status == "UNKNOWN"
 
 
 def test_repair_stays_unknown_without_caller_provenance() -> None:

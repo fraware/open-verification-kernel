@@ -169,3 +169,30 @@ def route(request):
         item.unresolved_reason == "recursive_call_deferred"
         for item in result.callsites
     )
+
+
+def test_attribute_callsite_matching_callee_poisons_lattice() -> None:
+    """Adversarial: module.callee Attribute forms must not be silently omitted."""
+
+    result = analyze_interprocedural_argument_provenance(
+        {
+            "app/helper.py": """
+def generate(request, bypass_filter: bool = False):
+    request.state.bypass_filter = bypass_filter
+""".strip(),
+            "app/caller.py": """
+import helper
+
+def route(request, bypass_filter: bool = False):
+    generate(request, True)
+    helper.generate(request, bypass_filter)
+""".strip(),
+        },
+        callee_name="generate",
+        parameter="bypass_filter",
+        scope_proof=_scope("app/helper.py", "app/caller.py"),
+    )
+    assert result.provenance == "unknown"
+    assert any(
+        item.unresolved_reason == "deferred_callee_form" for item in result.callsites
+    )

@@ -167,18 +167,41 @@ def _cut_set_evidence_for(
     )
 
 
+def _bypass_authority_proves_guard(
+    ir: AssuranceIR,
+    guard: AuthorizationGuard,
+) -> bool:
+    """True when durable BypassAuthorityEvidence independently proves the guard."""
+
+    if not guard.effectiveness_evidence_ids:
+        return False
+    by_id = {item.evidence_id: item for item in ir.bypass_authority_evidence}
+    for evidence_id in guard.effectiveness_evidence_ids:
+        evidence = by_id.get(evidence_id)
+        if evidence is None or evidence.status != "established":
+            continue
+        if evidence.control_point_edge_id is None:
+            continue
+        if evidence.control_point_edge_id not in guard.condition_ids:
+            continue
+        return True
+    return False
+
+
 def _guard_fully_qualifies_for_collective_cut(
     *,
     ir: AssuranceIR,
     guard: AuthorizationGuard,
     effect: ProtectedEffect,
     path: SemanticPath,
+    cut_evidence: AuthorizationCutSetEvidence,
 ) -> bool:
     """Narrow collective-cut member theorem.
 
     Every cut member must independently satisfy principal, effect,
     effectiveness, exact resource, and complete CFG binding where CFG
     evidence is present. Incomplete CFG binding refuses the whole cut.
+    Vacuous qualification (no CFG, no conditions, no bypass proof) is refused.
     """
 
     if guard.principal_id != effect.principal_id:
@@ -198,9 +221,24 @@ def _guard_fully_qualifies_for_collective_cut(
             or cfg_evidence.effect_cfg_node_id is None
         ):
             return False
+        return True
+    # Cut-set CFG binding: member mapped into a complete covering cut.
+    if guard.guard_id in cut_evidence.guard_cfg_node_ids:
+        if cut_evidence.coverage_status != "complete":
+            return False
+        if cut_evidence.effect_cfg_node_id is None:
+            return False
+        return True
+    # Trusted-bypass synthetic guards: security meaning from BypassAuthorityEvidence.
+    if _bypass_authority_proves_guard(ir, guard):
+        if cut_evidence.edge_control_points and not (
+            set(guard.condition_ids) & set(cut_evidence.edge_control_points)
+        ):
+            return False
+        return True
     # Entrypoint/condition guards without CFG evidence remain eligible when
     # their condition atoms are established on the path.
-    elif guard.condition_ids:
+    if guard.condition_ids:
         available = set(effect.condition_ids) | set(path.condition_ids)
         if not _conditions_imply(
             ir=ir,
@@ -208,7 +246,8 @@ def _guard_fully_qualifies_for_collective_cut(
             available_ids=available,
         ):
             return False
-    return True
+        return True
+    return False
 
 
 def _collective_cut_on_path(
@@ -249,6 +288,7 @@ def _collective_cut_on_path(
                 guard=guard,
                 effect=effect,
                 path=path,
+                cut_evidence=evidence,
             )
             for guard in members
         ):
