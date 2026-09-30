@@ -304,6 +304,42 @@ def test_complete_negative_cut_set_requires_counterexample_path() -> None:
         )
 
 
+def test_cut_set_counterexample_must_connect_entry_to_effect_and_avoid_guards() -> None:
+    with pytest.raises(ValueError, match="must connect entry to effect"):
+        AuthorizationCutSetEvidence(
+            evidence_id="cutset:bad-endpoints",
+            protected_effect_id="protected:refund",
+            entrypoint="POST /refund",
+            guard_ids=["guard:a"],
+            guard_cfg_node_ids={"guard:a": "stmt:4"},
+            entry_cfg_node_id="entry:1",
+            effect_cfg_node_id="stmt:8",
+            control_flow_summary_digest="cfg:complete",
+            covers_all_paths=False,
+            coverage_status="complete",
+            uncovered_path_node_ids=["stmt:2", "stmt:8"],
+            reason="counterexample",
+            origin=_origin("app/routes.py", 9),
+        )
+
+    with pytest.raises(ValueError, match="must avoid guard nodes"):
+        AuthorizationCutSetEvidence(
+            evidence_id="cutset:hits-guard",
+            protected_effect_id="protected:refund",
+            entrypoint="POST /refund",
+            guard_ids=["guard:a"],
+            guard_cfg_node_ids={"guard:a": "stmt:4"},
+            entry_cfg_node_id="entry:1",
+            effect_cfg_node_id="stmt:8",
+            control_flow_summary_digest="cfg:complete",
+            covers_all_paths=False,
+            coverage_status="complete",
+            uncovered_path_node_ids=["entry:1", "stmt:4", "stmt:8"],
+            reason="counterexample",
+            origin=_origin("app/routes.py", 9),
+        )
+
+
 def test_cut_set_guard_node_map_must_match_guard_ids() -> None:
     with pytest.raises(ValueError, match="node map must match guard_ids"):
         AuthorizationCutSetEvidence(
