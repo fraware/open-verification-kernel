@@ -106,13 +106,17 @@ async def mcp_post(request: Request):
     ir, evaluation = _evaluation(source)
 
     assert ir.guards == []
-    assert evaluation.status == "fail"
+    # The protected sink is inside an unsupported loop. The configured route
+    # dependency is absent, but partial body coverage cannot prove that no
+    # other authorization guard exists on every sink-reaching execution.
+    assert evaluation.status == "unknown"
+    assert evaluation.extraction_coverage == "partial"
     guard_check = next(
         check
         for check in evaluation.checks
         if check.dimension == "guard_presence"
     )
-    assert guard_check.status == "violated"
+    assert guard_check.status == "unknown"
 
 
 def test_dependency_factory_is_candidate_with_unproved_effectiveness() -> None:
