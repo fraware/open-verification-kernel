@@ -41,11 +41,25 @@ BypassAuthorityStatus = Literal[
 
 
 @dataclass(frozen=True)
+class ClosedWorldScopeProof:
+    """Caller-supplied proof boundary for repository writer accounting.
+
+    accounted_paths is the complete Python source set claimed for this analysis
+    scope. source_roots map repository paths to importable module names, e.g.
+    ("backend",) for backend/open_webui/... -> open_webui....
+    """
+
+    accounted_paths: tuple[str, ...]
+    source_roots: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class ClosedWorldCondition:
     """Explicit closed-world accounting status for one analysis unit."""
 
     complete: bool
     accounted_paths: tuple[str, ...]
+    source_roots: tuple[str, ...]
     unresolvable_imports: tuple[str, ...]
     reason: str
 
@@ -79,7 +93,7 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id="assurance.fastapi.bypass_authority.ast_v1",
-        extractor_version="0.4.0",
+        extractor_version="0.6.0",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -505,38 +519,57 @@ def _normalize_unit_path(path: str) -> str:
     return path.replace("\\", "/")
 
 
+def _normalize_source_root(root: str) -> str:
+    normalized = _normalize_unit_path(root).strip("/")
+    return "" if normalized in {"", "."} else normalized
+
+
+def _path_relative_to_root(path: str, root: str) -> str | None:
+    root = _normalize_source_root(root)
+    if not root:
+        return path
+    prefix = root + "/"
+    if not path.startswith(prefix):
+        return None
+    return path[len(prefix):]
+
+
 def _module_path_in_unit(
     module: str,
     *,
     available_paths: set[str],
+    source_roots: tuple[str, ...],
 ) -> str | None:
-    """Resolve an absolute module name to a unique path in the unit, else None."""
+    """Resolve an absolute module name under declared Python source roots."""
 
     stem = module.replace(".", "/")
-    suffixes = (f"{stem}.py", f"{stem}/__init__.py")
-    candidates = sorted(
-        path
-        for path in available_paths
-        if any(
-            path == suffix or path.endswith("/" + suffix)
-            for suffix in suffixes
-        )
-    )
-    return candidates[0] if len(candidates) == 1 else None
+    candidates: set[str] = set()
+    for source_root in source_roots:
+        root = _normalize_source_root(source_root)
+        prefix = f"{root}/" if root else ""
+        for suffix in (f"{stem}.py", f"{stem}/__init__.py"):
+            candidate = prefix + suffix
+            if candidate in available_paths:
+                candidates.add(candidate)
+    ordered = sorted(candidates)
+    return ordered[0] if len(ordered) == 1 else None
 
 
-def _unit_package_roots(available_paths: set[str]) -> frozenset[str]:
-    """Top-level package/module names present in the compilation unit."""
+def _unit_package_roots(
+    available_paths: set[str],
+    *,
+    source_roots: tuple[str, ...],
+) -> frozenset[str]:
+    """Top-level import names represented under the declared source roots."""
 
     roots: set[str] = set()
     for path in available_paths:
-        parts = path.split("/")
-        if not parts:
-            continue
-        if parts[0].endswith(".py"):
-            roots.add(parts[0][:-3])
-        else:
-            roots.add(parts[0])
+        for source_root in source_roots:
+            relative = _path_relative_to_root(path, source_root)
+            if relative is None or not relative:
+                continue
+            top = relative.split("/", 1)[0]
+            roots.add(top[:-3] if top.endswith(".py") else top)
     return frozenset(roots)
 
 
@@ -544,46 +577,92 @@ def _import_module_name(
     node: ast.ImportFrom,
     *,
     importer_path: str,
+    source_roots: tuple[str, ...],
 ) -> str | None:
-    """Resolve ImportFrom to an absolute module name within the unit, if possible."""
+    """Resolve ImportFrom to an import-space module name."""
 
-    if node.level and node.level > 0:
-        # Relative import: resolve against importer package.
-        importer = _normalize_unit_path(importer_path)
-        if importer.endswith(".py"):
-            importer = importer[: -len(".py")]
-        parts = importer.split("/")
-        if parts and parts[-1] == "__init__":
-            parts = parts[:-1]
-        # Go up ``level`` packages from the containing package.
-        package_parts = parts[:-1] if parts else []
-        if node.level - 1 > len(package_parts):
-            return None
-        if node.level > 1:
-            package_parts = package_parts[: -(node.level - 1)]
-        if node.module:
-            package_parts = list(package_parts) + node.module.split(".")
-        return ".".join(package_parts) if package_parts else None
-    return node.module
+    if not node.level or node.level <= 0:
+        return node.module
+
+    importer = _normalize_unit_path(importer_path)
+    relative_importer = None
+    for source_root in source_roots:
+        candidate = _path_relative_to_root(importer, source_root)
+        if candidate is not None:
+            relative_importer = candidate
+            break
+    if relative_importer is None:
+        return None
+    if relative_importer.endswith(".py"):
+        relative_importer = relative_importer[:-3]
+    parts = relative_importer.split("/")
+    if parts and parts[-1] == "__init__":
+        parts = parts[:-1]
+    package_parts = parts[:-1] if parts else []
+    if node.level - 1 > len(package_parts):
+        return None
+    if node.level > 1:
+        package_parts = package_parts[: -(node.level - 1)]
+    if node.module:
+        package_parts = list(package_parts) + node.module.split(".")
+    return ".".join(package_parts) if package_parts else None
 
 
 def _evaluate_closed_world(
     files: Mapping[str, str],
+    *,
+    scope_proof: ClosedWorldScopeProof | None,
 ) -> ClosedWorldCondition:
-    """Establish whether the unit's import graph is closed and resolvable.
-
-    Repository-local imports whose top-level package is present in the unit
-    must resolve to a unit path. Unresolvable local imports, star imports, and
-    dynamic import forms make the closed-world condition incomplete — never an
-    authorized PASS. Third-party / stdlib imports (top-level not in the unit)
-    are outside this closed world and do not, by themselves, complete or break
-    it; absence of writers outside the unit is still not positive proof.
-    """
+    """Verify the declared repository writer scope and its local imports."""
 
     available = {_normalize_unit_path(path) for path in files}
-    roots = _unit_package_roots(available)
-    unresolvable: list[str] = []
     accounted = tuple(sorted(available))
+
+    if scope_proof is None:
+        return ClosedWorldCondition(
+            complete=False,
+            accounted_paths=accounted,
+            source_roots=(),
+            unresolvable_imports=("scope_proof_missing",),
+            reason="closed_world_scope_proof_missing",
+        )
+
+    proof_paths = {
+        _normalize_unit_path(path)
+        for path in scope_proof.accounted_paths
+    }
+    source_roots = tuple(
+        sorted({_normalize_source_root(root) for root in scope_proof.source_roots})
+    )
+    scope_errors: list[str] = []
+    if proof_paths != available:
+        for missing in sorted(proof_paths - available):
+            scope_errors.append(f"scope_path_missing:{missing}")
+        for extra in sorted(available - proof_paths):
+            scope_errors.append(f"scope_path_unaccounted:{extra}")
+    if not source_roots:
+        scope_errors.append("source_roots_missing")
+    for path in sorted(available):
+        if not any(
+            _path_relative_to_root(path, root) is not None
+            for root in source_roots
+        ):
+            scope_errors.append(f"path_outside_source_roots:{path}")
+
+    if scope_errors:
+        return ClosedWorldCondition(
+            complete=False,
+            accounted_paths=accounted,
+            source_roots=source_roots,
+            unresolvable_imports=tuple(sorted(set(scope_errors))),
+            reason="closed_world_scope_proof_mismatch",
+        )
+
+    roots = _unit_package_roots(
+        available,
+        source_roots=source_roots,
+    )
+    unresolvable: list[str] = []
 
     for path, source in sorted(files.items()):
         norm = _normalize_unit_path(path)
@@ -597,17 +676,21 @@ def _evaluate_closed_world(
                 if any(alias.name == "*" for alias in node.names):
                     unresolvable.append(f"{norm}:star_import")
                     continue
-                module_name = _import_module_name(node, importer_path=norm)
+                module_name = _import_module_name(
+                    node,
+                    importer_path=norm,
+                    source_roots=source_roots,
+                )
                 if module_name is None:
                     unresolvable.append(f"{norm}:unresolved_relative_import")
                     continue
                 top = module_name.split(".", 1)[0]
                 if top not in roots:
-                    # External to the compilation unit — out of closed-world
-                    # writer accounting (explicitly not positive proof).
                     continue
                 resolved = _module_path_in_unit(
-                    module_name, available_paths=available
+                    module_name,
+                    available_paths=available,
+                    source_roots=source_roots,
                 )
                 if resolved is None:
                     unresolvable.append(
@@ -619,15 +702,15 @@ def _evaluate_closed_world(
                     if top not in roots:
                         continue
                     resolved = _module_path_in_unit(
-                        alias.name, available_paths=available
+                        alias.name,
+                        available_paths=available,
+                        source_roots=source_roots,
                     )
                     if resolved is None:
                         unresolvable.append(
                             f"{norm}:unresolvable_local_import:{alias.name}"
                         )
 
-        # Dynamic imports anywhere in the module (including nested function
-        # bodies) make the closed world incomplete — Unknown > false PASS.
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -643,16 +726,16 @@ def _evaluate_closed_world(
                 break
 
     complete = not unresolvable
-    reason = (
-        "closed_world_complete_over_unit"
-        if complete
-        else "closed_world_incomplete_unresolvable_imports"
-    )
     return ClosedWorldCondition(
         complete=complete,
         accounted_paths=accounted,
+        source_roots=source_roots,
         unresolvable_imports=tuple(sorted(set(unresolvable))),
-        reason=reason,
+        reason=(
+            "closed_world_complete_over_proved_scope"
+            if complete
+            else "closed_world_incomplete_unresolvable_imports"
+        ),
     )
 
 
@@ -797,6 +880,7 @@ def analyze_bypass_authority_unit(
     entry_path: str,
     function_name: str | None = None,
     bypass_fields: frozenset[str] | None = None,
+    scope_proof: ClosedWorldScopeProof | None = None,
 ) -> tuple[BypassAuthorityFinding, ...]:
     """Closed-world bypass analysis over a multi-file compilation unit.
 
@@ -814,7 +898,10 @@ def analyze_bypass_authority_unit(
     if entry not in normalized:
         raise ValueError(f"entry_path {entry_path!r} not in compilation unit")
 
-    closed_world = _evaluate_closed_world(normalized)
+    closed_world = _evaluate_closed_world(
+        normalized,
+        scope_proof=scope_proof,
+    )
 
     entry_tree = ast.parse(normalized[entry], filename=entry)
     entry_functions = [
@@ -863,6 +950,7 @@ def analyze_bypass_authority(
     path: str = "<module>",
     function_name: str | None = None,
     bypass_fields: frozenset[str] | None = None,
+    scope_proof: ClosedWorldScopeProof | None = None,
 ) -> tuple[BypassAuthorityFinding, ...]:
     """Analyze closed-world bypass authority for a single source unit.
 
@@ -875,6 +963,7 @@ def analyze_bypass_authority(
         entry_path=path,
         function_name=function_name,
         bypass_fields=bypass_fields,
+        scope_proof=scope_proof,
     )
 
 
@@ -893,6 +982,7 @@ def bypass_authority_digest(findings: tuple[BypassAuthorityFinding, ...]) -> str
                     {
                         "complete": item.closed_world.complete,
                         "accounted_paths": list(item.closed_world.accounted_paths),
+                        "source_roots": list(item.closed_world.source_roots),
                         "unresolvable_imports": list(
                             item.closed_world.unresolvable_imports
                         ),
