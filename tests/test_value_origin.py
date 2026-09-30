@@ -24,7 +24,7 @@ def handler(bypass_filter: bool = False, item_id: str = "x"):
     assert kinds["item_id"] == "externally_bound_http_value"
 
 
-def test_literal_and_config_kinds() -> None:
+def test_literal_and_config_shaped_names_do_not_invent_trust() -> None:
     lit = classify_expression_origin(
         ast.parse("True", mode="eval").body,
         path="h.py",
@@ -32,19 +32,13 @@ def test_literal_and_config_kinds() -> None:
     )
     assert lit.origin_kind == "literal_constant"
 
-    cfg = classify_expression_origin(
-        ast.parse("SETTINGS.debug", mode="eval").body,
-        path="h.py",
-        handler_param_names=frozenset(),
-    )
-    assert cfg.origin_kind == "server_configuration"
-
-    settings_attr = classify_expression_origin(
-        ast.parse("settings.ALLOW", mode="eval").body,
-        path="h.py",
-        handler_param_names=frozenset(),
-    )
-    assert settings_attr.origin_kind == "server_configuration"
+    for expression in ("SETTINGS.debug", "settings.ALLOW"):
+        evidence = classify_expression_origin(
+            ast.parse(expression, mode="eval").body,
+            path="h.py",
+            handler_param_names=frozenset(),
+        )
+        assert evidence.origin_kind == "derived_value"
 
 
 def test_bare_allcaps_name_is_unknown_not_server_configuration() -> None:
@@ -59,14 +53,23 @@ def test_bare_allcaps_name_is_unknown_not_server_configuration() -> None:
         assert evidence.origin_kind == "unknown_origin", bare
 
 
-def test_conventional_config_suffix_name_remains_server_configuration() -> None:
+def test_conventional_config_shaped_names_remain_unknown() -> None:
     for name in ("APP_SETTINGS", "SERVER_CONFIG", "CONFIG_FLAG"):
         evidence = classify_expression_origin(
             ast.parse(name, mode="eval").body,
             path="h.py",
             handler_param_names=frozenset(),
         )
-        assert evidence.origin_kind == "server_configuration", name
+        assert evidence.origin_kind == "unknown_origin", name
+
+
+def test_settings_parameter_attribute_is_not_server_configuration() -> None:
+    evidence = classify_expression_origin(
+        ast.parse("settings.ALLOW", mode="eval").body,
+        path="h.py",
+        handler_param_names=frozenset({"settings"}),
+    )
+    assert evidence.origin_kind == "derived_value"
 
 
 def test_request_state_is_not_trusted() -> None:
