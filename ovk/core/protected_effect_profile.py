@@ -79,6 +79,26 @@ class OwnershipAssertionConfig(BaseModel):
         return normalized
 
 
+class TrustedBypassAuthorityConfig(BaseModel):
+    """Governed mapping from a source-grounded bypass field to effects.
+
+    Policy keys must be explicit ``request.state.<field>`` paths. Names such as
+    bypass / skip_auth / trusted never imply authorization by themselves.
+    """
+
+    effects: list[str]
+
+    @field_validator("effects")
+    @classmethod
+    def _effects_non_empty(cls, values: list[str]) -> list[str]:
+        normalized = [value.strip() for value in values if value.strip()]
+        if not normalized:
+            raise ValueError("trusted bypass authority effects must be non-empty")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("trusted bypass authority effects must be unique")
+        return normalized
+
+
 class ProtectedEffectProfileConfig(BaseModel):
     """Repository-declared semantics for the supported FastAPI assurance profile."""
 
@@ -136,6 +156,9 @@ class ProtectedEffectProfileConfig(BaseModel):
     route_dependency_guard_resources: dict[str, str] = Field(default_factory=dict)
     route_dependency_guard_effects: dict[str, list[str]] = Field(default_factory=dict)
     principal_parameter: str = "user"
+    trusted_bypass_authorities: dict[str, TrustedBypassAuthorityConfig] = Field(
+        default_factory=dict
+    )
 
     @field_validator("source_paths")
     @classmethod
@@ -179,6 +202,16 @@ class ProtectedEffectProfileConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_semantic_references(self) -> "ProtectedEffectProfileConfig":
+        for key in self.trusted_bypass_authorities:
+            if not key.startswith("request.state.") or key.count(".") != 2:
+                raise ValueError(
+                    "trusted_bypass_authorities keys must be request.state.<field>"
+                )
+            field = key.rsplit(".", 1)[-1]
+            if not field.isidentifier():
+                raise ValueError(
+                    "trusted_bypass_authorities fields must be Python identifiers"
+                )
         sink_keys = set(self.sink_effects)
         per_sink_maps = {
             "sink_identity_args": set(self.sink_identity_args),
@@ -372,6 +405,15 @@ class ProtectedEffectProfileConfig(BaseModel):
                 payload["route_dependency_guard_effects"].items()
             )
         }
+        payload["trusted_bypass_authorities"] = {
+            key: {
+                **value,
+                "effects": sorted(value["effects"]),
+            }
+            for key, value in sorted(
+                payload["trusted_bypass_authorities"].items()
+            )
+        }
         return payload
 
     @property
@@ -439,6 +481,10 @@ class ProtectedEffectProfileConfig(BaseModel):
                 for key, values in self.route_dependency_guard_effects.items()
             },
             principal_parameter=self.principal_parameter,
+            trusted_bypass_authorities={
+                key: tuple(value.effects)
+                for key, value in self.trusted_bypass_authorities.items()
+            },
         )
 
 

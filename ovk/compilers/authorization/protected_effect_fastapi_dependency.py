@@ -37,6 +37,9 @@ from ovk.compilers.authorization.fastapi_semantic_fragment import (
     assemble_fastapi_assurance_ir,
     bind_route_file_summary,
 )
+from ovk.compilers.authorization.trusted_bypass_authorization import (
+    enrich_assurance_ir_with_trusted_bypass,
+)
 from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.compilers.authorization.python_ast_index import (
     ParsedPythonMaterials,
@@ -168,6 +171,11 @@ class FastApiDependencyEffectProfile:
     route_dependency_guard_effects: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     principal_parameter: str = "user"
+    # Explicit policy keys (request.state.<field>) -> authorized effect names.
+    # Field names never imply authorization without this mapping.
+    trusted_bypass_authorities: dict[str, tuple[str, ...]] = field(
+        default_factory=dict
+    )
 
     def __post_init__(self) -> None:
         static_sinks = set(self.sink_static_resources)
@@ -823,7 +831,7 @@ class FastApiDependencyEffectExtractor:
             and path not in route_summaries.summaries
         ]
 
-        return assemble_fastapi_assurance_ir(
+        ir = assemble_fastapi_assurance_ir(
             materials=materials,
             function_contracts=function_contracts,
             resource_return_contracts=resource_return_contracts,
@@ -832,3 +840,23 @@ class FastApiDependencyEffectExtractor:
             syntax_errors=parsed.syntax_errors,
             missing_route_summary_paths=missing_route_summaries,
         )
+        if profile.trusted_bypass_authorities:
+            route_cfgs = {
+                (path, handler.handler_name): handler.control_flow
+                for path, summary in route_summaries.summaries.items()
+                for handler in summary.handlers
+            }
+            principals = list(ir.principals)
+            principal_id = (
+                principals[0].principal_id
+                if principals
+                else f"principal:{profile.principal_parameter}"
+            )
+            ir = enrich_assurance_ir_with_trusted_bypass(
+                ir,
+                materials=materials.head_files,
+                trusted_bypass_authorities=profile.trusted_bypass_authorities,
+                route_cfgs=route_cfgs,
+                principal_id=principal_id,
+            )
+        return ir
