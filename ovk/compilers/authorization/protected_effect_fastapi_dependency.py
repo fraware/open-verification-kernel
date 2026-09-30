@@ -130,6 +130,16 @@ class ResourceOwnershipAssertionSemantics:
 
 
 @dataclass(frozen=True)
+class BodyAuthorizationHelperSemantics:
+    """Runtime semantics for one profile-declared body authorization helper."""
+
+    authorized_effects: tuple[str, ...]
+    principal_arg: int = 0
+    resource_arg: int | None = None
+    authorized_resource: str | None = None
+
+
+@dataclass(frozen=True)
 class FastApiDependencyEffectProfile:
     """Explicit semantics for dependency guards and protected service calls."""
 
@@ -180,9 +190,9 @@ class FastApiDependencyEffectProfile:
     trusted_bypass_authorities: dict[str, tuple[str, ...]] = field(
         default_factory=dict
     )
-    # Handler-body helper call name -> authorized effect names. Matched by
-    # profile key (full or leaf call name), never by English security meaning.
-    body_authorization_helpers: dict[str, tuple[str, ...]] = field(
+    # Handler-body helper call name -> governed semantics. Matched by profile
+    # key only; effectiveness stays unproved until implementation evidence.
+    body_authorization_helpers: dict[str, BodyAuthorizationHelperSemantics] = field(
         default_factory=dict
     )
 
@@ -255,14 +265,19 @@ class FastApiDependencyEffectProfile:
                     + ", ".join(unknown)
                 )
 
-        for helper_key, effects in self.body_authorization_helpers.items():
+        for helper_key, semantics in self.body_authorization_helpers.items():
             if not helper_key.strip():
                 raise ValueError(
                     "body authorization helper names must be non-empty"
                 )
+            effects = semantics.authorized_effects
             if not effects or any(not effect.strip() for effect in effects):
                 raise ValueError(
                     "body authorization helper effects must be non-empty"
+                )
+            if semantics.resource_arg is None and not semantics.authorized_resource:
+                raise ValueError(
+                    "body authorization helpers require resource_arg or authorized_resource"
                 )
             unknown = sorted(set(effects) - modeled_effects)
             if unknown:
@@ -344,7 +359,7 @@ class FastApiDependencyEffectProfile:
         self,
         full_name: str,
         leaf_name: str | None,
-    ) -> tuple[str, tuple[str, ...]] | None:
+    ) -> tuple[str, BodyAuthorizationHelperSemantics] | None:
         """Resolve profile-declared body authorization helpers.
 
         Matching is by governed profile key only. Helper names never imply
@@ -861,6 +876,7 @@ class FastApiDependencyEffectExtractor:
                     router_wrappers.owners_for(path)
                 ),
                 route_attachment_digest=route_attachment_digest(path),
+                source_files=materials.head_files,
             )
             for path, summary in sorted(route_summaries.summaries.items())
             if summary.handlers

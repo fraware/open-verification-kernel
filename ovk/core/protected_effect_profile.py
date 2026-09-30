@@ -19,6 +19,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ovk.compilers.authorization.protected_effect_fastapi_dependency import (
+    BodyAuthorizationHelperSemantics,
     FastApiDependencyEffectProfile,
     ResourceOwnershipAssertionSemantics,
     ResourceScopeAssertionSemantics,
@@ -86,9 +87,17 @@ class BodyAuthorizationHelperConfig(BaseModel):
     ``require_access`` / ``check_access`` never imply authorization without
     an explicit profile entry. Near-miss helpers outside the profile stay
     unbound (Unknown).
+
+    Profile declaration alone does not establish effectiveness. Effectiveness
+    requires fail-closed implementation evidence or a separately governed
+    function contract. Resource binding must be explicit via ``resource_arg``
+    or ``authorized_resource`` — never a silent map onto the sink acted_id.
     """
 
     effects: list[str]
+    principal_arg: int = Field(default=0, ge=0)
+    resource_arg: int | None = Field(default=None, ge=0)
+    authorized_resource: str | None = None
 
     @field_validator("effects")
     @classmethod
@@ -103,6 +112,28 @@ class BodyAuthorizationHelperConfig(BaseModel):
                 "body authorization helper effects must be unique"
             )
         return normalized
+
+    @field_validator("authorized_resource")
+    @classmethod
+    def _authorized_resource_non_empty(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("authorized_resource must be non-empty when set")
+        return value
+
+    @model_validator(mode="after")
+    def _resource_binding_explicit(self) -> "BodyAuthorizationHelperConfig":
+        if self.resource_arg is None and self.authorized_resource is None:
+            raise ValueError(
+                "body authorization helpers require resource_arg or authorized_resource"
+            )
+        if self.resource_arg is not None and self.authorized_resource is not None:
+            raise ValueError(
+                "body authorization helpers cannot set both resource_arg and authorized_resource"
+            )
+        return self
 
 
 class TrustedBypassAuthorityConfig(BaseModel):
@@ -535,7 +566,12 @@ class ProtectedEffectProfileConfig(BaseModel):
             },
             principal_parameter=self.principal_parameter,
             body_authorization_helpers={
-                key: tuple(value.effects)
+                key: BodyAuthorizationHelperSemantics(
+                    authorized_effects=tuple(value.effects),
+                    principal_arg=value.principal_arg,
+                    resource_arg=value.resource_arg,
+                    authorized_resource=value.authorized_resource,
+                )
                 for key, value in self.body_authorization_helpers.items()
             },
             trusted_bypass_authorities={
