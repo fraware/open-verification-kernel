@@ -84,9 +84,10 @@ def test_development_replay_answers_both_revisions_separately() -> None:
     assert rep.bypass_predicate_represented is True
     assert rep.origin_established is True
     assert rep.ordinary_auth_guard_dominates_sink is False
-    assert rep.bypass_path_independently_authorized is True
+    assert rep.bypass_path_independently_authorized is False
     assert rep.cfg_coverage_complete is True
-    assert rep.remaining_human_review_reason == "bypass_independently_authorized"
+    assert rep.remaining_human_review_reason == "human_review_required"
+    assert "unsupported_write_origin_mix" in report.repair.notes
 
 
 def test_development_replay_does_not_count_held_out_success() -> None:
@@ -153,6 +154,33 @@ async def generate_chat_completion(request, form_data, user, bypass_filter: bool
     assert report.answers.remaining_human_review_reason == (
         "client_controlled_bypass_not_authorized"
     )
+
+
+
+def test_live_repair_helper_parameter_stays_unknown_without_caller_provenance() -> None:
+    repair_unit = {
+        "backend/open_webui/utils/chat.py": """
+async def generate_chat_completion(request, form_data, user, bypass_filter: bool = False):
+    request.state.bypass_filter = bypass_filter
+""".strip(),
+        "backend/open_webui/routers/openai.py": """
+async def generate_chat_completion(request, form_data, user):
+    bypass_filter = getattr(request.state, "bypass_filter", False)
+    if not bypass_filter:
+        check_model_access(user, model)
+    metadata = form_data.get("metadata")
+    return metadata
+""".strip(),
+    }
+    report = analyze_open_webui_live_pin_revision(
+        revision_sha=OPEN_WEBUI_REPAIR_SHA,
+        files=repair_unit,
+    )
+    assert report.source_mode == "live_pin"
+    assert report.answers.source_extraction_succeeded is True
+    assert report.answers.bypass_path_independently_authorized is False
+    assert report.answers.remaining_human_review_reason == "human_review_required"
+    assert "unresolved_write_origin" in report.notes
 
 
 @pytest.mark.skipif(
