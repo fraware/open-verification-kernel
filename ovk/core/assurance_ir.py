@@ -308,19 +308,23 @@ class AuthorizationCutSetEvidence(BaseModel):
     entrypoint: str
     guard_ids: list[str] = Field(default_factory=list)
     guard_cfg_node_ids: dict[str, str] = Field(default_factory=dict)
+    entry_cfg_node_id: str
     effect_cfg_node_id: str
     control_flow_summary_digest: str
     covers_all_paths: bool = False
     coverage_status: AuthorizationCutSetCoverageStatus = "unknown"
     uncovered_path_node_ids: list[str] = Field(default_factory=list)
+    reason: str
     origin: SemanticOrigin
 
     @field_validator(
         "evidence_id",
         "protected_effect_id",
         "entrypoint",
+        "entry_cfg_node_id",
         "effect_cfg_node_id",
         "control_flow_summary_digest",
+        "reason",
     )
     @classmethod
     def _cut_set_fields_non_empty(cls, value: str) -> str:
