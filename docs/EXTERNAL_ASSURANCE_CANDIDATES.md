@@ -144,6 +144,14 @@ CI uses synthetic fixtures. An optional gated live pin path
 revisions. Development replay is not held-out success and does not change frozen
 registry classifications.
 
+The multi-obligation replay (`open_webui_multi_obligation_replay`) evaluates both
+pinned revisions and reports each obligation separately (source extraction, CFG
+coverage, bypass predicate, value origin, writer closure, caller provenance,
+ordinary guard effectiveness, bypass authority, branch-outcome binding,
+collective path coverage, principal/effect/resource binding, and final Protected
+Effect status). Repair may correctly remain UNKNOWN when caller provenance or
+repository closure is incomplete.
+
 ### Apache Airflow obligations (parked)
 
 Apache Airflow backfill parser/authorization obligations remain parked. Support

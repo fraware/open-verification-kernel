@@ -344,6 +344,12 @@ def enrich_assurance_ir_with_trusted_bypass(
 
     Without a closed-world scope proof, established status is refused (Unknown >
     false PASS). Empty profile mapping yields no enrichment.
+
+    Established synthetic guards are attached to matching semantic paths and
+    their authorizing edges are merged into existing cut-set evidence without
+    inventing cover (covers_all_paths is never upgraded here without CFG
+    re-evaluation). Ownership cuts are not replaced; a separate bypass-edge
+    member is added so PE can qualify via BypassAuthorityEvidence.
     """
 
     if not trusted_bypass_authorities:
@@ -354,6 +360,7 @@ def enrich_assurance_ir_with_trusted_bypass(
         item.evidence_id: item for item in ir.bypass_authority_evidence
     }
     guards_by_id = {item.guard_id: item for item in ir.guards}
+    emitted_guards: list[AuthorizationGuard] = []
 
     for (path, function_name), cfg in sorted(route_cfgs.items()):
         if path not in materials:
@@ -374,12 +381,68 @@ def enrich_assurance_ir_with_trusted_bypass(
             evidence_by_id[evidence.evidence_id] = evidence
         for guard in result.guards:
             guards_by_id[guard.guard_id] = guard
+            emitted_guards.append(guard)
 
     ir.bypass_authority_evidence = sorted(
         evidence_by_id.values(),
         key=lambda item: item.evidence_id,
     )
     ir.guards = sorted(guards_by_id.values(), key=lambda item: item.guard_id)
+
+    if not emitted_guards:
+        return ir
+
+    effect_ids_by_protected = {
+        item.protected_effect_id: item.effect_id for item in ir.protected_effects
+    }
+    for path in ir.paths:
+        path_effect_ids = {
+            effect_ids_by_protected[pe_id]
+            for pe_id in path.protected_effect_ids
+            if pe_id in effect_ids_by_protected
+        }
+        for guard in emitted_guards:
+            if guard.effect_id not in path_effect_ids:
+                continue
+            if guard.guard_id in path.guard_ids:
+                continue
+            path.guard_ids = sorted([*path.guard_ids, guard.guard_id])
+
+    cut_by_id = {
+        item.evidence_id: item for item in ir.authorization_cut_set_evidence
+    }
+    for guard in emitted_guards:
+        if not guard.effectiveness_evidence_ids:
+            continue
+        bypass = evidence_by_id.get(guard.effectiveness_evidence_ids[0])
+        if bypass is None or bypass.status != "established":
+            continue
+        edge_id = bypass.control_point_edge_id
+        if edge_id is None:
+            continue
+        for protected in ir.protected_effects:
+            if protected.effect_id != guard.effect_id:
+                continue
+            if protected.resource_id != guard.resource_id:
+                continue
+            matching = [
+                item
+                for item in cut_by_id.values()
+                if item.protected_effect_id == protected.protected_effect_id
+            ]
+            for cut in matching:
+                # Merge the authorizing edge into structural cut points only.
+                # Do not add synthetic bypass guards into guard_ids of an
+                # existing ownership cut (exact identity + guard_cfg map).
+                if edge_id not in cut.edge_control_points:
+                    cut.edge_control_points = sorted(
+                        [*cut.edge_control_points, edge_id]
+                    )
+                # Never invent cover: adding edges can only shrink reachability.
+    ir.authorization_cut_set_evidence = sorted(
+        cut_by_id.values(),
+        key=lambda item: item.evidence_id,
+    )
     return ir
 
 

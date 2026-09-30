@@ -132,6 +132,22 @@ def _resolve_callee_name(
     return None
 
 
+def _maybe_targets_callee(func: ast.AST, callee_name: str) -> bool:
+    """True when an unresolved callee form might still name ``callee_name``.
+
+    Attribute calls whose final attribute equals the callee are deferred
+    potential callsites and must poison the lattice (Unknown > false internal).
+    Non-Name/non-matching forms that cannot be proved irrelevant also poison.
+    """
+
+    if isinstance(func, ast.Name):
+        return False
+    if isinstance(func, ast.Attribute):
+        return func.attr == callee_name
+    # Call / Subscript / Lambda / etc. could evaluate to the callee.
+    return True
+
+
 def _collect_import_aliases(tree: ast.AST) -> dict[str, str] | None:
     """Return alias->name for unique function imports, or None if ambiguous/deferred."""
 
@@ -279,6 +295,24 @@ def analyze_interprocedural_argument_provenance(
             if not isinstance(node, ast.Call):
                 continue
             resolved = _resolve_callee_name(node.func, import_aliases=aliases)
+            if resolved is None:
+                # Deferred callee forms that might target this callee must
+                # poison provenance. Silent omit enables false server_internal.
+                if _maybe_targets_callee(node.func, callee_name):
+                    unresolved = True
+                    bindings.append(
+                        CallsiteBinding(
+                            callsite_id=(
+                                f"callsite:{path}:{getattr(node, 'lineno', 0)}"
+                            ),
+                            path=path,
+                            actual_expression=ast.unparse(node),
+                            origin_kind="unknown_origin",
+                            evidence_id=None,
+                            unresolved_reason="deferred_callee_form",
+                        )
+                    )
+                continue
             if resolved != callee_name:
                 continue
             caller = _enclosing_function(tree, node)

@@ -40,6 +40,9 @@ from ovk.compilers.authorization.fastapi_semantic_fragment import (
 from ovk.compilers.authorization.trusted_bypass_authorization import (
     enrich_assurance_ir_with_trusted_bypass,
 )
+from ovk.compilers.authorization.repository_scope_proof import (
+    derive_closed_world_scope_proof,
+)
 from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.compilers.authorization.python_ast_index import (
     ParsedPythonMaterials,
@@ -852,11 +855,37 @@ class FastApiDependencyEffectExtractor:
                 if principals
                 else f"principal:{profile.principal_parameter}"
             )
+            # Machine-derived scope from head materials. Sparse/incomplete
+            # closures stay honest via import_resolution_status; established
+            # bypass still requires proved writers under this proof.
+            field_searched = None
+            for key in sorted(profile.trusted_bypass_authorities):
+                if key.startswith("request.state."):
+                    field_searched = key.rsplit(".", 1)[-1]
+                    break
+            try:
+                derived_scope = derive_closed_world_scope_proof(
+                    repo=materials.repo or "workspace",
+                    revision=materials.head_revision or "HEAD",
+                    files=materials.head_files,
+                    source_roots=(".",),
+                    analyzed_paths=tuple(materials.head_files),
+                    field_searched=field_searched,
+                    import_resolution_status=(
+                        "authenticated_head_materials_v1"
+                        if materials.repo and materials.head_revision
+                        else "workspace_materials_not_repo_closure"
+                    ),
+                )
+                scope_proof = derived_scope.as_closed_world_scope_proof()
+            except ValueError:
+                scope_proof = None
             ir = enrich_assurance_ir_with_trusted_bypass(
                 ir,
                 materials=materials.head_files,
                 trusted_bypass_authorities=profile.trusted_bypass_authorities,
                 route_cfgs=route_cfgs,
                 principal_id=principal_id,
+                scope_proof=scope_proof,
             )
         return ir

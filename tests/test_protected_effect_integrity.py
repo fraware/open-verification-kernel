@@ -555,3 +555,55 @@ def test_collective_cut_refuses_shrinking_unqualified_member() -> None:
 
     assert _status(obligation, "guard_presence") == "violated"
     assert obligation.path_candidate_guard_ids["path:refund"] == []
+
+
+def test_collective_cut_qualifies_via_cut_cfg_binding_without_dominance() -> None:
+    """Cut-set CFG node map is sufficient structural binding for collective cut."""
+
+    ir = _base_ir(
+        guard_resource="r:authorized",
+        effect_resource="r:authorized",
+        include_binding=False,
+    )
+    ir.guards = [
+        AuthorizationGuard(
+            guard_id="g:a",
+            principal_id="p:user",
+            effect_id="e:refund",
+            resource_id="r:authorized",
+            origin=_origin(9),
+        ),
+        AuthorizationGuard(
+            guard_id="g:b",
+            principal_id="p:user",
+            effect_id="e:refund",
+            resource_id="r:authorized",
+            origin=_origin(11),
+        ),
+    ]
+    ir.paths[0].guard_ids = ["g:a", "g:b"]
+    ir.paths[0].coverage_status = "complete"
+    ir.guard_dominance_evidence = []
+    ir.authorization_cut_set_evidence = [
+        AuthorizationCutSetEvidence(
+            evidence_id="cutset:pe:refund",
+            protected_effect_id="pe:refund",
+            entrypoint="POST /refund",
+            guard_ids=["g:a", "g:b"],
+            guard_cfg_node_ids={"g:a": "stmt:a", "g:b": "stmt:b"},
+            node_control_points=["stmt:a", "stmt:b"],
+            entry_cfg_node_id="entry:1",
+            effect_cfg_node_id="stmt:sink",
+            control_flow_summary_digest="cfg:complete",
+            covers_all_paths=True,
+            coverage_status="complete",
+            reason="authorization_control_points_disconnect_entry_from_sink",
+            origin=_origin(4),
+        )
+    ]
+
+    obligation = compile_protected_effect_integrity(ir)[0]
+
+    assert _status(obligation, "guard_presence") == "established"
+    assert obligation.path_candidate_guard_ids["path:refund"] == ["g:a", "g:b"]
+    assert obligation.structural_status == "established"
