@@ -2,7 +2,17 @@
 
 from __future__ import annotations
 
-from ovk.compilers.authorization.bypass_authority import analyze_bypass_authority
+from ovk.compilers.authorization.bypass_authority import (
+    ClosedWorldScopeProof,
+    analyze_bypass_authority,
+)
+
+
+def _scope(*paths: str, source_roots: tuple[str, ...] = (".",)) -> ClosedWorldScopeProof:
+    return ClosedWorldScopeProof(
+        accounted_paths=tuple(paths),
+        source_roots=source_roots,
+    )
 
 
 def test_client_controlled_bypass_is_violated() -> None:
@@ -82,8 +92,27 @@ def handler(request):
     return getattr(request.state, "bypass_filter", False)
 """.strip(),
         bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("<module>"),
     )
     assert findings[0].status == "authorized"
+    assert findings[0].closed_world is not None
+    assert findings[0].closed_world.complete is True
+
+
+def test_literal_write_without_scope_proof_is_unknown() -> None:
+    findings = analyze_bypass_authority(
+        """
+def handler(request):
+    request.state.bypass_filter = True
+    return request.state.bypass_filter
+""".strip(),
+        function_name="handler",
+        bypass_fields=frozenset({"bypass_filter"}),
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason == "closed_world_incomplete"
+    assert findings[0].closed_world is not None
+    assert findings[0].closed_world.reason == "closed_world_scope_proof_missing"
 
 
 def test_non_entry_middleware_parameter_origin_is_unknown() -> None:
@@ -177,6 +206,7 @@ def handler(request):
         entry_path="app/handler.py",
         function_name="handler",
         bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("app/middleware.py", "app/handler.py"),
     )
     assert findings[0].status == "authorized"
     assert findings[0].closed_world is not None
@@ -228,12 +258,16 @@ def handler(request):
         },
         entry_path="app/handler.py",
         bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("app/handler.py"),
     )
     assert findings[0].status == "unknown"
     assert findings[0].reason == "closed_world_incomplete"
     assert findings[0].closed_world is not None
     assert findings[0].closed_world.complete is False
-    assert findings[0].closed_world.unresolvable_imports
+    assert any(
+        "unresolvable_local_import:app.missing_middleware" in item
+        for item in findings[0].closed_world.unresolvable_imports
+    )
 
 
 def test_nested_client_overwrite_is_not_authorized() -> None:
@@ -318,11 +352,16 @@ def handler(request):
         },
         entry_path="app/handler.py",
         bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("app/handler.py"),
     )
     assert findings[0].status == "unknown"
     assert findings[0].reason == "closed_world_incomplete"
     assert findings[0].closed_world is not None
     assert findings[0].closed_world.complete is False
+    assert any(
+        "dynamic_import" in item
+        for item in findings[0].closed_world.unresolvable_imports
+    )
 
 
 def test_star_import_refuses_authorized() -> None:
@@ -345,6 +384,7 @@ def handler(request):
         },
         entry_path="app/handler.py",
         bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("app/middleware.py", "app/handler.py"),
     )
     assert findings[0].status == "unknown"
     assert findings[0].reason == "closed_world_incomplete"
@@ -353,6 +393,40 @@ def handler(request):
         "star_import" in item for item in findings[0].closed_world.unresolvable_imports
     )
 
+
+
+def test_source_root_scope_detects_sparse_local_package_import() -> None:
+    from ovk.compilers.authorization.bypass_authority import (
+        analyze_bypass_authority_unit,
+    )
+
+    files = {
+        "backend/open_webui/routers/openai.py": """
+from open_webui.utils.auth import get_verified_user
+
+def handler(request):
+    request.state.bypass_filter = True
+    return request.state.bypass_filter
+""".strip(),
+    }
+    findings = analyze_bypass_authority_unit(
+        files,
+        entry_path="backend/open_webui/routers/openai.py",
+        function_name="handler",
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope(
+            "backend/open_webui/routers/openai.py",
+            source_roots=("backend",),
+        ),
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason == "closed_world_incomplete"
+    assert findings[0].closed_world is not None
+    assert findings[0].closed_world.source_roots == ("backend",)
+    assert any(
+        "unresolvable_local_import:open_webui.utils.auth" in item
+        for item in findings[0].closed_world.unresolvable_imports
+    )
 
 def test_bare_allcaps_bypass_predicate_is_not_authorized() -> None:
     """Bare ALL_CAPS Names must not authorize trusted bypass authority."""

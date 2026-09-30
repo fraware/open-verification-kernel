@@ -124,8 +124,8 @@ external candidates without rewriting frozen triage labels:
 - bounded handler control-flow graphs (CFG) with iterative dominance;
 - guard-to-sink CFG dominance evidence (incomplete coverage stays UNKNOWN);
 - value-origin provenance for FastAPI parameters and `request.state` attributes;
-- closed-world trusted bypass authority over `request.state` writers, including
-  repository-local multi-module units when the import world is complete;
+- closed-world bypass authority over `request.state` writers, with an explicit
+  accounted-path/source-root proof and repository-local import closure;
 - bounded flat `and`/`or` short-circuit CFG expansion (nested or opaque BoolOp
   remains UNKNOWN);
 - value-origin evidence assembled into FastAPI IR digests when material.
