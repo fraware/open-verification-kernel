@@ -246,6 +246,34 @@ def test_established_evidence_requires_control_point_writers_and_scope() -> None
             reason="test",
             origin=origin,
         )
+    with pytest.raises(ValueError, match="CFG digest"):
+        BypassAuthorityEvidence(
+            evidence_id="bypass:x",
+            field_name="bypass_filter",
+            read_expression="request.state.bypass_filter",
+            read_origin=origin,
+            status="established",
+            control_point_edge_id="edge:branch:1->stmt:2:true",
+            entrypoint="POST /x",
+            writer_evidence_ids=["vo:1"],
+            closed_world_scope_digest="scope:1",
+            reason="test",
+            origin=origin,
+        )
+    with pytest.raises(ValueError, match="entrypoint"):
+        BypassAuthorityEvidence(
+            evidence_id="bypass:x",
+            field_name="bypass_filter",
+            read_expression="request.state.bypass_filter",
+            read_origin=origin,
+            status="established",
+            control_point_edge_id="edge:branch:1->stmt:2:true",
+            control_flow_summary_digest="cfg:1",
+            writer_evidence_ids=["vo:1"],
+            closed_world_scope_digest="scope:1",
+            reason="test",
+            origin=origin,
+        )
 
 
 def test_synthetic_guard_refuses_non_established_evidence() -> None:

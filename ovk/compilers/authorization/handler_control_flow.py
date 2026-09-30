@@ -85,7 +85,11 @@ def control_flow_edge_id(
     target_node_id: str,
     branch_value: bool | None = None,
 ) -> str:
-    """Return a deterministic edge identity from semantic edge content."""
+    """Return a handler-local edge identity from semantic edge content.
+
+    Local IDs are unique only within one CFG. Security evidence must namespace
+    them with :func:`scoped_control_flow_edge_id` (CFG digest + entrypoint).
+    """
 
     if branch_value is None:
         branch_token = "none"
@@ -94,6 +98,48 @@ def control_flow_edge_id(
     else:
         branch_token = "false"
     return f"edge:{source_node_id}->{target_node_id}:{branch_token}"
+
+
+def scoped_control_flow_edge_id(
+    *,
+    control_flow_summary_digest: str,
+    entrypoint: str,
+    source_node_id: str,
+    target_node_id: str,
+    branch_value: bool | None = None,
+) -> str:
+    """Namespace a CFG edge by digest, entrypoint, endpoints, and branch value."""
+
+    local = control_flow_edge_id(source_node_id, target_node_id, branch_value)
+    digest = control_flow_summary_digest.strip()
+    entry = entrypoint.strip()
+    if not digest or not entry:
+        raise ValueError("scoped edge identity requires CFG digest and entrypoint")
+    return (
+        f"edge:{digest}:{content_digest({'entrypoint': entry})[:12]}:"
+        f"{local.removeprefix('edge:')}"
+    )
+
+
+def scoped_control_flow_edge_id_from_local(
+    *,
+    control_flow_summary_digest: str,
+    entrypoint: str,
+    local_edge_id: str,
+) -> str:
+    """Lift a handler-local edge id into a globally scoped security identity."""
+
+    digest = control_flow_summary_digest.strip()
+    entry = entrypoint.strip()
+    local = local_edge_id.strip()
+    if not digest or not entry or not local:
+        raise ValueError("scoped edge identity requires digest, entrypoint, and edge")
+    if not local.startswith("edge:"):
+        raise ValueError("local edge id must use the edge: prefix")
+    return (
+        f"edge:{digest}:{content_digest({'entrypoint': entry})[:12]}:"
+        f"{local.removeprefix('edge:')}"
+    )
 
 
 def control_flow_edge_ref(

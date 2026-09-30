@@ -29,9 +29,11 @@ from ovk.compilers.authorization.bypass_authority import (
 from ovk.compilers.authorization.handler_control_flow import (
     HandlerControlFlowSummary,
     find_control_flow_edge_ref,
+    scoped_control_flow_edge_id_from_local,
 )
 from ovk.core.assurance_ir import (
     AssuranceIR,
+    AuthorizationControlPointEvidence,
     AuthorizationGuard,
     BypassAuthorityEvidence,
     BypassAuthorityEvidenceStatus,
@@ -169,6 +171,8 @@ def build_bypass_authority_evidence(
     read_origin: SemanticOrigin,
     origin: SemanticOrigin,
     control_point_edge_id: str | None = None,
+    control_flow_summary_digest: str | None = None,
+    entrypoint: str | None = None,
     scope_proof: ClosedWorldScopeProof | None = None,
     derived_scope_digest: str | None = None,
     assumptions: Sequence[str] = (),
@@ -194,19 +198,25 @@ def build_bypass_authority_evidence(
 
     # Established IR status requires the authorizing edge. Without it, stay
     # unknown even when writers are proved.
-    if status == "established" and control_point_edge_id is None:
+    if status == "established" and (
+        control_point_edge_id is None
+        or control_flow_summary_digest is None
+        or entrypoint is None
+    ):
         status = "unknown"
         reason = "bypass_control_point_unbound"
     else:
         reason = finding.reason
 
     return BypassAuthorityEvidence(
-        evidence_id=f"bypass:{finding.field_name}:{content_digest({'r': reason, 'e': control_point_edge_id or ''})[:12]}",
+        evidence_id=f"bypass:{finding.field_name}:{content_digest({'r': reason, 'e': control_point_edge_id or '', 'c': control_flow_summary_digest or '', 'p': entrypoint or ''})[:12]}",
         field_name=finding.field_name,
         read_expression=finding.read_expression,
         read_origin=read_origin,
         status=status,
         control_point_edge_id=control_point_edge_id,
+        control_flow_summary_digest=control_flow_summary_digest,
+        entrypoint=entrypoint,
         writer_evidence_ids=list(finding.evidence_ids),
         closed_world_scope_digest=scope_digest,
         assumptions=list(assumptions),
@@ -219,6 +229,7 @@ def build_bypass_authority_evidence(
 class TrustedBypassAuthorizationResult:
     evidence: tuple[BypassAuthorityEvidence, ...]
     guards: tuple[AuthorizationGuard, ...]
+    control_points: tuple[AuthorizationControlPointEvidence, ...] = ()
 
 
 def synthesize_trusted_bypass_guard(
@@ -234,6 +245,10 @@ def synthesize_trusted_bypass_guard(
     if evidence.status != "established":
         return None
     if evidence.control_point_edge_id is None:
+        return None
+    if evidence.control_flow_summary_digest is None:
+        return None
+    if evidence.entrypoint is None:
         return None
     if not evidence.writer_evidence_ids:
         return None
@@ -254,6 +269,44 @@ def synthesize_trusted_bypass_guard(
     )
 
 
+def build_authorization_control_point_evidence(
+    *,
+    guard: AuthorizationGuard,
+    protected_effect_id: str,
+    evidence: BypassAuthorityEvidence,
+    origin: SemanticOrigin,
+) -> AuthorizationControlPointEvidence | None:
+    """Bind a synthetic bypass guard to an exact CFG control point."""
+
+    if (
+        evidence.status != "established"
+        or evidence.control_point_edge_id is None
+        or evidence.control_flow_summary_digest is None
+        or evidence.entrypoint is None
+    ):
+        return None
+    scoped = scoped_control_flow_edge_id_from_local(
+        control_flow_summary_digest=evidence.control_flow_summary_digest,
+        entrypoint=evidence.entrypoint,
+        local_edge_id=evidence.control_point_edge_id,
+    )
+    return AuthorizationControlPointEvidence(
+        evidence_id=(
+            f"acp:{guard.guard_id}:{content_digest(scoped)[:12]}"
+        ),
+        guard_id=guard.guard_id,
+        protected_effect_id=protected_effect_id,
+        principal_id=guard.principal_id,
+        effect_id=guard.effect_id,
+        resource_id=guard.resource_id,
+        entrypoint=evidence.entrypoint,
+        control_flow_summary_digest=evidence.control_flow_summary_digest,
+        edge_id=evidence.control_point_edge_id,
+        scoped_edge_id=scoped,
+        origin=origin,
+    )
+
+
 def evaluate_trusted_bypass_authorizations(
     *,
     files: Mapping[str, str],
@@ -266,6 +319,7 @@ def evaluate_trusted_bypass_authorizations(
     origin: SemanticOrigin,
     scope_proof: ClosedWorldScopeProof | None = None,
     derived_scope_digest: str | None = None,
+    entrypoint: str | None = None,
 ) -> TrustedBypassAuthorizationResult:
     """Analyze governed bypass fields and emit evidence plus synthetic guards.
 
@@ -276,6 +330,7 @@ def evaluate_trusted_bypass_authorizations(
     ``effect_bindings`` maps effect name -> ``(effect_id, resource_id)``.
     ``derived_scope_digest`` should be ``DerivedClosedWorldScopeProof.digest()``
     whenever product compile produced a machine-derived scope proof.
+    ``entrypoint`` scopes the authorizing control point to one handler.
     """
 
     field_to_effects: dict[str, tuple[str, ...]] = {}
@@ -299,6 +354,11 @@ def evaluate_trusted_bypass_authorizations(
         scope_proof=scope_proof,
     )
 
+    cfg_digest = cfg.digest() if cfg is not None else None
+    resolved_entrypoint = entrypoint or (
+        f"{entry_path}:{function_name}" if function_name else entry_path
+    )
+
     evidence_items: list[BypassAuthorityEvidence] = []
     guards: list[AuthorizationGuard] = []
     for finding in findings:
@@ -313,6 +373,8 @@ def evaluate_trusted_bypass_authorizations(
             read_origin=origin,
             origin=origin,
             control_point_edge_id=edge_id,
+            control_flow_summary_digest=cfg_digest if edge_id is not None else None,
+            entrypoint=resolved_entrypoint if edge_id is not None else None,
             scope_proof=scope_proof,
             derived_scope_digest=derived_scope_digest,
             assumptions=(
@@ -413,10 +475,41 @@ def enrich_assurance_ir_with_trusted_bypass(
         if cfg is not None
     }
 
+    control_points_by_id: dict[str, AuthorizationControlPointEvidence] = {
+        item.evidence_id: item for item in ir.authorization_control_point_evidence
+    }
+    # Track which handler (path, function) emitted each guard so path/cut
+    # attachment cannot cross handlers via colliding local edge ids.
+    guard_emission_scope: dict[str, tuple[str | None, str | None, str]] = {}
+
     for (path, function_name), cfg in sorted(route_cfgs.items()):
         if path not in materials:
             continue
         origin = read_origin_for_path(path)
+        cfg_digest = cfg.digest() if cfg is not None else None
+        # Prefer HTTP entrypoints already present on cuts/paths for this CFG.
+        http_entrypoints = sorted(
+            {
+                item.entrypoint
+                for item in ir.authorization_cut_set_evidence
+                if item.control_flow_summary_digest == cfg_digest
+                and item.entrypoint
+            }
+            | {
+                item.entrypoint
+                for item in ir.paths
+                if item.entrypoint and cfg_digest is not None
+            }
+        )
+        entrypoint = (
+            http_entrypoints[0]
+            if len(http_entrypoints) == 1
+            else (
+                f"{path}:{function_name}"
+                if function_name
+                else path
+            )
+        )
         result = evaluate_trusted_bypass_authorizations(
             files=materials,
             entry_path=path,
@@ -428,17 +521,30 @@ def enrich_assurance_ir_with_trusted_bypass(
             origin=origin,
             scope_proof=scope_proof,
             derived_scope_digest=derived_scope_digest,
+            entrypoint=entrypoint,
         )
         for evidence in result.evidence:
             if refuse_established and evidence.status == "established":
                 evidence.status = "unknown"
                 evidence.reason = "sparse_or_workspace_scope_not_repo_closure"
+                evidence.control_flow_summary_digest = None
+                evidence.entrypoint = None
             evidence_by_id[evidence.evidence_id] = evidence
         for guard in result.guards:
             if refuse_established:
                 continue
             guards_by_id[guard.guard_id] = guard
             emitted_guards.append(guard)
+            guard_emission_scope[guard.guard_id] = (
+                cfg_digest,
+                (
+                    evidence_by_id[guard.effectiveness_evidence_ids[0]].entrypoint
+                    if guard.effectiveness_evidence_ids
+                    and guard.effectiveness_evidence_ids[0] in evidence_by_id
+                    else entrypoint
+                ),
+                path,
+            )
 
     ir.bypass_authority_evidence = sorted(
         evidence_by_id.values(),
@@ -447,23 +553,41 @@ def enrich_assurance_ir_with_trusted_bypass(
     ir.guards = sorted(guards_by_id.values(), key=lambda item: item.guard_id)
 
     if not emitted_guards:
+        ir.authorization_control_point_evidence = sorted(
+            control_points_by_id.values(),
+            key=lambda item: item.evidence_id,
+        )
         return ir
 
     effect_ids_by_protected = {
         item.protected_effect_id: item.effect_id for item in ir.protected_effects
     }
-    for path in ir.paths:
+    for semantic_path in ir.paths:
         path_effect_ids = {
             effect_ids_by_protected[pe_id]
-            for pe_id in path.protected_effect_ids
+            for pe_id in semantic_path.protected_effect_ids
             if pe_id in effect_ids_by_protected
         }
         for guard in emitted_guards:
             if guard.effect_id not in path_effect_ids:
                 continue
-            if guard.guard_id in path.guard_ids:
+            scope = guard_emission_scope.get(guard.guard_id)
+            if scope is None:
                 continue
-            path.guard_ids = sorted([*path.guard_ids, guard.guard_id])
+            cfg_digest, _bypass_entrypoint, _source_path = scope
+            if guard.guard_id in semantic_path.guard_ids:
+                continue
+            path_pe_ids = set(semantic_path.protected_effect_ids)
+            shares_cfg = any(
+                cut.protected_effect_id in path_pe_ids
+                and cut.control_flow_summary_digest == cfg_digest
+                for cut in ir.authorization_cut_set_evidence
+            )
+            if cfg_digest is not None and not shares_cfg:
+                continue
+            semantic_path.guard_ids = sorted(
+                [*semantic_path.guard_ids, guard.guard_id]
+            )
 
     cut_by_id = {
         item.evidence_id: item for item in ir.authorization_cut_set_evidence
@@ -475,8 +599,11 @@ def enrich_assurance_ir_with_trusted_bypass(
         if bypass is None or bypass.status != "established":
             continue
         edge_id = bypass.control_point_edge_id
-        if edge_id is None:
+        cfg_digest = bypass.control_flow_summary_digest
+        if edge_id is None or cfg_digest is None:
             continue
+        scope = guard_emission_scope.get(guard.guard_id)
+        origin = guard.origin
         for protected in ir.protected_effects:
             if protected.effect_id != guard.effect_id:
                 continue
@@ -486,24 +613,28 @@ def enrich_assurance_ir_with_trusted_bypass(
                 item
                 for item in cut_by_id.values()
                 if item.protected_effect_id == protected.protected_effect_id
+                and item.control_flow_summary_digest == cfg_digest
             ]
             for cut in matching:
-                # Merge the authorizing edge into structural cut points only.
-                # Do not add synthetic bypass guards into guard_ids of an
-                # existing body/ownership cut (exact identity + guard_cfg map).
+                # Merge the authorizing edge into structural cut points only
+                # under the same CFG digest (no cross-handler local-id merge).
                 if edge_id not in cut.edge_control_points:
                     cut.edge_control_points = sorted(
                         [*cut.edge_control_points, edge_id]
                     )
+                control_point = build_authorization_control_point_evidence(
+                    guard=guard,
+                    protected_effect_id=protected.protected_effect_id,
+                    evidence=bypass,
+                    origin=origin,
+                )
+                if control_point is not None:
+                    control_points_by_id[control_point.evidence_id] = control_point
                 if cut.unresolved_guard_ids:
                     continue
                 if cut.effect_cfg_node_id is None:
                     continue
-                if cut.coverage_status == "unknown" and cut.unresolved_guard_ids:
-                    continue
-                cfg = None
-                if cut.control_flow_summary_digest is not None:
-                    cfg = cfg_by_digest.get(cut.control_flow_summary_digest)
+                cfg = cfg_by_digest.get(cfg_digest)
                 if cfg is None:
                     continue
                 cut_nodes = frozenset(
@@ -511,9 +642,6 @@ def enrich_assurance_ir_with_trusted_bypass(
                     or list(cut.guard_cfg_node_ids.values())
                 )
                 cut_edges = frozenset(cut.edge_control_points)
-                # Re-evaluate: adding edges can only shrink reachability, so
-                # cover may upgrade from uncovered to covered without inventing
-                # false cover over unresolved bindings.
                 result = evaluate_authorization_cut_set(
                     cfg,
                     sink_node_id=cut.effect_cfg_node_id,
@@ -534,6 +662,10 @@ def enrich_assurance_ir_with_trusted_bypass(
                     cut.uncovered_path_node_ids = []
     ir.authorization_cut_set_evidence = sorted(
         cut_by_id.values(),
+        key=lambda item: item.evidence_id,
+    )
+    ir.authorization_control_point_evidence = sorted(
+        control_points_by_id.values(),
         key=lambda item: item.evidence_id,
     )
     return ir

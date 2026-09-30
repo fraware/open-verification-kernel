@@ -182,6 +182,10 @@ def _bypass_authority_proves_guard(
             continue
         if evidence.control_point_edge_id is None:
             continue
+        if evidence.control_flow_summary_digest is None:
+            continue
+        if evidence.entrypoint is None:
+            continue
         if evidence.control_point_edge_id not in guard.condition_ids:
             continue
         return True
@@ -193,29 +197,62 @@ def _edge_control_points_independently_proved(
     ir: AssuranceIR,
     cut_evidence: AuthorizationCutSetEvidence,
 ) -> bool:
-    """Prove bypass-claimed cut edges; admit body-derived edges via guards.
+    """Prove bypass-claimed cut edges via exact control-point evidence.
 
-    Edges mentioned by BypassAuthorityEvidence must be independently
-    established (Unknown > false PASS on sparse/unproved bypass). Edges never
-    claimed by bypass evidence are treated as structural projections of body
-    guard members (for example ownership branch-outcome edges) and rely on
-    guard-member qualification instead.
+    Edges are never proved by raw global edge-string membership. Each bypass
+    edge on the cut must have AuthorizationControlPointEvidence binding the
+    same CFG digest, protected effect, and edge id. Unscoped bypass claims
+    (missing CFG digest) fail closed for any cut containing the edge.
+    Edges never claimed by bypass evidence remain structural projections of
+    body guard members.
     """
 
     if not cut_evidence.edge_control_points:
         return True
-    proved_edges = {
-        item.control_point_edge_id
-        for item in ir.bypass_authority_evidence
-        if item.status == "established" and item.control_point_edge_id is not None
-    }
-    claimed_by_bypass = {
-        item.control_point_edge_id
-        for item in ir.bypass_authority_evidence
-        if item.control_point_edge_id is not None
-    }
+    control_points = [
+        item
+        for item in ir.authorization_control_point_evidence
+        if item.protected_effect_id == cut_evidence.protected_effect_id
+        and item.control_flow_summary_digest
+        == cut_evidence.control_flow_summary_digest
+        and item.edge_id in cut_evidence.edge_control_points
+    ]
+    proved_local_edges = {item.edge_id for item in control_points}
+    bypass_claimed: set[str] = set()
+    for item in ir.bypass_authority_evidence:
+        if item.control_point_edge_id is None:
+            continue
+        if item.control_flow_summary_digest is None:
+            # Unscoped claim cannot authorize any cut edge.
+            bypass_claimed.add(item.control_point_edge_id)
+            continue
+        if (
+            item.control_flow_summary_digest
+            == cut_evidence.control_flow_summary_digest
+        ):
+            bypass_claimed.add(item.control_point_edge_id)
     for edge_id in cut_evidence.edge_control_points:
-        if edge_id in claimed_by_bypass and edge_id not in proved_edges:
+        if edge_id not in bypass_claimed:
+            continue
+        if edge_id not in proved_local_edges:
+            return False
+        matching = [item for item in control_points if item.edge_id == edge_id]
+        if not matching:
+            return False
+        if not any(
+            item.principal_id and item.effect_id and item.resource_id
+            for item in matching
+        ):
+            return False
+        # Require the backing bypass evidence to be established under this CFG.
+        established = any(
+            item.status == "established"
+            and item.control_point_edge_id == edge_id
+            and item.control_flow_summary_digest
+            == cut_evidence.control_flow_summary_digest
+            for item in ir.bypass_authority_evidence
+        )
+        if not established:
             return False
     return True
 
@@ -261,11 +298,25 @@ def _guard_fully_qualifies_for_collective_cut(
         if cut_evidence.effect_cfg_node_id is None:
             return False
         return True
-    # Trusted-bypass synthetic guards: security meaning from BypassAuthorityEvidence.
+    # Trusted-bypass synthetic guards: security meaning from exact
+    # AuthorizationControlPointEvidence (not raw global edge strings).
     if _bypass_authority_proves_guard(ir, guard):
-        if cut_evidence.edge_control_points and not (
-            set(guard.condition_ids) & set(cut_evidence.edge_control_points)
-        ):
+        control_points = [
+            item
+            for item in ir.authorization_control_point_evidence
+            if item.guard_id == guard.guard_id
+            and item.protected_effect_id == effect.protected_effect_id
+            and item.principal_id == effect.principal_id
+            and item.effect_id == effect.effect_id
+            and item.resource_id == effect.resource_id
+            and (
+                cut_evidence.control_flow_summary_digest is None
+                or item.control_flow_summary_digest
+                == cut_evidence.control_flow_summary_digest
+            )
+            and item.edge_id in set(cut_evidence.edge_control_points or [])
+        ]
+        if not control_points:
             return False
         return True
     # Entrypoint/condition guards without CFG evidence remain eligible when
