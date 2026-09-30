@@ -49,7 +49,7 @@ from ovk.core.result_cache import (
 
 
 PROTECTED_EFFECT_CHECKER_ID = "protected-effect-integrity"
-PROTECTED_EFFECT_CHECKER_VERSION = "0.3.0"
+PROTECTED_EFFECT_CHECKER_VERSION = "0.4.0"
 PROTECTED_EFFECT_GUARANTEE = "protected_effect_integrity_v1"
 PROTECTED_EFFECT_REUSE_SCHEMA = "ovk.protected_effect_reuse.v1"
 

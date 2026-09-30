@@ -28,9 +28,7 @@ from ovk.core.assurance_ir import (
     ResourceBinding,
     SemanticPath,
 )
-from ovk.compilers.authorization.guard_cfg_dominance import (
-    cfg_dominance_is_sufficient,
-)
+
 
 
 DimensionStatus = Literal["established", "violated", "unknown"]
@@ -154,30 +152,41 @@ def _dominance_evidence_for(
     return sorted(matches, key=lambda item: item.evidence_id)[0]
 
 
-def _guard_dominates_effect_on_path(
+def _guard_dominance_status_on_path(
     *,
     ir: AssuranceIR,
     guard: AuthorizationGuard,
     effect: ProtectedEffect,
     path: SemanticPath,
-) -> bool:
+) -> DimensionStatus:
+    """Resolve structural guard dominance independently of effectiveness.
+
+    Presence of CFG evidence means the guard is body-executed and CFG binding
+    is authoritative. Ambiguous binding or partial sink coverage is UNKNOWN;
+    it must never fall back to the legacy condition calculus. Guards with no
+    CFG evidence retain entrypoint/condition semantics for compatibility with
+    dependency and decorator authorization.
+    """
+
     cfg_evidence = _dominance_evidence_for(ir, guard, effect)
-    if (
-        cfg_evidence is not None
-        and cfg_evidence.guard_cfg_node_id is not None
-        and cfg_evidence.effect_cfg_node_id is not None
-    ):
-        # Body-bound CFG evidence is authoritative when both nodes resolve.
-        return cfg_dominance_is_sufficient(
-            cfg_evidence,
-            effectiveness=guard.effectiveness,
-        )
+    if cfg_evidence is not None:
+        if cfg_evidence.coverage_status != "complete":
+            return "unknown"
+        if (
+            cfg_evidence.guard_cfg_node_id is None
+            or cfg_evidence.effect_cfg_node_id is None
+        ):
+            return "unknown"
+        return "established" if cfg_evidence.dominates else "violated"
+
     available = set(effect.condition_ids) | set(path.condition_ids)
-    return _conditions_imply(
+    if _conditions_imply(
         ir=ir,
         required_ids=guard.condition_ids,
         available_ids=available,
-    )
+    ):
+        return "established"
+    return _path_missing_status(ir, path)
 
 
 def _binding_applies_on_path(
@@ -280,15 +289,19 @@ def compile_protected_effect_integrity(ir: AssuranceIR) -> list[ProtectedEffectI
                 for guard_id in path.guard_ids
                 if guard_id in guards_by_id
             ]
-            dominating_guards = [
-                guard
-                for guard in referenced_guards
-                if _guard_dominates_effect_on_path(
+            dominance_statuses = {
+                guard.guard_id: _guard_dominance_status_on_path(
                     ir=ir,
                     guard=guard,
                     effect=effect,
                     path=path,
                 )
+                for guard in referenced_guards
+            }
+            dominating_guards = [
+                guard
+                for guard in referenced_guards
+                if dominance_statuses[guard.guard_id] == "established"
             ]
             path_candidate_guard_ids[path.path_id] = sorted(
                 guard.guard_id for guard in dominating_guards
@@ -298,16 +311,18 @@ def compile_protected_effect_integrity(ir: AssuranceIR) -> list[ProtectedEffectI
 
             if dominating_guards:
                 presence_statuses.append("established")
+            elif any(
+                status == "unknown"
+                for status in dominance_statuses.values()
+            ):
+                presence_statuses.append("unknown")
             elif not referenced_guards:
-                # Absence of any represented authorization guard is a concrete
-                # structural violation. Partial coverage may still block PASS
-                # elsewhere, but it does not turn a known missing guard into
-                # benign uncertainty.
-                presence_statuses.append("violated")
-            else:
-                # A conditional guard exists, but bounded condition evidence
-                # does not establish that it dominates this effect path.
+                # Absence is a violation only under complete local extraction.
+                # Partial coverage cannot prove that no relevant guard exists.
                 presence_statuses.append(_path_missing_status(ir, path))
+            else:
+                # Every represented candidate is structurally refuted.
+                presence_statuses.append("violated")
 
             principal_matches = [
                 guard
