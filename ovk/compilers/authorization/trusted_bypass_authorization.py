@@ -53,7 +53,23 @@ def trusted_bypass_field_name(policy_key: str) -> str | None:
     return match.group(1)
 
 
-def closed_world_scope_digest(scope_proof: ClosedWorldScopeProof | None) -> str | None:
+def closed_world_scope_digest(
+    scope_proof: ClosedWorldScopeProof | None,
+    *,
+    derived_scope_digest: str | None = None,
+) -> str | None:
+    """Digest for durable bypass evidence.
+
+    Prefer the full ``DerivedClosedWorldScopeProof.digest()`` when available so
+    durable evidence retains revision/manifest/import-resolution identity.
+    The stripped path/root pair is a fallback for unit fixtures only.
+    """
+
+    if derived_scope_digest is not None:
+        digest = derived_scope_digest.strip()
+        if not digest:
+            raise ValueError("derived_scope_digest must be non-empty")
+        return digest
     if scope_proof is None:
         return None
     return content_digest(
@@ -154,12 +170,16 @@ def build_bypass_authority_evidence(
     origin: SemanticOrigin,
     control_point_edge_id: str | None = None,
     scope_proof: ClosedWorldScopeProof | None = None,
+    derived_scope_digest: str | None = None,
     assumptions: Sequence[str] = (),
 ) -> BypassAuthorityEvidence:
     """Lift a diagnostic finding into durable BypassAuthorityEvidence."""
 
     status = _finding_status(finding)
-    scope_digest = closed_world_scope_digest(scope_proof)
+    scope_digest = closed_world_scope_digest(
+        scope_proof,
+        derived_scope_digest=derived_scope_digest,
+    )
     if (
         finding.closed_world is not None
         and finding.closed_world.complete
@@ -245,6 +265,7 @@ def evaluate_trusted_bypass_authorizations(
     effect_bindings: Mapping[str, tuple[str, str]],
     origin: SemanticOrigin,
     scope_proof: ClosedWorldScopeProof | None = None,
+    derived_scope_digest: str | None = None,
 ) -> TrustedBypassAuthorizationResult:
     """Analyze governed bypass fields and emit evidence plus synthetic guards.
 
@@ -253,6 +274,8 @@ def evaluate_trusted_bypass_authorizations(
     inference is refused: only explicitly listed keys participate.
 
     ``effect_bindings`` maps effect name -> ``(effect_id, resource_id)``.
+    ``derived_scope_digest`` should be ``DerivedClosedWorldScopeProof.digest()``
+    whenever product compile produced a machine-derived scope proof.
     """
 
     field_to_effects: dict[str, tuple[str, ...]] = {}
@@ -291,6 +314,7 @@ def evaluate_trusted_bypass_authorizations(
             origin=origin,
             control_point_edge_id=edge_id,
             scope_proof=scope_proof,
+            derived_scope_digest=derived_scope_digest,
             assumptions=(
                 "trusted_bypass_requires_profile_mapping",
                 "trusted_bypass_requires_proved_writers",
@@ -336,7 +360,7 @@ def effect_bindings_from_ir(ir: AssuranceIR) -> dict[str, tuple[str, str]]:
 
 _REPO_CLOSURE_IMPORT_STATUSES = frozenset(
     {
-        "authenticated_head_materials_v1",
+        "authenticated_revision_python_manifest_v1",
         "unit_local_static_imports_v1",
     }
 )
@@ -350,6 +374,7 @@ def enrich_assurance_ir_with_trusted_bypass(
     route_cfgs: Mapping[tuple[str, str], HandlerControlFlowSummary | None],
     principal_id: str,
     scope_proof: ClosedWorldScopeProof | None = None,
+    derived_scope_digest: str | None = None,
     import_resolution_status: str | None = None,
 ) -> AssuranceIR:
     """Attach bypass-authority evidence and synthetic guards to an assembled IR.
@@ -402,6 +427,7 @@ def enrich_assurance_ir_with_trusted_bypass(
             effect_bindings=effect_bindings,
             origin=origin,
             scope_proof=scope_proof,
+            derived_scope_digest=derived_scope_digest,
         )
         for evidence in result.evidence:
             if refuse_established and evidence.status == "established":

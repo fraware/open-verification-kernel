@@ -12,13 +12,21 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class AuthMaterials:
-    """Paired base/head source files keyed by relative path."""
+    """Paired base/head source files keyed by relative path.
+
+    ``head_files`` / ``base_files`` are the PE profile ``source_paths`` view.
+    ``repository_python_files`` is the complete authenticated Python manifest
+    for closed-world writer accounting and must not be filtered by
+    ``source_paths``. When absent, product compile refuses repository-closed
+    bypass authorization (Unknown > false PASS).
+    """
 
     base_files: dict[str, str] = field(default_factory=dict)
     head_files: dict[str, str] = field(default_factory=dict)
     base_revision: str | None = None
     head_revision: str | None = None
     repo: str | None = None
+    repository_python_files: dict[str, str] | None = None
 
     @property
     def paths(self) -> list[str]:

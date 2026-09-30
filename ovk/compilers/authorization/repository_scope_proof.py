@@ -6,6 +6,11 @@ file manifest digests, analyzed paths, and import-resolution status.
 
 A derived proof is invalidated when Python files are added/changed, source
 roots change, or import-resolution semantics change.
+
+Product compile must derive proofs from the complete authenticated Python
+manifest for a revision — never from PE ``source_paths``-filtered materials
+alone. Durable evidence must retain ``DerivedClosedWorldScopeProof.digest()``,
+not only the stripped ``ClosedWorldScopeProof`` path/root pair.
 """
 
 from __future__ import annotations
@@ -17,7 +22,8 @@ from ovk.compilers.authorization.bypass_authority import ClosedWorldScopeProof
 from ovk.core.bundle import content_digest
 
 
-_IMPLEMENTATION_VERSION = "0.1.0"
+_IMPLEMENTATION_VERSION = "0.2.0"
+_CONVENTIONAL_PYTHON_SOURCE_ROOTS = ("backend", "src")
 
 
 @dataclass(frozen=True)
@@ -60,6 +66,41 @@ class DerivedClosedWorldScopeProof:
 
 def _normalize(path: str) -> str:
     return path.replace("\\", "/")
+
+
+def derive_python_source_roots(paths: Sequence[str]) -> tuple[str, ...]:
+    """Infer importable Python source roots from repository-relative paths.
+
+    Conventional package roots such as ``backend/`` and ``src/`` are preferred
+    so imports like ``from open_webui...`` resolve under ``backend/open_webui``.
+    Paths outside those conventions keep repository-root ``"."``. Empty input
+    is refused.
+    """
+
+    normalized = {_normalize(path) for path in paths if path and path.strip()}
+    if not normalized:
+        raise ValueError("source_roots require at least one Python path")
+
+    conventional: set[str] = set()
+    for root in _CONVENTIONAL_PYTHON_SOURCE_ROOTS:
+        prefix = root + "/"
+        if any(path == root or path.startswith(prefix) for path in normalized):
+            conventional.add(root)
+
+    if not conventional:
+        return (".",)
+
+    outside = [
+        path
+        for path in normalized
+        if not any(
+            path == root or path.startswith(root + "/") for root in conventional
+        )
+    ]
+    roots = set(conventional)
+    if outside:
+        roots.add(".")
+    return tuple(sorted(roots))
 
 
 def file_manifest_digest(files: Mapping[str, str]) -> str:

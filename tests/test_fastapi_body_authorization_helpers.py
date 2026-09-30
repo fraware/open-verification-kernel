@@ -64,13 +64,25 @@ def _compile(
     profile: FastApiDependencyEffectProfile,
     repo: str | None = "example/body-auth",
     head_revision: str | None = "rev1",
+    repository_python_files: dict[str, str] | None = None,
+    include_repository_python_manifest: bool = True,
 ):
+    # Default: when repo+revision are present, the supplied unit is the complete
+    # authenticated Python manifest. Disable the manifest (or pass an explicit
+    # subset) to model source_paths-filtered materials without repository closure.
+    if repository_python_files is not None:
+        closure = repository_python_files
+    elif include_repository_python_manifest and repo and head_revision:
+        closure = files
+    else:
+        closure = None
     materials = AuthMaterials(
         base_files=files,
         head_files=files,
         repo=repo,
         base_revision="base",
         head_revision=head_revision,
+        repository_python_files=closure,
     )
     return FastApiDependencyEffectExtractor().compile(materials, profile)
 
@@ -112,7 +124,7 @@ async def handler(request, user = Depends(get_current_user)):
         {"app/routes.py": source},
         profile=_body_helper_profile(),
     )
-    assert ir.extractor.extractor_version == "0.23.0"
+    assert ir.extractor.extractor_version == "0.24.0"
     assert len(ir.guards) == 1
     assert ir.guards[0].origin.source_range is not None
     assert len(ir.authorization_cut_set_evidence) == 1
