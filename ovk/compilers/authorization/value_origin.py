@@ -61,7 +61,7 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id="assurance.fastapi.value_origin.ast_v1",
-        extractor_version="0.4.0",
+        extractor_version="0.5.0",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -101,28 +101,6 @@ def _is_request_state_attribute(node: ast.AST) -> tuple[bool, str | None]:
         return True, node.args[1].value
 
     return False, None
-
-
-def _looks_like_config_name(name: str) -> bool:
-    """True for bounded config-binding names — never bare ALL_CAPS alone.
-
-    Supported forms:
-    - explicit module/object names ``settings`` / ``config`` / ``SETTINGS`` /
-      ``CONFIG`` (Attribute bases such as ``settings.X``);
-    - conventional config suffixes/prefixes ``*_CONFIG``, ``*_SETTINGS``,
-      ``CONFIG_*``.
-
-    Bare identifiers such as ``BYPASS_FILTER``, ``ALLOW_ALL``, or ``DEBUG``
-    are not proved ``server_configuration`` merely because they are ALL_CAPS.
-    Prefer ``unknown_origin`` over a false authorizing PASS.
-    """
-
-    return (
-        name.endswith("_CONFIG")
-        or name.endswith("_SETTINGS")
-        or name.startswith("CONFIG_")
-        or name in {"settings", "config", "SETTINGS", "CONFIG"}
-    )
 
 
 def _unknown(
@@ -210,15 +188,6 @@ def classify_expression_origin(
                 dependencies=[],
                 origin=_origin(path, node),
             )
-        if _looks_like_config_name(node.id):
-            return ValueOriginEvidence(
-                evidence_id=_evidence_id("server_configuration", rendered),
-                value_id=f"value:config:{node.id}",
-                origin_kind="server_configuration",
-                source_expression=rendered,
-                dependencies=[],
-                origin=_origin(path, node),
-            )
         return ValueOriginEvidence(
             evidence_id=_evidence_id("unknown_origin", rendered),
             value_id=f"value:unknown:{node.id}",
@@ -238,15 +207,6 @@ def classify_expression_origin(
                 node=node,
                 expression=rendered,
                 value_id=f"value:attr_alias:{rendered}",
-            )
-        if _looks_like_config_name(node.value.id):
-            return ValueOriginEvidence(
-                evidence_id=_evidence_id("server_configuration", rendered),
-                value_id=f"value:config:{rendered}",
-                origin_kind="server_configuration",
-                source_expression=rendered,
-                dependencies=[],
-                origin=_origin(path, node),
             )
 
     # Derived / compound forms are recorded without inventing a stronger origin.
