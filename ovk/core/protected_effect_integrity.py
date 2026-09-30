@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from ovk.core.assurance_ir import (
     AssuranceIR,
+    AuthorizationCutSetEvidence,
     AuthorizationGuard,
     GuardDominanceEvidence,
     ProtectedEffect,
@@ -152,6 +153,110 @@ def _dominance_evidence_for(
     return sorted(matches, key=lambda item: item.evidence_id)[0]
 
 
+def _cut_set_evidence_for(
+    ir: AssuranceIR,
+    effect: ProtectedEffect,
+) -> list[AuthorizationCutSetEvidence]:
+    return sorted(
+        [
+            item
+            for item in ir.authorization_cut_set_evidence
+            if item.protected_effect_id == effect.protected_effect_id
+        ],
+        key=lambda item: item.evidence_id,
+    )
+
+
+def _guard_fully_qualifies_for_collective_cut(
+    *,
+    ir: AssuranceIR,
+    guard: AuthorizationGuard,
+    effect: ProtectedEffect,
+    path: SemanticPath,
+) -> bool:
+    """Narrow collective-cut member theorem.
+
+    Every cut member must independently satisfy principal, effect,
+    effectiveness, exact resource, and complete CFG binding where CFG
+    evidence is present. Incomplete CFG binding refuses the whole cut.
+    """
+
+    if guard.principal_id != effect.principal_id:
+        return False
+    if guard.effect_id != effect.effect_id:
+        return False
+    if guard.effectiveness != "established":
+        return False
+    if guard.resource_id != effect.resource_id:
+        return False
+    cfg_evidence = _dominance_evidence_for(ir, guard, effect)
+    if cfg_evidence is not None:
+        if cfg_evidence.coverage_status != "complete":
+            return False
+        if (
+            cfg_evidence.guard_cfg_node_id is None
+            or cfg_evidence.effect_cfg_node_id is None
+        ):
+            return False
+    # Entrypoint/condition guards without CFG evidence remain eligible when
+    # their condition atoms are established on the path.
+    elif guard.condition_ids:
+        available = set(effect.condition_ids) | set(path.condition_ids)
+        if not _conditions_imply(
+            ir=ir,
+            required_ids=guard.condition_ids,
+            available_ids=available,
+        ):
+            return False
+    return True
+
+
+def _collective_cut_on_path(
+    *,
+    ir: AssuranceIR,
+    effect: ProtectedEffect,
+    path: SemanticPath,
+    guards_by_id: dict[str, AuthorizationGuard],
+) -> AuthorizationCutSetEvidence | None:
+    """Return a structurally covering cut whose exact guard set all qualify.
+
+    Exact guard-set identity is preserved: if any member fails qualification,
+    the cut is refused rather than shrunk.
+    """
+
+    for evidence in _cut_set_evidence_for(ir, effect):
+        if not evidence.covers_all_paths:
+            continue
+        if evidence.coverage_status != "complete":
+            continue
+        if evidence.unresolved_guard_ids:
+            continue
+        if not evidence.guard_ids and not evidence.edge_control_points:
+            continue
+        # Node-cut members must resolve to IR guards. Edge-only cuts without
+        # guard_ids are not yet admitted by this narrow theorem.
+        if not evidence.guard_ids:
+            continue
+        if any(guard_id not in guards_by_id for guard_id in evidence.guard_ids):
+            continue
+        # Prefer cuts whose members are present on the path under evaluation.
+        if any(guard_id not in path.guard_ids for guard_id in evidence.guard_ids):
+            continue
+        members = [guards_by_id[guard_id] for guard_id in evidence.guard_ids]
+        if not all(
+            _guard_fully_qualifies_for_collective_cut(
+                ir=ir,
+                guard=guard,
+                effect=effect,
+                path=path,
+            )
+            for guard in members
+        ):
+            continue
+        return evidence
+    return None
+
+
 def _guard_dominance_status_on_path(
     *,
     ir: AssuranceIR,
@@ -227,15 +332,14 @@ def compile_protected_effect_integrity(ir: AssuranceIR) -> list[ProtectedEffectI
     """Compile one path-universal obligation per protected effect.
 
     Protected Effect Integrity is universal over execution paths. Within each
-    represented path, any one qualifying authorization guard is sufficient.
-    Across paths, every path that reaches the effect must have a qualifying
-    guard.
+    represented path, authorization is established by either:
 
-    Conditional dominance uses a bounded conjunctive calculus: a guard whose
-    condition atoms are a subset of the effect/path condition atoms dominates
-    that effect on the path. Unconditional guards dominate every path. Unknown
-    or logically equivalent-but-differently-rendered conditions are not
-    equated.
+    - individual dominance of one qualifying guard, or
+    - a complete collective authorization cut whose exact guard set all
+      qualify (principal/effect/effectiveness/exact resource/complete CFG)
+
+    Cuts are never shrunk after filtering. Across paths, every path that
+    reaches the effect must be authorized.
     """
 
     obligations: list[ProtectedEffectIntegrityObligation] = []
@@ -303,6 +407,20 @@ def compile_protected_effect_integrity(ir: AssuranceIR) -> list[ProtectedEffectI
                 for guard in referenced_guards
                 if dominance_statuses[guard.guard_id] == "established"
             ]
+            collective_cut = None
+            if not dominating_guards:
+                collective_cut = _collective_cut_on_path(
+                    ir=ir,
+                    effect=effect,
+                    path=path,
+                    guards_by_id=guards_by_id,
+                )
+                if collective_cut is not None:
+                    # Exact cut identity: use the full guard set, never a subset.
+                    dominating_guards = [
+                        guards_by_id[guard_id]
+                        for guard_id in collective_cut.guard_ids
+                    ]
             path_candidate_guard_ids[path.path_id] = sorted(
                 guard.guard_id for guard in dominating_guards
             )
