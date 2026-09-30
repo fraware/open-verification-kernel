@@ -39,9 +39,10 @@ and `request.state` attributes. Parameters of helper functions remain unresolved
 until caller provenance is established. Identifier spelling such as `settings`
 or `CONFIG_*` does not establish server authority. Conditional state writes stay
 UNKNOWN until their control provenance is proved. Closed-world bypass analysis
-refuses authorized PASS when its writer world is incomplete. Open WebUI bypass
-checks are development replay only and do not rewrite frozen external-candidate
-labels.
+requires an explicit scope proof naming the complete accounted source paths and
+Python source roots. Missing, mismatched, dynamically imported, or unresolved
+repository-local scope keeps authorization UNKNOWN. Open WebUI bypass checks are
+development replay only and do not rewrite frozen external-candidate labels.
 
 The profile marks unsupported loops/try/match/with, dynamic guard effect names,
 unsupported call signatures, syntax errors, and missing head material as
