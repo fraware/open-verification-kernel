@@ -12,6 +12,7 @@ from ovk.core.assurance_ir import (
     AssuranceCoverage,
     AssuranceExtractorIdentity,
     AssuranceIR,
+    AuthorizationCutSetEvidence,
     AuthorizationGuard,
     ContractPredicate,
     ContractTerm,
@@ -210,6 +211,151 @@ def test_interpretation_evidence_order_is_digest_stable() -> None:
         item["evidence_id"]
         for item in payload["interpretation_compatibility_evidence"]
     ] == ["evidence:a", "evidence:b"]
+
+
+def test_empty_cut_set_evidence_preserves_prior_canonical_shape() -> None:
+    ir = _ir()
+
+    assert "authorization_cut_set_evidence" not in ir.canonical_payload()
+
+
+def test_cut_set_evidence_order_and_guard_sets_are_digest_stable() -> None:
+    ir = _ir()
+    evidence = AuthorizationCutSetEvidence(
+        evidence_id="cutset:refund",
+        protected_effect_id="protected:refund",
+        entrypoint="POST /invoices/{invoice_id}/refund",
+        guard_ids=["guard:z", "guard:a"],
+        guard_cfg_node_ids={
+            "guard:z": "stmt:9",
+            "guard:a": "stmt:4",
+        },
+        entry_cfg_node_id="entry:1",
+        effect_cfg_node_id="stmt:12",
+        control_flow_summary_digest="cfg:refund",
+        covers_all_paths=True,
+        coverage_status="complete",
+        reason="test_cut_set_evidence",
+        origin=_origin("app/routes.py", 9),
+    )
+    ir.authorization_cut_set_evidence = [evidence]
+    reordered = deepcopy(ir)
+    reordered.authorization_cut_set_evidence[0].guard_ids.reverse()
+    reordered.authorization_cut_set_evidence[0].guard_cfg_node_ids = {
+        "guard:a": "stmt:4",
+        "guard:z": "stmt:9",
+    }
+
+    assert ir.assurance_ir_digest == reordered.assurance_ir_digest
+    payload = ir.canonical_payload()["authorization_cut_set_evidence"][0]
+    assert payload["guard_ids"] == ["guard:a", "guard:z"]
+    assert list(payload["guard_cfg_node_ids"]) == ["guard:a", "guard:z"]
+
+
+def test_positive_cut_set_evidence_requires_complete_nonempty_coverage() -> None:
+    with pytest.raises(ValueError, match="requires complete coverage"):
+        AuthorizationCutSetEvidence(
+            evidence_id="cutset:partial",
+            protected_effect_id="protected:refund",
+            entrypoint="POST /refund",
+            guard_ids=["guard:refund"],
+            guard_cfg_node_ids={"guard:refund": "stmt:4"},
+            entry_cfg_node_id="entry:1",
+            effect_cfg_node_id="stmt:8",
+            control_flow_summary_digest="cfg:partial",
+            covers_all_paths=True,
+            coverage_status="partial",
+            reason="test_cut_set_evidence",
+            origin=_origin("app/routes.py", 9),
+        )
+
+    with pytest.raises(ValueError, match="requires guards"):
+        AuthorizationCutSetEvidence(
+            evidence_id="cutset:empty",
+            protected_effect_id="protected:refund",
+            entrypoint="POST /refund",
+            guard_ids=[],
+            guard_cfg_node_ids={},
+            entry_cfg_node_id="entry:1",
+            effect_cfg_node_id="stmt:8",
+            control_flow_summary_digest="cfg:complete",
+            covers_all_paths=True,
+            coverage_status="complete",
+            reason="test_cut_set_evidence",
+            origin=_origin("app/routes.py", 9),
+        )
+
+
+def test_complete_negative_cut_set_requires_counterexample_path() -> None:
+    with pytest.raises(ValueError, match="requires an uncovered path"):
+        AuthorizationCutSetEvidence(
+            evidence_id="cutset:negative",
+            protected_effect_id="protected:refund",
+            entrypoint="POST /refund",
+            guard_ids=["guard:refund"],
+            guard_cfg_node_ids={"guard:refund": "stmt:4"},
+            entry_cfg_node_id="entry:1",
+            effect_cfg_node_id="stmt:8",
+            control_flow_summary_digest="cfg:complete",
+            covers_all_paths=False,
+            coverage_status="complete",
+            reason="test_cut_set_evidence",
+            origin=_origin("app/routes.py", 9),
+        )
+
+
+def test_cut_set_counterexample_must_connect_entry_to_effect_and_avoid_guards() -> None:
+    with pytest.raises(ValueError, match="must connect entry to effect"):
+        AuthorizationCutSetEvidence(
+            evidence_id="cutset:bad-endpoints",
+            protected_effect_id="protected:refund",
+            entrypoint="POST /refund",
+            guard_ids=["guard:a"],
+            guard_cfg_node_ids={"guard:a": "stmt:4"},
+            entry_cfg_node_id="entry:1",
+            effect_cfg_node_id="stmt:8",
+            control_flow_summary_digest="cfg:complete",
+            covers_all_paths=False,
+            coverage_status="complete",
+            uncovered_path_node_ids=["stmt:2", "stmt:8"],
+            reason="counterexample",
+            origin=_origin("app/routes.py", 9),
+        )
+
+    with pytest.raises(ValueError, match="must avoid guard nodes"):
+        AuthorizationCutSetEvidence(
+            evidence_id="cutset:hits-guard",
+            protected_effect_id="protected:refund",
+            entrypoint="POST /refund",
+            guard_ids=["guard:a"],
+            guard_cfg_node_ids={"guard:a": "stmt:4"},
+            entry_cfg_node_id="entry:1",
+            effect_cfg_node_id="stmt:8",
+            control_flow_summary_digest="cfg:complete",
+            covers_all_paths=False,
+            coverage_status="complete",
+            uncovered_path_node_ids=["entry:1", "stmt:4", "stmt:8"],
+            reason="counterexample",
+            origin=_origin("app/routes.py", 9),
+        )
+
+
+def test_cut_set_guard_node_map_must_match_guard_ids() -> None:
+    with pytest.raises(ValueError, match="node map must match guard_ids"):
+        AuthorizationCutSetEvidence(
+            evidence_id="cutset:mismatch",
+            protected_effect_id="protected:refund",
+            entrypoint="POST /refund",
+            guard_ids=["guard:a"],
+            guard_cfg_node_ids={"guard:b": "stmt:4"},
+            entry_cfg_node_id="entry:1",
+            effect_cfg_node_id="stmt:8",
+            control_flow_summary_digest="cfg:unknown",
+            covers_all_paths=False,
+            coverage_status="unknown",
+            reason="test_cut_set_evidence",
+            origin=_origin("app/routes.py", 9),
+        )
 
 
 def test_assurance_ir_digest_changes_when_semantics_change() -> None:
