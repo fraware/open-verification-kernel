@@ -98,25 +98,6 @@ def evaluate_authorization_cut_set(
             reason="sink_node_absent_from_cfg",
         )
 
-    if not cut_node_ids:
-        uncovered = _reachable_path_avoiding_nodes(
-            cfg,
-            sink_node_id=sink_node_id,
-            avoided_node_ids=frozenset(),
-        )
-        return AuthorizationCutSetResult(
-            covers_all_paths=False,
-            coverage_status="complete" if uncovered is not None else "unknown",
-            cut_node_ids=(),
-            sink_node_id=sink_node_id,
-            uncovered_path_node_ids=uncovered or (),
-            reason=(
-                "empty_authorization_cut_set"
-                if uncovered is not None
-                else "sink_unreachable_from_entry"
-            ),
-        )
-
     unknown_cut = sorted(cut_node_ids - known)
     if unknown_cut:
         return AuthorizationCutSetResult(
@@ -145,15 +126,6 @@ def evaluate_authorization_cut_set(
             reason="sink_node_cannot_be_authorization_cut",
         )
 
-    if not coverage_authoritative_for(cfg, sink_node_id):
-        return AuthorizationCutSetResult(
-            covers_all_paths=False,
-            coverage_status="partial",
-            cut_node_ids=ordered_cut,
-            sink_node_id=sink_node_id,
-            reason="sink_reaching_cfg_coverage_partial",
-        )
-
     baseline_path = _reachable_path_avoiding_nodes(
         cfg,
         sink_node_id=sink_node_id,
@@ -166,6 +138,26 @@ def evaluate_authorization_cut_set(
             cut_node_ids=ordered_cut,
             sink_node_id=sink_node_id,
             reason="sink_unreachable_from_entry",
+        )
+
+    if not coverage_authoritative_for(cfg, sink_node_id):
+        return AuthorizationCutSetResult(
+            covers_all_paths=False,
+            coverage_status="partial",
+            cut_node_ids=ordered_cut,
+            sink_node_id=sink_node_id,
+            uncovered_path_node_ids=baseline_path,
+            reason="sink_reaching_cfg_coverage_partial",
+        )
+
+    if not cut_node_ids:
+        return AuthorizationCutSetResult(
+            covers_all_paths=False,
+            coverage_status="complete",
+            cut_node_ids=(),
+            sink_node_id=sink_node_id,
+            uncovered_path_node_ids=baseline_path,
+            reason="empty_authorization_cut_set",
         )
 
     uncovered = _reachable_path_avoiding_nodes(
