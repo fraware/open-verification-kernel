@@ -123,15 +123,17 @@ async def create_run(
 """.strip()
 
     ir = _compile(source)
-    assert ir.extractor.extractor_version == "0.21.0"
+    assert ir.extractor.extractor_version == "0.22.0"
     assert len(ir.authorization_cut_set_evidence) == 1
     evidence = ir.authorization_cut_set_evidence[0]
     assert evidence.covers_all_paths is True
     assert evidence.coverage_status == "complete"
     assert evidence.unresolved_guard_ids == []
     assert len(evidence.guard_ids) == 1
+    assert evidence.node_control_points == []
+    assert len(evidence.edge_control_points) == 1
     assert evidence.reason == (
-        "authorization_nodes_disconnect_entry_from_sink"
+        "authorization_control_points_disconnect_entry_from_sink"
     )
 
 
@@ -162,6 +164,33 @@ def handler(user, flag):
     assert evidence.coverage_status == "complete"
     assert set(evidence.guard_ids) == {"guard:a", "guard:b"}
     assert evidence.unresolved_guard_ids == []
+
+
+def test_multi_outcome_branch_guard_binding_is_unknown() -> None:
+    """A guard bound to a branch with two sink-reaching arms cannot authorize."""
+
+    path = "handler.py"
+    source = """
+def handler(flag, user):
+    if flag:
+        observe_a(user)
+    else:
+        observe_b(user)
+    return sink(user)
+""".strip()
+    cfg = build_handler_control_flow_from_source(source, path=path)
+    evidence = build_authorization_cut_set_evidence(
+        effect=_effect(path, 6),
+        entrypoint="POST /demo",
+        cfg=cfg,
+        candidate_guards=[_guard("guard:branch", path, 2)],
+        origin=_origin(path, 1),
+    )
+    assert evidence is not None
+    assert evidence.coverage_status == "unknown"
+    assert evidence.covers_all_paths is False
+    assert evidence.reason == "branch_outcome_control_point_ambiguous"
+    assert evidence.unresolved_guard_ids == ["guard:branch"]
 
 
 def test_only_one_branch_guard_emits_complete_uncovered_path() -> None:

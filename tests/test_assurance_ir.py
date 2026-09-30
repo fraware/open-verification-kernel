@@ -230,6 +230,11 @@ def test_cut_set_evidence_order_and_guard_sets_are_digest_stable() -> None:
             "guard:z": "stmt:9",
             "guard:a": "stmt:4",
         },
+        node_control_points=["stmt:9", "stmt:4"],
+        edge_control_points=[
+            "edge:branch:3->stmt:4:true",
+            "edge:branch:3->stmt:5:false",
+        ],
         entry_cfg_node_id="entry:1",
         effect_cfg_node_id="stmt:12",
         control_flow_summary_digest="cfg:refund",
@@ -245,11 +250,36 @@ def test_cut_set_evidence_order_and_guard_sets_are_digest_stable() -> None:
         "guard:a": "stmt:4",
         "guard:z": "stmt:9",
     }
+    reordered.authorization_cut_set_evidence[0].node_control_points.reverse()
+    reordered.authorization_cut_set_evidence[0].edge_control_points.reverse()
 
     assert ir.assurance_ir_digest == reordered.assurance_ir_digest
     payload = ir.canonical_payload()["authorization_cut_set_evidence"][0]
     assert payload["guard_ids"] == ["guard:a", "guard:z"]
     assert list(payload["guard_cfg_node_ids"]) == ["guard:a", "guard:z"]
+    assert payload["node_control_points"] == ["stmt:4", "stmt:9"]
+    assert payload["edge_control_points"] == [
+        "edge:branch:3->stmt:4:true",
+        "edge:branch:3->stmt:5:false",
+    ]
+
+
+def test_edge_only_positive_cut_set_evidence_is_valid() -> None:
+    evidence = AuthorizationCutSetEvidence(
+        evidence_id="cutset:edge-only",
+        protected_effect_id="protected:refund",
+        entrypoint="POST /refund",
+        edge_control_points=["edge:branch:3->stmt:4:true"],
+        entry_cfg_node_id="entry:1",
+        effect_cfg_node_id="stmt:8",
+        control_flow_summary_digest="cfg:complete",
+        covers_all_paths=True,
+        coverage_status="complete",
+        reason="test_edge_control_point",
+        origin=_origin("app/routes.py", 9),
+    )
+    assert evidence.covers_all_paths is True
+    assert evidence.edge_control_points == ["edge:branch:3->stmt:4:true"]
 
 
 def test_positive_cut_set_evidence_requires_complete_nonempty_coverage() -> None:
@@ -269,7 +299,7 @@ def test_positive_cut_set_evidence_requires_complete_nonempty_coverage() -> None
             origin=_origin("app/routes.py", 9),
         )
 
-    with pytest.raises(ValueError, match="requires guards"):
+    with pytest.raises(ValueError, match="requires control points"):
         AuthorizationCutSetEvidence(
             evidence_id="cutset:empty",
             protected_effect_id="protected:refund",
