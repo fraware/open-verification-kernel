@@ -866,7 +866,6 @@ def bind_route_file_summary(
                     origin=ownership_assertion.origin,
                 )
                 guard_ids.append(ownership_guard_id)
-                body_guard_ids.add(ownership_guard_id)
 
             for (
                 dep_name,
