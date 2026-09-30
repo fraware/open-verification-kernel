@@ -153,7 +153,7 @@ async def handler(request, user = Depends(get_current_user)):
 
 
 def test_zero_arg_helper_never_matches() -> None:
-    source = f"""
+    source = """
 from fastapi import Depends, FastAPI, HTTPException
 app = FastAPI()
 
