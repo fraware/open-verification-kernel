@@ -34,11 +34,14 @@ become authoritative; otherwise the result stays UNKNOWN rather than a false
 PASS. Flat `and`/`or` BoolOps expand into short-circuit-aware branches; nested
 or opaque BoolOps remain outside the envelope.
 
-Value-origin provenance classifies ordinary FastAPI parameters and
-`request.state` attributes. Closed-world bypass authority accounts for
-`request.state` writers across a compilation unit and refuses authorized PASS
-when the world is incomplete. Open WebUI bypass checks are development replay
-only and do not rewrite frozen external-candidate labels.
+Value-origin provenance classifies ordinary FastAPI entry-handler parameters
+and `request.state` attributes. Parameters of helper functions remain unresolved
+until caller provenance is established. Identifier spelling such as `settings`
+or `CONFIG_*` does not establish server authority. Conditional state writes stay
+UNKNOWN until their control provenance is proved. Closed-world bypass analysis
+refuses authorized PASS when its writer world is incomplete. Open WebUI bypass
+checks are development replay only and do not rewrite frozen external-candidate
+labels.
 
 The profile marks unsupported loops/try/match/with, dynamic guard effect names,
 unsupported call signatures, syntax errors, and missing head material as

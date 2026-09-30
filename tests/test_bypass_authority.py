@@ -24,7 +24,7 @@ def handler(request):
     assert findings[0].reason == "client_controlled_bypass_write"
 
 
-def test_server_authority_bypass_is_authorized() -> None:
+def test_config_shaped_bypass_is_unknown_without_binding_proof() -> None:
     findings = analyze_bypass_authority(
         """
 def middleware(request):
@@ -38,8 +38,8 @@ def handler(request):
 """.strip(),
         bypass_fields=frozenset({"bypass_filter"}),
     )
-    assert findings[0].status == "authorized"
-    assert findings[0].reason == "source_proved_server_authority_write"
+    assert findings[0].status == "unknown"
+    assert findings[0].reason == "unsupported_write_origin_mix"
 
 
 def test_unresolved_writer_is_unknown() -> None:
@@ -86,8 +86,8 @@ def handler(request):
     assert findings[0].status == "authorized"
 
 
-def test_middleware_http_param_remains_violated_when_handler_selected() -> None:
-    """Closed-world writes must see middleware params even if reads are scoped."""
+def test_non_entry_middleware_parameter_origin_is_unknown() -> None:
+    """Helper parameters need caller provenance before they are HTTP-controlled."""
 
     findings = analyze_bypass_authority(
         """
@@ -103,8 +103,8 @@ def handler(request):
         function_name="handler",
         bypass_fields=frozenset({"bypass_filter"}),
     )
-    assert findings[0].status == "violated"
-    assert findings[0].reason == "client_controlled_bypass_write"
+    assert findings[0].status == "unknown"
+    assert findings[0].reason == "unresolved_write_origin"
 
 
 def test_wildcard_state_update_is_unknown() -> None:
@@ -162,7 +162,7 @@ def test_cross_file_trusted_write_is_authorized() -> None:
         {
             "app/middleware.py": """
 def attach(request):
-    request.state.bypass_filter = settings.ALLOW
+    request.state.bypass_filter = True
 """.strip(),
             "app/handler.py": """
 from app.middleware import attach
@@ -184,7 +184,7 @@ def handler(request):
     assert findings[0].write_count >= 1
 
 
-def test_cross_file_client_write_is_violated() -> None:
+def test_cross_file_helper_parameter_requires_caller_provenance() -> None:
     from ovk.compilers.authorization.bypass_authority import (
         analyze_bypass_authority_unit,
     )
@@ -206,8 +206,8 @@ def handler(request):
         entry_path="app/handler.py",
         bypass_fields=frozenset({"bypass_filter"}),
     )
-    assert findings[0].status == "violated"
-    assert findings[0].reason == "client_controlled_bypass_write"
+    assert findings[0].status == "unknown"
+    assert findings[0].reason == "unresolved_write_origin"
 
 
 def test_unresolvable_local_import_refuses_authorized() -> None:
@@ -221,7 +221,7 @@ def test_unresolvable_local_import_refuses_authorized() -> None:
 from app.missing_middleware import attach
 
 def handler(request):
-    request.state.bypass_filter = settings.ALLOW
+    request.state.bypass_filter = True
     if request.state.bypass_filter:
         return sink()
 """.strip(),
@@ -240,7 +240,7 @@ def test_nested_client_overwrite_is_not_authorized() -> None:
     findings = analyze_bypass_authority(
         """
 def middleware(request, bypass_filter: bool = False, flag: bool = False):
-    request.state.bypass_filter = settings.ALLOW
+    request.state.bypass_filter = True
     if flag:
         request.state.bypass_filter = bypass_filter
 
@@ -249,9 +249,25 @@ def handler(request):
 """.strip(),
         bypass_fields=frozenset({"bypass_filter"}),
     )
-    assert findings[0].status == "violated"
-    assert findings[0].reason == "client_controlled_bypass_write"
+    assert findings[0].status == "unknown"
+    assert findings[0].reason == "control_dependent_state_mutation"
     assert findings[0].write_count >= 2
+
+
+def test_client_condition_gating_literal_write_is_not_authorized() -> None:
+    findings = analyze_bypass_authority(
+        """
+def middleware(request, bypass_filter: bool = False):
+    if bypass_filter:
+        request.state.bypass_filter = True
+
+def handler(request):
+    return request.state.bypass_filter
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason == "control_dependent_state_mutation"
 
 
 def test_request_state_setattr_method_is_unknown() -> None:
@@ -296,7 +312,7 @@ def test_in_function_dynamic_import_refuses_authorized() -> None:
             "app/handler.py": """
 def handler(request):
     __import__("secret_mod")
-    request.state.bypass_filter = settings.ALLOW
+    request.state.bypass_filter = True
     return request.state.bypass_filter
 """.strip(),
         },
@@ -318,7 +334,7 @@ def test_star_import_refuses_authorized() -> None:
         {
             "app/middleware.py": """
 def attach(request):
-    request.state.bypass_filter = settings.ALLOW
+    request.state.bypass_filter = True
 """.strip(),
             "app/handler.py": """
 from app.middleware import *
@@ -360,9 +376,7 @@ def handler(request):
         assert "server_configuration" not in findings[0].origin_kinds, bare
 
 
-def test_settings_attribute_server_config_still_authorizes() -> None:
-    """Attribute form under settings.* remains a bounded authorizing source."""
-
+def test_settings_attribute_does_not_authorize_without_binding_proof() -> None:
     findings = analyze_bypass_authority(
         """
 def middleware(request):
@@ -374,6 +388,21 @@ def handler(request):
 """.strip(),
         bypass_fields=frozenset({"bypass_filter"}),
     )
-    assert findings[0].status == "authorized"
-    assert findings[0].reason == "source_proved_server_authority_write"
-    assert findings[0].origin_kinds == ("server_configuration",)
+    assert findings[0].status == "unknown"
+    assert findings[0].reason == "unsupported_write_origin_mix"
+    assert "server_configuration" not in findings[0].origin_kinds
+
+
+def test_settings_parameter_attribute_does_not_authorize() -> None:
+    findings = analyze_bypass_authority(
+        """
+def middleware(request, settings):
+    request.state.bypass_filter = settings.ALLOW
+
+def handler(request):
+    return request.state.bypass_filter
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+    )
+    assert findings[0].status == "unknown"
+    assert "server_configuration" not in findings[0].origin_kinds
