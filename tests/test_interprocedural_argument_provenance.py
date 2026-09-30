@@ -243,3 +243,28 @@ def route(request):
     assert result.provenance == "unknown"
     assert result.reason == "no_accounted_callsites"
 
+
+def test_nested_def_shadowing_does_not_pollute_callsite_lattice() -> None:
+    """Nested def generate(...) must not count as a global generate callsite."""
+
+    result = analyze_interprocedural_argument_provenance(
+        {
+            "app/helper.py": """
+def generate(request, bypass_filter: bool = False):
+    request.state.bypass_filter = bypass_filter
+""".strip(),
+            "app/caller.py": """
+def route(request):
+    def generate(request, bypass_filter: bool = False):
+        request.state.bypass_filter = True
+    generate(request, True)
+""".strip(),
+        },
+        callee_name="generate",
+        parameter="bypass_filter",
+        scope_proof=_scope("app/helper.py", "app/caller.py"),
+    )
+    assert result.provenance == "unknown"
+    assert result.reason == "no_accounted_callsites"
+    assert result.callsites == ()
+

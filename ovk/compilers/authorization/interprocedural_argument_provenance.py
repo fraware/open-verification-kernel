@@ -139,7 +139,13 @@ def _resolve_callee_name(
 def _shadowed_names_in_function(
     caller: ast.AST | None,
 ) -> frozenset[str]:
-    """Names bound as parameters or store targets in the enclosing function."""
+    """Names bound as parameters, stores, or nested defs in the enclosing function.
+
+    Nested ``def``/``async def``/``class`` bindings shadow global callee names the
+    same way parameters and assignments do. Omitting them lets a nested
+    ``def generate`` pollute interprocedural provenance for the global
+    ``generate`` (Unknown > false server_internal).
+    """
 
     if caller is None or not isinstance(
         caller, (ast.FunctionDef, ast.AsyncFunctionDef)
@@ -150,10 +156,16 @@ def _shadowed_names_in_function(
     if params:
         names.update(params)
     for node in ast.walk(caller):
+        if node is caller:
+            continue
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
             names.add(node.id)
         elif isinstance(node, ast.arg):
             names.add(node.arg)
+        elif isinstance(
+            node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+        ):
+            names.add(node.name)
     return frozenset(names)
 
 
