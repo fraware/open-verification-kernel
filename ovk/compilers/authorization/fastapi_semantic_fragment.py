@@ -831,6 +831,7 @@ def bind_route_file_summary(
                 contract_use_ids.append(use_id)
 
             guard_ids: list[str] = []
+            body_guard_ids: set[str] = set()
             binding_ids: list[str] = []
             route_dependency_candidate = False
 
@@ -865,6 +866,7 @@ def bind_route_file_summary(
                     origin=ownership_assertion.origin,
                 )
                 guard_ids.append(ownership_guard_id)
+                body_guard_ids.add(ownership_guard_id)
 
             for (
                 dep_name,
@@ -1093,7 +1095,7 @@ def bind_route_file_summary(
             )
 
             entrypoint = f"{handler.method} {handler.route_path}"
-            for guard_id in guard_ids:
+            for guard_id in sorted(body_guard_ids):
                 guard = guards[guard_id]
                 evidence = build_guard_dominance_evidence(
                     guard=guard,
@@ -1333,7 +1335,7 @@ def assemble_fastapi_assurance_ir(
         ),
         extractor=AssuranceExtractorIdentity(
             extractor_id="assurance.fastapi.dependency_effects.ast_v1",
-            extractor_version="0.18.0",
+            extractor_version="0.19.0",
             source_profile_id="assurance.fastapi.dependency_effects.ast_v1",
         ),
         coverage=AssuranceCoverage(
