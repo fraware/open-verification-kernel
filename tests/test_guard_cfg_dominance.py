@@ -84,7 +84,9 @@ def handler(user):
         cfg=cfg,
         origin=_origin("h.py", 1),
     )
-    assert evidence.dominates is False
+    # Dominance is structural and remains true even though the guard's
+    # authorization effectiveness is unresolved.
+    assert evidence.dominates is True
     assert cfg_dominance_is_unknown(evidence, effectiveness="unproved")
     assert not cfg_dominance_is_sufficient(
         evidence, effectiveness="unproved"
