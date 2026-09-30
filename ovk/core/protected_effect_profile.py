@@ -173,6 +173,12 @@ class ProtectedEffectProfileConfig(BaseModel):
         ge=1024,
         le=50_000_000,
     )
+    closure_max_files: int = Field(default=5000, ge=1, le=50000)
+    closure_max_total_bytes: int = Field(
+        default=50_000_000,
+        ge=1024,
+        le=500_000_000,
+    )
 
     sink_effects: dict[str, str]
     sink_identity_args: dict[str, int] = Field(default_factory=dict)

@@ -240,7 +240,9 @@ def handler(request):
     assert findings[0].reason == "unresolved_write_origin"
 
 
-def test_unresolvable_local_import_refuses_authorized() -> None:
+def test_missing_absolute_import_is_external_not_root_special_cased() -> None:
+    """Zero manifest candidates mean external — not a backend/src local miss."""
+
     from ovk.compilers.authorization.bypass_authority import (
         analyze_bypass_authority_unit,
     )
@@ -260,12 +262,43 @@ def handler(request):
         bypass_fields=frozenset({"bypass_filter"}),
         scope_proof=_scope("app/handler.py"),
     )
+    # No */app/missing_middleware.py in the manifest → external import.
+    assert findings[0].closed_world is not None
+    assert findings[0].closed_world.complete is True
+    assert findings[0].status == "authorized"
+
+
+def test_ambiguous_manifest_import_refuses_authorized() -> None:
+    from ovk.compilers.authorization.bypass_authority import (
+        analyze_bypass_authority_unit,
+    )
+
+    findings = analyze_bypass_authority_unit(
+        {
+            "src/acme/auth.py": "def check():\n    pass\n",
+            "lib/acme/auth.py": "def check():\n    pass\n",
+            "app/handler.py": """
+from acme.auth import check
+
+def handler(request):
+    request.state.bypass_filter = True
+    return request.state.bypass_filter
+""".strip(),
+        },
+        entry_path="app/handler.py",
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope(
+            "src/acme/auth.py",
+            "lib/acme/auth.py",
+            "app/handler.py",
+        ),
+    )
     assert findings[0].status == "unknown"
     assert findings[0].reason == "closed_world_incomplete"
     assert findings[0].closed_world is not None
     assert findings[0].closed_world.complete is False
     assert any(
-        "unresolvable_local_import:app.missing_middleware" in item
+        "ambiguous_local_import:acme.auth" in item
         for item in findings[0].closed_world.unresolvable_imports
     )
 
@@ -395,7 +428,37 @@ def handler(request):
 
 
 
-def test_source_root_scope_detects_sparse_local_package_import() -> None:
+def test_nonconventional_python_layout_resolves_local_import() -> None:
+    """``python/acme/...`` must resolve without backend/src special-casing."""
+
+    from ovk.compilers.authorization.bypass_authority import (
+        analyze_bypass_authority_unit,
+    )
+
+    files = {
+        "python/acme/auth.py": """
+def attach(request):
+    request.state.bypass_filter = True
+""".strip(),
+        "python/acme/routes.py": """
+from acme.auth import attach
+
+def handler(request):
+    return request.state.bypass_filter
+""".strip(),
+    }
+    findings = analyze_bypass_authority_unit(
+        files,
+        entry_path="python/acme/routes.py",
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope(*files, source_roots=(".",)),
+    )
+    assert findings[0].closed_world is not None
+    assert findings[0].closed_world.complete is True
+    assert findings[0].status == "authorized"
+
+
+def test_missing_backend_import_without_candidate_is_external() -> None:
     from ovk.compilers.authorization.bypass_authority import (
         analyze_bypass_authority_unit,
     )
@@ -419,14 +482,10 @@ def handler(request):
             source_roots=("backend",),
         ),
     )
-    assert findings[0].status == "unknown"
-    assert findings[0].reason == "closed_world_incomplete"
+    # Zero candidates → external; literal writer may authorize under complete CW.
     assert findings[0].closed_world is not None
-    assert findings[0].closed_world.source_roots == ("backend",)
-    assert any(
-        "unresolvable_local_import:open_webui.utils.auth" in item
-        for item in findings[0].closed_world.unresolvable_imports
-    )
+    assert findings[0].closed_world.complete is True
+    assert findings[0].status == "authorized"
 
 def test_bare_allcaps_bypass_predicate_is_not_authorized() -> None:
     """Bare ALL_CAPS Names must not authorize trusted bypass authority."""

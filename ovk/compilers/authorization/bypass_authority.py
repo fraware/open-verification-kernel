@@ -771,78 +771,86 @@ def _path_relative_to_root(path: str, root: str) -> str | None:
     return path[len(prefix):]
 
 
+def _module_candidates_in_manifest(
+    module: str,
+    available_paths: set[str],
+) -> tuple[str, ...]:
+    """Locate repository paths that could bind an absolute import.
+
+    Searches the complete authenticated Python manifest for
+    ``*/<module/path>.py`` and ``*/<module/path>/__init__.py`` without
+    encoding conventional source-root names (backend/src). Exactly one
+    candidate establishes a local binding; multiple mean ambiguity;
+    none means external.
+    """
+
+    stem = module.replace(".", "/")
+    wanted = (f"{stem}.py", f"{stem}/__init__.py")
+    found: set[str] = set()
+    for path in available_paths:
+        for suffix in wanted:
+            if path == suffix or path.endswith("/" + suffix):
+                found.add(path)
+                break
+    return tuple(sorted(found))
+
+
 def _module_path_in_unit(
     module: str,
     *,
     available_paths: set[str],
-    source_roots: tuple[str, ...],
+    source_roots: tuple[str, ...] | None = None,
 ) -> str | None:
-    """Resolve an absolute module name under declared Python source roots."""
+    """Resolve an absolute module name from the complete manifest.
 
-    stem = module.replace(".", "/")
-    candidates: set[str] = set()
-    for source_root in source_roots:
-        root = _normalize_source_root(source_root)
-        prefix = f"{root}/" if root else ""
-        for suffix in (f"{stem}.py", f"{stem}/__init__.py"):
-            candidate = prefix + suffix
-            if candidate in available_paths:
-                candidates.add(candidate)
-    ordered = sorted(candidates)
-    return ordered[0] if len(ordered) == 1 else None
+    ``source_roots`` is retained for call-site compatibility but is not used
+    by the security theorem (#155).
+    """
+
+    del source_roots  # security theorem is manifest-complete, not root-special-cased
+    candidates = _module_candidates_in_manifest(module, available_paths)
+    return candidates[0] if len(candidates) == 1 else None
 
 
-def _unit_package_roots(
-    available_paths: set[str],
+def _import_module_name_from_importer(
+    node: ast.ImportFrom,
     *,
-    source_roots: tuple[str, ...],
-) -> frozenset[str]:
-    """Top-level import names represented under the declared source roots."""
+    importer_path: str,
+) -> str | None:
+    """Resolve ImportFrom to an absolute module name from the importer path."""
 
-    roots: set[str] = set()
-    for path in available_paths:
-        for source_root in source_roots:
-            relative = _path_relative_to_root(path, source_root)
-            if relative is None or not relative:
-                continue
-            top = relative.split("/", 1)[0]
-            roots.add(top[:-3] if top.endswith(".py") else top)
-    return frozenset(roots)
+    if not node.level or node.level <= 0:
+        return node.module
+
+    importer = _normalize_unit_path(importer_path)
+    parts = importer.split("/")
+    if not parts:
+        return None
+    if parts[-1].endswith(".py"):
+        parts[-1] = parts[-1][:-3]
+    if parts and parts[-1] == "__init__":
+        parts = parts[:-1]
+    else:
+        parts = parts[:-1]
+    if node.level - 1 > len(parts):
+        return None
+    if node.level > 1:
+        parts = parts[: -(node.level - 1)]
+    if node.module:
+        parts = list(parts) + node.module.split(".")
+    return ".".join(parts) if parts else None
 
 
 def _import_module_name(
     node: ast.ImportFrom,
     *,
     importer_path: str,
-    source_roots: tuple[str, ...],
+    source_roots: tuple[str, ...] | None = None,
 ) -> str | None:
     """Resolve ImportFrom to an import-space module name."""
 
-    if not node.level or node.level <= 0:
-        return node.module
-
-    importer = _normalize_unit_path(importer_path)
-    relative_importer = None
-    for source_root in source_roots:
-        candidate = _path_relative_to_root(importer, source_root)
-        if candidate is not None:
-            relative_importer = candidate
-            break
-    if relative_importer is None:
-        return None
-    if relative_importer.endswith(".py"):
-        relative_importer = relative_importer[:-3]
-    parts = relative_importer.split("/")
-    if parts and parts[-1] == "__init__":
-        parts = parts[:-1]
-    package_parts = parts[:-1] if parts else []
-    if node.level - 1 > len(package_parts):
-        return None
-    if node.level > 1:
-        package_parts = package_parts[: -(node.level - 1)]
-    if node.module:
-        package_parts = list(package_parts) + node.module.split(".")
-    return ".".join(package_parts) if package_parts else None
+    del source_roots
+    return _import_module_name_from_importer(node, importer_path=importer_path)
 
 
 def _evaluate_closed_world(
@@ -895,10 +903,6 @@ def _evaluate_closed_world(
             reason="closed_world_scope_proof_mismatch",
         )
 
-    roots = _unit_package_roots(
-        available,
-        source_roots=source_roots,
-    )
     unresolvable: list[str] = []
 
     for path, source in sorted(files.items()):
@@ -921,31 +925,24 @@ def _evaluate_closed_world(
                 if module_name is None:
                     unresolvable.append(f"{norm}:unresolved_relative_import")
                     continue
-                top = module_name.split(".", 1)[0]
-                if top not in roots:
+                candidates = _module_candidates_in_manifest(module_name, available)
+                if len(candidates) == 0:
+                    # No repository path matches — treat as external.
                     continue
-                resolved = _module_path_in_unit(
-                    module_name,
-                    available_paths=available,
-                    source_roots=source_roots,
-                )
-                if resolved is None:
+                if len(candidates) > 1:
                     unresolvable.append(
-                        f"{norm}:unresolvable_local_import:{module_name}"
+                        f"{norm}:ambiguous_local_import:{module_name}"
                     )
             elif isinstance(node, ast.Import):
                 for alias in node.names:
-                    top = alias.name.split(".", 1)[0]
-                    if top not in roots:
-                        continue
-                    resolved = _module_path_in_unit(
-                        alias.name,
-                        available_paths=available,
-                        source_roots=source_roots,
+                    candidates = _module_candidates_in_manifest(
+                        alias.name, available
                     )
-                    if resolved is None:
+                    if len(candidates) == 0:
+                        continue
+                    if len(candidates) > 1:
                         unresolvable.append(
-                            f"{norm}:unresolvable_local_import:{alias.name}"
+                            f"{norm}:ambiguous_local_import:{alias.name}"
                         )
 
         for node in ast.walk(tree):

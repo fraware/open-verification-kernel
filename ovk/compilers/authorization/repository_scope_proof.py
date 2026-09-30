@@ -22,7 +22,7 @@ from ovk.compilers.authorization.bypass_authority import ClosedWorldScopeProof
 from ovk.core.bundle import content_digest
 
 
-_IMPLEMENTATION_VERSION = "0.2.0"
+_IMPLEMENTATION_VERSION = "0.3.0"
 _CONVENTIONAL_PYTHON_SOURCE_ROOTS = ("backend", "src")
 
 
@@ -69,10 +69,11 @@ def _normalize(path: str) -> str:
 
 
 def derive_python_source_roots(paths: Sequence[str]) -> tuple[str, ...]:
-    """Infer importable Python source roots from repository-relative paths.
+    """Infer path-accounting roots from repository-relative paths.
 
-    Conventional package roots such as ``backend/`` and ``src/`` are preferred
-    so imports like ``from open_webui...`` resolve under ``backend/open_webui``.
+    Conventional package roots such as ``backend/`` and ``src/`` remain useful
+    for path scoping displays, but import closure (#155) resolves modules from
+    the complete manifest without depending on these names for security.
     Paths outside those conventions keep repository-root ``"."``. Empty input
     is refused.
     """

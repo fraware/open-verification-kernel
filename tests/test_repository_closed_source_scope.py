@@ -185,7 +185,7 @@ def test_complete_manifest_literal_writer_establishes_and_keeps_derived_digest()
         files=files,
         source_roots=derive_python_source_roots(files),
         field_searched="bypass_filter",
-        import_resolution_status="authenticated_revision_python_manifest_v1",
+        import_resolution_status="authenticated_revision_python_manifest_v2",
     )
     materials = AuthMaterials(
         base_files=files,
@@ -267,8 +267,10 @@ def handler(request):
     assert findings[0].closed_world.complete is True
     assert findings[0].status != "authorized"
 
-    # Sparse unit under ".": open_webui import is external, auth.py absent,
-    # literal writer alone authorizes — false PASS relative to the full repo.
+    # Sparse unit under ".": open_webui import has zero candidates → external,
+    # auth.py absent, literal writer alone authorizes — false PASS relative to
+    # the full repo. Manifest-complete product compile avoids this by scanning
+    # the authenticated revision, not a hand-picked sparse unit.
     sparse = {
         "backend/open_webui/routers/openai.py": full[
             "backend/open_webui/routers/openai.py"
@@ -292,8 +294,9 @@ def handler(request):
     assert wrong[0].closed_world.complete is True
     assert wrong[0].status == "authorized"
 
-    # Same sparse unit under derived backend roots stays incomplete because the
-    # local package import must resolve inside the closed world.
+    # Same sparse unit under backend roots: zero candidates still means
+    # external under the #155 manifest theorem (no backend/src special-case
+    # forcing incompleteness for a missing module path).
     correct_sparse = derive_closed_world_scope_proof(
         repo="open-webui/open-webui",
         revision="rev",
@@ -308,5 +311,6 @@ def handler(request):
         bypass_fields=frozenset({"bypass_filter"}),
         scope_proof=correct_sparse.as_closed_world_scope_proof(),
     )
-    assert honest[0].status == "unknown"
-    assert honest[0].reason == "closed_world_incomplete"
+    assert honest[0].closed_world is not None
+    assert honest[0].closed_world.complete is True
+    assert honest[0].status == "authorized"
