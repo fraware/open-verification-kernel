@@ -45,6 +45,7 @@ from ovk.compilers.authorization.semantic_summary_cache import (
     load_persistent_semantic_summaries,
 )
 from ovk.core.assurance_ir import (
+    AuthorizationCutSetEvidence,
     AuthorizationGuard,
     ContractUse,
     EffectRef,
@@ -61,7 +62,7 @@ from ovk.core.bundle import content_digest
 
 
 PERSISTENT_FASTAPI_STATE_SCHEMA = "ovk.fastapi_incremental_state_cache.v1"
-PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION = "0.22.0"
+PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION = "0.23.0"
 DEFAULT_PERSISTENT_FASTAPI_STATE_DIR = Path(
     ".verification/cache/fastapi-incremental-state"
 )
@@ -97,6 +98,9 @@ def _fragment_payload(fragment: FastApiFileSemanticFragment) -> dict[str, Any]:
         "effects": _models(fragment.effects),
         "guards": _models(fragment.guards),
         "guard_dominance_evidence": _models(fragment.guard_dominance_evidence),
+        "authorization_cut_set_evidence": _models(
+            fragment.authorization_cut_set_evidence
+        ),
         "value_origin_evidence": _models(fragment.value_origin_evidence),
         "protected_effects": _models(fragment.protected_effects),
         "resource_bindings": _models(fragment.resource_bindings),
@@ -146,6 +150,10 @@ def _fragment_from_payload(payload: dict[str, Any]) -> FastApiFileSemanticFragme
         guard_dominance_evidence=tuple(
             GuardDominanceEvidence.model_validate(item)
             for item in payload.get("guard_dominance_evidence") or []
+        ),
+        authorization_cut_set_evidence=tuple(
+            AuthorizationCutSetEvidence.model_validate(item)
+            for item in payload.get("authorization_cut_set_evidence") or []
         ),
         value_origin_evidence=tuple(
             ValueOriginEvidence.model_validate(item)

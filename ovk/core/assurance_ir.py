@@ -301,6 +301,10 @@ class AuthorizationCutSetEvidence(BaseModel):
     This object records graph coverage only. Membership in guard_ids does not
     establish authorization effectiveness or principal/effect/resource binding.
     Those remain separate verification obligations.
+
+    unresolved_guard_ids records body cut candidates whose source-to-CFG binding
+    was ambiguous or missing. Any unresolved candidate forces unknown coverage;
+    the resolved subset alone must not emit a complete uncovered-path refutation.
     """
 
     evidence_id: str
@@ -308,9 +312,10 @@ class AuthorizationCutSetEvidence(BaseModel):
     entrypoint: str
     guard_ids: list[str] = Field(default_factory=list)
     guard_cfg_node_ids: dict[str, str] = Field(default_factory=dict)
-    entry_cfg_node_id: str
-    effect_cfg_node_id: str
-    control_flow_summary_digest: str
+    unresolved_guard_ids: list[str] = Field(default_factory=list)
+    entry_cfg_node_id: str | None = None
+    effect_cfg_node_id: str | None = None
+    control_flow_summary_digest: str | None = None
     covers_all_paths: bool = False
     coverage_status: AuthorizationCutSetCoverageStatus = "unknown"
     uncovered_path_node_ids: list[str] = Field(default_factory=list)
@@ -321,9 +326,6 @@ class AuthorizationCutSetEvidence(BaseModel):
         "evidence_id",
         "protected_effect_id",
         "entrypoint",
-        "entry_cfg_node_id",
-        "effect_cfg_node_id",
-        "control_flow_summary_digest",
         "reason",
     )
     @classmethod
@@ -333,16 +335,42 @@ class AuthorizationCutSetEvidence(BaseModel):
             raise ValueError("authorization cut-set evidence fields must be non-empty")
         return value
 
+    @field_validator(
+        "entry_cfg_node_id",
+        "effect_cfg_node_id",
+        "control_flow_summary_digest",
+    )
+    @classmethod
+    def _cut_set_optional_fields_non_empty(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("authorization cut-set evidence fields must be non-empty")
+        return value
+
     @model_validator(mode="after")
     def _cut_set_shape(self) -> "AuthorizationCutSetEvidence":
         if len(set(self.guard_ids)) != len(self.guard_ids):
             raise ValueError("authorization cut-set guard_ids must be unique")
+        if len(set(self.unresolved_guard_ids)) != len(self.unresolved_guard_ids):
+            raise ValueError(
+                "authorization cut-set unresolved_guard_ids must be unique"
+            )
+        if set(self.guard_ids) & set(self.unresolved_guard_ids):
+            raise ValueError(
+                "authorization cut-set guard_ids and unresolved_guard_ids must be disjoint"
+            )
         if set(self.guard_cfg_node_ids) != set(self.guard_ids):
             raise ValueError(
                 "authorization cut-set guard node map must match guard_ids"
             )
         if any(not guard_id.strip() for guard_id in self.guard_ids):
             raise ValueError("authorization cut-set guard ids must be non-empty")
+        if any(not guard_id.strip() for guard_id in self.unresolved_guard_ids):
+            raise ValueError(
+                "authorization cut-set unresolved guard ids must be non-empty"
+            )
         if any(
             not node_id.strip()
             for node_id in self.guard_cfg_node_ids.values()
@@ -350,22 +378,60 @@ class AuthorizationCutSetEvidence(BaseModel):
             raise ValueError(
                 "authorization cut-set guard CFG node ids must be non-empty"
             )
+        if self.unresolved_guard_ids:
+            if self.covers_all_paths:
+                raise ValueError(
+                    "positive authorization cut-set evidence cannot leave guards unresolved"
+                )
+            if self.coverage_status != "unknown":
+                raise ValueError(
+                    "unresolved authorization cut-set candidates require unknown coverage"
+                )
+            if self.uncovered_path_node_ids:
+                raise ValueError(
+                    "unresolved authorization cut-set candidates cannot carry an uncovered path"
+                )
+        if self.covers_all_paths or self.coverage_status == "complete":
+            if self.unresolved_guard_ids:
+                raise ValueError(
+                    "complete authorization cut-set evidence cannot leave guards unresolved"
+                )
+            if (
+                self.entry_cfg_node_id is None
+                or self.effect_cfg_node_id is None
+                or self.control_flow_summary_digest is None
+            ):
+                raise ValueError(
+                    "complete authorization cut-set evidence requires CFG endpoints and digest"
+                )
         guard_nodes = set(self.guard_cfg_node_ids.values())
-        if self.entry_cfg_node_id in guard_nodes:
+        if (
+            self.entry_cfg_node_id is not None
+            and self.entry_cfg_node_id in guard_nodes
+        ):
             raise ValueError(
                 "authorization cut-set cannot use the entry node as a guard"
             )
-        if self.effect_cfg_node_id in guard_nodes:
+        if (
+            self.effect_cfg_node_id is not None
+            and self.effect_cfg_node_id in guard_nodes
+        ):
             raise ValueError(
                 "authorization cut-set cannot use the effect node as a guard"
             )
-        if self.entry_cfg_node_id == self.effect_cfg_node_id:
+        if (
+            self.entry_cfg_node_id is not None
+            and self.effect_cfg_node_id is not None
+            and self.entry_cfg_node_id == self.effect_cfg_node_id
+        ):
             raise ValueError(
                 "authorization cut-set entry and effect nodes must differ"
             )
         if self.uncovered_path_node_ids:
             if (
-                self.uncovered_path_node_ids[0] != self.entry_cfg_node_id
+                self.entry_cfg_node_id is None
+                or self.effect_cfg_node_id is None
+                or self.uncovered_path_node_ids[0] != self.entry_cfg_node_id
                 or self.uncovered_path_node_ids[-1] != self.effect_cfg_node_id
             ):
                 raise ValueError(
@@ -388,7 +454,10 @@ class AuthorizationCutSetEvidence(BaseModel):
                 raise ValueError(
                     "positive authorization cut-set evidence cannot carry an uncovered path"
                 )
-        elif self.coverage_status == "complete" and not self.uncovered_path_node_ids:
+        elif (
+            self.coverage_status == "complete"
+            and not self.uncovered_path_node_ids
+        ):
             raise ValueError(
                 "complete negative authorization cut-set evidence requires an uncovered path"
             )
@@ -724,6 +793,7 @@ class AssuranceIR(BaseModel):
 
         for item in payload["authorization_cut_set_evidence"]:
             item["guard_ids"] = sorted(item["guard_ids"])
+            item["unresolved_guard_ids"] = sorted(item["unresolved_guard_ids"])
             item["guard_cfg_node_ids"] = dict(
                 sorted(item["guard_cfg_node_ids"].items())
             )

@@ -13,12 +13,20 @@ separate semantic obligations.
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
+from ovk.compilers.authorization.guard_cfg_dominance import resolve_cfg_node_id
 from ovk.compilers.authorization.handler_control_flow import (
     HandlerControlFlowSummary,
     coverage_authoritative_for,
+)
+from ovk.core.assurance_ir import (
+    AuthorizationCutSetEvidence,
+    AuthorizationGuard,
+    ProtectedEffect,
+    SemanticOrigin,
 )
 
 
@@ -181,4 +189,119 @@ def evaluate_authorization_cut_set(
         sink_node_id=sink_node_id,
         uncovered_path_node_ids=uncovered,
         reason="entry_to_sink_path_avoids_all_authorization_nodes",
+    )
+
+
+def build_authorization_cut_set_evidence(
+    *,
+    effect: ProtectedEffect,
+    entrypoint: str,
+    cfg: HandlerControlFlowSummary | None,
+    candidate_guards: Sequence[AuthorizationGuard],
+    origin: SemanticOrigin,
+    allow_boolean_short_circuit_branch_guard_ids: frozenset[str] | None = None,
+) -> AuthorizationCutSetEvidence | None:
+    """Bind body cut candidates to structural AuthorizationCutSetEvidence.
+
+    Returns None when there are no body cut candidates so empty collections omit
+    from the canonical IR digest. Framework entrypoint dependencies must not be
+    passed as candidates; they execute outside the handler CFG.
+    """
+
+    candidates = tuple(
+        sorted(candidate_guards, key=lambda item: item.guard_id)
+    )
+    if not candidates:
+        return None
+
+    evidence_id = f"cutset:{effect.protected_effect_id}"
+    allow_bool = allow_boolean_short_circuit_branch_guard_ids or frozenset()
+    candidate_ids = [guard.guard_id for guard in candidates]
+
+    if cfg is None:
+        return AuthorizationCutSetEvidence(
+            evidence_id=evidence_id,
+            protected_effect_id=effect.protected_effect_id,
+            entrypoint=entrypoint,
+            unresolved_guard_ids=list(candidate_ids),
+            covers_all_paths=False,
+            coverage_status="unknown",
+            reason="handler_cfg_absent",
+            origin=origin,
+        )
+
+    effect_node = resolve_cfg_node_id(
+        cfg,
+        effect.origin.source_range if effect.origin else None,
+    )
+    resolved: dict[str, str] = {}
+    unresolved: list[str] = []
+    for guard in candidates:
+        node_id = resolve_cfg_node_id(
+            cfg,
+            guard.origin.source_range if guard.origin else None,
+            allow_boolean_short_circuit_branch=(
+                guard.guard_id in allow_bool
+            ),
+        )
+        if node_id is None:
+            unresolved.append(guard.guard_id)
+        else:
+            resolved[guard.guard_id] = node_id
+
+    if effect_node is None:
+        return AuthorizationCutSetEvidence(
+            evidence_id=evidence_id,
+            protected_effect_id=effect.protected_effect_id,
+            entrypoint=entrypoint,
+            unresolved_guard_ids=list(candidate_ids),
+            entry_cfg_node_id=cfg.entry_id,
+            control_flow_summary_digest=cfg.digest(),
+            covers_all_paths=False,
+            coverage_status="unknown",
+            reason="sink_cfg_binding_unresolved",
+            origin=origin,
+        )
+
+    if unresolved:
+        return AuthorizationCutSetEvidence(
+            evidence_id=evidence_id,
+            protected_effect_id=effect.protected_effect_id,
+            entrypoint=entrypoint,
+            guard_ids=sorted(resolved),
+            guard_cfg_node_ids=dict(sorted(resolved.items())),
+            unresolved_guard_ids=sorted(unresolved),
+            entry_cfg_node_id=cfg.entry_id,
+            effect_cfg_node_id=effect_node,
+            control_flow_summary_digest=cfg.digest(),
+            covers_all_paths=False,
+            coverage_status="unknown",
+            reason="authorization_cut_candidate_binding_unresolved",
+            origin=origin,
+        )
+
+    result = evaluate_authorization_cut_set(
+        cfg,
+        sink_node_id=effect_node,
+        cut_node_ids=frozenset(resolved.values()),
+    )
+    uncovered = (
+        list(result.uncovered_path_node_ids)
+        if result.coverage_status == "complete" and not result.covers_all_paths
+        else []
+    )
+    return AuthorizationCutSetEvidence(
+        evidence_id=evidence_id,
+        protected_effect_id=effect.protected_effect_id,
+        entrypoint=entrypoint,
+        guard_ids=sorted(resolved),
+        guard_cfg_node_ids=dict(sorted(resolved.items())),
+        entry_cfg_node_id=cfg.entry_id,
+        effect_cfg_node_id=effect_node,
+        control_flow_summary_digest=cfg.digest(),
+        covers_all_paths=result.covers_all_paths,
+        coverage_status=result.coverage_status,
+        uncovered_path_node_ids=uncovered,
+        reason=result.reason,
+        origin=origin,
     )

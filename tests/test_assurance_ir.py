@@ -358,6 +358,69 @@ def test_cut_set_guard_node_map_must_match_guard_ids() -> None:
         )
 
 
+def test_cut_set_unresolved_guards_force_unknown_without_uncovered_path() -> None:
+    with pytest.raises(ValueError, match="require unknown coverage"):
+        AuthorizationCutSetEvidence(
+            evidence_id="cutset:unresolved",
+            protected_effect_id="protected:refund",
+            entrypoint="POST /refund",
+            guard_ids=["guard:a"],
+            guard_cfg_node_ids={"guard:a": "stmt:4"},
+            unresolved_guard_ids=["guard:b"],
+            entry_cfg_node_id="entry:1",
+            effect_cfg_node_id="stmt:8",
+            control_flow_summary_digest="cfg:unknown",
+            covers_all_paths=False,
+            coverage_status="complete",
+            uncovered_path_node_ids=["entry:1", "stmt:8"],
+            reason="test_cut_set_evidence",
+            origin=_origin("app/routes.py", 9),
+        )
+
+    with pytest.raises(ValueError, match="cannot leave guards unresolved"):
+        AuthorizationCutSetEvidence(
+            evidence_id="cutset:positive-unresolved",
+            protected_effect_id="protected:refund",
+            entrypoint="POST /refund",
+            guard_ids=["guard:a"],
+            guard_cfg_node_ids={"guard:a": "stmt:4"},
+            unresolved_guard_ids=["guard:b"],
+            entry_cfg_node_id="entry:1",
+            effect_cfg_node_id="stmt:8",
+            control_flow_summary_digest="cfg:complete",
+            covers_all_paths=True,
+            coverage_status="complete",
+            reason="test_cut_set_evidence",
+            origin=_origin("app/routes.py", 9),
+        )
+
+
+def test_cut_set_unresolved_evidence_is_digest_stable() -> None:
+    ir = _ir()
+    evidence = AuthorizationCutSetEvidence(
+        evidence_id="cutset:unresolved",
+        protected_effect_id="protected:refund",
+        entrypoint="POST /refund",
+        guard_ids=["guard:a"],
+        guard_cfg_node_ids={"guard:a": "stmt:4"},
+        unresolved_guard_ids=["guard:z", "guard:b"],
+        entry_cfg_node_id="entry:1",
+        effect_cfg_node_id="stmt:8",
+        control_flow_summary_digest="cfg:unknown",
+        covers_all_paths=False,
+        coverage_status="unknown",
+        reason="authorization_cut_candidate_binding_unresolved",
+        origin=_origin("app/routes.py", 9),
+    )
+    ir.authorization_cut_set_evidence = [evidence]
+    reordered = deepcopy(ir)
+    reordered.authorization_cut_set_evidence[0].unresolved_guard_ids.reverse()
+
+    assert ir.assurance_ir_digest == reordered.assurance_ir_digest
+    payload = ir.canonical_payload()["authorization_cut_set_evidence"][0]
+    assert payload["unresolved_guard_ids"] == ["guard:b", "guard:z"]
+
+
 def test_assurance_ir_digest_changes_when_semantics_change() -> None:
     original = _ir()
     changed = deepcopy(original)

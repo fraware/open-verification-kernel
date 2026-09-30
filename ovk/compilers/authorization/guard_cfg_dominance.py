@@ -45,12 +45,18 @@ def _condition_has_boolean_short_circuit(expression: str | None) -> bool:
 def resolve_cfg_node_id(
     cfg: HandlerControlFlowSummary,
     source_range: SourceRange | None,
+    *,
+    allow_boolean_short_circuit_branch: bool = False,
 ) -> str | None:
     """Map a source range to exactly one CFG node, else None (ambiguous/missing).
 
-    Branch nodes whose conditions contain ``and``/``or`` are refused: binding a
-    call inside a Boolean expression as an executed guard would violate
+    Branch nodes whose conditions contain ``and``/``or`` are refused by default:
+    binding a call inside a Boolean expression as an executed guard would violate
     short-circuit opacity and can produce false dominance PASS.
+
+    Cut-set binding may set allow_boolean_short_circuit_branch when the candidate
+    guard *is* the branch statement itself (for example a fail-closed ownership
+    assertion), not a nested call inside the Boolean condition.
     """
 
     if source_range is None or source_range.start_line is None:
@@ -69,6 +75,7 @@ def resolve_cfg_node_id(
         and not (
             node.kind == "branch"
             and _condition_has_boolean_short_circuit(node.expression)
+            and not allow_boolean_short_circuit_branch
         )
     ]
     if len(matches) != 1:

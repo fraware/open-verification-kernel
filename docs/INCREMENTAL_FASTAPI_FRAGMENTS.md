@@ -12,6 +12,7 @@ Each FastApiFileSemanticFragment records:
 - exact stable-name -> contract_id dependencies consumed by that file;
 - unsupported constructs found during binding;
 - principals, resources, effects, guards;
+- guard-dominance evidence and authorization cut-set evidence;
 - Protected Effects and resource bindings;
 - contract uses;
 - semantic paths.

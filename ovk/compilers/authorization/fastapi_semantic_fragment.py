@@ -19,6 +19,9 @@ from ovk.compilers.authorization.fastapi_route_summary import (
     RouteFileSummary,
     RouteHandlerSummary,
 )
+from ovk.compilers.authorization.authorization_cut_set import (
+    build_authorization_cut_set_evidence,
+)
 from ovk.compilers.authorization.guard_cfg_dominance import (
     build_guard_dominance_evidence,
 )
@@ -30,6 +33,7 @@ from ovk.core.assurance_ir import (
     AssuranceCoverage,
     AssuranceExtractorIdentity,
     AssuranceIR,
+    AuthorizationCutSetEvidence,
     AuthorizationGuard,
     ContractUse,
     EffectRef,
@@ -245,15 +249,15 @@ def _prior_scope_assertion(
     return matches[-1][0], matches[-1][1], None
 
 
-def _prior_ownership_assertion(
+def _matching_ownership_assertions(
     *,
     handler: RouteHandlerSummary,
     sink_call: CallSummary,
     identity_expression: ExpressionSummary,
     effect_name: str,
     profile: Any,
-):
-    """Resolve a configured fail-closed ownership assertion before one sink."""
+) -> tuple[list[Any], str | None]:
+    """Return matching fail-closed ownership assertions before one sink."""
 
     matches = []
     expected_principal_prefix = profile.principal_parameter + "."
@@ -290,7 +294,7 @@ def _prior_ownership_assertion(
             continue
         if not semantics.allow_missing_resource:
             return (
-                None,
+                [],
                 "ownership_assertion_missing_resource_policy_mismatch:"
                 + assertion_key,
             )
@@ -299,19 +303,19 @@ def _prior_ownership_assertion(
             and not semantics.truthy_when_present
         ):
             return (
-                None,
+                [],
                 "ownership_assertion_truthiness_unproved:" + assertion_key,
             )
         if assertion.presence_test not in {"truthy", "is_not_none"}:
             return (
-                None,
+                [],
                 "unsupported_ownership_presence_test:" + assertion_key,
             )
 
-        matches.append((assertion_key, assertion))
+        matches.append(assertion)
 
     if not matches:
-        return None, None
+        return [], None
 
     identities = {
         (
@@ -319,12 +323,12 @@ def _prior_ownership_assertion(
             assertion.owner_attribute,
             assertion.principal_expression.rendered,
         )
-        for _key, assertion in matches
+        for assertion in matches
     }
     if len(identities) != 1:
-        return None, "ambiguous_ownership_assertions"
+        return [], "ambiguous_ownership_assertions"
 
-    return matches[-1][1], None
+    return matches, None
 
 
 @dataclass(frozen=True)
@@ -347,6 +351,7 @@ class FastApiFileSemanticFragment:
     effects: tuple[EffectRef, ...] = ()
     guards: tuple[AuthorizationGuard, ...] = ()
     guard_dominance_evidence: tuple[GuardDominanceEvidence, ...] = ()
+    authorization_cut_set_evidence: tuple[AuthorizationCutSetEvidence, ...] = ()
     value_origin_evidence: tuple[ValueOriginEvidence, ...] = ()
     protected_effects: tuple[ProtectedEffect, ...] = ()
     resource_bindings: tuple[ResourceBinding, ...] = ()
@@ -524,6 +529,7 @@ def bind_route_file_summary(
     effects: dict[str, EffectRef] = {}
     guards: dict[str, AuthorizationGuard] = {}
     dominance_evidence: dict[str, GuardDominanceEvidence] = {}
+    cut_set_evidence: dict[str, AuthorizationCutSetEvidence] = {}
     value_origins: dict[str, ValueOriginEvidence] = {}
     protected: dict[str, ProtectedEffect] = {}
     bindings: dict[str, ResourceBinding] = {}
@@ -832,40 +838,48 @@ def bind_route_file_summary(
 
             guard_ids: list[str] = []
             body_guard_ids: set[str] = set()
+            body_cut_candidate_guard_ids: set[str] = set()
             binding_ids: list[str] = []
             route_dependency_candidate = False
 
-            ownership_assertion, ownership_problem = _prior_ownership_assertion(
-                handler=handler,
-                sink_call=call,
-                identity_expression=identity_expression,
-                effect_name=effect_name,
-                profile=profile,
+            ownership_assertions, ownership_problem = (
+                _matching_ownership_assertions(
+                    handler=handler,
+                    sink_call=call,
+                    identity_expression=identity_expression,
+                    effect_name=effect_name,
+                    profile=profile,
+                )
             )
             if ownership_problem is not None:
                 unsupported.append(
                     f"{file_summary.path}:{handler.handler_name}:"
                     f"{ownership_problem}"
                 )
-            elif ownership_assertion is not None:
-                ownership_guard_id = _semantic_id(
-                    "guard",
-                    (
-                        f"{file_summary.path}:{handler.handler_name}:"
-                        f"{ownership_assertion.line}:ownership:"
-                        f"{effect_name}:{identity_expression.rendered}:"
-                        f"{ownership_assertion.owner_attribute}:"
-                        f"{ownership_assertion.principal_expression.rendered}"
-                    ),
-                )
-                guards[ownership_guard_id] = AuthorizationGuard(
-                    guard_id=ownership_guard_id,
-                    principal_id=principal_id,
-                    effect_id=effect_id,
-                    resource_id=acted_id,
-                    origin=ownership_assertion.origin,
-                )
-                guard_ids.append(ownership_guard_id)
+            else:
+                for ownership_assertion in ownership_assertions:
+                    ownership_guard_id = _semantic_id(
+                        "guard",
+                        (
+                            f"{file_summary.path}:{handler.handler_name}:"
+                            f"{ownership_assertion.line}:ownership:"
+                            f"{effect_name}:{identity_expression.rendered}:"
+                            f"{ownership_assertion.owner_attribute}:"
+                            f"{ownership_assertion.principal_expression.rendered}"
+                        ),
+                    )
+                    guards[ownership_guard_id] = AuthorizationGuard(
+                        guard_id=ownership_guard_id,
+                        principal_id=principal_id,
+                        effect_id=effect_id,
+                        resource_id=acted_id,
+                        origin=ownership_assertion.origin,
+                    )
+                    guard_ids.append(ownership_guard_id)
+                    # Ownership stays off the CFG-dominance body_guard_ids path
+                    # (continuation / fail-closed semantics). It is a cut-set
+                    # body candidate because its origin is handler-body local.
+                    body_cut_candidate_guard_ids.add(ownership_guard_id)
 
             for (
                 dep_name,
@@ -1105,6 +1119,24 @@ def bind_route_file_summary(
                 )
                 dominance_evidence[evidence.evidence_id] = evidence
 
+            cut_candidates = [
+                guards[guard_id]
+                for guard_id in sorted(body_cut_candidate_guard_ids)
+                if guard_id in guards
+            ]
+            cut_evidence = build_authorization_cut_set_evidence(
+                effect=protected[protected_id],
+                entrypoint=entrypoint,
+                cfg=cfg,
+                candidate_guards=cut_candidates,
+                origin=handler.origin,
+                allow_boolean_short_circuit_branch_guard_ids=frozenset(
+                    body_cut_candidate_guard_ids
+                ),
+            )
+            if cut_evidence is not None:
+                cut_set_evidence[cut_evidence.evidence_id] = cut_evidence
+
             paths[path_id] = SemanticPath(
                 path_id=path_id,
                 entrypoint=entrypoint,
@@ -1143,6 +1175,12 @@ def bind_route_file_summary(
         guard_dominance_evidence=tuple(
             sorted(
                 dominance_evidence.values(),
+                key=lambda item: item.evidence_id,
+            )
+        ),
+        authorization_cut_set_evidence=tuple(
+            sorted(
+                cut_set_evidence.values(),
                 key=lambda item: item.evidence_id,
             )
         ),
@@ -1272,6 +1310,7 @@ def assemble_fastapi_assurance_ir(
     effects: dict[str, EffectRef] = {}
     guards: dict[str, AuthorizationGuard] = {}
     dominance_evidence: dict[str, GuardDominanceEvidence] = {}
+    cut_set_evidence: dict[str, AuthorizationCutSetEvidence] = {}
     value_origins: dict[str, ValueOriginEvidence] = {}
     protected: dict[str, ProtectedEffect] = {}
     bindings: dict[str, ResourceBinding] = {}
@@ -1305,6 +1344,8 @@ def assemble_fastapi_assurance_ir(
             guards[item.guard_id] = item
         for item in fragment.guard_dominance_evidence:
             dominance_evidence[item.evidence_id] = item
+        for item in fragment.authorization_cut_set_evidence:
+            cut_set_evidence[item.evidence_id] = item
         for item in fragment.value_origin_evidence:
             value_origins[item.evidence_id] = item
         for item in fragment.protected_effects:
@@ -1334,7 +1375,7 @@ def assemble_fastapi_assurance_ir(
         ),
         extractor=AssuranceExtractorIdentity(
             extractor_id="assurance.fastapi.dependency_effects.ast_v1",
-            extractor_version="0.20.0",
+            extractor_version="0.21.0",
             source_profile_id="assurance.fastapi.dependency_effects.ast_v1",
         ),
         coverage=AssuranceCoverage(
@@ -1366,6 +1407,10 @@ def assemble_fastapi_assurance_ir(
         ),
         guard_dominance_evidence=sorted(
             dominance_evidence.values(),
+            key=lambda item: item.evidence_id,
+        ),
+        authorization_cut_set_evidence=sorted(
+            cut_set_evidence.values(),
             key=lambda item: item.evidence_id,
         ),
         value_origin_evidence=sorted(
