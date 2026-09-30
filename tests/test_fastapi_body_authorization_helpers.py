@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.compilers.authorization.protected_effect_fastapi_dependency import (
+    BodyAuthorizationHelperSemantics,
     FastApiDependencyEffectExtractor,
     FastApiDependencyEffectProfile,
 )
@@ -38,17 +39,30 @@ def _origin(line: int) -> SemanticOrigin:
     )
 
 
+_FAIL_CLOSED_HELPER = """
+def require_access(user):
+    if user is None:
+        raise HTTPException(status_code=403)
+""".strip()
+
+
 def _body_helper_profile(
     *,
     with_bypass: bool = False,
-    helpers: dict[str, tuple[str, ...]] | None = None,
+    helpers: dict[str, BodyAuthorizationHelperSemantics] | None = None,
 ) -> FastApiDependencyEffectProfile:
     return FastApiDependencyEffectProfile(
         sink_effects={"sink": "model.invoke"},
         sink_static_resources={"sink": "chat"},
         body_authorization_helpers=helpers
         if helpers is not None
-        else {"require_access": ("model.invoke",)},
+        else {
+            "require_access": BodyAuthorizationHelperSemantics(
+                authorized_effects=("model.invoke",),
+                principal_arg=0,
+                authorized_resource="chat",
+            )
+        },
         trusted_bypass_authorities=(
             {"request.state.bypass_filter": ("model.invoke",)}
             if with_bypass
@@ -94,26 +108,35 @@ def test_profile_body_authorization_helpers_round_trip() -> None:
         "source_paths": ["app/**/*.py"],
         "sink_effects": {"sink": "model.invoke"},
         "body_authorization_helpers": {
-            "require_access": {"effects": ["model.invoke"]},
-            "check_access": {"effects": ["model.invoke"]},
+            "require_access": {
+                "effects": ["model.invoke"],
+                "authorized_resource": "chat",
+            },
+            "check_access": {
+                "effects": ["model.invoke"],
+                "authorized_resource": "chat",
+            },
         },
+        "sink_static_resources": {"sink": "chat"},
         "principal_parameter": "user",
     }
     config = ProtectedEffectProfileConfig.model_validate(payload)
     runtime = config.runtime_profile()
-    assert runtime.body_authorization_helpers == {
-        "require_access": ("model.invoke",),
-        "check_access": ("model.invoke",),
-    }
+    assert runtime.body_authorization_helpers["require_access"].authorized_effects == (
+        "model.invoke",
+    )
+    assert runtime.body_authorization_helpers["require_access"].authorized_resource == "chat"
     assert "body_authorization_helpers" in config.canonical_payload()
 
 
 def test_sequential_body_helper_is_cut_candidate_and_pe_pass() -> None:
     """Positive: profile-declared sequential body helper covers sink."""
 
-    source = """
-from fastapi import Depends, FastAPI
+    source = f"""
+from fastapi import Depends, FastAPI, HTTPException
 app = FastAPI()
+
+{_FAIL_CLOSED_HELPER}
 
 @app.post("/chat")
 async def handler(request, user = Depends(get_current_user)):
@@ -124,7 +147,7 @@ async def handler(request, user = Depends(get_current_user)):
         {"app/routes.py": source},
         profile=_body_helper_profile(),
     )
-    assert ir.extractor.extractor_version == "0.25.0"
+    assert ir.extractor.extractor_version == "0.26.0"
     assert len(ir.guards) == 1
     assert ir.guards[0].origin.source_range is not None
     assert len(ir.authorization_cut_set_evidence) == 1
@@ -152,7 +175,15 @@ async def handler(request, user = Depends(get_current_user)):
 """.strip()
     ir = _compile(
         {"app/routes.py": source},
-        profile=_body_helper_profile(helpers={"require_access": ("model.invoke",)}),
+        profile=_body_helper_profile(
+            helpers={
+                "require_access": BodyAuthorizationHelperSemantics(
+                    authorized_effects=("model.invoke",),
+                    principal_arg=0,
+                    authorized_resource="chat",
+                )
+            }
+        ),
     )
     assert ir.guards == []
     assert ir.authorization_cut_set_evidence == []
@@ -168,8 +199,9 @@ def test_bypass_else_body_helper_compose_cut_node_and_edge() -> None:
 def attach(request):
     request.state.bypass_filter = True
 """.strip(),
+        "app/helpers.py": _FAIL_CLOSED_HELPER,
         "app/routes.py": """
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 app = FastAPI()
 
 @app.post("/chat")
@@ -211,9 +243,11 @@ async def handler(request, user = Depends(get_current_user)):
 def test_body_helper_alone_does_not_cover_bypass_true_branch() -> None:
     """Near-miss: body helper without proved bypass leaves true branch open."""
 
-    source = """
-from fastapi import Depends, FastAPI
+    source = f"""
+from fastapi import Depends, FastAPI, HTTPException
 app = FastAPI()
+
+{_FAIL_CLOSED_HELPER}
 
 @app.post("/chat")
 async def handler(request, user = Depends(get_current_user)):
@@ -242,8 +276,9 @@ def test_sparse_workspace_closure_refuses_bypass_collective_pass() -> None:
 def attach(request):
     request.state.bypass_filter = True
 """.strip(),
+        "app/helpers.py": _FAIL_CLOSED_HELPER,
         "app/routes.py": """
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 app = FastAPI()
 
 @app.post("/chat")

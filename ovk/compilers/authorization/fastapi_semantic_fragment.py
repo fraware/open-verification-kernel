@@ -12,6 +12,9 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Mapping
 
 from ovk.compilers.authorization.material_loader import AuthMaterials
+from ovk.compilers.authorization.body_helper_contracts import (
+    analyze_body_helper_implementation,
+)
 from ovk.compilers.authorization.fastapi_route_summary import (
     CallSummary,
     ExpressionSummary,
@@ -336,16 +339,18 @@ def _matching_body_authorization_helpers(
     handler: RouteHandlerSummary,
     sink_call: CallSummary,
     effect_name: str,
+    acted_resource_symbol: str | None,
+    identity_expression_rendered: str | None,
     profile: Any,
-) -> list[CallSummary]:
+) -> list[tuple[CallSummary, Any]]:
     """Return profile-declared body authorization helper calls before a sink.
 
     Near-miss helpers absent from the profile are ignored (stay Unknown).
-    When a call has positional arguments, the first must name the profile
-    principal parameter so source-grounded principal binding is preserved.
+    Principal and resource argument binding are explicit profile fields —
+    silent acted_id mapping is refused.
     """
 
-    matches: list[CallSummary] = []
+    matches: list[tuple[CallSummary, Any]] = []
     resolver = getattr(profile, "body_authorization_helper_names", None)
     if resolver is None:
         return matches
@@ -353,18 +358,32 @@ def _matching_body_authorization_helpers(
     for call in handler.calls:
         if call.line >= sink_call.line:
             continue
-        # Do not treat the sink call itself (or later calls) as a guard.
         resolved = resolver(call.full_name, call.leaf_name)
         if resolved is None:
             continue
-        helper_key, authorized_effects = resolved
-        if effect_name not in authorized_effects:
+        _helper_key, semantics = resolved
+        if effect_name not in semantics.authorized_effects:
             continue
-        if call.positional_arguments:
-            first = call.positional_arguments[0].rendered
-            if first != profile.principal_parameter:
+        args = call.positional_arguments
+        if len(args) <= semantics.principal_arg:
+            continue
+        if args[semantics.principal_arg].rendered != profile.principal_parameter:
+            continue
+        if semantics.resource_arg is not None:
+            if len(args) <= semantics.resource_arg:
                 continue
-        matches.append(call)
+            if (
+                identity_expression_rendered is None
+                or args[semantics.resource_arg].rendered
+                != identity_expression_rendered
+            ):
+                continue
+        elif semantics.authorized_resource is not None:
+            if acted_resource_symbol != semantics.authorized_resource:
+                continue
+        else:
+            continue
+        matches.append((call, semantics))
     return matches
 
 
@@ -467,7 +486,12 @@ def profile_semantic_digest(profile: Any) -> str:
             )
         },
         "body_authorization_helpers": {
-            key: sorted(value)
+            key: {
+                "authorized_effects": sorted(value.authorized_effects),
+                "principal_arg": value.principal_arg,
+                "resource_arg": value.resource_arg,
+                "authorized_resource": value.authorized_resource,
+            }
             for key, value in sorted(
                 getattr(profile, "body_authorization_helpers", {}).items()
             )
@@ -552,6 +576,7 @@ def bind_route_file_summary(
     ] | None = None,
     external_fastapi_route_owners: frozenset[str] | None = None,
     route_attachment_digest: str | None = None,
+    source_files: Mapping[str, str] | None = None,
 ) -> FastApiFileSemanticFragment:
     """Bind one file summary against current profile and function contracts."""
 
@@ -924,10 +949,20 @@ def bind_route_file_summary(
                     # body candidate because its origin is handler-body local.
                     body_cut_candidate_guard_ids.add(ownership_guard_id)
 
-            for helper_call in _matching_body_authorization_helpers(
+            for helper_call, helper_semantics in _matching_body_authorization_helpers(
                 handler=handler,
                 sink_call=call,
                 effect_name=effect_name,
+                acted_resource_symbol=(
+                    static_resource
+                    if static_resource is not None
+                    else None
+                ),
+                identity_expression_rendered=(
+                    None
+                    if static_resource is not None
+                    else identity_expression.rendered
+                ),
                 profile=profile,
             ):
                 helper_key = (
@@ -935,28 +970,59 @@ def bind_route_file_summary(
                         helper_call.full_name,
                         helper_call.leaf_name,
                     )
-                    or (helper_call.leaf_name or helper_call.full_name, ())
+                    or (helper_call.leaf_name or helper_call.full_name, helper_semantics)
                 )[0]
+                if helper_semantics.authorized_resource is not None:
+                    # Match static sink resource identity encoding.
+                    helper_resource_id = _semantic_id(
+                        "resource",
+                        f"static:{helper_semantics.authorized_resource}",
+                    )
+                    if helper_resource_id != acted_id:
+                        # Explicit authorized_resource that does not match the
+                        # acted sink resource cannot authorize this PE.
+                        continue
+                else:
+                    helper_resource_id = acted_id
+                implementation = analyze_body_helper_implementation(
+                    source_files or {file_summary.path: ""},
+                    helper_name=helper_key.split(".")[-1],
+                )
+                effectiveness = (
+                    "established"
+                    if implementation.status == "established"
+                    else "unproved"
+                )
+                evidence_ids: list[str] = []
+                if effectiveness == "established":
+                    evidence_ids = [
+                        f"body_helper_impl:{helper_key}:"
+                        f"{implementation.path}:{implementation.line}"
+                    ]
                 body_helper_guard_id = _semantic_id(
                     "guard",
                     (
                         f"{file_summary.path}:{handler.handler_name}:"
                         f"{helper_call.line}:body_auth:{helper_key}:"
-                        f"{effect_name}:{identity_expression.rendered}"
+                        f"{effect_name}:{helper_resource_id}:"
+                        f"{effectiveness}:{implementation.reason}"
                     ),
                 )
                 guards[body_helper_guard_id] = AuthorizationGuard(
                     guard_id=body_helper_guard_id,
                     principal_id=principal_id,
                     effect_id=effect_id,
-                    resource_id=acted_id,
+                    resource_id=helper_resource_id,
+                    effectiveness=effectiveness,
+                    effectiveness_evidence_ids=evidence_ids,
                     origin=helper_call.origin,
                 )
                 guard_ids.append(body_helper_guard_id)
                 # Call-style body helpers participate in both CFG dominance
-                # and the cut-set candidate universe.
-                body_guard_ids.add(body_helper_guard_id)
-                body_cut_candidate_guard_ids.add(body_helper_guard_id)
+                # and the cut-set candidate universe only when established.
+                if effectiveness == "established":
+                    body_guard_ids.add(body_helper_guard_id)
+                    body_cut_candidate_guard_ids.add(body_helper_guard_id)
 
             for (
                 dep_name,
@@ -1454,7 +1520,7 @@ def assemble_fastapi_assurance_ir(
         ),
         extractor=AssuranceExtractorIdentity(
             extractor_id="assurance.fastapi.dependency_effects.ast_v1",
-            extractor_version="0.25.0",
+            extractor_version="0.26.0",
             source_profile_id="assurance.fastapi.dependency_effects.ast_v1",
         ),
         coverage=AssuranceCoverage(

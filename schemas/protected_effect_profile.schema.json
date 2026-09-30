@@ -172,6 +172,18 @@
             "minItems": 1,
             "uniqueItems": true,
             "items": {"type": "string", "minLength": 1}
+          },
+          "principal_arg": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "resource_arg": {
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "authorized_resource": {
+            "type": ["string", "null"],
+            "minLength": 1
           }
         },
         "additionalProperties": false

@@ -14,6 +14,7 @@ from ovk.compilers.authorization.handler_control_flow import (
 )
 from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.compilers.authorization.protected_effect_fastapi_dependency import (
+    BodyAuthorizationHelperSemantics,
     FastApiDependencyEffectExtractor,
     FastApiDependencyEffectProfile,
 )
@@ -71,6 +72,11 @@ def test_cross_handler_local_edge_collision_does_not_merge_or_pass() -> None:
 def attach(request):
     request.state.bypass_filter = True
 """.strip(),
+        "app/helpers.py": """
+def require_access(user):
+    if user is None:
+        raise HTTPException(status_code=403)
+""".strip(),
         "app/routes.py": """
 from fastapi import Depends, FastAPI
 app = FastAPI()
@@ -95,7 +101,13 @@ async def other(request, user = Depends(get_current_user)):
     profile = FastApiDependencyEffectProfile(
         sink_effects={"sink": "model.invoke"},
         sink_static_resources={"sink": "chat"},
-        body_authorization_helpers={"require_access": ("model.invoke",)},
+        body_authorization_helpers={
+            "require_access": BodyAuthorizationHelperSemantics(
+                authorized_effects=("model.invoke",),
+                principal_arg=0,
+                authorized_resource="chat",
+            )
+        },
         trusted_bypass_authorities={
             "request.state.bypass_filter": ("model.invoke",),
         },
