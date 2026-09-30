@@ -558,9 +558,11 @@ def analyze_open_webui_multi_obligation_revision(
     )
 
     # Final three-valued PE classification for the development case.
+    # Structural dominance / trusted-bypass mechanism success must not claim
+    # PE PASS while principal/effect/resource bindings remain UNKNOWN.
     if ordinary_dominates and cfg_complete:
-        final_status: FinalProtectedEffectStatus = "PASS"
-        final_reason = "ordinary_guard_dominates"
+        final_status: FinalProtectedEffectStatus = "UNKNOWN"
+        final_reason = "ordinary_guard_structural_dominance_not_pe_pass"
     elif (
         bypass_authority.status == "established"
         and branch_outcome.status == "established"
@@ -571,8 +573,8 @@ def analyze_open_webui_multi_obligation_revision(
         )
         and cfg_complete
     ):
-        final_status = "PASS"
-        final_reason = "trusted_bypass_collective_cut"
+        final_status = "UNKNOWN"
+        final_reason = "trusted_bypass_mechanism_not_pe_pass_bindings_unresolved"
     elif (
         (
             writer_closure.status == "violated"
