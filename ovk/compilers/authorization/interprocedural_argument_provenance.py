@@ -24,7 +24,7 @@ from ovk.compilers.authorization.value_origin import (
     AliasState,
     classify_expression_origin,
 )
-from ovk.core.assurance_ir import SemanticOrigin, ValueOriginEvidence
+from ovk.core.assurance_ir import SemanticOrigin
 from ovk.core.bundle import content_digest
 from ovk.core.models import SourceRange
 
