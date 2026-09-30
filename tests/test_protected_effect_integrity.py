@@ -6,6 +6,7 @@ from ovk.core.assurance_ir import (
     AssuranceIR,
     AuthorizationGuard,
     EffectRef,
+    GuardDominanceEvidence,
     PathCondition,
     PrincipalRef,
     ProtectedEffect,
@@ -165,7 +166,7 @@ def test_every_complete_effect_path_requires_a_dominating_guard() -> None:
     }
 
 
-def test_partial_path_with_no_guard_remains_a_concrete_violation() -> None:
+def test_partial_path_with_no_guard_is_unknown_until_coverage_complete() -> None:
     ir = _base_ir(
         guard_resource="r:authorized",
         effect_resource="r:authorized",
@@ -186,8 +187,8 @@ def test_partial_path_with_no_guard_remains_a_concrete_violation() -> None:
 
     obligation = compile_protected_effect_integrity(ir)[0]
 
-    assert obligation.structural_status == "violated"
-    assert _status(obligation, "guard_presence") == "violated"
+    assert obligation.structural_status == "unknown"
+    assert _status(obligation, "guard_presence") == "unknown"
 
 
 def test_partial_path_with_conditional_guard_preserves_dominance_unknown() -> None:
@@ -290,3 +291,118 @@ def test_unknown_condition_atom_cannot_establish_dominance() -> None:
 
     assert _status(obligation, "guard_presence") == "violated"
 
+
+
+def test_cfg_ambiguous_body_guard_does_not_fall_back_to_unconditional() -> None:
+    ir = _base_ir(
+        guard_resource="r:authorized",
+        effect_resource="r:authorized",
+        include_binding=False,
+    )
+    ir.paths[0].coverage_status = "complete"
+    ir.guard_dominance_evidence = [
+        GuardDominanceEvidence(
+            evidence_id="gdom:ambiguous",
+            guard_id="g:refund",
+            protected_effect_id="pe:refund",
+            entrypoint="POST /refund",
+            guard_cfg_node_id=None,
+            effect_cfg_node_id="stmt:2",
+            control_flow_summary_digest="cfg:ambiguous",
+            dominates=False,
+            coverage_status="complete",
+            origin=_origin(4),
+        )
+    ]
+
+    obligation = compile_protected_effect_integrity(ir)[0]
+
+    assert obligation.structural_status == "unknown"
+    assert _status(obligation, "guard_presence") == "unknown"
+    assert obligation.path_candidate_guard_ids == {"path:refund": []}
+
+
+def test_cfg_partial_body_guard_does_not_fall_back_to_unconditional() -> None:
+    ir = _base_ir(
+        guard_resource="r:authorized",
+        effect_resource="r:authorized",
+        include_binding=False,
+    )
+    ir.paths[0].coverage_status = "partial"
+    ir.guard_dominance_evidence = [
+        GuardDominanceEvidence(
+            evidence_id="gdom:partial",
+            guard_id="g:refund",
+            protected_effect_id="pe:refund",
+            entrypoint="POST /refund",
+            guard_cfg_node_id="stmt:1",
+            effect_cfg_node_id="stmt:2",
+            control_flow_summary_digest="cfg:partial",
+            dominates=False,
+            coverage_status="partial",
+            origin=_origin(4),
+        )
+    ]
+
+    obligation = compile_protected_effect_integrity(ir)[0]
+
+    assert obligation.structural_status == "unknown"
+    assert _status(obligation, "guard_presence") == "unknown"
+
+
+def test_structural_cfg_dominance_survives_unproved_effectiveness() -> None:
+    ir = _base_ir(
+        guard_resource="r:authorized",
+        effect_resource="r:authorized",
+        include_binding=False,
+    )
+    ir.paths[0].coverage_status = "complete"
+    ir.guards[0].effectiveness = "unproved"
+    ir.guard_dominance_evidence = [
+        GuardDominanceEvidence(
+            evidence_id="gdom:structural",
+            guard_id="g:refund",
+            protected_effect_id="pe:refund",
+            entrypoint="POST /refund",
+            guard_cfg_node_id="stmt:1",
+            effect_cfg_node_id="stmt:2",
+            control_flow_summary_digest="cfg:complete",
+            dominates=True,
+            coverage_status="complete",
+            origin=_origin(4),
+        )
+    ]
+
+    obligation = compile_protected_effect_integrity(ir)[0]
+
+    assert obligation.structural_status == "unknown"
+    assert _status(obligation, "guard_presence") == "established"
+    assert _status(obligation, "guard_effectiveness") == "unknown"
+
+
+def test_complete_cfg_refuted_dominance_is_violation() -> None:
+    ir = _base_ir(
+        guard_resource="r:authorized",
+        effect_resource="r:authorized",
+        include_binding=False,
+    )
+    ir.paths[0].coverage_status = "complete"
+    ir.guard_dominance_evidence = [
+        GuardDominanceEvidence(
+            evidence_id="gdom:refuted",
+            guard_id="g:refund",
+            protected_effect_id="pe:refund",
+            entrypoint="POST /refund",
+            guard_cfg_node_id="stmt:branch",
+            effect_cfg_node_id="stmt:sink",
+            control_flow_summary_digest="cfg:complete",
+            dominates=False,
+            coverage_status="complete",
+            origin=_origin(4),
+        )
+    ]
+
+    obligation = compile_protected_effect_integrity(ir)[0]
+
+    assert obligation.structural_status == "violated"
+    assert _status(obligation, "guard_presence") == "violated"
