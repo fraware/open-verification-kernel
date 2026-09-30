@@ -36,6 +36,7 @@ ValueOriginKind = Literal[
     "unknown_origin",
 ]
 BypassAuthorityEvidenceStatus = Literal["established", "violated", "unknown"]
+HelperEffectivenessStatus = Literal["established", "unproved"]
 GuardEffectivenessEvidenceKind = Literal[
     "fail_closed_bearer_match_v1",
     "fail_closed_header_shared_secret_v1",
@@ -562,6 +563,49 @@ class ValueOriginEvidence(BaseModel):
         return value
 
 
+class HelperEffectivenessEvidence(BaseModel):
+    """First-class body-helper implementation evidence for Assurance IR (#152).
+
+    Records the resolved callee identity and digests. Status remains unproved
+    until a machine-checkable authorization predicate is modeled; digests exist
+    so incremental fragments cannot stale-reuse across helper body changes.
+    """
+
+    evidence_id: str
+    helper_name: str
+    qualified_symbol: str
+    definition_path: str
+    definition_line: int
+    source_digest: str
+    implementation_digest: str
+    status: HelperEffectivenessStatus = "unproved"
+    reason: str
+    origin: SemanticOrigin
+
+    @field_validator(
+        "evidence_id",
+        "helper_name",
+        "qualified_symbol",
+        "definition_path",
+        "source_digest",
+        "implementation_digest",
+        "reason",
+    )
+    @classmethod
+    def _helper_fields_non_empty(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("helper-effectiveness evidence fields must be non-empty")
+        return value
+
+    @field_validator("definition_line")
+    @classmethod
+    def _helper_line_non_negative(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("helper definition_line must be non-negative")
+        return value
+
+
 class BypassAuthorityEvidence(BaseModel):
     """Durable evidence for a source-grounded bypass authorization mechanism.
 
@@ -890,6 +934,9 @@ class AssuranceIR(BaseModel):
     bypass_authority_evidence: list[BypassAuthorityEvidence] = Field(
         default_factory=list
     )
+    helper_effectiveness_evidence: list[HelperEffectivenessEvidence] = Field(
+        default_factory=list
+    )
     protected_effects: list[ProtectedEffect] = Field(default_factory=list)
     resource_bindings: list[ResourceBinding] = Field(default_factory=list)
     resource_return_contracts: list[ResourceReturnContract] = Field(default_factory=list)
@@ -916,6 +963,7 @@ class AssuranceIR(BaseModel):
             "authorization_control_point_evidence": "evidence_id",
             "value_origin_evidence": "evidence_id",
             "bypass_authority_evidence": "evidence_id",
+            "helper_effectiveness_evidence": "evidence_id",
             "protected_effects": "protected_effect_id",
             "resource_bindings": "binding_id",
             "resource_return_contracts": "contract_id",
@@ -1022,6 +1070,8 @@ class AssuranceIR(BaseModel):
             payload.pop("value_origin_evidence", None)
         if not self.bypass_authority_evidence:
             payload.pop("bypass_authority_evidence", None)
+        if not self.helper_effectiveness_evidence:
+            payload.pop("helper_effectiveness_evidence", None)
         return payload
 
     @property

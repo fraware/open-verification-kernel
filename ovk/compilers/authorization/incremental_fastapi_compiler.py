@@ -226,6 +226,7 @@ def compile_incremental_fastapi_assurance(
                 contracts_by_name=contracts_by_name,
                 guard_effectiveness_by_name=guard_effectiveness_by_name,
                 route_attachment_digest=route_attachment_digest(path),
+                source_files=materials.head_files,
             )
         ):
             fragments[path] = prior
@@ -245,6 +246,7 @@ def compile_incremental_fastapi_assurance(
             ),
             external_fastapi_route_owners=router_wrappers.owners_for(path),
             route_attachment_digest=route_attachment_digest(path),
+            source_files=materials.head_files,
         )
         rebound += 1
 
