@@ -35,6 +35,7 @@ ValueOriginKind = Literal[
     "request_state_attribute",
     "unknown_origin",
 ]
+BypassAuthorityEvidenceStatus = Literal["established", "violated", "unknown"]
 GuardEffectivenessEvidenceKind = Literal[
     "fail_closed_bearer_match_v1",
     "fail_closed_header_shared_secret_v1",
@@ -519,6 +520,73 @@ class ValueOriginEvidence(BaseModel):
         return value
 
 
+class BypassAuthorityEvidence(BaseModel):
+    """Durable evidence for a source-grounded bypass authorization mechanism.
+
+    Status alone does not authorize a Protected Effect. Authorization requires
+    governed profile mapping, proved writers, and a bound branch-outcome
+    control point. Field names never imply security meaning.
+    """
+
+    evidence_id: str
+    field_name: str
+    read_expression: str
+    read_origin: SemanticOrigin
+    status: BypassAuthorityEvidenceStatus = "unknown"
+    control_point_edge_id: str | None = None
+    writer_evidence_ids: list[str] = Field(default_factory=list)
+    closed_world_scope_digest: str | None = None
+    assumptions: list[str] = Field(default_factory=list)
+    reason: str
+    origin: SemanticOrigin
+
+    @field_validator(
+        "evidence_id",
+        "field_name",
+        "read_expression",
+        "reason",
+    )
+    @classmethod
+    def _bypass_fields_non_empty(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("bypass-authority evidence fields must be non-empty")
+        return value
+
+    @field_validator("control_point_edge_id", "closed_world_scope_digest")
+    @classmethod
+    def _bypass_optional_non_empty(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("bypass-authority evidence fields must be non-empty")
+        return value
+
+    @model_validator(mode="after")
+    def _bypass_shape(self) -> "BypassAuthorityEvidence":
+        if len(set(self.writer_evidence_ids)) != len(self.writer_evidence_ids):
+            raise ValueError("bypass-authority writer_evidence_ids must be unique")
+        if any(not item.strip() for item in self.writer_evidence_ids):
+            raise ValueError("bypass-authority writer_evidence_ids must be non-empty")
+        if any(not item.strip() for item in self.assumptions):
+            raise ValueError("bypass-authority assumptions must be non-empty")
+        if self.status == "established":
+            if self.control_point_edge_id is None:
+                raise ValueError(
+                    "established bypass-authority evidence requires a control-point edge"
+                )
+            if not self.writer_evidence_ids:
+                raise ValueError(
+                    "established bypass-authority evidence requires writer evidence"
+                )
+            if self.closed_world_scope_digest is None:
+                raise ValueError(
+                    "established bypass-authority evidence requires a closed-world digest"
+                )
+        return self
+
+
 class ProtectedEffect(BaseModel):
     """Security-sensitive effect whose execution requires assurance."""
 
@@ -755,6 +823,9 @@ class AssuranceIR(BaseModel):
     value_origin_evidence: list[ValueOriginEvidence] = Field(
         default_factory=list
     )
+    bypass_authority_evidence: list[BypassAuthorityEvidence] = Field(
+        default_factory=list
+    )
     protected_effects: list[ProtectedEffect] = Field(default_factory=list)
     resource_bindings: list[ResourceBinding] = Field(default_factory=list)
     resource_return_contracts: list[ResourceReturnContract] = Field(default_factory=list)
@@ -779,6 +850,7 @@ class AssuranceIR(BaseModel):
             "guard_dominance_evidence": "evidence_id",
             "authorization_cut_set_evidence": "evidence_id",
             "value_origin_evidence": "evidence_id",
+            "bypass_authority_evidence": "evidence_id",
             "protected_effects": "protected_effect_id",
             "resource_bindings": "binding_id",
             "resource_return_contracts": "contract_id",
@@ -822,6 +894,10 @@ class AssuranceIR(BaseModel):
             item["assumptions"] = sorted(item["assumptions"])
 
         for item in payload["interpretation_compatibility_evidence"]:
+            item["assumptions"] = sorted(item["assumptions"])
+
+        for item in payload["bypass_authority_evidence"]:
+            item["writer_evidence_ids"] = sorted(item["writer_evidence_ids"])
             item["assumptions"] = sorted(item["assumptions"])
 
         for item in payload["authorization_cut_set_evidence"]:
@@ -877,6 +953,8 @@ class AssuranceIR(BaseModel):
             payload.pop("authorization_cut_set_evidence", None)
         if not self.value_origin_evidence:
             payload.pop("value_origin_evidence", None)
+        if not self.bypass_authority_evidence:
+            payload.pop("bypass_authority_evidence", None)
         return payload
 
     @property

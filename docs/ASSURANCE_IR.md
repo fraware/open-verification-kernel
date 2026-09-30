@@ -31,11 +31,15 @@ authorization guards, protected effects, resource bindings, semantic paths,
 assurance claims, abstraction coverage, assumptions, and source provenance.
 
 Later collections also carry optional guard-dominance evidence,
-authorization cut-set evidence, and value-origin evidence. Cut-set evidence
+authorization cut-set evidence, bypass-authority evidence, and value-origin
+evidence. Cut-set evidence
 records structural CFG coverage by candidate control points
 (nodes and/or directed branch-outcome edges). It does not establish guard
 effectiveness or principal/effect/resource compatibility, and it is not
-consumed by Protected Effect evaluation. Empty collections omit from the
+consumed by Protected Effect evaluation. Bypass-authority evidence records
+source-grounded writer/closed-world status and an optional branch-outcome
+control point; field names never imply authorization without a governed
+profile mapping. Empty collections omit from the
 canonical digest so prior identity is preserved until material evidence appears.
 
 Effects are open namespaced strings rather than a closed enum. This lets

@@ -112,6 +112,9 @@
     "value_origin_evidence": {
       "type": "array"
     },
+    "bypass_authority_evidence": {
+      "type": "array"
+    },
     "protected_effects": {
       "type": "array"
     },
