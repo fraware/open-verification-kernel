@@ -72,13 +72,14 @@ class StateAttributeWrite:
     dynamic: bool
     source_range: SourceRange | None
     path: str = "<module>"
+    control_dependent: bool = False
 
 
 def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id="assurance.fastapi.bypass_authority.ast_v1",
-        extractor_version="0.3.0",
+        extractor_version="0.4.0",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -185,6 +186,7 @@ def _collect_writes_in_function(
         statement: ast.stmt,
         *,
         dynamic: bool,
+        control_dependent: bool,
     ) -> None:
         field = _is_request_state_target(target)
         if field is None:
@@ -197,10 +199,15 @@ def _collect_writes_in_function(
                 dynamic=dynamic,
                 source_range=_origin(path, statement).source_range,
                 path=path,
+                control_dependent=control_dependent,
             )
         )
 
-    def _record_dynamic_calls(statement: ast.stmt) -> None:
+    def _record_dynamic_calls(
+        statement: ast.stmt,
+        *,
+        control_dependent: bool,
+    ) -> None:
         for node in ast.walk(statement):
             if not isinstance(node, ast.Call):
                 continue
@@ -220,6 +227,7 @@ def _collect_writes_in_function(
                         dynamic=True,
                         source_range=_origin(path, node).source_range,
                         path=path,
+                        control_dependent=control_dependent,
                     )
                 )
             rendered = ast.unparse(node)
@@ -235,14 +243,23 @@ def _collect_writes_in_function(
                         dynamic=True,
                         source_range=_origin(path, node).source_range,
                         path=path,
+                        control_dependent=control_dependent,
                     )
                 )
 
-    def _visit_statement(statement: ast.stmt) -> None:
+    def _visit_statement(
+        statement: ast.stmt,
+        *,
+        control_dependent: bool = False,
+    ) -> None:
         if isinstance(statement, ast.Assign):
             for target in statement.targets:
                 _record_assign_target(
-                    target, statement.value, statement, dynamic=False
+                    target,
+                    statement.value,
+                    statement,
+                    dynamic=False,
+                    control_dependent=control_dependent,
                 )
             apply_statement_bindings(
                 statement,
@@ -254,7 +271,11 @@ def _collect_writes_in_function(
 
         if isinstance(statement, ast.AnnAssign) and statement.value is not None:
             _record_assign_target(
-                statement.target, statement.value, statement, dynamic=False
+                statement.target,
+                statement.value,
+                statement,
+                dynamic=False,
+                control_dependent=control_dependent,
             )
             apply_statement_bindings(
                 statement,
@@ -266,7 +287,11 @@ def _collect_writes_in_function(
 
         if isinstance(statement, ast.AugAssign):
             _record_assign_target(
-                statement.target, statement.value, statement, dynamic=True
+                statement.target,
+                statement.value,
+                statement,
+                dynamic=True,
+                control_dependent=control_dependent,
             )
             apply_statement_bindings(
                 statement,
@@ -282,7 +307,7 @@ def _collect_writes_in_function(
                 list(statement.body) + list(statement.orelse)
             )
             for child in list(statement.body) + list(statement.orelse):
-                _visit_statement(child)
+                _visit_statement(child, control_dependent=True)
             for name in assigned_on_branches:
                 alias_state.poison(name)
             return
@@ -294,7 +319,7 @@ def _collect_writes_in_function(
             )
             assigned.update(_collect_assign_target_names(statement.target))
             for child in list(statement.body) + list(statement.orelse):
-                _visit_statement(child)
+                _visit_statement(child, control_dependent=True)
             for name in assigned:
                 alias_state.poison(name)
             return
@@ -306,7 +331,10 @@ def _collect_writes_in_function(
                 if item.optional_vars is not None:
                     assigned.update(_collect_assign_target_names(item.optional_vars))
             for child in statement.body:
-                _visit_statement(child)
+                _visit_statement(
+                    child,
+                    control_dependent=control_dependent,
+                )
             for name in assigned:
                 alias_state.poison(name)
             return
@@ -322,18 +350,21 @@ def _collect_writes_in_function(
                 if handler.name:
                     assigned.add(handler.name)
             for child in statement.body:
-                _visit_statement(child)
+                _visit_statement(child, control_dependent=True)
             for handler in statement.handlers:
                 for child in handler.body:
-                    _visit_statement(child)
+                    _visit_statement(child, control_dependent=True)
             for child in list(statement.orelse) + list(statement.finalbody):
-                _visit_statement(child)
+                _visit_statement(child, control_dependent=True)
             for name in assigned:
                 alias_state.poison(name)
             return
 
         # Ordinary statements: setattr / wildcard calls anywhere in this node.
-        _record_dynamic_calls(statement)
+        _record_dynamic_calls(
+            statement,
+            control_dependent=control_dependent,
+        )
         apply_statement_bindings(
             statement,
             path=path,
@@ -350,7 +381,7 @@ def _collect_state_writes(
     tree: ast.AST,
     *,
     path: str,
-    handler_param_names: frozenset[str],
+    externally_bound_function_name: str | None,
 ) -> tuple[StateAttributeWrite, ...]:
     writes: list[StateAttributeWrite] = []
     # Prefer per-function alias tracking so rebinding inside a writer is proved.
@@ -361,11 +392,20 @@ def _collect_state_writes(
     ]
     if functions:
         for fn in functions:
+            fn_param_names = frozenset(
+                arg.arg
+                for arg in list(fn.args.posonlyargs) + list(fn.args.args)
+                if arg.arg not in {"self", "cls"}
+            )
             writes.extend(
                 _collect_writes_in_function(
                     fn,
                     path=path,
-                    handler_param_names=handler_param_names,
+                    handler_param_names=(
+                        fn_param_names
+                        if fn.name == externally_bound_function_name
+                        else frozenset()
+                    ),
                 )
             )
         # Module-level writes (outside functions) still matter.
@@ -389,18 +429,18 @@ def _collect_state_writes(
                                 origin=classify_expression_origin(
                                     statement.value,
                                     path=path,
-                                    handler_param_names=handler_param_names,
+                                    handler_param_names=frozenset(),
                                     alias_state=alias_state,
                                 ),
                                 dynamic=False,
                                 source_range=_origin(path, statement).source_range,
-                            path=path,
+                                path=path,
                             )
                         )
                     apply_statement_bindings(
                         statement,
                         path=path,
-                        handler_param_names=handler_param_names,
+                        handler_param_names=frozenset(),
                         alias_state=alias_state,
                     )
         return tuple(writes)
@@ -415,7 +455,7 @@ def _collect_state_writes(
                 origin = classify_expression_origin(
                     node.value,
                     path=path,
-                    handler_param_names=handler_param_names,
+                    handler_param_names=frozenset(),
                 )
                 writes.append(
                     StateAttributeWrite(
@@ -424,7 +464,7 @@ def _collect_state_writes(
                         origin=origin,
                         dynamic=False,
                         source_range=_origin(path, node).source_range,
-                    path=path,
+                        path=path,
                     )
                 )
     return tuple(writes)
@@ -677,6 +717,16 @@ def _findings_for_writes_and_reads(
             )
             continue
 
+        if any(item.control_dependent for item in field_writes):
+            _emit(
+                "unknown",
+                "control_dependent_state_mutation",
+                write_count=len(field_writes),
+                origin_kinds=all_origins,
+                ids=evidence_ids,
+            )
+            continue
+
         if not field_writes:
             # Absence of discovered writers is not positive proof.
             _emit(
@@ -766,28 +816,6 @@ def analyze_bypass_authority_unit(
 
     closed_world = _evaluate_closed_world(normalized)
 
-    unit_param_names: set[str] = set()
-    for path, source in sorted(normalized.items()):
-        tree = ast.parse(source, filename=path)
-        for fn in tree.body:
-            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            for arg in list(fn.args.posonlyargs) + list(fn.args.args):
-                if arg.arg not in {"self", "cls"}:
-                    unit_param_names.add(arg.arg)
-
-    param_names = frozenset(unit_param_names)
-    all_writes: list[StateAttributeWrite] = []
-    for path, source in sorted(normalized.items()):
-        tree = ast.parse(source, filename=path)
-        all_writes.extend(
-            _collect_state_writes(
-                tree,
-                path=path,
-                handler_param_names=param_names,
-            )
-        )
-
     entry_tree = ast.parse(normalized[entry], filename=entry)
     entry_functions = [
         node
@@ -799,6 +827,23 @@ def analyze_bypass_authority_unit(
             node for node in entry_functions if node.name == function_name
         ]
     handler = entry_functions[0] if entry_functions else None
+
+    # Only the selected HTTP entry handler receives externally-bound parameter
+    # semantics. Parameters of helpers/middleware in other functions remain
+    # unresolved until an interprocedural caller-provenance theorem establishes
+    # their origin.
+    all_writes: list[StateAttributeWrite] = []
+    for path, source in sorted(normalized.items()):
+        tree = ast.parse(source, filename=path)
+        all_writes.extend(
+            _collect_state_writes(
+                tree,
+                path=path,
+                externally_bound_function_name=(
+                    handler.name if handler is not None and path == entry else None
+                ),
+            )
+        )
     reads = _collect_state_reads(handler if handler is not None else entry_tree)
     # Keep extract call for audit packaging symmetry with single-file path.
     if handler is not None:
