@@ -1,9 +1,10 @@
-"""Bind authorization guards and protected effects to handler CFG dominance.
+"""Bind body-executed authorization guards to handler CFG dominance.
 
-This module is security-facing: a guard satisfies a protected effect via CFG
-dominance only when effectiveness is established, the CFG sink-reaching region
-is complete, node binding is unambiguous, and the guard node dominates the
-effect node. Anything weaker yields insufficient/unknown evidence — never PASS.
+This module proves only the structural execution relation. Guard effectiveness
+is a separate Protected Effect obligation and must not change whether the guard
+node structurally dominates the protected effect. Incomplete coverage or
+ambiguous node binding yields unresolved evidence and must never be repaired by
+falling back to an unrelated dominance calculus.
 """
 
 from __future__ import annotations
@@ -83,10 +84,11 @@ def build_guard_dominance_evidence(
     cfg: HandlerControlFlowSummary | None,
     origin: SemanticOrigin,
 ) -> GuardDominanceEvidence:
-    """Construct dominance evidence for one guard/effect pair.
+    """Construct structural dominance evidence for one body guard/effect pair.
 
-    Never reports dominates=True unless effectiveness is established, CFG
-    coverage for the sink is complete, and the guard node dominates the effect.
+    The dominates field records only the CFG relation. Effectiveness remains a
+    separate obligation. True dominance still requires complete sink-reaching
+    CFG coverage and unambiguous node binding.
     """
 
     evidence_id = (
@@ -122,8 +124,7 @@ def build_guard_dominance_evidence(
         coverage = "complete"
         dominates_flag = False
         if (
-            guard.effectiveness == "established"
-            and guard_node is not None
+            guard_node is not None
             and dominates(cfg, guard_node, effect_node)
         ):
             dominates_flag = True
