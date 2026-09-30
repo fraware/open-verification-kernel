@@ -176,6 +176,27 @@ def handler(user):
     assert result.uncovered_path_node_ids[-1] == sink
 
 
+def test_empty_cut_set_under_partial_cfg_remains_partial() -> None:
+    source = """
+def handler(items, user):
+    for item in items:
+        observe(item)
+    return sink(user)
+""".strip()
+    cfg = build_handler_control_flow_from_source(source, path="h.py")
+    sink = _one(cfg, "sink")
+
+    result = evaluate_authorization_cut_set(
+        cfg,
+        sink_node_id=sink,
+        cut_node_ids=frozenset(),
+    )
+
+    assert result.coverage_status == "partial"
+    assert result.covers_all_paths is False
+    assert result.reason == "sink_reaching_cfg_coverage_partial"
+
+
 def test_entry_and_sink_cannot_be_used_as_authorization_nodes() -> None:
     source = """
 def handler(user):
