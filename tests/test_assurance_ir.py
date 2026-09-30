@@ -230,10 +230,12 @@ def test_cut_set_evidence_order_and_guard_sets_are_digest_stable() -> None:
             "guard:z": "stmt:9",
             "guard:a": "stmt:4",
         },
+        entry_cfg_node_id="entry:1",
         effect_cfg_node_id="stmt:12",
         control_flow_summary_digest="cfg:refund",
         covers_all_paths=True,
         coverage_status="complete",
+        reason="test_cut_set_evidence",
         origin=_origin("app/routes.py", 9),
     )
     ir.authorization_cut_set_evidence = [evidence]
@@ -258,10 +260,12 @@ def test_positive_cut_set_evidence_requires_complete_nonempty_coverage() -> None
             entrypoint="POST /refund",
             guard_ids=["guard:refund"],
             guard_cfg_node_ids={"guard:refund": "stmt:4"},
-            effect_cfg_node_id="stmt:8",
+            entry_cfg_node_id="entry:1",
+        effect_cfg_node_id="stmt:8",
             control_flow_summary_digest="cfg:partial",
             covers_all_paths=True,
             coverage_status="partial",
+            reason="test_cut_set_evidence",
             origin=_origin("app/routes.py", 9),
         )
 
@@ -272,10 +276,12 @@ def test_positive_cut_set_evidence_requires_complete_nonempty_coverage() -> None
             entrypoint="POST /refund",
             guard_ids=[],
             guard_cfg_node_ids={},
-            effect_cfg_node_id="stmt:8",
+            entry_cfg_node_id="entry:1",
+        effect_cfg_node_id="stmt:8",
             control_flow_summary_digest="cfg:complete",
             covers_all_paths=True,
             coverage_status="complete",
+            reason="test_cut_set_evidence",
             origin=_origin("app/routes.py", 9),
         )
 
@@ -288,10 +294,12 @@ def test_complete_negative_cut_set_requires_counterexample_path() -> None:
             entrypoint="POST /refund",
             guard_ids=["guard:refund"],
             guard_cfg_node_ids={"guard:refund": "stmt:4"},
-            effect_cfg_node_id="stmt:8",
+            entry_cfg_node_id="entry:1",
+        effect_cfg_node_id="stmt:8",
             control_flow_summary_digest="cfg:complete",
             covers_all_paths=False,
             coverage_status="complete",
+            reason="test_cut_set_evidence",
             origin=_origin("app/routes.py", 9),
         )
 
@@ -304,10 +312,12 @@ def test_cut_set_guard_node_map_must_match_guard_ids() -> None:
             entrypoint="POST /refund",
             guard_ids=["guard:a"],
             guard_cfg_node_ids={"guard:b": "stmt:4"},
-            effect_cfg_node_id="stmt:8",
+            entry_cfg_node_id="entry:1",
+        effect_cfg_node_id="stmt:8",
             control_flow_summary_digest="cfg:unknown",
             covers_all_paths=False,
             coverage_status="unknown",
+            reason="test_cut_set_evidence",
             origin=_origin("app/routes.py", 9),
         )
 
