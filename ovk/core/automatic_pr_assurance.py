@@ -215,7 +215,12 @@ def _load_exact_source_materials(
     head_sha: str,
     profile: ProtectedEffectProfileConfig,
 ) -> tuple[AuthMaterials | None, list[str]]:
-    """Load exact base/head files selected by the trusted source profile."""
+    """Load exact base/head files selected by the trusted source profile.
+
+    PE compilation uses ``source_paths``-filtered materials. Closed-world
+    bypass accounting separately loads the complete authenticated Python
+    manifest for the head revision via ``_paths_at_revision``.
+    """
 
     reasons: list[str] = []
     if not _revision_exists(base_sha):
@@ -269,6 +274,27 @@ def _load_exact_source_materials(
     if not selected:
         return None, ["source_profile_matched_no_files"]
 
+    # Full authenticated Python universe for closed-world writer accounting.
+    # Independent of source_paths so omitted writers cannot false-PASS.
+    python_paths = sorted(
+        path
+        for path in (head_paths or [])
+        if path.endswith(".py")
+    )
+    if len(python_paths) > profile.max_files:
+        return None, ["repository_python_manifest_file_limit_exceeded"]
+
+    repository_python_files: dict[str, str] = {}
+    python_bytes = 0
+    for path in python_paths:
+        text = _read_revision_file(head_sha, path)
+        if text is None:
+            return None, [f"repository_python_unavailable:{path}"]
+        python_bytes += len(text.encode("utf-8"))
+        if python_bytes > profile.max_total_bytes:
+            return None, ["repository_python_manifest_byte_limit_exceeded"]
+        repository_python_files[path] = text
+
     return (
         AuthMaterials(
             base_files=base_files,
@@ -276,6 +302,7 @@ def _load_exact_source_materials(
             repo=repo,
             base_revision=base_sha,
             head_revision=head_sha,
+            repository_python_files=repository_python_files,
         ),
         [],
     )

@@ -42,6 +42,7 @@ from ovk.compilers.authorization.trusted_bypass_authorization import (
 )
 from ovk.compilers.authorization.repository_scope_proof import (
     derive_closed_world_scope_proof,
+    derive_python_source_roots,
 )
 from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.compilers.authorization.python_ast_index import (
@@ -892,40 +893,63 @@ class FastApiDependencyEffectExtractor:
                 if principals
                 else f"principal:{profile.principal_parameter}"
             )
-            # Machine-derived scope from head materials. Sparse/incomplete
-            # closures stay honest via import_resolution_status; established
-            # bypass still requires proved writers under this proof.
+            # Closed-world writer accounting requires the complete authenticated
+            # Python manifest, independent of PE source_paths filtering.
+            # Filtered head_files alone must never be labeled repository-closed.
             field_searched = None
             for key in sorted(profile.trusted_bypass_authorities):
                 if key.startswith("request.state."):
                     field_searched = key.rsplit(".", 1)[-1]
                     break
-            try:
-                derived_scope = derive_closed_world_scope_proof(
-                    repo=materials.repo or "workspace",
-                    revision=materials.head_revision or "HEAD",
-                    files=materials.head_files,
-                    source_roots=(".",),
-                    analyzed_paths=tuple(materials.head_files),
-                    field_searched=field_searched,
-                    import_resolution_status=(
-                        "authenticated_head_materials_v1"
-                        if materials.repo and materials.head_revision
-                        else "workspace_materials_not_repo_closure"
-                    ),
+            closure_files = materials.repository_python_files
+            scope_proof = None
+            derived_scope_digest = None
+            if (
+                closure_files is not None
+                and materials.repo
+                and materials.head_revision
+            ):
+                try:
+                    source_roots = derive_python_source_roots(closure_files)
+                    derived_scope = derive_closed_world_scope_proof(
+                        repo=materials.repo,
+                        revision=materials.head_revision,
+                        files=closure_files,
+                        source_roots=source_roots,
+                        analyzed_paths=tuple(closure_files),
+                        field_searched=field_searched,
+                        import_resolution_status=(
+                            "authenticated_revision_python_manifest_v1"
+                        ),
+                    )
+                    scope_proof = derived_scope.as_closed_world_scope_proof()
+                    derived_scope_digest = derived_scope.digest()
+                    import_resolution_status = (
+                        derived_scope.import_resolution_status
+                    )
+                    bypass_materials = closure_files
+                except ValueError:
+                    import_resolution_status = (
+                        "repository_python_manifest_invalid"
+                    )
+                    bypass_materials = materials.head_files
+            elif materials.repo and materials.head_revision:
+                # Repo identity without a full Python manifest is not closure.
+                import_resolution_status = (
+                    "source_paths_filtered_materials_not_repo_closure"
                 )
-                scope_proof = derived_scope.as_closed_world_scope_proof()
-                import_resolution_status = derived_scope.import_resolution_status
-            except ValueError:
-                scope_proof = None
+                bypass_materials = materials.head_files
+            else:
                 import_resolution_status = "workspace_materials_not_repo_closure"
+                bypass_materials = materials.head_files
             ir = enrich_assurance_ir_with_trusted_bypass(
                 ir,
-                materials=materials.head_files,
+                materials=bypass_materials,
                 trusted_bypass_authorities=profile.trusted_bypass_authorities,
                 route_cfgs=route_cfgs,
                 principal_id=principal_id,
                 scope_proof=scope_proof,
+                derived_scope_digest=derived_scope_digest,
                 import_resolution_status=import_resolution_status,
             )
         return ir

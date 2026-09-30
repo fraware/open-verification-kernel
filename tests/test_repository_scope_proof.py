@@ -1,4 +1,4 @@
-"""Machine-derived repository closed-world scope proofs (#142)."""
+"""Machine-derived repository closed-world scope proofs (#142 / #146)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import pytest
 from ovk.compilers.authorization.bypass_authority import analyze_bypass_authority
 from ovk.compilers.authorization.repository_scope_proof import (
     derive_closed_world_scope_proof,
+    derive_python_source_roots,
     scope_proof_invalidated_by_file_change,
     scope_proof_invalidated_by_roots,
 )
@@ -107,3 +108,8 @@ def test_empty_source_roots_rejected() -> None:
             files={"app.py": "x = 1\n"},
             source_roots=(),
         )
+
+
+def test_derive_python_source_roots_rejects_empty() -> None:
+    with pytest.raises(ValueError, match="source_roots"):
+        derive_python_source_roots([])
