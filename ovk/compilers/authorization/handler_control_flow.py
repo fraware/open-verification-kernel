@@ -67,6 +67,63 @@ class ControlFlowEdgeSummary:
 
 
 @dataclass(frozen=True)
+class ControlFlowEdgeRef:
+    """Stable, content-addressed reference to one CFG edge.
+
+    ``edge_id`` is derived from ``(source_node_id, target_node_id, branch_value)``
+    and must never rely on process-local object identity.
+    """
+
+    edge_id: str
+    source_node_id: str
+    target_node_id: str
+    branch_value: bool | None = None
+
+
+def control_flow_edge_id(
+    source_node_id: str,
+    target_node_id: str,
+    branch_value: bool | None = None,
+) -> str:
+    """Return a deterministic edge identity from semantic edge content."""
+
+    if branch_value is None:
+        branch_token = "none"
+    elif branch_value:
+        branch_token = "true"
+    else:
+        branch_token = "false"
+    return f"edge:{source_node_id}->{target_node_id}:{branch_token}"
+
+
+def control_flow_edge_ref(
+    source_node_id: str,
+    target_node_id: str,
+    branch_value: bool | None = None,
+) -> ControlFlowEdgeRef:
+    """Build a stable edge reference from semantic endpoints and branch value."""
+
+    return ControlFlowEdgeRef(
+        edge_id=control_flow_edge_id(source_node_id, target_node_id, branch_value),
+        source_node_id=source_node_id,
+        target_node_id=target_node_id,
+        branch_value=branch_value,
+    )
+
+
+def control_flow_edge_ref_from_summary(
+    edge: ControlFlowEdgeSummary,
+) -> ControlFlowEdgeRef:
+    """Lift a CFG edge summary into a stable edge reference."""
+
+    return control_flow_edge_ref(
+        edge.source_id,
+        edge.target_id,
+        edge.branch_value,
+    )
+
+
+@dataclass(frozen=True)
 class HandlerControlFlowSummary:
     entry_id: str
     exit_ids: tuple[str, ...]
@@ -745,6 +802,37 @@ def coverage_authoritative_for(
         if node.partial or node.unsupported_construct is not None:
             return False
     return True
+
+
+def find_control_flow_edge_ref(
+    cfg: HandlerControlFlowSummary,
+    *,
+    source_node_id: str,
+    target_node_id: str | None = None,
+    branch_value: bool | None = None,
+    require_branch_value: bool = False,
+) -> ControlFlowEdgeRef | None:
+    """Resolve exactly one CFG edge, or None when missing or ambiguous.
+
+    When ``require_branch_value`` is True, ``branch_value`` must match exactly
+    (including ``None``). When False and ``branch_value`` is provided, only
+    edges with that branch value are considered; ``target_node_id`` may further
+    narrow the match.
+    """
+
+    matches: list[ControlFlowEdgeRef] = []
+    for edge in cfg.edges:
+        if edge.source_id != source_node_id:
+            continue
+        if target_node_id is not None and edge.target_id != target_node_id:
+            continue
+        if require_branch_value or branch_value is not None:
+            if edge.branch_value != branch_value:
+                continue
+        matches.append(control_flow_edge_ref_from_summary(edge))
+    if len(matches) != 1:
+        return None
+    return matches[0]
 
 
 def find_nodes_by_expression_substring(

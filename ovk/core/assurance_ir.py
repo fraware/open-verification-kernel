@@ -296,11 +296,17 @@ class GuardDominanceEvidence(BaseModel):
 
 
 class AuthorizationCutSetEvidence(BaseModel):
-    """Structural evidence that a guard-node set intercepts sink-reaching paths.
+    """Structural evidence that control points intercept sink-reaching paths.
 
-    This object records graph coverage only. Membership in guard_ids does not
-    establish authorization effectiveness or principal/effect/resource binding.
-    Those remain separate verification obligations.
+    This object records graph coverage only. Membership in guard_ids,
+    node_control_points, or edge_control_points does not establish
+    authorization effectiveness or principal/effect/resource binding. Those
+    remain separate verification obligations.
+
+    node_control_points and edge_control_points are the generic control-flow
+    vocabulary for cut members. guard_ids / guard_cfg_node_ids remain the
+    guard-bound view of node cuts when candidates originate as authorization
+    guards.
 
     unresolved_guard_ids records body cut candidates whose source-to-CFG binding
     was ambiguous or missing. Any unresolved candidate forces unknown coverage;
@@ -313,6 +319,8 @@ class AuthorizationCutSetEvidence(BaseModel):
     guard_ids: list[str] = Field(default_factory=list)
     guard_cfg_node_ids: dict[str, str] = Field(default_factory=dict)
     unresolved_guard_ids: list[str] = Field(default_factory=list)
+    node_control_points: list[str] = Field(default_factory=list)
+    edge_control_points: list[str] = Field(default_factory=list)
     entry_cfg_node_id: str | None = None
     effect_cfg_node_id: str | None = None
     control_flow_summary_digest: str | None = None
@@ -357,6 +365,14 @@ class AuthorizationCutSetEvidence(BaseModel):
             raise ValueError(
                 "authorization cut-set unresolved_guard_ids must be unique"
             )
+        if len(set(self.node_control_points)) != len(self.node_control_points):
+            raise ValueError(
+                "authorization cut-set node_control_points must be unique"
+            )
+        if len(set(self.edge_control_points)) != len(self.edge_control_points):
+            raise ValueError(
+                "authorization cut-set edge_control_points must be unique"
+            )
         if set(self.guard_ids) & set(self.unresolved_guard_ids):
             raise ValueError(
                 "authorization cut-set guard_ids and unresolved_guard_ids must be disjoint"
@@ -370,6 +386,14 @@ class AuthorizationCutSetEvidence(BaseModel):
         if any(not guard_id.strip() for guard_id in self.unresolved_guard_ids):
             raise ValueError(
                 "authorization cut-set unresolved guard ids must be non-empty"
+            )
+        if any(not node_id.strip() for node_id in self.node_control_points):
+            raise ValueError(
+                "authorization cut-set node control points must be non-empty"
+            )
+        if any(not edge_id.strip() for edge_id in self.edge_control_points):
+            raise ValueError(
+                "authorization cut-set edge control points must be non-empty"
             )
         if any(
             not node_id.strip()
@@ -404,17 +428,22 @@ class AuthorizationCutSetEvidence(BaseModel):
                 raise ValueError(
                     "complete authorization cut-set evidence requires CFG endpoints and digest"
                 )
-        guard_nodes = set(self.guard_cfg_node_ids.values())
+        cut_nodes = set(self.node_control_points)
+        if not cut_nodes and not self.edge_control_points:
+            # Legacy node-only evidence records cuts only via guard_cfg_node_ids.
+            cut_nodes = set(self.guard_cfg_node_ids.values())
+        binding_nodes = set(self.guard_cfg_node_ids.values())
         if (
             self.entry_cfg_node_id is not None
-            and self.entry_cfg_node_id in guard_nodes
+            and self.entry_cfg_node_id in (cut_nodes | binding_nodes)
+            and self.entry_cfg_node_id in cut_nodes
         ):
             raise ValueError(
                 "authorization cut-set cannot use the entry node as a guard"
             )
         if (
             self.effect_cfg_node_id is not None
-            and self.effect_cfg_node_id in guard_nodes
+            and self.effect_cfg_node_id in cut_nodes
         ):
             raise ValueError(
                 "authorization cut-set cannot use the effect node as a guard"
@@ -437,7 +466,7 @@ class AuthorizationCutSetEvidence(BaseModel):
                 raise ValueError(
                     "authorization cut-set uncovered path must connect entry to effect"
                 )
-            if guard_nodes & set(self.uncovered_path_node_ids):
+            if cut_nodes & set(self.uncovered_path_node_ids):
                 raise ValueError(
                     "authorization cut-set uncovered path must avoid guard nodes"
                 )
@@ -446,9 +475,13 @@ class AuthorizationCutSetEvidence(BaseModel):
                 raise ValueError(
                     "positive authorization cut-set evidence requires complete coverage"
                 )
-            if not self.guard_ids:
+            if not (
+                self.guard_ids
+                or self.node_control_points
+                or self.edge_control_points
+            ):
                 raise ValueError(
-                    "positive authorization cut-set evidence requires guards"
+                    "positive authorization cut-set evidence requires control points"
                 )
             if self.uncovered_path_node_ids:
                 raise ValueError(
@@ -797,6 +830,12 @@ class AssuranceIR(BaseModel):
             item["guard_cfg_node_ids"] = dict(
                 sorted(item["guard_cfg_node_ids"].items())
             )
+            item["node_control_points"] = sorted(item["node_control_points"])
+            item["edge_control_points"] = sorted(item["edge_control_points"])
+            if not item["node_control_points"]:
+                item.pop("node_control_points", None)
+            if not item["edge_control_points"]:
+                item.pop("edge_control_points", None)
 
         for item in payload["paths"]:
             item["guard_ids"] = sorted(item["guard_ids"])
