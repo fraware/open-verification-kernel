@@ -350,10 +350,31 @@ class AuthorizationCutSetEvidence(BaseModel):
             raise ValueError(
                 "authorization cut-set guard CFG node ids must be non-empty"
             )
-        if self.effect_cfg_node_id in set(self.guard_cfg_node_ids.values()):
+        guard_nodes = set(self.guard_cfg_node_ids.values())
+        if self.entry_cfg_node_id in guard_nodes:
+            raise ValueError(
+                "authorization cut-set cannot use the entry node as a guard"
+            )
+        if self.effect_cfg_node_id in guard_nodes:
             raise ValueError(
                 "authorization cut-set cannot use the effect node as a guard"
             )
+        if self.entry_cfg_node_id == self.effect_cfg_node_id:
+            raise ValueError(
+                "authorization cut-set entry and effect nodes must differ"
+            )
+        if self.uncovered_path_node_ids:
+            if (
+                self.uncovered_path_node_ids[0] != self.entry_cfg_node_id
+                or self.uncovered_path_node_ids[-1] != self.effect_cfg_node_id
+            ):
+                raise ValueError(
+                    "authorization cut-set uncovered path must connect entry to effect"
+                )
+            if guard_nodes & set(self.uncovered_path_node_ids):
+                raise ValueError(
+                    "authorization cut-set uncovered path must avoid guard nodes"
+                )
         if self.covers_all_paths:
             if self.coverage_status != "complete":
                 raise ValueError(
