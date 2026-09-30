@@ -14,6 +14,7 @@ from typing import Any, Mapping
 from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.compilers.authorization.body_helper_contracts import (
     analyze_body_helper_implementation,
+    helper_name_locally_rebound_in_handler,
 )
 from ovk.compilers.authorization.fastapi_route_summary import (
     CallSummary,
@@ -984,15 +985,35 @@ def bind_route_file_summary(
                         continue
                 else:
                     helper_resource_id = acted_id
+                helper_leaf = helper_key.split(".")[-1]
                 implementation = analyze_body_helper_implementation(
                     source_files or {file_summary.path: ""},
-                    helper_name=helper_key.split(".")[-1],
+                    helper_name=helper_leaf,
                 )
                 effectiveness = (
                     "established"
                     if implementation.status == "established"
                     else "unproved"
                 )
+                effectiveness_reason = implementation.reason
+                # Module-level fail-closed evidence must not authorize a
+                # callsite where the helper name is locally rebound.
+                if effectiveness == "established":
+                    handler_source = (source_files or {}).get(file_summary.path)
+                    trusted_line = (
+                        implementation.line
+                        if implementation.path == file_summary.path
+                        else None
+                    )
+                    if handler_source is None or helper_name_locally_rebound_in_handler(
+                        handler_source,
+                        handler_name=handler.handler_name,
+                        helper_name=helper_leaf,
+                        call_line=helper_call.line,
+                        trusted_definition_line=trusted_line,
+                    ):
+                        effectiveness = "unproved"
+                        effectiveness_reason = "helper_callsite_name_rebound"
                 evidence_ids: list[str] = []
                 if effectiveness == "established":
                     evidence_ids = [
@@ -1005,7 +1026,7 @@ def bind_route_file_summary(
                         f"{file_summary.path}:{handler.handler_name}:"
                         f"{helper_call.line}:body_auth:{helper_key}:"
                         f"{effect_name}:{helper_resource_id}:"
-                        f"{effectiveness}:{implementation.reason}"
+                        f"{effectiveness}:{effectiveness_reason}"
                     ),
                 )
                 guards[body_helper_guard_id] = AuthorizationGuard(

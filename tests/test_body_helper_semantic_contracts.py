@@ -197,3 +197,107 @@ async def handler(request, user = Depends(get_current_user)):
     assert not any("body_auth" in guard.guard_id for guard in ir.guards)
     evaluation = evaluate_protected_effect_integrity(ir)
     assert evaluation[0].status != "pass"
+
+
+def test_nested_shadow_of_module_helper_never_pe_pass() -> None:
+    """Module fail-closed must not authorize a nested no-op of the same name."""
+
+    files = {
+        "app/auth.py": _FAIL_CLOSED_HELPER + "\n",
+        "app/routes.py": """
+from fastapi import Depends, FastAPI
+app = FastAPI()
+
+@app.post("/chat")
+async def handler(request, user = Depends(get_current_user)):
+    def require_access(user):
+        return True
+    require_access(user)
+    return sink(user)
+""".strip(),
+    }
+    evidence = analyze_body_helper_implementation(
+        files, helper_name="require_access"
+    )
+    assert evidence.status == "unproved"
+    assert evidence.reason == "helper_definition_shadowed"
+    ir = _compile(files, profile=_profile())
+    assert all(guard.effectiveness != "established" for guard in ir.guards)
+    evaluation = evaluate_protected_effect_integrity(ir)
+    assert evaluation[0].status != "pass"
+
+
+def test_assignment_rebind_of_helper_never_pe_pass() -> None:
+    """Local assignment of the helper name must not PE PASS."""
+
+    files = {
+        "app/auth.py": _FAIL_CLOSED_HELPER + "\n",
+        "app/routes.py": """
+from fastapi import Depends, FastAPI
+app = FastAPI()
+
+@app.post("/chat")
+async def handler(request, user = Depends(get_current_user)):
+    require_access = (lambda u: True)
+    require_access(user)
+    return sink(user)
+""".strip(),
+    }
+    evidence = analyze_body_helper_implementation(
+        files, helper_name="require_access"
+    )
+    assert evidence.status == "established"
+    ir = _compile(files, profile=_profile())
+    assert all(guard.effectiveness != "established" for guard in ir.guards)
+    evaluation = evaluate_protected_effect_integrity(ir)
+    assert evaluation[0].status != "pass"
+
+
+def test_dead_code_raise_never_establishes() -> None:
+    """Unreachable raise under ``if False`` must stay unproved."""
+
+    source = """
+from fastapi import Depends, FastAPI, HTTPException
+app = FastAPI()
+
+def require_access(user):
+    if False:
+        raise HTTPException(status_code=403)
+
+@app.post("/chat")
+async def handler(request, user = Depends(get_current_user)):
+    require_access(user)
+    return sink(user)
+""".strip()
+    evidence = analyze_body_helper_implementation(
+        {"app/routes.py": source}, helper_name="require_access"
+    )
+    assert evidence.status == "unproved"
+    assert evidence.reason == "helper_implementation_unproved"
+    ir = _compile({"app/routes.py": source}, profile=_profile())
+    assert all(guard.effectiveness != "established" for guard in ir.guards)
+    evaluation = evaluate_protected_effect_integrity(ir)
+    assert evaluation[0].status != "pass"
+
+
+def test_raise_after_return_never_establishes() -> None:
+    source = """
+from fastapi import Depends, FastAPI, HTTPException
+app = FastAPI()
+
+def require_access(user):
+    return True
+    raise HTTPException(status_code=403)
+
+@app.post("/chat")
+async def handler(request, user = Depends(get_current_user)):
+    require_access(user)
+    return sink(user)
+""".strip()
+    evidence = analyze_body_helper_implementation(
+        {"app/routes.py": source}, helper_name="require_access"
+    )
+    assert evidence.status == "unproved"
+    ir = _compile({"app/routes.py": source}, profile=_profile())
+    evaluation = evaluate_protected_effect_integrity(ir)
+    assert evaluation[0].status != "pass"
