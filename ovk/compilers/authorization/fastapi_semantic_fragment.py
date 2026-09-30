@@ -331,6 +331,43 @@ def _matching_ownership_assertions(
     return matches, None
 
 
+def _matching_body_authorization_helpers(
+    *,
+    handler: RouteHandlerSummary,
+    sink_call: CallSummary,
+    effect_name: str,
+    profile: Any,
+) -> list[CallSummary]:
+    """Return profile-declared body authorization helper calls before a sink.
+
+    Near-miss helpers absent from the profile are ignored (stay Unknown).
+    When a call has positional arguments, the first must name the profile
+    principal parameter so source-grounded principal binding is preserved.
+    """
+
+    matches: list[CallSummary] = []
+    resolver = getattr(profile, "body_authorization_helper_names", None)
+    if resolver is None:
+        return matches
+
+    for call in handler.calls:
+        if call.line >= sink_call.line:
+            continue
+        # Do not treat the sink call itself (or later calls) as a guard.
+        resolved = resolver(call.full_name, call.leaf_name)
+        if resolved is None:
+            continue
+        helper_key, authorized_effects = resolved
+        if effect_name not in authorized_effects:
+            continue
+        if call.positional_arguments:
+            first = call.positional_arguments[0].rendered
+            if first != profile.principal_parameter:
+                continue
+        matches.append(call)
+    return matches
+
+
 @dataclass(frozen=True)
 class FastApiFileSemanticFragment:
     """Semantic objects produced by one source file under one binding context."""
@@ -427,6 +464,12 @@ def profile_semantic_digest(profile: Any) -> str:
             key: sorted(value)
             for key, value in sorted(
                 profile.route_dependency_guard_effects.items()
+            )
+        },
+        "body_authorization_helpers": {
+            key: sorted(value)
+            for key, value in sorted(
+                getattr(profile, "body_authorization_helpers", {}).items()
             )
         },
         "principal_parameter": profile.principal_parameter,
@@ -881,6 +924,40 @@ def bind_route_file_summary(
                     # body candidate because its origin is handler-body local.
                     body_cut_candidate_guard_ids.add(ownership_guard_id)
 
+            for helper_call in _matching_body_authorization_helpers(
+                handler=handler,
+                sink_call=call,
+                effect_name=effect_name,
+                profile=profile,
+            ):
+                helper_key = (
+                    profile.body_authorization_helper_names(
+                        helper_call.full_name,
+                        helper_call.leaf_name,
+                    )
+                    or (helper_call.leaf_name or helper_call.full_name, ())
+                )[0]
+                body_helper_guard_id = _semantic_id(
+                    "guard",
+                    (
+                        f"{file_summary.path}:{handler.handler_name}:"
+                        f"{helper_call.line}:body_auth:{helper_key}:"
+                        f"{effect_name}:{identity_expression.rendered}"
+                    ),
+                )
+                guards[body_helper_guard_id] = AuthorizationGuard(
+                    guard_id=body_helper_guard_id,
+                    principal_id=principal_id,
+                    effect_id=effect_id,
+                    resource_id=acted_id,
+                    origin=helper_call.origin,
+                )
+                guard_ids.append(body_helper_guard_id)
+                # Call-style body helpers participate in both CFG dominance
+                # and the cut-set candidate universe.
+                body_guard_ids.add(body_helper_guard_id)
+                body_cut_candidate_guard_ids.add(body_helper_guard_id)
+
             for (
                 dep_name,
                 allowed_effects,
@@ -1269,6 +1346,7 @@ _SUPPORTED_CONSTRUCTS = [
     "configured_service_call_sink",
     "configured_fail_closed_resource_scope_assertion",
     "configured_fail_closed_resource_ownership_assertion",
+    "configured_body_authorization_helper",
     "configured_sink_scope_keyword",
     "source_derived_resource_return_contract",
     "typed_function_contract",
@@ -1285,6 +1363,7 @@ _PROFILE_ASSUMPTIONS = [
     "Configured sink scope keyword denotes the acted resource scope when no source contract is required.",
     "Configured resource-scope assertion helpers fail closed: normal continuation establishes equality between the configured acted-resource attribute and authorization-resource argument.",
     "Configured resource-ownership assertions fail closed: normal continuation establishes that a present loaded resource has the configured owner/principal equality; truthiness-style presence checks rely on the explicit profile truthy-when-present assumption.",
+    "Configured body authorization helpers authorize the declared effects when invoked in the handler body with the profile principal; helper names outside the profile never authorize.",
     "Source-derived function contracts are consumed only after resolving the configured service method.",
     "Only profile-selected contract attributes become required identity/scope/binding proof obligations.",
     "Conditional return contracts require the caller's non-null argument precondition to be established.",
@@ -1375,7 +1454,7 @@ def assemble_fastapi_assurance_ir(
         ),
         extractor=AssuranceExtractorIdentity(
             extractor_id="assurance.fastapi.dependency_effects.ast_v1",
-            extractor_version="0.22.0",
+            extractor_version="0.23.0",
             source_profile_id="assurance.fastapi.dependency_effects.ast_v1",
         ),
         coverage=AssuranceCoverage(
