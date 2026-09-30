@@ -122,14 +122,39 @@ def _resolve_callee_name(
     func: ast.AST,
     *,
     import_aliases: Mapping[str, str],
+    shadowed_names: frozenset[str] = frozenset(),
 ) -> str | None:
     if isinstance(func, ast.Name):
+        if func.id in shadowed_names:
+            # Parameter/local assignment shadows the global callee identity.
+            return None
         return import_aliases.get(func.id, func.id)
     if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
         # module.func where module is a uniquely imported module alias — deferred
         # unless the alias maps to a bare function name in this theorem.
         return None
     return None
+
+
+def _shadowed_names_in_function(
+    caller: ast.AST | None,
+) -> frozenset[str]:
+    """Names bound as parameters or store targets in the enclosing function."""
+
+    if caller is None or not isinstance(
+        caller, (ast.FunctionDef, ast.AsyncFunctionDef)
+    ):
+        return frozenset()
+    names: set[str] = set()
+    params = _function_params(caller)
+    if params:
+        names.update(params)
+    for node in ast.walk(caller):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            names.add(node.id)
+        elif isinstance(node, ast.arg):
+            names.add(node.arg)
+    return frozenset(names)
 
 
 def _maybe_targets_callee(func: ast.AST, callee_name: str) -> bool:
@@ -294,8 +319,22 @@ def analyze_interprocedural_argument_provenance(
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
-            resolved = _resolve_callee_name(node.func, import_aliases=aliases)
+            caller = _enclosing_function(tree, node)
+            shadowed = _shadowed_names_in_function(caller)
+            resolved = _resolve_callee_name(
+                node.func,
+                import_aliases=aliases,
+                shadowed_names=shadowed,
+            )
             if resolved is None:
+                # Shadowed Name matching the callee is a local binding, not a
+                # global callsite — omit without poisoning provenance.
+                if (
+                    isinstance(node.func, ast.Name)
+                    and node.func.id == callee_name
+                    and node.func.id in shadowed
+                ):
+                    continue
                 # Deferred callee forms that might target this callee must
                 # poison provenance. Silent omit enables false server_internal.
                 if _maybe_targets_callee(node.func, callee_name):
@@ -315,7 +354,6 @@ def analyze_interprocedural_argument_provenance(
                 continue
             if resolved != callee_name:
                 continue
-            caller = _enclosing_function(tree, node)
             if (
                 caller is not None
                 and path == callee_path

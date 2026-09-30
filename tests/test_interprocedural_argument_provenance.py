@@ -196,3 +196,50 @@ def route(request, bypass_filter: bool = False):
     assert any(
         item.unresolved_reason == "deferred_callee_form" for item in result.callsites
     )
+
+
+def test_parameter_shadowing_does_not_count_as_global_callsite() -> None:
+    """Adversarial: def route(generate): generate(...) is not global generate."""
+
+    result = analyze_interprocedural_argument_provenance(
+        {
+            "app/helper.py": """
+def generate(request, bypass_filter: bool = False):
+    request.state.bypass_filter = bypass_filter
+""".strip(),
+            "app/caller.py": """
+def route(generate):
+    generate(request, True)
+""".strip(),
+        },
+        callee_name="generate",
+        parameter="bypass_filter",
+        scope_proof=_scope("app/helper.py", "app/caller.py"),
+    )
+    assert result.provenance == "unknown"
+    assert result.reason == "no_accounted_callsites"
+    assert result.callsites == ()
+
+
+def test_local_assignment_shadowing_does_not_count_as_global_callsite() -> None:
+    """Local rebinding of the callee name must not authorize caller provenance."""
+
+    result = analyze_interprocedural_argument_provenance(
+        {
+            "app/helper.py": """
+def generate(request, bypass_filter: bool = False):
+    request.state.bypass_filter = bypass_filter
+""".strip(),
+            "app/caller.py": """
+def route(request):
+    generate = other_fn
+    generate(request, True)
+""".strip(),
+        },
+        callee_name="generate",
+        parameter="bypass_filter",
+        scope_proof=_scope("app/helper.py", "app/caller.py"),
+    )
+    assert result.provenance == "unknown"
+    assert result.reason == "no_accounted_callsites"
+
