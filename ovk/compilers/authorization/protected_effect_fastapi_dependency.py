@@ -77,6 +77,122 @@ _CONTROL_FLOW = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try, ast.Match, a
 
 
 @dataclass(frozen=True)
+class FastApiAssuranceFinalization:
+    """Post-assembly IR plus closure digests shared by full/incremental paths."""
+
+    ir: AssuranceIR
+    head_repository_python_manifest_digest: str | None
+    derived_closed_world_scope_digest: str | None
+
+
+def repository_python_manifest_digest(
+    files: dict[str, str] | None,
+) -> str | None:
+    """Stable digest of a complete authenticated Python manifest, if present."""
+
+    if files is None:
+        return None
+    return content_digest({path: files[path] for path in sorted(files)})
+
+
+def finalize_fastapi_assurance_ir(
+    ir: AssuranceIR,
+    *,
+    materials: AuthMaterials,
+    profile: FastApiDependencyEffectProfile,
+    route_summary_index: RouteSummaryIndex,
+) -> FastApiAssuranceFinalization:
+    """Apply post-assembly semantic enrichment shared by full and incremental.
+
+    Trusted-bypass / closed-world writer accounting depends on the complete
+    repository Python manifest, which may include files outside
+    ``profile.source_paths`` and therefore outside route fragments. Both
+    compilers must call this after ``assemble_fastapi_assurance_ir``.
+    """
+
+    closure_files = materials.closure_files_for_revision(head=True)
+    manifest_digest = repository_python_manifest_digest(closure_files)
+    derived_scope_digest: str | None = None
+
+    if not profile.trusted_bypass_authorities:
+        return FastApiAssuranceFinalization(
+            ir=ir,
+            head_repository_python_manifest_digest=manifest_digest,
+            derived_closed_world_scope_digest=None,
+        )
+
+    route_cfgs = {
+        (path, handler.handler_name): handler.control_flow
+        for path, summary in route_summary_index.summaries.items()
+        for handler in summary.handlers
+    }
+    principals = list(ir.principals)
+    principal_id = (
+        principals[0].principal_id
+        if principals
+        else f"principal:{profile.principal_parameter}"
+    )
+    # Closed-world writer accounting requires the complete authenticated
+    # Python manifest, independent of PE source_paths filtering.
+    # Filtered head_files alone must never be labeled repository-closed.
+    field_searched = None
+    for key in sorted(profile.trusted_bypass_authorities):
+        if key.startswith("request.state."):
+            field_searched = key.rsplit(".", 1)[-1]
+            break
+    scope_proof = None
+    if (
+        closure_files is not None
+        and materials.repo
+        and materials.head_revision
+    ):
+        try:
+            source_roots = derive_python_source_roots(closure_files)
+            derived_scope = derive_closed_world_scope_proof(
+                repo=materials.repo,
+                revision=materials.head_revision,
+                files=closure_files,
+                source_roots=source_roots,
+                analyzed_paths=tuple(closure_files),
+                field_searched=field_searched,
+                import_resolution_status=(
+                    "authenticated_revision_python_manifest_v2"
+                ),
+            )
+            scope_proof = derived_scope.as_closed_world_scope_proof()
+            derived_scope_digest = derived_scope.digest()
+            import_resolution_status = derived_scope.import_resolution_status
+            bypass_materials = closure_files
+        except ValueError:
+            import_resolution_status = "repository_python_manifest_invalid"
+            bypass_materials = materials.head_files
+    elif materials.repo and materials.head_revision:
+        import_resolution_status = (
+            "source_paths_filtered_materials_not_repo_closure"
+        )
+        bypass_materials = materials.head_files
+    else:
+        import_resolution_status = "workspace_materials_not_repo_closure"
+        bypass_materials = materials.head_files
+
+    enriched = enrich_assurance_ir_with_trusted_bypass(
+        ir,
+        materials=bypass_materials,
+        trusted_bypass_authorities=profile.trusted_bypass_authorities,
+        route_cfgs=route_cfgs,
+        principal_id=principal_id,
+        scope_proof=scope_proof,
+        derived_scope_digest=derived_scope_digest,
+        import_resolution_status=import_resolution_status,
+    )
+    return FastApiAssuranceFinalization(
+        ir=enriched,
+        head_repository_python_manifest_digest=manifest_digest,
+        derived_closed_world_scope_digest=derived_scope_digest,
+    )
+
+
+@dataclass(frozen=True)
 class ResourceScopeAssertionSemantics:
     """Semantics for a configured fail-closed resource-scope assertion helper.
 
@@ -897,75 +1013,9 @@ class FastApiDependencyEffectExtractor:
             syntax_errors=parsed.syntax_errors,
             missing_route_summary_paths=missing_route_summaries,
         )
-        if profile.trusted_bypass_authorities:
-            route_cfgs = {
-                (path, handler.handler_name): handler.control_flow
-                for path, summary in route_summaries.summaries.items()
-                for handler in summary.handlers
-            }
-            principals = list(ir.principals)
-            principal_id = (
-                principals[0].principal_id
-                if principals
-                else f"principal:{profile.principal_parameter}"
-            )
-            # Closed-world writer accounting requires the complete authenticated
-            # Python manifest, independent of PE source_paths filtering.
-            # Filtered head_files alone must never be labeled repository-closed.
-            field_searched = None
-            for key in sorted(profile.trusted_bypass_authorities):
-                if key.startswith("request.state."):
-                    field_searched = key.rsplit(".", 1)[-1]
-                    break
-            closure_files = materials.closure_files_for_revision(head=True)
-            scope_proof = None
-            derived_scope_digest = None
-            if (
-                closure_files is not None
-                and materials.repo
-                and materials.head_revision
-            ):
-                try:
-                    source_roots = derive_python_source_roots(closure_files)
-                    derived_scope = derive_closed_world_scope_proof(
-                        repo=materials.repo,
-                        revision=materials.head_revision,
-                        files=closure_files,
-                        source_roots=source_roots,
-                        analyzed_paths=tuple(closure_files),
-                        field_searched=field_searched,
-                        import_resolution_status=(
-                            "authenticated_revision_python_manifest_v2"
-                        ),
-                    )
-                    scope_proof = derived_scope.as_closed_world_scope_proof()
-                    derived_scope_digest = derived_scope.digest()
-                    import_resolution_status = (
-                        derived_scope.import_resolution_status
-                    )
-                    bypass_materials = closure_files
-                except ValueError:
-                    import_resolution_status = (
-                        "repository_python_manifest_invalid"
-                    )
-                    bypass_materials = materials.head_files
-            elif materials.repo and materials.head_revision:
-                # Repo identity without a full Python manifest is not closure.
-                import_resolution_status = (
-                    "source_paths_filtered_materials_not_repo_closure"
-                )
-                bypass_materials = materials.head_files
-            else:
-                import_resolution_status = "workspace_materials_not_repo_closure"
-                bypass_materials = materials.head_files
-            ir = enrich_assurance_ir_with_trusted_bypass(
-                ir,
-                materials=bypass_materials,
-                trusted_bypass_authorities=profile.trusted_bypass_authorities,
-                route_cfgs=route_cfgs,
-                principal_id=principal_id,
-                scope_proof=scope_proof,
-                derived_scope_digest=derived_scope_digest,
-                import_resolution_status=import_resolution_status,
-            )
-        return ir
+        return finalize_fastapi_assurance_ir(
+            ir,
+            materials=materials,
+            profile=profile,
+            route_summary_index=route_summaries,
+        ).ir

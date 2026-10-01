@@ -25,6 +25,7 @@ from ovk.compilers.authorization.fastapi_semantic_fragment import (
 from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.compilers.authorization.protected_effect_fastapi_dependency import (
     FastApiDependencyEffectProfile,
+    finalize_fastapi_assurance_ir,
 )
 from ovk.compilers.authorization.python_ast_index import (
     ParsedPythonMaterials,
@@ -54,6 +55,8 @@ class IncrementalFastApiCompilationState:
     fragments: dict[str, FastApiFileSemanticFragment]
     assurance_ir_digest: str
     contract_composition_state: IncrementalContractCompositionState | None = None
+    head_repository_python_manifest_digest: str | None = None
+    derived_closed_world_scope_digest: str | None = None
 
 
 @dataclass(frozen=True)
@@ -272,6 +275,13 @@ def compile_incremental_fastapi_assurance(
         syntax_errors=parsed_index.syntax_errors,
         missing_route_summary_paths=missing_route_summaries,
     )
+    finalized = finalize_fastapi_assurance_ir(
+        ir,
+        materials=materials,
+        profile=profile,
+        route_summary_index=route_summary_index,
+    )
+    ir = finalized.ir
     state = IncrementalFastApiCompilationState(
         repo=materials.repo or "unknown/repo",
         head_revision=materials.head_revision,
@@ -281,6 +291,12 @@ def compile_incremental_fastapi_assurance(
         fragments=fragments,
         assurance_ir_digest=ir.assurance_ir_digest,
         contract_composition_state=contract_composition.state,
+        head_repository_python_manifest_digest=(
+            finalized.head_repository_python_manifest_digest
+        ),
+        derived_closed_world_scope_digest=(
+            finalized.derived_closed_world_scope_digest
+        ),
     )
     return IncrementalFastApiCompilationResult(
         ir=ir,
