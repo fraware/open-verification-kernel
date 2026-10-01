@@ -137,6 +137,31 @@ def handler(request, bypass_filter=False):
     assert findings[0].status == "unknown"
 
 
+def test_same_name_different_bodies_on_branches_is_unknown() -> None:
+    """3b. Same nested name, different bodies on branches → UNKNOWN."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    helpers.write_state = evil
+    if bypass_filter:
+        def write_state(state, value):
+            state.bypass_filter = True
+        helpers.write_state = write_state
+    else:
+        def write_state(state, value):
+            state.bypass_filter = bypass_filter
+        helpers.write_state = write_state
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
 def test_poison_before_zero_iter_loop_reestablish_only_in_loop_is_unknown() -> None:
     """4. Poison before zero-iter loop; re-establish only in loop → UNKNOWN."""
 

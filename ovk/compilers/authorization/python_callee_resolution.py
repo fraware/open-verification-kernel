@@ -983,6 +983,35 @@ def _match_exhaustive(stmt: ast.Match) -> bool:
     return bool(stmt.cases) and _match_pattern_irrefutable(stmt.cases[-1].pattern)
 
 
+def _same_local_callable(
+    left: ast.AST | None,
+    right: ast.AST | None,
+) -> bool:
+    """True when two nested callables are the same identity for must-join.
+
+    Object identity is preferred; structurally identical defs (same source
+    shape on every predecessor) also agree so uniform rebinding may
+    re-establish without requiring a shared AST node object.
+    """
+
+    if left is None or right is None:
+        return left is right
+    if left is right:
+        return True
+    return ast.dump(left, include_attributes=False) == ast.dump(
+        right, include_attributes=False
+    )
+
+
+def _local_callables_agree(
+    nodes: Sequence[ast.FunctionDef | ast.AsyncFunctionDef | None],
+) -> bool:
+    if not nodes:
+        return True
+    first = nodes[0]
+    return all(_same_local_callable(first, node) for node in nodes[1:])
+
+
 def _join_request_time_identity_states(
     states: Sequence[RequestTimeIdentityState],
 ) -> RequestTimeIdentityState:
@@ -1017,6 +1046,16 @@ def _join_request_time_identity_states(
                 break
             values.append(restored)
         if agreed and values and all(value == values[0] for value in values):
+            restored = values[0]
+            # Nested defs share (path, name) spelling; must-join also requires
+            # the same local callable (object or structural identity).
+            local_nodes = [state.local_fns.get(restored[1]) for state in states]
+            if any(node is not None for node in local_nodes) and not (
+                all(node is not None for node in local_nodes)
+                and _local_callables_agree(local_nodes)
+            ):
+                agreed = False
+        if agreed and values and all(value == values[0] for value in values):
             reestablished_exports[key] = values[0]
             # Uniform re-establishment clears the may-poison for this export.
             path, name = key
@@ -1037,13 +1076,25 @@ def _join_request_time_identity_states(
     reestablished_behaviors = set(states[0].reestablished_behaviors)
     for state in states[1:]:
         reestablished_behaviors &= state.reestablished_behaviors
+    # Drop behavior re-establishments whose local callables disagree.
+    refined_behaviors: set[tuple[str, str]] = set()
+    for key in reestablished_behaviors:
+        _path, name = key
+        local_nodes = [state.local_fns.get(name) for state in states]
+        if all(node is None for node in local_nodes):
+            refined_behaviors.add(key)
+        elif all(node is not None for node in local_nodes) and _local_callables_agree(
+            local_nodes
+        ):
+            refined_behaviors.add(key)
     any_reest_behaviors: set[tuple[str, str]] = set()
     for state in states:
         any_reest_behaviors.update(state.reestablished_behaviors)
-    for key in any_reest_behaviors - reestablished_behaviors:
+    for key in any_reest_behaviors - refined_behaviors:
         behavior_mutations.add(key)
-    for key in reestablished_behaviors:
+    for key in refined_behaviors:
         behavior_mutations.discard(key)
+    reestablished_behaviors = refined_behaviors
 
     local_fns: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
     common_names = set(states[0].local_fns)
@@ -1051,7 +1102,7 @@ def _join_request_time_identity_states(
         common_names &= set(state.local_fns)
     for name in common_names:
         nodes = [state.local_fns[name] for state in states]
-        if all(node is nodes[0] for node in nodes):
+        if _local_callables_agree(nodes):
             local_fns[name] = nodes[0]
 
     visited_fns = set(states[0].visited_fns)
