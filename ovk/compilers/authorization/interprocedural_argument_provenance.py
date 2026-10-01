@@ -42,7 +42,7 @@ ArgumentProvenanceKind = Literal[
     "unknown",
 ]
 
-_IMPLEMENTATION_VERSION = "0.4.0"
+_IMPLEMENTATION_VERSION = "0.5.0"
 
 
 @dataclass(frozen=True)
@@ -296,6 +296,7 @@ def analyze_interprocedural_argument_provenance(
                     if reason in {
                         "ambiguous_manifest",
                         "import_follow_depth",
+                        "callable_behavior_unknown",
                     }:
                         unresolved = True
                         bindings.append(
