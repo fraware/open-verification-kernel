@@ -149,13 +149,51 @@ class _UnitCalleeIndex:
         return self.by_name[name]
 
 
+def _collect_module_store_names(target: ast.AST) -> list[str]:
+    """Collect bare names stored by a module-level assignment target."""
+
+    names: list[str] = []
+    if isinstance(target, ast.Name):
+        names.append(target.id)
+    elif isinstance(target, ast.Starred):
+        names.extend(_collect_module_store_names(target.value))
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for elt in target.elts:
+            names.extend(_collect_module_store_names(elt))
+    return names
+
+
 def _build_unit_callee_index(
     trees: Mapping[str, ast.AST],
 ) -> _UnitCalleeIndex:
     buckets: dict[str, list[_ResolvedUnitFunction]] = {}
     for path, tree in sorted(trees.items()):
+        # Module-level rebinding after ``def name`` removes that definition from
+        # the unique callee index (same theorem as interprocedural provenance).
+        # Tuple/list unpack targets count as rebinding — omitting them lets
+        # ``(write_state,) = (evil,)`` authorize against the stale def.
+        final_bindings: dict[str, str] = {}
         for node in getattr(tree, "body", ()):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                final_bindings[node.name] = "function"
+            elif isinstance(node, ast.ClassDef):
+                final_bindings[node.name] = "rebound"
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    for name in _collect_module_store_names(target):
+                        final_bindings[name] = "rebound"
+            elif isinstance(node, ast.AnnAssign) and isinstance(
+                node.target, ast.Name
+            ):
+                final_bindings[node.target.id] = "rebound"
+            elif isinstance(node, ast.AugAssign) and isinstance(
+                node.target, ast.Name
+            ):
+                final_bindings[node.target.id] = "rebound"
+        for node in getattr(tree, "body", ()):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if final_bindings.get(node.name) != "function":
+                    continue
                 buckets.setdefault(node.name, []).append(
                     _ResolvedUnitFunction(path=path, node=node)
                 )
