@@ -88,7 +88,7 @@ def read_item(item_id: str, bypass_filter: bool = False):
         resource_return_contracts=[],
         fragments={fragment.path: fragment},
     )
-    assert ir.extractor.extractor_version == "0.29.0"
+    assert ir.extractor.extractor_version == "0.30.0"
     payload = ir.canonical_payload()
     assert "value_origin_evidence" in payload
     assert payload["value_origin_evidence"]
