@@ -381,8 +381,188 @@ def handler(request, bypass_filter=False):
         bypass_fields=frozenset({"bypass_filter"}),
         scope_proof=_scope("app/helpers.py", "app/routes.py"),
     )
-    # Ambiguous bare name ``write_state`` across the unit must not authorize.
-    assert findings[0].status != "authorized"
+    # Caller-local ``write_state`` resolves; client value still violates.
+    assert findings[0].status == "violated"
+    assert findings[0].reason == "client_controlled_bypass_write"
+
+
+def test_external_import_same_leaf_as_unrelated_local_cannot_authorize() -> None:
+    """External ``write_state`` must not close over an unrelated local def."""
+
+    findings = analyze_bypass_authority_unit(
+        {
+            "app/local_helpers.py": """
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip(),
+            "app/routes.py": """
+from thirdparty_package import write_state
+
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""".strip(),
+        },
+        entry_path="app/routes.py",
+        function_name="handler",
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("app/local_helpers.py", "app/routes.py"),
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_local_import_uniquely_resolved_to_exact_implementation() -> None:
+    """``from helpers import write_state`` follows the unique local body."""
+
+    findings = analyze_bypass_authority_unit(
+        {
+            "app/helpers.py": """
+def write_state(state, value):
+    state.bypass_filter = value
+""".strip(),
+            "app/routes.py": """
+from helpers import write_state
+
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""".strip(),
+        },
+        entry_path="app/routes.py",
+        function_name="handler",
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("app/helpers.py", "app/routes.py"),
+    )
+    assert findings[0].status == "violated"
+    assert findings[0].reason == "client_controlled_bypass_write"
+    assert findings[0].write_count >= 2
+
+
+def test_same_module_def_then_external_import_overwrite_cannot_authorize() -> None:
+    """``def write_state`` then ``from external import write_state`` → import wins."""
+
+    findings = analyze_bypass_authority(
+        """
+def write_state(state, value):
+    state.bypass_filter = True
+from thirdparty_package import write_state
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("<module>"),
+        function_name="handler",
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_local_import_then_assignment_overwrite_cannot_authorize() -> None:
+    findings = analyze_bypass_authority_unit(
+        {
+            "app/helpers.py": """
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip(),
+            "app/routes.py": """
+from helpers import write_state
+write_state = wrapper
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""".strip(),
+        },
+        entry_path="app/routes.py",
+        function_name="handler",
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("app/helpers.py", "app/routes.py"),
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_module_alias_call_h_write_state_resolves_or_unknown() -> None:
+    """``import helpers as h; h.write_state(...)`` follows unique module attr."""
+
+    findings = analyze_bypass_authority_unit(
+        {
+            "app/helpers.py": """
+def write_state(state, value):
+    state.bypass_filter = value
+""".strip(),
+            "app/routes.py": """
+import helpers as h
+
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    h.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""".strip(),
+        },
+        entry_path="app/routes.py",
+        function_name="handler",
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("app/helpers.py", "app/routes.py"),
+    )
+    assert findings[0].status == "violated"
+    assert findings[0].reason == "client_controlled_bypass_write"
+
+
+def test_ambiguous_same_module_path_across_source_roots_is_unknown() -> None:
+    findings = analyze_bypass_authority_unit(
+        {
+            "backend/helpers.py": """
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip(),
+            "src/helpers.py": """
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip(),
+            "app/routes.py": """
+from helpers import write_state
+
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""".strip(),
+        },
+        entry_path="app/routes.py",
+        function_name="handler",
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope(
+            "backend/helpers.py",
+            "src/helpers.py",
+            "app/routes.py",
+        ),
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_unimported_same_named_function_elsewhere_never_resolves() -> None:
+    findings = analyze_bypass_authority_unit(
+        {
+            "app/helpers.py": """
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip(),
+            "app/routes.py": """
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""".strip(),
+        },
+        entry_path="app/routes.py",
+        function_name="handler",
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("app/helpers.py", "app/routes.py"),
+    )
+    assert findings[0].status == "unknown"
 
 
 def test_pe_compile_refuses_established_for_state_helper_client_write() -> None:

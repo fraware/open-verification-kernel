@@ -24,6 +24,10 @@ import ast
 from dataclasses import dataclass
 from typing import Literal, Mapping
 
+from ovk.compilers.authorization.python_callee_resolution import (
+    CalleeResolver,
+    build_callee_resolver,
+)
 from ovk.compilers.authorization.value_origin import (
     AliasState,
     apply_statement_bindings,
@@ -94,7 +98,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.8.2"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.9.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -129,78 +133,6 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
             end_line=getattr(node, "end_lineno", getattr(node, "lineno", None)),
         ),
     )
-
-
-@dataclass(frozen=True)
-class _ResolvedUnitFunction:
-    path: str
-    node: ast.FunctionDef | ast.AsyncFunctionDef
-
-
-@dataclass(frozen=True)
-class _UnitCalleeIndex:
-    """Module-level bare-name → unique function, or None when ambiguous."""
-
-    by_name: Mapping[str, _ResolvedUnitFunction | None]
-
-    def resolve(self, name: str) -> _ResolvedUnitFunction | None:
-        if name not in self.by_name:
-            return None
-        return self.by_name[name]
-
-
-def _collect_module_store_names(target: ast.AST) -> list[str]:
-    """Collect bare names stored by a module-level assignment target."""
-
-    names: list[str] = []
-    if isinstance(target, ast.Name):
-        names.append(target.id)
-    elif isinstance(target, ast.Starred):
-        names.extend(_collect_module_store_names(target.value))
-    elif isinstance(target, (ast.Tuple, ast.List)):
-        for elt in target.elts:
-            names.extend(_collect_module_store_names(elt))
-    return names
-
-
-def _build_unit_callee_index(
-    trees: Mapping[str, ast.AST],
-) -> _UnitCalleeIndex:
-    buckets: dict[str, list[_ResolvedUnitFunction]] = {}
-    for path, tree in sorted(trees.items()):
-        # Module-level rebinding after ``def name`` removes that definition from
-        # the unique callee index (same theorem as interprocedural provenance).
-        # Tuple/list unpack targets count as rebinding — omitting them lets
-        # ``(write_state,) = (evil,)`` authorize against the stale def.
-        final_bindings: dict[str, str] = {}
-        for node in getattr(tree, "body", ()):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                final_bindings[node.name] = "function"
-            elif isinstance(node, ast.ClassDef):
-                final_bindings[node.name] = "rebound"
-            elif isinstance(node, ast.Assign):
-                for target in node.targets:
-                    for name in _collect_module_store_names(target):
-                        final_bindings[name] = "rebound"
-            elif isinstance(node, ast.AnnAssign) and isinstance(
-                node.target, ast.Name
-            ):
-                final_bindings[node.target.id] = "rebound"
-            elif isinstance(node, ast.AugAssign) and isinstance(
-                node.target, ast.Name
-            ):
-                final_bindings[node.target.id] = "rebound"
-        for node in getattr(tree, "body", ()):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if final_bindings.get(node.name) != "function":
-                    continue
-                buckets.setdefault(node.name, []).append(
-                    _ResolvedUnitFunction(path=path, node=node)
-                )
-    by_name: dict[str, _ResolvedUnitFunction | None] = {}
-    for name, items in buckets.items():
-        by_name[name] = items[0] if len(items) == 1 else None
-    return _UnitCalleeIndex(by_name=by_name)
 
 
 @dataclass
@@ -657,7 +589,7 @@ def _collect_writes_in_function(
     *,
     path: str,
     handler_param_names: frozenset[str],
-    callee_index: _UnitCalleeIndex | None = None,
+    callee_resolver: CalleeResolver | None = None,
     seed_request_aliases: _RequestStateAliasEnv | None = None,
     seed_alias_state: AliasState | None = None,
     call_stack: frozenset[tuple[str, str]] | None = None,
@@ -677,7 +609,8 @@ def _collect_writes_in_function(
     Escape analysis (#156): passing request/request.state into an unresolved
     callee, unresolved ``__dict__`` / ``vars(state)`` stores, and similar
     mutation channels force dynamic wildcard writes (Unknown > false PASS)
-    unless a bounded interprocedural theorem resolves the callee.
+    unless a bounded interprocedural theorem resolves the callee under
+    caller-relative module-qualified identity (#160).
     """
 
     writes: list[StateAttributeWrite] = []
@@ -758,15 +691,33 @@ def _collect_writes_in_function(
         *,
         control_dependent: bool,
     ) -> bool:
-        """Resolve a local Name callee that receives request/state; else False."""
+        """Resolve a caller-relative callee that receives request/state."""
 
-        if callee_index is None or not isinstance(call.func, ast.Name):
+        if callee_resolver is None:
             return False
         if depth >= _MAX_INTERPROCEDURAL_WRITER_DEPTH:
             return False
-        resolved = callee_index.resolve(call.func.id)
-        if resolved is None:
+        # Nested defs/params/stores shadow module bindings for Name callees.
+        shadowed: set[str] = set(fn_params)
+        for node in ast.walk(fn):
+            if node is fn:
+                continue
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                shadowed.add(node.id)
+            elif isinstance(node, ast.arg):
+                shadowed.add(node.arg)
+            elif isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+            ):
+                shadowed.add(node.name)
+        result = callee_resolver.resolve_call(
+            call.func,
+            caller_path=path,
+            shadowed_names=frozenset(shadowed),
+        )
+        if result.callee is None:
             return False
+        resolved = result.callee
         callee_frame = (_normalize_unit_path(resolved.path), resolved.node.name)
         if callee_frame in stack or callee_frame == frame:
             return False
@@ -795,7 +746,7 @@ def _collect_writes_in_function(
             resolved.node,
             path=resolved.path,
             handler_param_names=handler_param_names,
-            callee_index=callee_index,
+            callee_resolver=callee_resolver,
             seed_request_aliases=callee_aliases,
             seed_alias_state=callee_alias_state,
             call_stack=stack | {frame},
@@ -1079,7 +1030,7 @@ def _collect_writes_in_function(
                     statement,
                     path=path,
                     handler_param_names=frozenset(),
-                    callee_index=callee_index,
+                    callee_resolver=callee_resolver,
                     call_stack=stack | {frame},
                     depth=depth,
                 )
@@ -1094,7 +1045,7 @@ def _collect_writes_in_function(
                             child,
                             path=path,
                             handler_param_names=frozenset(),
-                            callee_index=callee_index,
+                            callee_resolver=callee_resolver,
                             call_stack=stack | {frame},
                             depth=depth,
                         )
@@ -1165,7 +1116,7 @@ def _collect_state_writes(
     *,
     path: str,
     externally_bound_function_name: str | None,
-    callee_index: _UnitCalleeIndex | None = None,
+    callee_resolver: CalleeResolver | None = None,
 ) -> tuple[StateAttributeWrite, ...]:
     writes: list[StateAttributeWrite] = []
     # Prefer per-function alias tracking so rebinding inside a writer is proved.
@@ -1195,7 +1146,7 @@ def _collect_state_writes(
                         if fn.name == externally_bound_function_name
                         else frozenset()
                     ),
-                    callee_index=callee_index,
+                    callee_resolver=callee_resolver,
                 )
             )
         # Module-level writes (outside functions) still matter.
@@ -1720,7 +1671,7 @@ def analyze_bypass_authority_unit(
     trees: dict[str, ast.AST] = {}
     for path, source in sorted(normalized.items()):
         trees[path] = ast.parse(source, filename=path)
-    callee_index = _build_unit_callee_index(trees)
+    callee_resolver = build_callee_resolver(trees)
 
     entry_tree = trees[entry]
     entry_functions = [
@@ -1747,7 +1698,7 @@ def analyze_bypass_authority_unit(
                 externally_bound_function_name=(
                     handler.name if handler is not None and path == entry else None
                 ),
-                callee_index=callee_index,
+                callee_resolver=callee_resolver,
             )
         )
     reads = _collect_state_reads(handler if handler is not None else entry_tree)
