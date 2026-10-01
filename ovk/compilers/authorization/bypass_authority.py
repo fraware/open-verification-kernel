@@ -26,6 +26,8 @@ from typing import Literal, Mapping
 
 from ovk.compilers.authorization.python_callee_resolution import (
     CalleeResolver,
+    RequestTimeIdentitySession,
+    begin_request_time_identity_session,
     build_callee_resolver,
     import_module_name_from_importer,
 )
@@ -108,7 +110,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.14.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.15.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -602,6 +604,7 @@ def _collect_writes_in_function(
     callee_resolver: CalleeResolver | None = None,
     seed_request_aliases: _RequestStateAliasEnv | None = None,
     seed_alias_state: AliasState | None = None,
+    seed_identity_session: RequestTimeIdentitySession | None = None,
     call_stack: frozenset[tuple[str, str]] | None = None,
     depth: int = 0,
 ) -> list[StateAttributeWrite]:
@@ -621,6 +624,11 @@ def _collect_writes_in_function(
     mutation channels force dynamic wildcard writes (Unknown > false PASS)
     unless a bounded interprocedural theorem resolves the callee under
     caller-relative module-qualified identity (#160).
+
+    Request-time callable identity (#167): the shared #166 object-alias
+    identity environment is threaded statement-order through this walk so
+    handler-body mutations of module exports / callable behavior invalidate
+    authorizing resolve from the mutation point onward.
     """
 
     writes: list[StateAttributeWrite] = []
@@ -632,6 +640,14 @@ def _collect_writes_in_function(
         request_aliases = _RequestStateAliasEnv.seed(param_names=fn_params)
     stack = call_stack or frozenset()
     frame = (_normalize_unit_path(path), fn.name)
+    if seed_identity_session is not None:
+        identity_session: RequestTimeIdentitySession | None = seed_identity_session
+    elif callee_resolver is not None:
+        identity_session = begin_request_time_identity_session(
+            callee_resolver, path=path, fn=fn
+        )
+    else:
+        identity_session = None
 
     def _classify(node: ast.AST) -> ValueOriginEvidence:
         return classify_expression_origin(
@@ -720,10 +736,17 @@ def _collect_writes_in_function(
                 node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
             ):
                 shadowed.add(node.name)
-        result = callee_resolver.resolve_call(
-            call.func,
-            caller_path=path,
-            shadowed_names=frozenset(shadowed),
+        result = (
+            identity_session.resolve_call(
+                call.func,
+                shadowed_names=frozenset(shadowed),
+            )
+            if identity_session is not None
+            else callee_resolver.resolve_call(
+                call.func,
+                caller_path=path,
+                shadowed_names=frozenset(shadowed),
+            )
         )
         if result.callee is None:
             return False
@@ -752,6 +775,15 @@ def _collect_writes_in_function(
             origin = _classify(actual)
             callee_alias_state.bind(formal, origin)
 
+        # Bounded request-time identity follows into the callee with a fresh
+        # session seeded from the callee module (caller overlay already made
+        # resolve succeed only when identity is established at this point).
+        callee_identity = None
+        if callee_resolver is not None:
+            callee_identity = begin_request_time_identity_session(
+                callee_resolver, path=resolved.path, fn=resolved.node
+            )
+
         collected = _collect_writes_in_function(
             resolved.node,
             path=resolved.path,
@@ -759,6 +791,7 @@ def _collect_writes_in_function(
             callee_resolver=callee_resolver,
             seed_request_aliases=callee_aliases,
             seed_alias_state=callee_alias_state,
+            seed_identity_session=callee_identity,
             call_stack=stack | {frame},
             depth=depth + 1,
         )
@@ -906,6 +939,8 @@ def _collect_writes_in_function(
                 handler_param_names=handler_param_names,
                 alias_state=alias_state,
             )
+            if identity_session is not None:
+                identity_session.observe_statement(statement)
             return
 
         if isinstance(statement, ast.AnnAssign) and statement.value is not None:
@@ -939,6 +974,8 @@ def _collect_writes_in_function(
                 handler_param_names=handler_param_names,
                 alias_state=alias_state,
             )
+            if identity_session is not None:
+                identity_session.observe_statement(statement)
             return
 
         if isinstance(statement, ast.AugAssign):
@@ -955,6 +992,8 @@ def _collect_writes_in_function(
                 handler_param_names=handler_param_names,
                 alias_state=alias_state,
             )
+            if identity_session is not None:
+                identity_session.observe_statement(statement)
             return
 
         if isinstance(statement, (ast.If, ast.While)):
@@ -962,8 +1001,19 @@ def _collect_writes_in_function(
             assigned_on_branches = _collect_assigned_names_in_statements(
                 list(statement.body) + list(statement.orelse)
             )
-            for child in list(statement.body) + list(statement.orelse):
+            env0 = identity_session.copy_env() if identity_session is not None else None
+            for child in statement.body:
                 _visit_statement(child, control_dependent=True)
+            env_body = (
+                identity_session.copy_env() if identity_session is not None else None
+            )
+            if identity_session is not None and env0 is not None:
+                # Restore pre-branch aliases; poisons stay (Unknown > false PASS).
+                identity_session.restore_env(env0)
+            for child in statement.orelse:
+                _visit_statement(child, control_dependent=True)
+            if identity_session is not None and env_body is not None:
+                identity_session.join_env(env_body)
             for name in assigned_on_branches:
                 alias_state.poison(name)
             request_aliases.poison_names(assigned_on_branches)
@@ -987,8 +1037,12 @@ def _collect_writes_in_function(
                 list(statement.body) + list(statement.orelse)
             )
             assigned.update(_collect_assign_target_names(statement.target))
+            env0 = identity_session.copy_env() if identity_session is not None else None
             for child in list(statement.body) + list(statement.orelse):
                 _visit_statement(child, control_dependent=True)
+            if identity_session is not None and env0 is not None:
+                # Loop may not execute — join with pre-loop env.
+                identity_session.join_env(env0)
             for name in assigned:
                 alias_state.poison(name)
             request_aliases.poison_names(assigned)
@@ -1008,6 +1062,8 @@ def _collect_writes_in_function(
             for name in assigned:
                 alias_state.poison(name)
             request_aliases.poison_names(assigned)
+            if identity_session is not None:
+                identity_session.observe_statement(statement)
             return
 
         if isinstance(statement, ast.Try):
@@ -1020,12 +1076,33 @@ def _collect_writes_in_function(
                 assigned.update(_collect_assigned_names_in_statements(handler.body))
                 if handler.name:
                     assigned.add(handler.name)
+            env0 = identity_session.copy_env() if identity_session is not None else None
             for child in statement.body:
                 _visit_statement(child, control_dependent=True)
+            env_body = (
+                identity_session.copy_env() if identity_session is not None else None
+            )
+            branch_envs: list[dict] = []
+            if env_body is not None:
+                branch_envs.append(env_body)
             for handler in statement.handlers:
+                if identity_session is not None and env0 is not None:
+                    identity_session.restore_env(env0)
                 for child in handler.body:
                     _visit_statement(child, control_dependent=True)
-            for child in list(statement.orelse) + list(statement.finalbody):
+                if identity_session is not None:
+                    branch_envs.append(identity_session.copy_env())
+            if identity_session is not None and env_body is not None:
+                identity_session.restore_env(env_body)
+            for child in statement.orelse:
+                _visit_statement(child, control_dependent=True)
+            if identity_session is not None:
+                branch_envs.append(identity_session.copy_env())
+                if env0 is not None:
+                    identity_session.restore_env(env0)
+                for env_b in branch_envs:
+                    identity_session.join_env(env_b)
+            for child in statement.finalbody:
                 _visit_statement(child, control_dependent=True)
             for name in assigned:
                 alias_state.poison(name)
@@ -1035,31 +1112,47 @@ def _collect_writes_in_function(
         if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
             # Nested writers must be accounted; omission beside a trusted
             # literal would otherwise false-PASS closed-world authority.
+            nested_identity = None
+            if callee_resolver is not None:
+                nested_identity = begin_request_time_identity_session(
+                    callee_resolver, path=path, fn=statement
+                )
             writes.extend(
                 _collect_writes_in_function(
                     statement,
                     path=path,
                     handler_param_names=frozenset(),
                     callee_resolver=callee_resolver,
+                    seed_identity_session=nested_identity,
                     call_stack=stack | {frame},
                     depth=depth,
                 )
             )
+            if identity_session is not None:
+                identity_session.observe_statement(statement)
             return
 
         if isinstance(statement, ast.ClassDef):
             for child in statement.body:
                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    nested_identity = None
+                    if callee_resolver is not None:
+                        nested_identity = begin_request_time_identity_session(
+                            callee_resolver, path=path, fn=child
+                        )
                     writes.extend(
                         _collect_writes_in_function(
                             child,
                             path=path,
                             handler_param_names=frozenset(),
                             callee_resolver=callee_resolver,
+                            seed_identity_session=nested_identity,
                             call_stack=stack | {frame},
                             depth=depth,
                         )
                     )
+            if identity_session is not None:
+                identity_session.observe_statement(statement)
             return
 
         if isinstance(statement, ast.Return) and statement.value is not None:
@@ -1091,6 +1184,8 @@ def _collect_writes_in_function(
                 handler_param_names=handler_param_names,
                 alias_state=alias_state,
             )
+            if identity_session is not None:
+                identity_session.observe_statement(statement)
             return
 
         if isinstance(statement, ast.Expr):
@@ -1115,6 +1210,8 @@ def _collect_writes_in_function(
             handler_param_names=handler_param_names,
             alias_state=alias_state,
         )
+        if identity_session is not None:
+            identity_session.observe_statement(statement)
 
     for statement in fn.body:
         _visit_statement(statement)
