@@ -224,10 +224,10 @@ def test_complete_manifest_literal_writer_establishes_and_keeps_derived_digest()
 def test_backend_open_webui_import_resolves_under_derived_roots() -> None:
     """Correct roots keep local packages inside the closed world.
 
-    Hardcoding ``source_roots=('.')`` classifies ``open_webui`` imports as
-    external, so the imported module need not be present. A sparse unit that
-    only contains the literal writer then falsely authorizes — the #135-class
-    failure this root derivation closes.
+    Sparse units that omit a local ``open_webui.*`` submodule while the
+    package prefix is present must refuse authorized (Unknown > false PASS).
+    Manifest-complete product compile supplies the full authenticated
+    revision so genuine local modules resolve uniquely.
     """
 
     full = {
@@ -267,50 +267,31 @@ def handler(request):
     assert findings[0].closed_world.complete is True
     assert findings[0].status != "authorized"
 
-    # Sparse unit under ".": open_webui import has zero candidates → external,
-    # auth.py absent, literal writer alone authorizes — false PASS relative to
-    # the full repo. Manifest-complete product compile avoids this by scanning
-    # the authenticated revision, not a hand-picked sparse unit.
+    # Sparse unit omits auth.py while open_webui/ still appears — local miss.
     sparse = {
         "backend/open_webui/routers/openai.py": full[
             "backend/open_webui/routers/openai.py"
         ],
     }
-    wrong_roots = derive_closed_world_scope_proof(
-        repo="open-webui/open-webui",
-        revision="rev",
-        files=sparse,
-        source_roots=(".",),
-        field_searched="bypass_filter",
-    )
-    wrong = analyze_bypass_authority_unit(
-        sparse,
-        entry_path="backend/open_webui/routers/openai.py",
-        function_name="handler",
-        bypass_fields=frozenset({"bypass_filter"}),
-        scope_proof=wrong_roots.as_closed_world_scope_proof(),
-    )
-    assert wrong[0].closed_world is not None
-    assert wrong[0].closed_world.complete is True
-    assert wrong[0].status == "authorized"
-
-    # Same sparse unit under backend roots: zero candidates still means
-    # external under the #155 manifest theorem (no backend/src special-case
-    # forcing incompleteness for a missing module path).
-    correct_sparse = derive_closed_world_scope_proof(
-        repo="open-webui/open-webui",
-        revision="rev",
-        files=sparse,
-        source_roots=("backend",),
-        field_searched="bypass_filter",
-    )
-    honest = analyze_bypass_authority_unit(
-        sparse,
-        entry_path="backend/open_webui/routers/openai.py",
-        function_name="handler",
-        bypass_fields=frozenset({"bypass_filter"}),
-        scope_proof=correct_sparse.as_closed_world_scope_proof(),
-    )
-    assert honest[0].closed_world is not None
-    assert honest[0].closed_world.complete is True
-    assert honest[0].status == "authorized"
+    for source_roots in ((".",), ("backend",)):
+        sparse_proof = derive_closed_world_scope_proof(
+            repo="open-webui/open-webui",
+            revision="rev",
+            files=sparse,
+            source_roots=source_roots,
+            field_searched="bypass_filter",
+        )
+        sparse_findings = analyze_bypass_authority_unit(
+            sparse,
+            entry_path="backend/open_webui/routers/openai.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=sparse_proof.as_closed_world_scope_proof(),
+        )
+        assert sparse_findings[0].closed_world is not None
+        assert sparse_findings[0].closed_world.complete is False
+        assert sparse_findings[0].status != "authorized"
+        assert any(
+            "unresolvable_local_import:open_webui.utils.auth" in item
+            for item in sparse_findings[0].closed_world.unresolvable_imports
+        )

@@ -781,7 +781,8 @@ def _module_candidates_in_manifest(
     ``*/<module/path>.py`` and ``*/<module/path>/__init__.py`` without
     encoding conventional source-root names (backend/src). Exactly one
     candidate establishes a local binding; multiple mean ambiguity;
-    none means external.
+    none means external *unless* the import is relative or the top-level
+    name already appears as a local package path in the manifest.
     """
 
     stem = module.replace(".", "/")
@@ -793,6 +794,23 @@ def _module_candidates_in_manifest(
                 found.add(path)
                 break
     return tuple(sorted(found))
+
+
+def _top_level_appears_local(top: str, available_paths: set[str]) -> bool:
+    """True when ``top`` already names a path segment under the manifest.
+
+    Used so ``from app.missing import ...`` cannot be classified external
+    when ``app/...`` paths are present (Unknown > false PASS).
+    """
+
+    if not top or "." in top:
+        return False
+    for path in available_paths:
+        if path == f"{top}.py" or path.startswith(f"{top}/"):
+            return True
+        if f"/{top}/" in f"/{path}/" or path.endswith(f"/{top}.py"):
+            return True
+    return False
 
 
 def _module_path_in_unit(
@@ -927,7 +945,19 @@ def _evaluate_closed_world(
                     continue
                 candidates = _module_candidates_in_manifest(module_name, available)
                 if len(candidates) == 0:
-                    # No repository path matches — treat as external.
+                    # Relative imports are always repository-local. Absolute
+                    # imports whose top-level name already appears under the
+                    # manifest are also local misses — never external.
+                    relative = bool(node.level and node.level > 0)
+                    top = module_name.split(".", 1)[0]
+                    if relative or _top_level_appears_local(top, available):
+                        kind = (
+                            "unresolvable_relative_import"
+                            if relative
+                            else "unresolvable_local_import"
+                        )
+                        unresolvable.append(f"{norm}:{kind}:{module_name}")
+                    # else: true external (pip/stdlib) — ignore
                     continue
                 if len(candidates) > 1:
                     unresolvable.append(
@@ -939,6 +969,11 @@ def _evaluate_closed_world(
                         alias.name, available
                     )
                     if len(candidates) == 0:
+                        top = alias.name.split(".", 1)[0]
+                        if _top_level_appears_local(top, available):
+                            unresolvable.append(
+                                f"{norm}:unresolvable_local_import:{alias.name}"
+                            )
                         continue
                     if len(candidates) > 1:
                         unresolvable.append(

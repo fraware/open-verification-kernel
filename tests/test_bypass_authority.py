@@ -241,7 +241,65 @@ def handler(request):
 
 
 def test_missing_absolute_import_is_external_not_root_special_cased() -> None:
-    """Zero manifest candidates mean external — not a backend/src local miss."""
+    """Zero manifest candidates for a foreign top-level name mean external."""
+
+    from ovk.compilers.authorization.bypass_authority import (
+        analyze_bypass_authority_unit,
+    )
+
+    findings = analyze_bypass_authority_unit(
+        {
+            "app/handler.py": """
+from missing_middleware_pkg import attach
+
+def handler(request):
+    request.state.bypass_filter = True
+    if request.state.bypass_filter:
+        return sink()
+""".strip(),
+        },
+        entry_path="app/handler.py",
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("app/handler.py"),
+    )
+    # No */missing_middleware_pkg.py in the manifest → external import.
+    assert findings[0].closed_world is not None
+    assert findings[0].closed_world.complete is True
+    assert findings[0].status == "authorized"
+
+
+def test_missing_relative_import_refuses_authorized() -> None:
+    """Relative imports are never external; unresolved ones poison closure."""
+
+    from ovk.compilers.authorization.bypass_authority import (
+        analyze_bypass_authority_unit,
+    )
+
+    findings = analyze_bypass_authority_unit(
+        {
+            "app/handler.py": """
+from .evil import client_writer
+
+def handler(request):
+    request.state.bypass_filter = True
+    return request.state.bypass_filter
+""".strip(),
+        },
+        entry_path="app/handler.py",
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("app/handler.py"),
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].closed_world is not None
+    assert findings[0].closed_world.complete is False
+    assert any(
+        "unresolvable_relative_import:app.evil" in item
+        for item in findings[0].closed_world.unresolvable_imports
+    )
+
+
+def test_missing_local_package_absolute_import_refuses_authorized() -> None:
+    """Absolute import under an existing local package top is not external."""
 
     from ovk.compilers.authorization.bypass_authority import (
         analyze_bypass_authority_unit,
@@ -254,18 +312,20 @@ from app.missing_middleware import attach
 
 def handler(request):
     request.state.bypass_filter = True
-    if request.state.bypass_filter:
-        return sink()
+    return request.state.bypass_filter
 """.strip(),
         },
         entry_path="app/handler.py",
         bypass_fields=frozenset({"bypass_filter"}),
         scope_proof=_scope("app/handler.py"),
     )
-    # No */app/missing_middleware.py in the manifest → external import.
+    assert findings[0].status != "authorized"
     assert findings[0].closed_world is not None
-    assert findings[0].closed_world.complete is True
-    assert findings[0].status == "authorized"
+    assert findings[0].closed_world.complete is False
+    assert any(
+        "unresolvable_local_import:app.missing_middleware" in item
+        for item in findings[0].closed_world.unresolvable_imports
+    )
 
 
 def test_ambiguous_manifest_import_refuses_authorized() -> None:
@@ -458,7 +518,10 @@ def handler(request):
     assert findings[0].status == "authorized"
 
 
-def test_missing_backend_import_without_candidate_is_external() -> None:
+def test_missing_local_package_submodule_refuses_authorized() -> None:
+    """``open_webui`` already appears under the manifest — missing submodule
+    is a local miss, not an external import (Unknown > false PASS)."""
+
     from ovk.compilers.authorization.bypass_authority import (
         analyze_bypass_authority_unit,
     )
@@ -482,10 +545,13 @@ def handler(request):
             source_roots=("backend",),
         ),
     )
-    # Zero candidates → external; literal writer may authorize under complete CW.
     assert findings[0].closed_world is not None
-    assert findings[0].closed_world.complete is True
-    assert findings[0].status == "authorized"
+    assert findings[0].closed_world.complete is False
+    assert findings[0].status != "authorized"
+    assert any(
+        "unresolvable_local_import:open_webui.utils.auth" in item
+        for item in findings[0].closed_world.unresolvable_imports
+    )
 
 def test_bare_allcaps_bypass_predicate_is_not_authorized() -> None:
     """Bare ALL_CAPS Names must not authorize trusted bypass authority."""
