@@ -81,6 +81,9 @@ def _materials(
         repo=repo,
         base_revision="base",
         head_revision=revision,
+        repository_python_files=files,
+        head_repository_python_files=files,
+        base_repository_python_files=files,
     )
 
 
@@ -140,6 +143,68 @@ def test_persistent_fastapi_state_round_trips_typed_state(tmp_path) -> None:
     assert (
         loaded.contract_composition_state.contracts.keys()
         == state.contract_composition_state.contracts.keys()
+    )
+    # #157 persisted fields must survive the 0.27.0 round-trip.
+    assert loaded.head_repository_python_manifest_digest is not None
+    assert (
+        loaded.head_repository_python_manifest_digest
+        == state.head_repository_python_manifest_digest
+    )
+    assert (
+        loaded.derived_closed_world_scope_digest
+        == state.derived_closed_world_scope_digest
+    )
+
+
+def test_old_persistent_fastapi_state_implementation_version_is_cache_miss(
+    tmp_path,
+) -> None:
+    """0.26.0 key identity must not load under 0.27.0 (#160)."""
+
+    from ovk.compilers.authorization.persistent_fastapi_state import (
+        PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION,
+        _key_components,
+    )
+
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.27.0"
+
+    summary_root = tmp_path / "summaries"
+    state_root = tmp_path / "state"
+    materials = _materials(revision="head-1")
+    state_cache = PersistentFastApiIncrementalStateCache(state_root)
+
+    result = compile_persistent_incremental_fastapi_assurance(
+        materials,
+        _profile(),
+        semantic_summary_cache=PersistentPythonSemanticSummaryCache(
+            summary_root
+        ),
+        state_cache=state_cache,
+    )
+    state = result.compilation.state
+    cache_path = state_cache._path(
+        repo=state.repo,
+        profile_digest=state.profile_digest,
+    )
+    record = json.loads(cache_path.read_text(encoding="utf-8"))
+    # Forge a pre-#160 implementation version inside the current key file.
+    record["key_components"]["implementation_version"] = "0.26.0"
+    record["key_digest"] = content_digest(record["key_components"])
+    cache_path.write_text(
+        json.dumps(record, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    assert state_cache.get(
+        repo=state.repo,
+        profile_digest=state.profile_digest,
+    ) is None
+    # Current key components still advertise 0.27.0.
+    assert (
+        _key_components(
+            repo=state.repo,
+            profile_digest=state.profile_digest,
+        )["implementation_version"]
+        == "0.27.0"
     )
 
 
