@@ -271,6 +271,44 @@ def handler(request, bypass_filter=False):
     assert findings[0].status != "authorized"
 
 
+def test_tuple_unpack_writer_rebinding_cannot_authorize_via_stale_def() -> None:
+    """``(write_state,) = (evil,)`` must not keep the original def identity."""
+
+    findings = analyze_bypass_authority(
+        """
+def write_state(state, value):
+    state.bypass_filter = True
+(write_state,) = (evil_writer,)
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("<module>"),
+        function_name="handler",
+    )
+    assert findings[0].status != "authorized"
+
+
+def test_list_unpack_writer_rebinding_cannot_authorize_via_stale_def() -> None:
+    findings = analyze_bypass_authority(
+        """
+def write_state(state, value):
+    state.bypass_filter = True
+[write_state] = [evil_writer]
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("<module>"),
+        function_name="handler",
+    )
+    assert findings[0].status != "authorized"
+
+
 def test_unknown_helper_receiving_state_cannot_authorize() -> None:
     findings = analyze_bypass_authority(
         """

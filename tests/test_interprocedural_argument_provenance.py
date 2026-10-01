@@ -290,6 +290,25 @@ def route(request):
     assert result.reason == "callee_not_uniquely_resolved"
 
 
+def test_module_level_tuple_unpack_rebinding_does_not_authorize() -> None:
+    result = analyze_interprocedural_argument_provenance(
+        {
+            "app/mod.py": """
+def generate(request, bypass_filter: bool = False):
+    request.state.bypass_filter = bypass_filter
+(generate,) = (other_callable,)
+def route(request):
+    generate(request, True)
+""".strip(),
+        },
+        callee_name="generate",
+        parameter="bypass_filter",
+        scope_proof=_scope("app/mod.py"),
+    )
+    assert result.provenance == "unknown"
+    assert result.reason == "callee_not_uniquely_resolved"
+
+
 def test_module_level_import_rebinding_poisons_callsite() -> None:
     result = analyze_interprocedural_argument_provenance(
         {

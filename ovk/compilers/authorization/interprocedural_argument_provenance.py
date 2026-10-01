@@ -35,7 +35,7 @@ ArgumentProvenanceKind = Literal[
     "unknown",
 ]
 
-_IMPLEMENTATION_VERSION = "0.2.0"
+_IMPLEMENTATION_VERSION = "0.2.1"
 
 
 @dataclass(frozen=True)
@@ -104,6 +104,8 @@ def _collect_store_names(target: ast.AST) -> list[str]:
     names: list[str] = []
     if isinstance(target, ast.Name):
         names.append(target.id)
+    elif isinstance(target, ast.Starred):
+        names.extend(_collect_store_names(target.value))
     elif isinstance(target, (ast.Tuple, ast.List)):
         for elt in target.elts:
             names.extend(_collect_store_names(elt))
