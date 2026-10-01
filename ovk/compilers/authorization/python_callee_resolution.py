@@ -169,6 +169,14 @@ def _static_str(node: ast.AST) -> str | None:
     return None
 
 
+def _is_module_namespace_expr(node: ast.AST) -> bool:
+    """True for module-level namespace objects we refuse to trust as identity."""
+
+    if _is_globals_call(node):
+        return True
+    return isinstance(node, ast.Name) and node.id in {"__dict__", "globals", "locals", "vars"}
+
+
 def _names_bound_by_statement(node: ast.AST) -> set[str]:
     """Names a module-level statement may bind, including nested suites.
 
@@ -194,7 +202,9 @@ def _names_bound_by_statement(node: ast.AST) -> set[str]:
     elif isinstance(node, ast.Assign):
         for target in node.targets:
             names.update(_collect_store_names(target))
-            if isinstance(target, ast.Subscript) and _is_globals_call(target.value):
+            if isinstance(target, ast.Subscript) and _is_module_namespace_expr(
+                target.value
+            ):
                 key = _static_str(target.slice)
                 if key is not None:
                     names.add(key)
@@ -245,7 +255,7 @@ def _names_bound_by_statement(node: ast.AST) -> set[str]:
         if isinstance(node.value, ast.Call) and isinstance(
             node.value.func, ast.Attribute
         ):
-            if _is_globals_call(node.value.func.value) and node.value.func.attr in {
+            if _is_module_namespace_expr(node.value.func.value) and node.value.func.attr in {
                 "update",
                 "setdefault",
                 "pop",
@@ -306,7 +316,9 @@ def _apply_precise_binding(
     elif isinstance(node, ast.Assign):
         poisoned = False
         for target in node.targets:
-            if isinstance(target, ast.Subscript) and _is_globals_call(target.value):
+            if isinstance(target, ast.Subscript) and _is_module_namespace_expr(
+                target.value
+            ):
                 key = _static_str(target.slice)
                 if key is None:
                     poisoned = True
@@ -343,7 +355,7 @@ def _apply_precise_binding(
         if isinstance(node.value, ast.Call) and isinstance(
             node.value.func, ast.Attribute
         ):
-            if _is_globals_call(node.value.func.value) and node.value.func.attr in {
+            if _is_module_namespace_expr(node.value.func.value) and node.value.func.attr in {
                 "update",
                 "setdefault",
                 "pop",

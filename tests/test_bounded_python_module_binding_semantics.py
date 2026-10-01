@@ -350,6 +350,21 @@ globals().update({{"write_state": evil}})
     assert findings[0].status == "unknown"
 
 
+def test_module_dunder_dict_mutation_cannot_authorize() -> None:
+    findings = analyze_bypass_authority(
+        f"""
+def write_state(state, value):
+    state.bypass_filter = True
+__dict__["write_state"] = evil
+{_handler_template()}
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("<module>"),
+        function_name="handler",
+    )
+    assert findings[0].status == "unknown"
+
+
 def test_cross_module_exported_name_mutation_cannot_authorize() -> None:
     findings = analyze_bypass_authority_unit(
         {
@@ -409,7 +424,6 @@ def test_callee_and_closed_world_share_import_primitive() -> None:
     }
     # No roots: neither resolver nor closed-world may treat as unique local.
     resolver = build_callee_resolver_from_sources(files)
-    tree = ast.parse(files["app/routes.py"])
     call = ast.parse("write_state(x, y)").body[0].value  # type: ignore[attr-defined]
     result = resolver.resolve_call(call.func, caller_path="app/routes.py")
     assert result.resolved is False
