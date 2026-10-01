@@ -881,14 +881,218 @@ def _collect_mutation_effects(
                     identity, mutation_path=path, mutation_index=index
                 )
 
+    def _scan_stmts(
+        stmts: Sequence[ast.stmt],
+        *,
+        path: str,
+        index: int,
+        local_bindings: Mapping[str, FinalBinding],
+        visited_fns: set[int],
+    ) -> None:
+        for stmt in stmts:
+            if isinstance(stmt, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                targets: list[ast.AST]
+                if isinstance(stmt, ast.Assign):
+                    targets = list(stmt.targets)
+                else:
+                    targets = [stmt.target]
+                for target in targets:
+                    _scan_assign_target(
+                        target,
+                        path=path,
+                        index=index,
+                        local_bindings=local_bindings,
+                    )
+            elif isinstance(stmt, ast.Delete):
+                for target in stmt.targets:
+                    _scan_assign_target(
+                        target,
+                        path=path,
+                        index=index,
+                        local_bindings=local_bindings,
+                    )
+            elif isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+                _scan_call(
+                    stmt.value,
+                    path=path,
+                    index=index,
+                    local_bindings=local_bindings,
+                    visited_fns=visited_fns,
+                )
+            elif isinstance(stmt, ast.If):
+                _scan_stmts(
+                    stmt.body,
+                    path=path,
+                    index=index,
+                    local_bindings=local_bindings,
+                    visited_fns=visited_fns,
+                )
+                _scan_stmts(
+                    stmt.orelse,
+                    path=path,
+                    index=index,
+                    local_bindings=local_bindings,
+                    visited_fns=visited_fns,
+                )
+            elif isinstance(stmt, (ast.For, ast.AsyncFor, ast.While)):
+                _scan_stmts(
+                    list(stmt.body) + list(stmt.orelse),
+                    path=path,
+                    index=index,
+                    local_bindings=local_bindings,
+                    visited_fns=visited_fns,
+                )
+            elif isinstance(stmt, (ast.With, ast.AsyncWith)):
+                _scan_stmts(
+                    stmt.body,
+                    path=path,
+                    index=index,
+                    local_bindings=local_bindings,
+                    visited_fns=visited_fns,
+                )
+            elif isinstance(stmt, ast.Try):
+                _scan_stmts(
+                    stmt.body,
+                    path=path,
+                    index=index,
+                    local_bindings=local_bindings,
+                    visited_fns=visited_fns,
+                )
+                for handler in stmt.handlers:
+                    _scan_stmts(
+                        handler.body,
+                        path=path,
+                        index=index,
+                        local_bindings=local_bindings,
+                        visited_fns=visited_fns,
+                    )
+                _scan_stmts(
+                    list(stmt.orelse) + list(stmt.finalbody),
+                    path=path,
+                    index=index,
+                    local_bindings=local_bindings,
+                    visited_fns=visited_fns,
+                )
+            elif isinstance(stmt, ast.Match):
+                for case in stmt.cases:
+                    _scan_stmts(
+                        case.body,
+                        path=path,
+                        index=index,
+                        local_bindings=local_bindings,
+                        visited_fns=visited_fns,
+                    )
+
+    def _follow_local_callee(
+        call: ast.Call,
+        *,
+        path: str,
+        index: int,
+        local_bindings: Mapping[str, FinalBinding],
+        visited_fns: set[int],
+    ) -> None:
+        """Scan bodies of local functions invoked at module level (#163 audit)."""
+
+        func = call.func
+        if isinstance(func, ast.Lambda):
+            # Lambdas cannot assign, but can call setattr / mutate via calls.
+            if isinstance(func.body, ast.Call):
+                _scan_call(
+                    func.body,
+                    path=path,
+                    index=index,
+                    local_bindings=local_bindings,
+                    visited_fns=visited_fns,
+                )
+            return
+        if not isinstance(func, ast.Name):
+            return
+        if func.id in {
+            "print",
+            "len",
+            "abs",
+            "min",
+            "max",
+            "sorted",
+            "list",
+            "dict",
+            "set",
+            "tuple",
+            "str",
+            "int",
+            "bool",
+            "float",
+            "range",
+            "enumerate",
+            "zip",
+            "iter",
+            "next",
+            "open",
+            "isinstance",
+            "issubclass",
+            "hasattr",
+            "getattr",
+            "id",
+            "hash",
+            "repr",
+            "format",
+            "sum",
+            "any",
+            "all",
+            "round",
+            "divmod",
+            "pow",
+            "bytearray",
+            "bytes",
+            "frozenset",
+            "object",
+            "type",
+            "super",
+            "property",
+            "staticmethod",
+            "classmethod",
+        }:
+            return
+        binding = local_bindings.get(func.id)
+        if (
+            binding is not None
+            and binding.kind == "function"
+            and binding.function_node is not None
+        ):
+            fn_id = id(binding.function_node)
+            if fn_id in visited_fns:
+                return
+            visited_fns.add(fn_id)
+            _scan_stmts(
+                binding.function_node.body,
+                path=path,
+                index=index,
+                local_bindings=local_bindings,
+                visited_fns=visited_fns,
+            )
+            return
+        # Unresolved / imported callee at module level that receives a module
+        # alias: cannot prove absence of export mutation.
+        for arg in call.args:
+            if isinstance(arg, ast.Name):
+                arg_binding = local_bindings.get(arg.id)
+                if (
+                    arg_binding is not None
+                    and arg_binding.kind == "import_module"
+                ):
+                    _handle_module_alias_export(arg.id, None, path=path)
+
     def _scan_call(
         call: ast.Call,
         *,
         path: str,
         index: int,
         local_bindings: Mapping[str, FinalBinding],
+        visited_fns: set[int] | None = None,
     ) -> None:
         nonlocal unsupported
+        if visited_fns is None:
+            visited_fns = set()
         setattr_parts = _setattr_target_and_name(call)
         if setattr_parts is not None:
             obj, name_expr = setattr_parts
@@ -950,17 +1154,26 @@ def _collect_mutation_effects(
                     _note_behavior(
                         identity, mutation_path=path, mutation_index=index
                     )
+            return
+
+        _follow_local_callee(
+            call,
+            path=path,
+            index=index,
+            local_bindings=local_bindings,
+            visited_fns=visited_fns,
+        )
 
     for path, tree in trees.items():
         local_bindings = bindings_by_path.get(path, {})
         body: Sequence[ast.stmt] = getattr(tree, "body", ())
         for index, node in _iter_module_level_executable_stmts(body):
             if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
-                targets: list[ast.AST]
-                if isinstance(node, ast.Assign):
-                    targets = list(node.targets)
-                else:
-                    targets = [node.target]
+                targets = (
+                    list(node.targets)
+                    if isinstance(node, ast.Assign)
+                    else [node.target]
+                )
                 for target in targets:
                     _scan_assign_target(
                         target,
@@ -974,6 +1187,7 @@ def _collect_mutation_effects(
                     path=path,
                     index=index,
                     local_bindings=local_bindings,
+                    visited_fns=set(),
                 )
             elif isinstance(node, ast.Delete):
                 for target in node.targets:

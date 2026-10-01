@@ -328,7 +328,30 @@ write_state.__code__ = evil.__code__
     assert prov.provenance == "unknown"
 
 
-def test_resolver_refuses_callable_behavior_without_module_rebinding() -> None:
+def test_module_level_helper_call_mutation_cannot_authorize() -> None:
+    findings = _unit(
+        f"""
+import helpers
+def poison():
+    helpers.write_state = evil
+poison()
+{_handler_attr()}
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_module_level_print_does_not_poison_identity() -> None:
+    findings = _unit(
+        f"""
+import helpers
+print("boot")
+{_handler_attr()}
+"""
+    )
+    assert findings[0].status == "authorized"
+    assert findings[0].reason == "source_proved_server_authority_write"
+
     resolver = build_callee_resolver_from_sources(
         {
             "app/helpers.py": _helpers_source(),
