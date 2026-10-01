@@ -65,7 +65,12 @@ def test_scoped_edge_ids_differ_across_cfg_digests() -> None:
 
 
 def test_cross_handler_local_edge_collision_does_not_merge_or_pass() -> None:
-    """Authority from handler A must not merge into handler B via local edge ids."""
+    """Authority from handler A must not merge into handler B via local edge ids.
+
+    #151: body helpers remain unproved (reachable-raise insufficient), so cuts
+    that previously composed bypass+helper no longer cover. Cross-handler edge
+    collision must still never PE PASS.
+    """
 
     files = {
         "app/middleware.py": """
@@ -122,18 +127,15 @@ async def other(request, user = Depends(get_current_user)):
         repository_python_files=files,
     )
     ir = FastApiDependencyEffectExtractor().compile(materials, profile)
-    assert ir.authorization_control_point_evidence
-    # Each established control point is bound to one CFG digest.
-    digests = {
-        item.control_flow_summary_digest
-        for item in ir.authorization_control_point_evidence
-    }
-    assert len(digests) >= 1
+    assert all(
+        guard.effectiveness != "established"
+        for guard in ir.guards
+        if "body_auth" in guard.guard_id
+    )
+    # Bypass may establish under repository closure; helpers do not compose a cut.
     for cut in ir.authorization_cut_set_evidence:
         if not cut.edge_control_points:
             continue
-        # Edges on a cut must only be justified by control points with the
-        # same CFG digest — never by another handler's colliding local id.
         for edge_id in cut.edge_control_points:
             foreign = [
                 item
@@ -149,6 +151,8 @@ async def other(request, user = Depends(get_current_user)):
                 for item in ir.authorization_control_point_evidence
                 if item.edge_id == edge_id
             )
+    evaluation = evaluate_protected_effect_integrity(ir)
+    assert all(item.status != "pass" for item in evaluation)
 
 
 def test_raw_edge_membership_without_control_point_refuses_collective_pass() -> None:

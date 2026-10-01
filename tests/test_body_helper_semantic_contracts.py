@@ -1,8 +1,9 @@
-"""Body-helper semantic contracts (#148).
+"""Body-helper semantic contracts (#148 / #151).
 
-Profile-declared helpers stay unproved until fail-closed implementation
-evidence exists. Resource binding is explicit; silent acted_id mapping is
-refused. No-op, shadowed, zero-arg, and wrong-resource helpers never PE PASS.
+Profile-declared helpers stay unproved: a reachable denial-shaped raise is
+insufficient authorization evidence. Resource binding is explicit; silent
+acted_id mapping is refused. No-op, shadowed, zero-arg, wrong-resource, and
+reachable-raise helpers never PE PASS.
 """
 
 from __future__ import annotations
@@ -87,7 +88,9 @@ def test_profile_requires_explicit_resource_binding() -> None:
         ProtectedEffectProfileConfig.model_validate(payload)
 
 
-def test_fail_closed_helper_with_authorized_resource_can_pass() -> None:
+def test_reachable_raise_helper_stays_unproved_never_pe_pass() -> None:
+    """#151: reachable raise is insufficient — never established, never PASS."""
+
     source = f"""
 from fastapi import Depends, FastAPI, HTTPException
 app = FastAPI()
@@ -99,12 +102,16 @@ async def handler(request, user = Depends(get_current_user)):
     require_access(user)
     return sink(user)
 """.strip()
+    evidence = analyze_body_helper_implementation(
+        {"app/routes.py": source}, helper_name="require_access"
+    )
+    assert evidence.status == "unproved"
+    assert evidence.reason == "helper_reachable_raise_insufficient"
     ir = _compile({"app/routes.py": source}, profile=_profile())
     assert ir.guards
-    assert ir.guards[0].effectiveness == "established"
-    assert ir.guards[0].resource_id == ir.protected_effects[0].resource_id
+    assert all(guard.effectiveness != "established" for guard in ir.guards)
     evaluation = evaluate_protected_effect_integrity(ir)
-    assert evaluation[0].status == "pass"
+    assert evaluation[0].status != "pass"
 
 
 def test_noop_helper_never_pe_pass() -> None:
@@ -246,7 +253,9 @@ async def handler(request, user = Depends(get_current_user)):
     evidence = analyze_body_helper_implementation(
         files, helper_name="require_access"
     )
-    assert evidence.status == "established"
+    # Unique module definition still diagnosed as reachable-raise-insufficient;
+    # callsite rebinding additionally refuses establishment at bind time.
+    assert evidence.status == "unproved"
     ir = _compile(files, profile=_profile())
     assert all(guard.effectiveness != "established" for guard in ir.guards)
     evaluation = evaluate_protected_effect_integrity(ir)

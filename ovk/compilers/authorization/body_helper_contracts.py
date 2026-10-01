@@ -1,14 +1,16 @@
-"""Fail-closed body-authorization-helper implementation evidence (#148).
+"""Body-authorization-helper implementation evidence (#148 / #151).
 
-Profile declaration alone never establishes effectiveness. A helper becomes
-established only when exactly one definition is found and that definition is a
-fail-closed authorization check (raises / HTTPException on denial). No-op,
-shadowed, dead-code-only, and unresolved definitions stay unproved
-(Unknown > false PASS).
+Profile declaration alone never establishes effectiveness. A reachable
+denial-shaped raise is also insufficient: it does not prove the raise
+implements the authorization policy represented by the profile
+(Unknown > false PASS). Helpers therefore remain ``unproved`` until a
+machine-checkable authorization predicate or digest-bound contract is
+modeled (#152+).
 
-Callsite-local rebinding (nested def, parameter, or assignment of the helper
-name inside the enclosing handler) also refuses establishment even when a
-module-level fail-closed definition exists elsewhere.
+No-op, shadowed, dead-code-only, and unresolved definitions stay unproved
+with distinct diagnostic reasons. Callsite-local rebinding (nested def,
+parameter, or assignment of the helper name inside the enclosing handler)
+also refuses establishment even when a module-level definition exists.
 """
 
 from __future__ import annotations
@@ -311,12 +313,15 @@ def analyze_body_helper_implementation(
             reason="helper_implementation_noop",
         )
     if _block_has_reachable_fail_closed_raise(list(node.body)):
+        # #151: a reachable raise is diagnostic only — never establishes
+        # authorization effectiveness. Irrelevant / inverted / probabilistic
+        # denials would otherwise false-PASS under an unchanged profile.
         return BodyHelperImplementationEvidence(
             helper_name=helper_name,
             path=path,
             line=getattr(node, "lineno", 0) or 0,
-            status="established",
-            reason="helper_fail_closed_raise",
+            status="unproved",
+            reason="helper_reachable_raise_insufficient",
         )
     return BodyHelperImplementationEvidence(
         helper_name=helper_name,
