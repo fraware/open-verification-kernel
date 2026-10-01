@@ -2,8 +2,10 @@
 
 Adversarial coverage: statement-order ModuleObject / CallableObject /
 ModuleNamespace aliases, interprocedural actual→formal binding, conditional
-alias joins, reassignment severance, and container escape → UNKNOWN.
-Unknown > false PASS. Shared by bypass writer closure and argument provenance.
+alias joins, reassignment severance, container escape → UNKNOWN, and lattice
+refinement of bottom vs unknown receivers (export-spelling poison without
+breaking severance). Unknown > false PASS. Shared by bypass writer closure
+and argument provenance.
 """
 
 from __future__ import annotations
@@ -344,6 +346,146 @@ match helpers:
     case m:
         m.write_state = evil
 {_handler_attr()}
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_getattr_module_dict_cannot_authorize() -> None:
+    """getattr(module, \"__dict__\") must be ModuleNamespace, not CallableObject."""
+
+    findings = _unit(
+        f"""
+import helpers
+d = getattr(helpers, "__dict__")
+d["write_state"] = evil
+{_handler_attr()}
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_kwonly_actual_formal_cannot_authorize() -> None:
+    findings = _unit(
+        f"""
+import helpers
+def poison(*, mod):
+    mod.write_state = evil
+poison(mod=helpers)
+{_handler_attr()}
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_default_value_identity_cannot_authorize() -> None:
+    findings = _unit(
+        f"""
+import helpers
+def f(m=helpers):
+    m.write_state = evil
+f()
+{_handler_attr()}
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_returned_closure_mutation_cannot_authorize() -> None:
+    findings = _unit(
+        f"""
+import helpers
+def make():
+    m = helpers
+    def inner():
+        m.write_state = evil
+    return inner
+make()()
+{_handler_attr()}
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_for_iter_container_escape_cannot_authorize() -> None:
+    findings = _unit(
+        f"""
+import helpers
+for m in [helpers]:
+    m.write_state = evil
+{_handler_attr()}
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_unknown_receiver_export_spelling_cannot_authorize() -> None:
+    """Unmodeled values may alias a module; export-shaped writes must UNKNOWN.
+
+    Distinct from severance: ``m = other`` is bottom (no tracked identity) and
+    may still authorize after reassignment.
+    """
+
+    findings = _unit(
+        f"""
+import helpers
+m = unknown()
+m.write_state = evil
+{_handler_attr()}
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_unknown_receiver_unrelated_attr_still_authorizes() -> None:
+    findings = _unit(
+        f"""
+import helpers
+m = unknown()
+m.unrelated = evil
+{_handler_attr()}
+"""
+    )
+    assert findings[0].status == "authorized"
+    assert findings[0].reason == "source_proved_server_authority_write"
+
+
+def test_class_body_module_mutation_cannot_authorize() -> None:
+    findings = _unit(
+        f"""
+import helpers
+class C:
+    helpers.write_state = evil
+{_handler_attr()}
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_decorator_helper_mutation_cannot_authorize() -> None:
+    findings = _unit(
+        f"""
+import helpers
+def deco(f):
+    helpers.write_state = evil
+    return f
+@deco
+def g():
+    pass
+{_handler_attr()}
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_diamond_alias_and_from_import_as_still_poison() -> None:
+    findings = _unit(
+        f"""
+from helpers import write_state as w
+f = w
+g = f
+g.__code__ = evil.__code__
+{_handler_attr("write_state")}
 """
     )
     assert findings[0].status == "unknown"
