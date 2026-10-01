@@ -43,7 +43,7 @@ from ovk.compilers.authorization.python_import_space import (
     normalize_path,
 )
 
-_IMPLEMENTATION_VERSION = "0.8.0"
+_IMPLEMENTATION_VERSION = "0.9.0"
 _MAX_IMPORT_FOLLOW_DEPTH = 8
 
 BindingKind = Literal["function", "import_name", "import_module", "rebound"]
@@ -741,6 +741,13 @@ def _is_setattr_call(call: ast.Call) -> bool:
     )
 
 
+def _is_delattr_call(call: ast.Call) -> bool:
+    func = call.func
+    return (isinstance(func, ast.Name) and func.id == "delattr") or (
+        isinstance(func, ast.Attribute) and func.attr == "__delattr__"
+    )
+
+
 def _setattr_target_and_name(
     call: ast.Call,
 ) -> tuple[ast.AST, ast.AST] | None:
@@ -759,6 +766,95 @@ def _setattr_target_and_name(
         # obj.__setattr__(name, value)
         return (func.value, call.args[0])
     return None
+
+
+def _delattr_target_and_name(
+    call: ast.Call,
+) -> tuple[ast.AST, ast.AST] | None:
+    """Return (target_obj, name_expr) for delattr-shaped calls."""
+
+    if not _is_delattr_call(call) or len(call.args) < 1:
+        return None
+    func = call.func
+    if isinstance(func, ast.Name) and func.id == "delattr":
+        if len(call.args) < 2:
+            return None
+        return (call.args[0], call.args[1])
+    if isinstance(func, ast.Attribute) and func.attr == "__delattr__":
+        if isinstance(func.value, ast.Name) and func.value.id == "object":
+            if len(call.args) < 2:
+                return None
+            return (call.args[0], call.args[1])
+        return (func.value, call.args[0])
+    return None
+
+
+def _unwrap_await(expr: ast.AST) -> ast.AST:
+    """Peel ``Await`` wrappers so async helper calls remain visible."""
+
+    while isinstance(expr, ast.Await):
+        expr = expr.value
+    return expr
+
+
+def _class_method_by_name(
+    class_node: ast.ClassDef,
+    method_name: str,
+) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+    for child in class_node.body:
+        if (
+            isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and child.name == method_name
+        ):
+            return child
+    return None
+
+
+def _attrsetter_static_name(call: ast.Call) -> str | None:
+    """Return the static attribute name for ``operator.attrsetter("x")``."""
+
+    func = call.func
+    if isinstance(func, ast.Name) and func.id == "attrsetter" and call.args:
+        return _static_str(call.args[0])
+    if (
+        isinstance(func, ast.Attribute)
+        and func.attr == "attrsetter"
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "operator"
+        and call.args
+    ):
+        return _static_str(call.args[0])
+    return None
+
+
+def _methodcaller_static_name(call: ast.Call) -> str | None:
+    """Return the static method name for ``operator.methodcaller("x")``."""
+
+    func = call.func
+    if isinstance(func, ast.Name) and func.id == "methodcaller" and call.args:
+        return _static_str(call.args[0])
+    if (
+        isinstance(func, ast.Attribute)
+        and func.attr == "methodcaller"
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "operator"
+        and call.args
+    ):
+        return _static_str(call.args[0])
+    return None
+
+
+def _getattr_static_name(call: ast.Call) -> str | None:
+    """Return the static attribute name for ``getattr(obj, "x")``."""
+
+    if not (
+        isinstance(call.func, ast.Name)
+        and call.func.id == "getattr"
+        and len(call.args) >= 2
+        and not call.keywords
+    ):
+        return None
+    return _static_str(call.args[1])
 
 
 _BENIGN_BUILTINS = frozenset(
@@ -780,6 +876,8 @@ _BENIGN_BUILTINS = frozenset(
         "range",
         "enumerate",
         "zip",
+        "map",
+        "filter",
         "iter",
         "next",
         "open",
@@ -1077,6 +1175,12 @@ def _build_identity_scanner(
     """Shared #165/#167 object-alias identity scanner closed over ``accum``."""
 
     lambda_bindings: dict[str, ast.Lambda] = {}
+    # Name → class method FunctionDef for bound-method aliases (``p = m.poison``).
+    method_bindings: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+    # Nested / module ClassDef registry for method-call following (#167 harden).
+    class_registry: dict[str, ast.ClassDef] = {}
+    # Local name → class name for ``m = Mut()`` instance aliases.
+    instance_class_of: dict[str, str] = {}
 
     def _note_export(module_path: str, name: str) -> None:
         accum.export_mutations.setdefault(module_path, set()).add(name)
@@ -1164,7 +1268,147 @@ def _build_identity_scanner(
         "index": 0,
         "visited_fns": set(),
         "local_fns": None,
+        "local_classes": None,
     }
+
+    def _register_module_classes(path: str) -> None:
+        tree = trees.get(path)
+        if tree is None:
+            return
+        for node in getattr(tree, "body", ()):
+            if isinstance(node, ast.ClassDef):
+                class_registry[node.name] = node
+
+    def _lookup_class(
+        name: str,
+        local_classes: Mapping[str, ast.ClassDef] | None,
+    ) -> ast.ClassDef | None:
+        if local_classes is not None and name in local_classes:
+            return local_classes[name]
+        return class_registry.get(name)
+
+    def _resolve_receiver_class(
+        receiver: ast.AST,
+        *,
+        local_classes: Mapping[str, ast.ClassDef] | None,
+    ) -> ast.ClassDef | None:
+        """Resolve ``Mut`` / ``Mut()`` / instance aliases to a ClassDef."""
+
+        if isinstance(receiver, ast.Name):
+            direct = _lookup_class(receiver.id, local_classes)
+            if direct is not None:
+                return direct
+            cname = instance_class_of.get(receiver.id)
+            if cname is not None:
+                return _lookup_class(cname, local_classes)
+            return None
+        if isinstance(receiver, ast.Call) and isinstance(receiver.func, ast.Name):
+            return _lookup_class(receiver.func.id, local_classes)
+        return None
+
+    def _resolve_attribute_method(
+        func: ast.Attribute,
+        *,
+        local_classes: Mapping[str, ast.ClassDef] | None,
+    ) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+        class_node = _resolve_receiver_class(
+            func.value, local_classes=local_classes
+        )
+        if class_node is None:
+            return None
+        return _class_method_by_name(class_node, func.attr)
+
+    def _methods_named(
+        method_name: str,
+        *,
+        local_classes: Mapping[str, ast.ClassDef] | None,
+    ) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
+        """Conservative may-execute set of methods with ``method_name``."""
+
+        seen: set[int] = set()
+        methods: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
+        classes: dict[str, ast.ClassDef] = dict(class_registry)
+        if local_classes is not None:
+            classes.update(local_classes)
+        for class_node in classes.values():
+            method = _class_method_by_name(class_node, method_name)
+            if method is None or id(method) in seen:
+                continue
+            seen.add(id(method))
+            methods.append(method)
+        return methods
+
+    def _follow_methods_named(
+        method_name: str,
+        call: ast.Call,
+        *,
+        path: str,
+        index: int,
+        env: dict[str, _IdentityPointsTo],
+        visited_fns: set[int],
+        local_fns: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None,
+        local_classes: Mapping[str, ast.ClassDef] | None,
+    ) -> bool:
+        methods = _methods_named(method_name, local_classes=local_classes)
+        if not methods:
+            return False
+        for method in methods:
+            _scan_fn_body(
+                method,
+                path=path,
+                index=index,
+                env=env,
+                visited_fns=visited_fns,
+                local_fns=local_fns,
+                local_classes=local_classes,
+                formals=_formal_bindings_for_call(call, method, env, path=path),
+            )
+        return True
+
+    def _scan_fn_body(
+        fn_node: ast.FunctionDef | ast.AsyncFunctionDef,
+        *,
+        path: str,
+        index: int,
+        env: dict[str, _IdentityPointsTo],
+        visited_fns: set[int],
+        local_fns: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None,
+        local_classes: Mapping[str, ast.ClassDef] | None,
+        formals: Mapping[str, _IdentityPointsTo] | None = None,
+    ) -> None:
+        fn_id = id(fn_node)
+        if fn_id in visited_fns:
+            return
+        visited_fns.add(fn_id)
+        call_env = _copy_env(env)
+        if formals is not None:
+            call_env.update(formals)
+        nested_fns = dict(local_fns or {})
+        nested_classes = dict(local_classes or {})
+        for stmt in fn_node.body:
+            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                nested_fns[stmt.name] = stmt
+            elif isinstance(stmt, ast.ClassDef):
+                nested_classes[stmt.name] = stmt
+                class_registry[stmt.name] = stmt
+        _scan_stmts(
+            fn_node.body,
+            path=path,
+            index=index,
+            env=call_env,
+            visited_fns=visited_fns,
+            local_fns=nested_fns,
+            local_classes=nested_classes,
+        )
+        _scan_nested_defs_conservatively(
+            fn_node,
+            path=path,
+            index=index,
+            call_env=call_env,
+            visited_fns=visited_fns,
+            local_fns=nested_fns,
+            local_classes=nested_classes,
+        )
 
     def _poison_unknown_receiver(
         *,
@@ -1216,6 +1460,7 @@ def _build_identity_scanner(
         *,
         path: str,
     ) -> _IdentityPointsTo:
+        expr = _unwrap_await(expr)
         if isinstance(expr, ast.Name):
             return _lookup_name(expr.id, env, path=path)
         if isinstance(expr, ast.NamedExpr):
@@ -1365,6 +1610,7 @@ def _build_identity_scanner(
                 env=env_dict,
                 visited_fns=_scan_ctx["visited_fns"],  # type: ignore[arg-type]
                 local_fns=_scan_ctx["local_fns"],  # type: ignore[arg-type]
+                local_classes=_scan_ctx["local_classes"],  # type: ignore[arg-type]
             )
             return _IdentityPointsTo.unknown_only()
         return _IdentityPointsTo.unknown_only()
@@ -1704,6 +1950,7 @@ def _build_identity_scanner(
         call_env: dict[str, _IdentityPointsTo],
         visited_fns: set[int],
         local_fns: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None,
+        local_classes: Mapping[str, ast.ClassDef] | None = None,
     ) -> None:
         """May-execute nested defs (returned/stored closures) under call_env."""
 
@@ -1726,9 +1973,13 @@ def _build_identity_scanner(
                     nest_env[arg.arg] = _IdentityPointsTo.unknown_only()
                 nested_local = dict(local_fns or {})
                 nested_local[node.name] = node
+                nested_classes = dict(local_classes or {})
                 for stmt in node.body:
                     if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
                         nested_local[stmt.name] = stmt
+                    elif isinstance(stmt, ast.ClassDef):
+                        nested_classes[stmt.name] = stmt
+                        class_registry[stmt.name] = stmt
                 _scan_stmts(
                     node.body,
                     path=path,
@@ -1736,6 +1987,7 @@ def _build_identity_scanner(
                     env=nest_env,
                     visited_fns=visited_fns,
                     local_fns=nested_local,
+                    local_classes=nested_classes,
                 )
 
     def _follow_local_callee(
@@ -1746,6 +1998,7 @@ def _build_identity_scanner(
         env: dict[str, _IdentityPointsTo],
         visited_fns: set[int],
         local_fns: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None = None,
+        local_classes: Mapping[str, ast.ClassDef] | None = None,
     ) -> None:
         func = call.func
         if isinstance(func, ast.Lambda):
@@ -1779,6 +2032,7 @@ def _build_identity_scanner(
                         env=call_env,
                         visited_fns=visited_fns,
                         local_fns=local_fns,
+                        local_classes=local_classes,
                     )
                 else:
                     _escape_if_tracked(_eval_expr(func.body, call_env, path=path))
@@ -1803,9 +2057,53 @@ def _build_identity_scanner(
                 env=env,
                 visited_fns=visited_fns,
                 local_fns=local_fns,
+                local_classes=local_classes,
+            )
+            return
+        # Bound method alias: ``p = Mut().poison; p()``.
+        if isinstance(func, ast.Name) and func.id in method_bindings:
+            _scan_fn_body(
+                method_bindings[func.id],
+                path=path,
+                index=index,
+                env=env,
+                visited_fns=visited_fns,
+                local_fns=local_fns,
+                local_classes=local_classes,
+                formals=_formal_bindings_for_call(
+                    call, method_bindings[func.id], env, path=path
+                ),
             )
             return
         if isinstance(func, ast.Call):
+            # getattr(obj, "poison")() — follow the named method when static.
+            getattr_name = _getattr_static_name(func)
+            if getattr_name is not None:
+                if _follow_methods_named(
+                    getattr_name,
+                    call,
+                    path=path,
+                    index=index,
+                    env=env,
+                    visited_fns=visited_fns,
+                    local_fns=local_fns,
+                    local_classes=local_classes,
+                ):
+                    return
+            # operator.methodcaller("poison")(obj)
+            methodcaller_name = _methodcaller_static_name(func)
+            if methodcaller_name is not None:
+                if _follow_methods_named(
+                    methodcaller_name,
+                    call,
+                    path=path,
+                    index=index,
+                    env=env,
+                    visited_fns=visited_fns,
+                    local_fns=local_fns,
+                    local_classes=local_classes,
+                ):
+                    return
             # Chained call ``make()()``: evaluate the callee expression first so
             # returned nested helpers still contribute mutation effects.
             _scan_call(
@@ -1815,6 +2113,7 @@ def _build_identity_scanner(
                 env=env,
                 visited_fns=visited_fns,
                 local_fns=local_fns,
+                local_classes=local_classes,
             )
             for arg in call.args:
                 _escape_if_tracked(_eval_expr(arg, env, path=path))
@@ -1822,6 +2121,37 @@ def _build_identity_scanner(
                 _escape_if_tracked(_eval_expr(kw.value, env, path=path))
             return
         if isinstance(func, ast.Attribute):
+            # Method calls: Mut().poison() / Mut.poison() / instance.poison().
+            method = _resolve_attribute_method(
+                func, local_classes=local_classes
+            )
+            if method is not None:
+                _scan_fn_body(
+                    method,
+                    path=path,
+                    index=index,
+                    env=env,
+                    visited_fns=visited_fns,
+                    local_fns=local_fns,
+                    local_classes=local_classes,
+                    formals=_formal_bindings_for_call(
+                        call, method, env, path=path
+                    ),
+                )
+                return
+            # Factory / opaque receivers: may-execute every registered method
+            # with this name (Unknown > false PASS).
+            if _follow_methods_named(
+                func.attr,
+                call,
+                path=path,
+                index=index,
+                env=env,
+                visited_fns=visited_fns,
+                local_fns=local_fns,
+                local_classes=local_classes,
+            ):
+                return
             # ModuleNamespace method receivers (e.g. d.get) escape; ModuleObject
             # receivers of ordinary calls do not.
             receiver = _eval_expr(func.value, env, path=path)
@@ -1860,6 +2190,30 @@ def _build_identity_scanner(
                     _escape_identity(points)
             return
         if func.id in _BENIGN_BUILTINS:
+            # Container / higher-order builtins must still evaluate arguments so
+            # ``list(genexp)``, ``map(fn, …)`` cannot hide request-time mutations.
+            if func.id in {"map", "filter"} and call.args:
+                synthetic = ast.Call(
+                    func=call.args[0],
+                    args=list(call.args[1:]),
+                    keywords=list(call.keywords),
+                )
+                _follow_local_callee(
+                    synthetic,
+                    path=path,
+                    index=index,
+                    env=env,
+                    visited_fns=visited_fns,
+                    local_fns=local_fns,
+                    local_classes=local_classes,
+                )
+                for arg in call.args[1:]:
+                    _eval_expr(arg, env, path=path)
+                return
+            for arg in call.args:
+                _eval_expr(arg, env, path=path)
+            for kw in call.keywords:
+                _eval_expr(kw.value, env, path=path)
             return
         # Resolve local function from nested scan map / module final bindings.
         fn_node: ast.FunctionDef | ast.AsyncFunctionDef | None = None
@@ -1887,35 +2241,15 @@ def _build_identity_scanner(
                             (atom.defining_path, atom.export_name)
                         )
             return
-        fn_id = id(fn_node)
-        if fn_id in visited_fns:
-            return
-        visited_fns.add(fn_id)
-        formals = _formal_bindings_for_call(call, fn_node, env, path=path)
-        call_env = _copy_env(env)
-        if formals is not None:
-            call_env.update(formals)
-        nested_fns = dict(local_fns or {})
-        for stmt in fn_node.body:
-            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                nested_fns[stmt.name] = stmt
-        _scan_stmts(
-            fn_node.body,
-            path=path,
-            index=index,
-            env=call_env,
-            visited_fns=visited_fns,
-            local_fns=nested_fns,
-        )
-        # Nested defs may be returned/stored and invoked later — scan their
-        # bodies under the closure environment (Unknown > false PASS).
-        _scan_nested_defs_conservatively(
+        _scan_fn_body(
             fn_node,
             path=path,
             index=index,
-            call_env=call_env,
+            env=env,
             visited_fns=visited_fns,
-            local_fns=nested_fns,
+            local_fns=local_fns,
+            local_classes=local_classes,
+            formals=_formal_bindings_for_call(call, fn_node, env, path=path),
         )
 
     def _scan_call(
@@ -1926,6 +2260,7 @@ def _build_identity_scanner(
         env: dict[str, _IdentityPointsTo],
         visited_fns: set[int] | None = None,
         local_fns: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None = None,
+        local_classes: Mapping[str, ast.ClassDef] | None = None,
     ) -> None:
         if visited_fns is None:
             visited_fns = set()
@@ -1942,6 +2277,35 @@ def _build_identity_scanner(
                 index=index,
             )
             return
+        delattr_parts = _delattr_target_and_name(call)
+        if delattr_parts is not None:
+            obj, name_expr = delattr_parts
+            attr = _static_str(name_expr)
+            _mutate_through_expr(
+                obj,
+                export_name=attr,
+                behavior=True,
+                env=env,
+                path=path,
+                index=index,
+            )
+            return
+        # operator.attrsetter("write_state")(helpers, evil)
+        if (
+            isinstance(call.func, ast.Call)
+            and len(call.args) >= 2
+        ):
+            setter_attr = _attrsetter_static_name(call.func)
+            if setter_attr is not None:
+                _mutate_through_expr(
+                    call.args[0],
+                    export_name=setter_attr,
+                    behavior=True,
+                    env=env,
+                    path=path,
+                    index=index,
+                )
+                return
 
         func = call.func
         if (
@@ -1981,6 +2345,7 @@ def _build_identity_scanner(
             env=env,
             visited_fns=visited_fns,
             local_fns=local_fns,
+            local_classes=local_classes,
         )
 
     def _scan_stmts(
@@ -1991,15 +2356,18 @@ def _build_identity_scanner(
         env: dict[str, _IdentityPointsTo],
         visited_fns: set[int],
         local_fns: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None = None,
+        local_classes: Mapping[str, ast.ClassDef] | None = None,
     ) -> None:
-        # Mutable nested-def map for this statement sequence.
+        # Mutable nested-def / class maps for this statement sequence.
         active_fns: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = dict(
             local_fns or {}
         )
+        active_classes: dict[str, ast.ClassDef] = dict(local_classes or {})
         for stmt in stmts:
             _scan_ctx["index"] = index
             _scan_ctx["visited_fns"] = visited_fns
             _scan_ctx["local_fns"] = active_fns
+            _scan_ctx["local_classes"] = active_classes
             if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 active_fns[stmt.name] = stmt
                 # Defaults evaluate at definition time — container packing escapes.
@@ -2018,6 +2386,7 @@ def _build_identity_scanner(
                             env=env,
                             visited_fns=visited_fns,
                             local_fns=active_fns,
+                            local_classes=active_classes,
                         )
                     else:
                         synthetic = ast.Call(
@@ -2032,10 +2401,13 @@ def _build_identity_scanner(
                             env=env,
                             visited_fns=visited_fns,
                             local_fns=active_fns,
+                            local_classes=active_classes,
                         )
                 _apply_import_identities(stmt, env, path=path)
                 continue
             if isinstance(stmt, ast.ClassDef):
+                active_classes[stmt.name] = stmt
+                class_registry[stmt.name] = stmt
                 for deco in stmt.decorator_list:
                     if isinstance(deco, ast.Call):
                         _scan_call(
@@ -2045,6 +2417,7 @@ def _build_identity_scanner(
                             env=env,
                             visited_fns=visited_fns,
                             local_fns=active_fns,
+                            local_classes=active_classes,
                         )
                     else:
                         _escape_if_tracked(_eval_expr(deco, env, path=path))
@@ -2057,6 +2430,7 @@ def _build_identity_scanner(
                     env=class_env,
                     visited_fns=visited_fns,
                     local_fns=active_fns,
+                    local_classes=active_classes,
                 )
                 _apply_import_identities(stmt, env, path=path)
                 continue
@@ -2074,12 +2448,35 @@ def _build_identity_scanner(
                         env=env,
                         value_points=value_points,
                     )
-                    # Name-bound lambdas are followed on later calls (#167).
+                    # Name-bound lambdas / bound methods followed on later calls.
                     if isinstance(target, ast.Name):
                         if isinstance(stmt.value, ast.Lambda):
                             lambda_bindings[target.id] = stmt.value
+                            method_bindings.pop(target.id, None)
+                            instance_class_of.pop(target.id, None)
+                        elif isinstance(stmt.value, ast.Attribute):
+                            lambda_bindings.pop(target.id, None)
+                            instance_class_of.pop(target.id, None)
+                            method = _resolve_attribute_method(
+                                stmt.value, local_classes=active_classes
+                            )
+                            if method is not None:
+                                method_bindings[target.id] = method
+                            else:
+                                method_bindings.pop(target.id, None)
+                        elif (
+                            isinstance(stmt.value, ast.Call)
+                            and isinstance(stmt.value.func, ast.Name)
+                            and _lookup_class(stmt.value.func.id, active_classes)
+                            is not None
+                        ):
+                            lambda_bindings.pop(target.id, None)
+                            method_bindings.pop(target.id, None)
+                            instance_class_of[target.id] = stmt.value.func.id
                         else:
                             lambda_bindings.pop(target.id, None)
+                            method_bindings.pop(target.id, None)
+                            instance_class_of.pop(target.id, None)
                 # Walrus bindings inside RHS.
                 for child in ast.walk(stmt.value):
                     if isinstance(child, ast.NamedExpr) and isinstance(
@@ -2139,16 +2536,19 @@ def _build_identity_scanner(
                             value_points=None,
                         )
                 continue
-            if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
-                _scan_call(
-                    stmt.value,
-                    path=path,
-                    index=index,
-                    env=env,
-                    visited_fns=visited_fns,
-                    local_fns=active_fns,
-                )
-                continue
+            if isinstance(stmt, ast.Expr):
+                expr_value = _unwrap_await(stmt.value)
+                if isinstance(expr_value, ast.Call):
+                    _scan_call(
+                        expr_value,
+                        path=path,
+                        index=index,
+                        env=env,
+                        visited_fns=visited_fns,
+                        local_fns=active_fns,
+                        local_classes=active_classes,
+                    )
+                    continue
             if isinstance(stmt, ast.If):
                 env_body = _copy_env(env)
                 _scan_stmts(
@@ -2158,6 +2558,7 @@ def _build_identity_scanner(
                     env=env_body,
                     visited_fns=visited_fns,
                     local_fns=active_fns,
+                    local_classes=active_classes,
                 )
                 env_else = _copy_env(env)
                 _scan_stmts(
@@ -2167,6 +2568,7 @@ def _build_identity_scanner(
                     env=env_else,
                     visited_fns=visited_fns,
                     local_fns=active_fns,
+                    local_classes=active_classes,
                 )
                 joined = _join_envs(env_body, env_else)
                 env.clear()
@@ -2186,6 +2588,7 @@ def _build_identity_scanner(
                     env=env_body,
                     visited_fns=visited_fns,
                     local_fns=active_fns,
+                    local_classes=active_classes,
                 )
                 joined = _join_envs(env, env_body)
                 env.clear()
@@ -2200,6 +2603,7 @@ def _build_identity_scanner(
                     env=env_body,
                     visited_fns=visited_fns,
                     local_fns=active_fns,
+                    local_classes=active_classes,
                 )
                 joined = _join_envs(env, env_body)
                 env.clear()
@@ -2232,6 +2636,7 @@ def _build_identity_scanner(
                     env=env_body,
                     visited_fns=visited_fns,
                     local_fns=active_fns,
+                    local_classes=active_classes,
                 )
                 joined = _join_envs(env, env_body)
                 env.clear()
@@ -2246,6 +2651,7 @@ def _build_identity_scanner(
                     env=env_body,
                     visited_fns=visited_fns,
                     local_fns=active_fns,
+                    local_classes=active_classes,
                 )
                 branch_envs = [env_body]
                 for handler in stmt.handlers:
@@ -2259,6 +2665,7 @@ def _build_identity_scanner(
                         env=env_h,
                         visited_fns=visited_fns,
                         local_fns=active_fns,
+                        local_classes=active_classes,
                     )
                     branch_envs.append(env_h)
                 env_else = _copy_env(env_body)
@@ -2269,6 +2676,7 @@ def _build_identity_scanner(
                     env=env_else,
                     visited_fns=visited_fns,
                     local_fns=active_fns,
+                    local_classes=active_classes,
                 )
                 branch_envs.append(env_else)
                 merged = branch_envs[0]
@@ -2282,6 +2690,7 @@ def _build_identity_scanner(
                     env=env_final,
                     visited_fns=visited_fns,
                     local_fns=active_fns,
+                    local_classes=active_classes,
                 )
                 env.clear()
                 env.update(env_final)
@@ -2304,6 +2713,7 @@ def _build_identity_scanner(
                         env=env_c,
                         visited_fns=visited_fns,
                         local_fns=active_fns,
+                        local_classes=active_classes,
                     )
                     branch_envs.append(env_c)
                 if not branch_envs:
@@ -2353,12 +2763,16 @@ def _build_identity_scanner(
     def scan_module_init() -> None:
         # Top-level walk per module: statement-order identity environment (#165).
         for path, tree in trees.items():
+            _register_module_classes(path)
             env: dict[str, _IdentityPointsTo] = {}
             body: Sequence[ast.stmt] = getattr(tree, "body", ())
             module_fns: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+            module_classes: dict[str, ast.ClassDef] = {}
             for node in body:
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     module_fns[node.name] = node
+                elif isinstance(node, ast.ClassDef):
+                    module_classes[node.name] = node
             for index, node in enumerate(body):
                 _scan_stmts(
                     [node],
@@ -2367,7 +2781,12 @@ def _build_identity_scanner(
                     env=env,
                     visited_fns=set(),
                     local_fns=module_fns,
+                    local_classes=module_classes,
                 )
+
+    def seed_class_registry() -> None:
+        for path in trees:
+            _register_module_classes(path)
 
     class _IdentityScanner:
         pass
@@ -2377,6 +2796,7 @@ def _build_identity_scanner(
     scanner.scan_module_init = scan_module_init  # type: ignore[method-assign]
     scanner.seed_env_for_path = seed_env_for_path  # type: ignore[method-assign]
     scanner.local_fns_for_path = local_fns_for_path  # type: ignore[method-assign]
+    scanner.seed_class_registry = seed_class_registry  # type: ignore[method-assign]
     return scanner
 
 
@@ -2430,6 +2850,7 @@ def begin_request_time_identity_session(
         import_roots=resolver.import_roots,
         accum=accum,
     )
+    scanner.seed_class_registry()
     env = scanner.seed_env_for_path(path_n)
     local_fns = dict(scanner.local_fns_for_path(path_n))
     return RequestTimeIdentitySession(

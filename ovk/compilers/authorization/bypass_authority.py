@@ -110,7 +110,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.15.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.16.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
