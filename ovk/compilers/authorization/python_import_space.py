@@ -1,4 +1,4 @@
-"""Bounded Python import-space theorem (#161).
+"""Bounded Python import-space theorem (#161 / #163).
 
 Callee resolution and closed-world import accounting share this primitive so
 they cannot diverge on module identity.
@@ -15,6 +15,11 @@ Proof sources for binding an absolute import ``a.b.c`` to a repository path:
 Unproved path-suffix matching (``*/a/b/c.py`` anywhere in the manifest) is
 intentionally absent: without a root proof, ``from helpers import f`` with
 only ``app/helpers.py`` is unresolved.
+
+Trust boundary: ``python_import_roots`` is a trusted profile fact / explicit
+case assumption. OVK does not discover it from packaging or runtime metadata.
+Held-out evaluations must record any supplied roots as assumptions, not as
+observed runtime facts.
 """
 
 from __future__ import annotations

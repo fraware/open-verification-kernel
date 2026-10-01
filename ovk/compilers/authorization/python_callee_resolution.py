@@ -1,12 +1,14 @@
-"""Caller-relative Python callee resolution (#160 / #161).
+"""Caller-relative Python callee resolution (#160 / #161 / #163).
 
 Replaces repository-global simple-name callee indexing with resolution that
 honours the caller's module-level final bindings and authenticated-manifest
 import identity under the shared import-root theorem (#161).
 
-Shared by:
-- bypass interprocedural writer closure
-- interprocedural argument provenance
+#163 adds bounded callable/module mutation closure: an imported module export
+or source-grounded callable retains precise authorizing identity only when
+both ModuleBindingIdentity and CallableBehaviorIdentity are established.
+Mutation analysis is shared by bypass writer closure and interprocedural
+argument provenance (no divergent systems).
 
 Resolution for a bare call ``write_state(...)``:
 1. local function binding in the caller module
@@ -21,8 +23,8 @@ name matches. Import follow uses :func:`python_import_space.module_candidates_in
 from __future__ import annotations
 
 import ast
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from ovk.compilers.authorization.python_import_space import (
@@ -31,7 +33,7 @@ from ovk.compilers.authorization.python_import_space import (
     normalize_path,
 )
 
-_IMPLEMENTATION_VERSION = "0.3.0"
+_IMPLEMENTATION_VERSION = "0.4.0"
 _MAX_IMPORT_FOLLOW_DEPTH = 8
 
 BindingKind = Literal["function", "import_name", "import_module", "rebound"]
@@ -55,7 +57,13 @@ class ResolvedCallee:
 
 @dataclass(frozen=True)
 class FinalBinding:
-    """Module-scope final binding for one local name."""
+    """Module-scope final binding for one local name.
+
+    ``behavior_established`` is CallableBehaviorIdentity: false when a
+    represented execution can mutate the callable object (``__code__``,
+    attribute/subscript writes, etc.) while ModuleBindingIdentity remains.
+    Authorizing resolution requires both identities.
+    """
 
     kind: BindingKind
     function_node: ast.FunctionDef | ast.AsyncFunctionDef | None = None
@@ -63,6 +71,7 @@ class FinalBinding:
     module_name: str | None = None
     # Imported attribute for ``from mod import attr`` (attr may differ from local).
     imported_name: str | None = None
+    behavior_established: bool = True
 
 
 @dataclass(frozen=True)
@@ -76,6 +85,17 @@ class CalleeResolveResult:
     def resolved(self) -> bool:
         return self.callee is not None
 
+
+@dataclass(frozen=True)
+class _MutationEffects:
+    """Collected module-export and callable-behavior mutation effects (#163)."""
+
+    # Defining module path → export names whose ModuleBindingIdentity is lost.
+    export_mutations: Mapping[str, frozenset[str]]
+    # (defining_path, export_name) with CallableBehaviorIdentity lost.
+    behavior_mutations: frozenset[tuple[str, str]]
+    # Unsupported dynamic module surfaces (e.g. sys.modules) → full poison.
+    unsupported_module_mutation: bool
 
 def import_module_name_from_importer(
     node: ast.ImportFrom,
@@ -422,95 +442,792 @@ def module_final_bindings(
     return bindings
 
 
-def _cross_module_mutations(
+def _iter_module_level_executable_stmts(
+    stmts: Sequence[ast.stmt],
+) -> Iterable[tuple[int, ast.stmt]]:
+    """Yield (top_level_index, stmt) for every module-level executable stmt.
+
+    Recurses into if/else, try/except/else/finally, for/while, with, and match
+    suites. Does not enter function or class bodies.
+    """
+
+    for index, node in enumerate(stmts):
+        yield index, node
+        if isinstance(node, ast.If):
+            for _, child in _iter_module_level_executable_stmts(node.body):
+                yield index, child
+            for _, child in _iter_module_level_executable_stmts(node.orelse):
+                yield index, child
+        elif isinstance(node, ast.While):
+            for _, child in _iter_module_level_executable_stmts(node.body):
+                yield index, child
+            for _, child in _iter_module_level_executable_stmts(node.orelse):
+                yield index, child
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            for _, child in _iter_module_level_executable_stmts(node.body):
+                yield index, child
+            for _, child in _iter_module_level_executable_stmts(node.orelse):
+                yield index, child
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for _, child in _iter_module_level_executable_stmts(node.body):
+                yield index, child
+        elif isinstance(node, ast.Try):
+            for _, child in _iter_module_level_executable_stmts(node.body):
+                yield index, child
+            for handler in node.handlers:
+                for _, child in _iter_module_level_executable_stmts(handler.body):
+                    yield index, child
+            for _, child in _iter_module_level_executable_stmts(node.orelse):
+                yield index, child
+            for _, child in _iter_module_level_executable_stmts(node.finalbody):
+                yield index, child
+        elif isinstance(node, ast.Match):
+            for case in node.cases:
+                for _, child in _iter_module_level_executable_stmts(case.body):
+                    yield index, child
+
+
+def _final_binding_establish_index(
+    tree: ast.AST,
+    name: str,
+) -> int | None:
+    """Top-level statement index that establishes ``name``'s final binding."""
+
+    body: Sequence[ast.stmt] = getattr(tree, "body", ())
+    establish: int | None = None
+    for index, node in enumerate(body):
+        if isinstance(node, _COMPOUND_UNCERTAIN):
+            possible = _names_bound_by_statement(node)
+            if name in possible or "*" in possible:
+                # Uncertain compound leaves rebound unless a later precise bind.
+                establish = None
+            continue
+        # Mirror unconditional precise binding that can own ``name``.
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name == name:
+                establish = index
+        elif isinstance(node, ast.ClassDef) and node.name == name:
+            establish = index
+        elif isinstance(node, ast.ImportFrom):
+            if any(alias.name == "*" for alias in node.names):
+                establish = None
+            else:
+                for alias in node.names:
+                    if (alias.asname or alias.name) == name:
+                        establish = index
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                local = alias.asname or alias.name.split(".", 1)[0]
+                if local == name:
+                    establish = index
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Subscript) and _is_module_namespace_expr(
+                    target.value
+                ):
+                    key = _static_str(target.slice)
+                    if key is None:
+                        establish = None
+                    elif key == name:
+                        establish = index
+                elif name in _collect_store_names(target):
+                    establish = index
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            if node.target.id == name:
+                establish = index
+        elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+            if node.target.id == name:
+                establish = index
+        elif isinstance(node, ast.Delete):
+            for target in node.targets:
+                if name in _collect_store_names(target):
+                    establish = None
+        elif isinstance(node, ast.Expr):
+            if isinstance(node.value, ast.Call):
+                func = node.value.func
+                if isinstance(func, ast.Name) and func.id in {
+                    "exec",
+                    "eval",
+                    "compile",
+                }:
+                    establish = None
+                elif (
+                    isinstance(func, ast.Attribute)
+                    and _is_module_namespace_expr(func.value)
+                    and func.attr
+                    in {
+                        "update",
+                        "setdefault",
+                        "pop",
+                        "clear",
+                        "__setitem__",
+                    }
+                ):
+                    establish = None
+    return establish
+
+
+def _is_sys_modules_expr(node: ast.AST) -> bool:
+    """True for ``sys.modules`` (Name sys + Attribute modules)."""
+
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "modules"
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "sys"
+    )
+
+
+def _module_namespace_surface(
+    node: ast.AST,
+    *,
+    local_bindings: Mapping[str, FinalBinding],
+) -> str | None:
+    """Return module alias if ``node`` is that module's namespace surface.
+
+    Recognizes ``module``, ``module.__dict__``, and ``vars(module)``.
+    """
+
+    if isinstance(node, ast.Name):
+        binding = local_bindings.get(node.id)
+        if binding is not None and binding.kind == "import_module":
+            return node.id
+        return None
+    if isinstance(node, ast.Attribute) and node.attr == "__dict__":
+        return _module_namespace_surface(
+            node.value, local_bindings=local_bindings
+        )
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "vars"
+        and len(node.args) == 1
+        and not node.keywords
+    ):
+        return _module_namespace_surface(
+            node.args[0], local_bindings=local_bindings
+        )
+    return None
+
+
+def _resolve_import_module_path(
+    alias: str,
+    *,
+    path: str,
+    bindings_by_path: Mapping[str, Mapping[str, FinalBinding]],
+    available_paths: frozenset[str],
+    import_roots: tuple[str, ...],
+) -> str | None:
+    binding = bindings_by_path.get(path, {}).get(alias)
+    if binding is None or binding.kind != "import_module" or binding.module_name is None:
+        return None
+    candidates = module_candidates_in_manifest(
+        binding.module_name,
+        set(available_paths),
+        import_roots=import_roots,
+    )
+    if len(candidates) != 1:
+        return None
+    return candidates[0]
+
+
+def _resolve_callable_identity(
+    expr: ast.AST,
+    *,
+    path: str,
+    bindings_by_path: Mapping[str, Mapping[str, FinalBinding]],
+    available_paths: frozenset[str],
+    import_roots: tuple[str, ...],
+) -> tuple[str, str] | None:
+    """Resolve ``expr`` to a (defining_path, export_name) callable identity."""
+
+    local = bindings_by_path.get(path, {})
+    if isinstance(expr, ast.Name):
+        binding = local.get(expr.id)
+        if binding is None:
+            return None
+        if binding.kind == "function":
+            return (path, expr.id)
+        if binding.kind == "import_name":
+            if binding.module_name is None or binding.imported_name is None:
+                return None
+            candidates = module_candidates_in_manifest(
+                binding.module_name,
+                set(available_paths),
+                import_roots=import_roots,
+            )
+            if len(candidates) != 1:
+                return None
+            return (candidates[0], binding.imported_name)
+        return None
+    if isinstance(expr, ast.Attribute) and isinstance(expr.value, ast.Name):
+        module_path = _resolve_import_module_path(
+            expr.value.id,
+            path=path,
+            bindings_by_path=bindings_by_path,
+            available_paths=available_paths,
+            import_roots=import_roots,
+        )
+        if module_path is None:
+            return None
+        return (module_path, expr.attr)
+    return None
+
+
+def _is_setattr_call(call: ast.Call) -> bool:
+    func = call.func
+    return (isinstance(func, ast.Name) and func.id == "setattr") or (
+        isinstance(func, ast.Attribute) and func.attr == "__setattr__"
+    )
+
+
+def _setattr_target_and_name(
+    call: ast.Call,
+) -> tuple[ast.AST, ast.AST] | None:
+    """Return (target_obj, name_expr) for setattr-shaped calls."""
+
+    if not _is_setattr_call(call) or len(call.args) < 2:
+        return None
+    func = call.func
+    if isinstance(func, ast.Name) and func.id == "setattr":
+        return (call.args[0], call.args[1])
+    if isinstance(func, ast.Attribute) and func.attr == "__setattr__":
+        if isinstance(func.value, ast.Name) and func.value.id == "object":
+            if len(call.args) < 3:
+                return None
+            return (call.args[0], call.args[1])
+        # obj.__setattr__(name, value)
+        return (func.value, call.args[0])
+    return None
+
+
+def _collect_mutation_effects(
     trees: Mapping[str, ast.AST],
     bindings_by_path: Mapping[str, Mapping[str, FinalBinding]],
     *,
     available_paths: frozenset[str],
     import_roots: tuple[str, ...],
-) -> dict[str, set[str]]:
-    """Map target module path → exported names mutated by other modules."""
+) -> _MutationEffects:
+    """Collect module-export and callable-behavior mutations (#163).
 
-    mutated: dict[str, set[str]] = {}
+    Recursively inspects all module-level executable suites. Shared by bypass
+    writer closure and interprocedural argument provenance via CalleeResolver.
+    """
 
-    def _note_module_attr(alias: str, attr: str, *, path: str) -> None:
-        local_bindings = bindings_by_path.get(path, {})
-        binding = local_bindings.get(alias)
-        if binding is None or binding.kind != "import_module":
-            return
-        if binding.module_name is None:
-            return
-        candidates = module_candidates_in_manifest(
-            binding.module_name,
-            set(available_paths),
+    export_mutations: dict[str, set[str]] = {}
+    behavior_mutations: set[tuple[str, str]] = set()
+    unsupported = False
+
+    def _note_export(module_path: str, name: str) -> None:
+        export_mutations.setdefault(module_path, set()).add(name)
+
+    def _note_behavior(
+        identity: tuple[str, str],
+        *,
+        mutation_path: str,
+        mutation_index: int,
+    ) -> None:
+        defining_path, export_name = identity
+        if defining_path == mutation_path:
+            establish = _final_binding_establish_index(
+                trees[defining_path], export_name
+            )
+            # Later unconditional rebinding in the defining module restores a
+            # fresh source-grounded callable; mutations before that index do
+            # not poison the final object.
+            if establish is not None and mutation_index < establish:
+                return
+        behavior_mutations.add(identity)
+
+    def _handle_module_alias_export(
+        alias: str,
+        attr: str | None,
+        *,
+        path: str,
+    ) -> None:
+        module_path = _resolve_import_module_path(
+            alias,
+            path=path,
+            bindings_by_path=bindings_by_path,
+            available_paths=available_paths,
             import_roots=import_roots,
         )
-        if len(candidates) != 1:
+        if module_path is None:
             return
-        mutated.setdefault(candidates[0], set()).add(attr)
+        _note_export(module_path, "*" if attr is None else attr)
 
-    for path, tree in trees.items():
-        for node in getattr(tree, "body", ()):
-            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
-                targets: list[ast.AST] = []
-                if isinstance(node, ast.Assign):
-                    targets.extend(node.targets)
-                else:
-                    targets.append(node.target)
-                for target in targets:
-                    if not isinstance(target, ast.Attribute):
-                        continue
-                    if not isinstance(target.value, ast.Name):
-                        continue
-                    _note_module_attr(target.value.id, target.attr, path=path)
-            elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
-                call = node.value
-                # setattr(module, "name", value) / object.__setattr__(...)
-                func = call.func
-                is_setattr = (
-                    isinstance(func, ast.Name) and func.id == "setattr"
-                ) or (
-                    isinstance(func, ast.Attribute) and func.attr == "__setattr__"
-                )
-                if not is_setattr or len(call.args) < 2:
-                    continue
-                if not isinstance(call.args[0], ast.Name):
-                    continue
-                attr = _static_str(call.args[1])
-                if attr is None:
-                    # Dynamic attr name on a module alias → poison all exports.
-                    binding = bindings_by_path.get(path, {}).get(call.args[0].id)
-                    if (
-                        binding is not None
-                        and binding.kind == "import_module"
-                        and binding.module_name is not None
-                    ):
+    def _scan_assign_target(
+        target: ast.AST,
+        *,
+        path: str,
+        index: int,
+        local_bindings: Mapping[str, FinalBinding],
+    ) -> None:
+        nonlocal unsupported
+        # module.name = ... / callable.attr = ...
+        if isinstance(target, ast.Attribute):
+            if _is_sys_modules_expr(target.value) or (
+                isinstance(target.value, ast.Subscript)
+                and _is_sys_modules_expr(target.value.value)
+            ):
+                unsupported = True
+                # Static sys.modules["mod"].name when possible.
+                if (
+                    isinstance(target.value, ast.Subscript)
+                    and _is_sys_modules_expr(target.value.value)
+                ):
+                    key = _static_str(target.value.slice)
+                    attr = target.attr
+                    if key is not None:
                         candidates = module_candidates_in_manifest(
-                            binding.module_name,
+                            key,
                             set(available_paths),
                             import_roots=import_roots,
                         )
                         if len(candidates) == 1:
-                            # Mark a sentinel consumed as full-module poison.
-                            mutated.setdefault(candidates[0], set()).add("*")
-                    continue
-                _note_module_attr(call.args[0].id, attr, path=path)
-    return mutated
+                            _note_export(candidates[0], attr)
+                        else:
+                            for mod_path in available_paths:
+                                _note_export(mod_path, "*")
+                    else:
+                        for mod_path in available_paths:
+                            _note_export(mod_path, "*")
+                else:
+                    for mod_path in available_paths:
+                        _note_export(mod_path, "*")
+                return
+            if isinstance(target.value, ast.Name):
+                alias = target.value.id
+                binding = local_bindings.get(alias)
+                if binding is not None and binding.kind == "import_module":
+                    _handle_module_alias_export(alias, target.attr, path=path)
+                    return
+                identity = _resolve_callable_identity(
+                    target.value,
+                    path=path,
+                    bindings_by_path=bindings_by_path,
+                    available_paths=available_paths,
+                    import_roots=import_roots,
+                )
+                if identity is not None:
+                    _note_behavior(
+                        identity, mutation_path=path, mutation_index=index
+                    )
+                    return
+            # helpers.write_state.__code__ = ... (Attribute of Attribute)
+            if isinstance(target.value, ast.Attribute):
+                identity = _resolve_callable_identity(
+                    target.value,
+                    path=path,
+                    bindings_by_path=bindings_by_path,
+                    available_paths=available_paths,
+                    import_roots=import_roots,
+                )
+                if identity is not None:
+                    _note_behavior(
+                        identity, mutation_path=path, mutation_index=index
+                    )
+                return
+        # module.__dict__[name] / vars(module)[name] / callable.__globals__[k]
+        if isinstance(target, ast.Subscript):
+            if _is_sys_modules_expr(target.value):
+                unsupported = True
+                key = _static_str(target.slice)
+                if key is not None:
+                    candidates = module_candidates_in_manifest(
+                        key,
+                        set(available_paths),
+                        import_roots=import_roots,
+                    )
+                    if len(candidates) == 1:
+                        _note_export(candidates[0], "*")
+                    else:
+                        for mod_path in available_paths:
+                            _note_export(mod_path, "*")
+                else:
+                    for mod_path in available_paths:
+                        _note_export(mod_path, "*")
+                return
+            surface = _module_namespace_surface(
+                target.value, local_bindings=local_bindings
+            )
+            if surface is not None:
+                key = _static_str(target.slice)
+                _handle_module_alias_export(surface, key, path=path)
+                return
+            # fn.__globals__[x] / fn.__dict__[x] / any callable subscript write
+            if isinstance(target.value, ast.Attribute):
+                identity = _resolve_callable_identity(
+                    target.value.value,
+                    path=path,
+                    bindings_by_path=bindings_by_path,
+                    available_paths=available_paths,
+                    import_roots=import_roots,
+                )
+                if identity is not None:
+                    _note_behavior(
+                        identity, mutation_path=path, mutation_index=index
+                    )
+                    return
+            identity = _resolve_callable_identity(
+                target.value,
+                path=path,
+                bindings_by_path=bindings_by_path,
+                available_paths=available_paths,
+                import_roots=import_roots,
+            )
+            if identity is not None:
+                _note_behavior(
+                    identity, mutation_path=path, mutation_index=index
+                )
+
+    def _scan_stmts(
+        stmts: Sequence[ast.stmt],
+        *,
+        path: str,
+        index: int,
+        local_bindings: Mapping[str, FinalBinding],
+        visited_fns: set[int],
+    ) -> None:
+        for stmt in stmts:
+            if isinstance(stmt, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                targets: list[ast.AST]
+                if isinstance(stmt, ast.Assign):
+                    targets = list(stmt.targets)
+                else:
+                    targets = [stmt.target]
+                for target in targets:
+                    _scan_assign_target(
+                        target,
+                        path=path,
+                        index=index,
+                        local_bindings=local_bindings,
+                    )
+            elif isinstance(stmt, ast.Delete):
+                for target in stmt.targets:
+                    _scan_assign_target(
+                        target,
+                        path=path,
+                        index=index,
+                        local_bindings=local_bindings,
+                    )
+            elif isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+                _scan_call(
+                    stmt.value,
+                    path=path,
+                    index=index,
+                    local_bindings=local_bindings,
+                    visited_fns=visited_fns,
+                )
+            elif isinstance(stmt, ast.If):
+                _scan_stmts(
+                    stmt.body,
+                    path=path,
+                    index=index,
+                    local_bindings=local_bindings,
+                    visited_fns=visited_fns,
+                )
+                _scan_stmts(
+                    stmt.orelse,
+                    path=path,
+                    index=index,
+                    local_bindings=local_bindings,
+                    visited_fns=visited_fns,
+                )
+            elif isinstance(stmt, (ast.For, ast.AsyncFor, ast.While)):
+                _scan_stmts(
+                    list(stmt.body) + list(stmt.orelse),
+                    path=path,
+                    index=index,
+                    local_bindings=local_bindings,
+                    visited_fns=visited_fns,
+                )
+            elif isinstance(stmt, (ast.With, ast.AsyncWith)):
+                _scan_stmts(
+                    stmt.body,
+                    path=path,
+                    index=index,
+                    local_bindings=local_bindings,
+                    visited_fns=visited_fns,
+                )
+            elif isinstance(stmt, ast.Try):
+                _scan_stmts(
+                    stmt.body,
+                    path=path,
+                    index=index,
+                    local_bindings=local_bindings,
+                    visited_fns=visited_fns,
+                )
+                for handler in stmt.handlers:
+                    _scan_stmts(
+                        handler.body,
+                        path=path,
+                        index=index,
+                        local_bindings=local_bindings,
+                        visited_fns=visited_fns,
+                    )
+                _scan_stmts(
+                    list(stmt.orelse) + list(stmt.finalbody),
+                    path=path,
+                    index=index,
+                    local_bindings=local_bindings,
+                    visited_fns=visited_fns,
+                )
+            elif isinstance(stmt, ast.Match):
+                for case in stmt.cases:
+                    _scan_stmts(
+                        case.body,
+                        path=path,
+                        index=index,
+                        local_bindings=local_bindings,
+                        visited_fns=visited_fns,
+                    )
+
+    def _follow_local_callee(
+        call: ast.Call,
+        *,
+        path: str,
+        index: int,
+        local_bindings: Mapping[str, FinalBinding],
+        visited_fns: set[int],
+    ) -> None:
+        """Scan bodies of local functions invoked at module level (#163 audit)."""
+
+        func = call.func
+        if isinstance(func, ast.Lambda):
+            # Lambdas cannot assign, but can call setattr / mutate via calls.
+            if isinstance(func.body, ast.Call):
+                _scan_call(
+                    func.body,
+                    path=path,
+                    index=index,
+                    local_bindings=local_bindings,
+                    visited_fns=visited_fns,
+                )
+            return
+        if not isinstance(func, ast.Name):
+            return
+        if func.id in {
+            "print",
+            "len",
+            "abs",
+            "min",
+            "max",
+            "sorted",
+            "list",
+            "dict",
+            "set",
+            "tuple",
+            "str",
+            "int",
+            "bool",
+            "float",
+            "range",
+            "enumerate",
+            "zip",
+            "iter",
+            "next",
+            "open",
+            "isinstance",
+            "issubclass",
+            "hasattr",
+            "getattr",
+            "id",
+            "hash",
+            "repr",
+            "format",
+            "sum",
+            "any",
+            "all",
+            "round",
+            "divmod",
+            "pow",
+            "bytearray",
+            "bytes",
+            "frozenset",
+            "object",
+            "type",
+            "super",
+            "property",
+            "staticmethod",
+            "classmethod",
+        }:
+            return
+        binding = local_bindings.get(func.id)
+        if (
+            binding is not None
+            and binding.kind == "function"
+            and binding.function_node is not None
+        ):
+            fn_id = id(binding.function_node)
+            if fn_id in visited_fns:
+                return
+            visited_fns.add(fn_id)
+            _scan_stmts(
+                binding.function_node.body,
+                path=path,
+                index=index,
+                local_bindings=local_bindings,
+                visited_fns=visited_fns,
+            )
+            return
+        # Unresolved / imported callee at module level that receives a module
+        # alias: cannot prove absence of export mutation.
+        for arg in call.args:
+            if isinstance(arg, ast.Name):
+                arg_binding = local_bindings.get(arg.id)
+                if (
+                    arg_binding is not None
+                    and arg_binding.kind == "import_module"
+                ):
+                    _handle_module_alias_export(arg.id, None, path=path)
+
+    def _scan_call(
+        call: ast.Call,
+        *,
+        path: str,
+        index: int,
+        local_bindings: Mapping[str, FinalBinding],
+        visited_fns: set[int] | None = None,
+    ) -> None:
+        nonlocal unsupported
+        if visited_fns is None:
+            visited_fns = set()
+        setattr_parts = _setattr_target_and_name(call)
+        if setattr_parts is not None:
+            obj, name_expr = setattr_parts
+            if _is_sys_modules_expr(obj) or (
+                isinstance(obj, ast.Subscript) and _is_sys_modules_expr(obj.value)
+            ):
+                unsupported = True
+                for mod_path in available_paths:
+                    _note_export(mod_path, "*")
+                return
+            attr = _static_str(name_expr)
+            surface = _module_namespace_surface(
+                obj, local_bindings=local_bindings
+            )
+            if surface is not None:
+                _handle_module_alias_export(surface, attr, path=path)
+                return
+            if isinstance(obj, ast.Name):
+                binding = local_bindings.get(obj.id)
+                if binding is not None and binding.kind == "import_module":
+                    _handle_module_alias_export(obj.id, attr, path=path)
+                    return
+            identity = _resolve_callable_identity(
+                obj,
+                path=path,
+                bindings_by_path=bindings_by_path,
+                available_paths=available_paths,
+                import_roots=import_roots,
+            )
+            if identity is not None:
+                _note_behavior(
+                    identity, mutation_path=path, mutation_index=index
+                )
+            return
+
+        # module.__dict__.update(...) / vars(module).update(...)
+        func = call.func
+        if (
+            isinstance(func, ast.Attribute)
+            and func.attr
+            in {"update", "setdefault", "pop", "clear", "__setitem__"}
+        ):
+            surface = _module_namespace_surface(
+                func.value, local_bindings=local_bindings
+            )
+            if surface is not None:
+                _handle_module_alias_export(surface, None, path=path)
+                return
+            # callable.__globals__.update(...)
+            if isinstance(func.value, ast.Attribute):
+                identity = _resolve_callable_identity(
+                    func.value.value,
+                    path=path,
+                    bindings_by_path=bindings_by_path,
+                    available_paths=available_paths,
+                    import_roots=import_roots,
+                )
+                if identity is not None:
+                    _note_behavior(
+                        identity, mutation_path=path, mutation_index=index
+                    )
+            return
+
+        _follow_local_callee(
+            call,
+            path=path,
+            index=index,
+            local_bindings=local_bindings,
+            visited_fns=visited_fns,
+        )
+
+    for path, tree in trees.items():
+        local_bindings = bindings_by_path.get(path, {})
+        body: Sequence[ast.stmt] = getattr(tree, "body", ())
+        for index, node in _iter_module_level_executable_stmts(body):
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                targets = (
+                    list(node.targets)
+                    if isinstance(node, ast.Assign)
+                    else [node.target]
+                )
+                for target in targets:
+                    _scan_assign_target(
+                        target,
+                        path=path,
+                        index=index,
+                        local_bindings=local_bindings,
+                    )
+            elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+                _scan_call(
+                    node.value,
+                    path=path,
+                    index=index,
+                    local_bindings=local_bindings,
+                    visited_fns=set(),
+                )
+            elif isinstance(node, ast.Delete):
+                for target in node.targets:
+                    _scan_assign_target(
+                        target,
+                        path=path,
+                        index=index,
+                        local_bindings=local_bindings,
+                    )
+
+    return _MutationEffects(
+        export_mutations={
+            path: frozenset(names) for path, names in export_mutations.items()
+        },
+        behavior_mutations=frozenset(behavior_mutations),
+        unsupported_module_mutation=unsupported,
+    )
 
 
-def _apply_cross_module_mutations(
+def _apply_mutation_effects(
     bindings_by_path: dict[str, dict[str, FinalBinding]],
-    mutations: Mapping[str, set[str]],
+    effects: _MutationEffects,
     *,
     available_paths: frozenset[str],
     import_roots: tuple[str, ...],
 ) -> dict[str, dict[str, FinalBinding]]:
-    """Refuse precise identity for names mutated via other-module assignment."""
+    """Apply ModuleBindingIdentity and CallableBehaviorIdentity poisons."""
 
     result: dict[str, dict[str, FinalBinding]] = {
         path: dict(bindings) for path, bindings in bindings_by_path.items()
     }
-    for path, names in mutations.items():
+
+    export_mutations = {
+        path: set(names) for path, names in effects.export_mutations.items()
+    }
+    if effects.unsupported_module_mutation:
+        for path in list(available_paths):
+            export_mutations.setdefault(path, set()).add("*")
+
+    for path, names in export_mutations.items():
         target = result.setdefault(path, {})
         if "*" in names:
             _mark_rebound(target, list(target))
@@ -534,6 +1251,35 @@ def _apply_cross_module_mutations(
                     continue
                 if "*" in names or binding.imported_name in poison_names:
                     other_bindings[local] = FinalBinding(kind="rebound")
+
+    for defining_path, export_name in effects.behavior_mutations:
+        target = result.setdefault(defining_path, {})
+        binding = target.get(export_name)
+        if binding is not None and binding.kind == "function":
+            target[export_name] = replace(binding, behavior_established=False)
+        elif binding is not None:
+            target[export_name] = replace(binding, behavior_established=False)
+        else:
+            target[export_name] = FinalBinding(
+                kind="rebound",
+                behavior_established=False,
+            )
+        for other_path, other_bindings in result.items():
+            for local, other in list(other_bindings.items()):
+                if other.kind != "import_name" or other.module_name is None:
+                    continue
+                if other.imported_name != export_name:
+                    continue
+                candidates = module_candidates_in_manifest(
+                    other.module_name,
+                    set(available_paths),
+                    import_roots=import_roots,
+                )
+                if len(candidates) == 1 and candidates[0] == defining_path:
+                    other_bindings[local] = replace(
+                        other, behavior_established=False
+                    )
+
     return result
 
 
@@ -593,6 +1339,12 @@ class CalleeResolver:
         binding = bindings.get(name)
         if binding is None:
             return CalleeResolveResult(callee=None, reason="unbound_name")
+
+        if not binding.behavior_established:
+            return CalleeResolveResult(
+                callee=None,
+                reason="callable_behavior_unknown",
+            )
 
         if binding.kind == "function":
             assert binding.function_node is not None
@@ -679,16 +1431,20 @@ def build_callee_resolver(
         path: module_final_bindings(tree, path=path)
         for path, tree in normalized.items()
     }
-    mutations = _cross_module_mutations(
+    effects = _collect_mutation_effects(
         normalized,
         bindings,
         available_paths=available,
         import_roots=roots,
     )
-    if mutations:
-        bindings = _apply_cross_module_mutations(
+    if (
+        effects.export_mutations
+        or effects.behavior_mutations
+        or effects.unsupported_module_mutation
+    ):
+        bindings = _apply_mutation_effects(
             bindings,
-            mutations,
+            effects,
             available_paths=available,
             import_roots=roots,
         )
