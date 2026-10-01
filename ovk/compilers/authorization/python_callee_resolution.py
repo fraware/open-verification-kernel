@@ -1,4 +1,4 @@
-"""Caller-relative Python callee resolution (#160 / #161 / #163).
+"""Caller-relative Python callee resolution (#160 / #161 / #163 / #165).
 
 Replaces repository-global simple-name callee indexing with resolution that
 honours the caller's module-level final bindings and authenticated-manifest
@@ -7,7 +7,12 @@ import identity under the shared import-root theorem (#161).
 #163 adds bounded callable/module mutation closure: an imported module export
 or source-grounded callable retains precise authorizing identity only when
 both ModuleBindingIdentity and CallableBehaviorIdentity are established.
-Mutation analysis is shared by bypass writer closure and interprocedural
+
+#165 extends mutation closure with bounded module/callable *object-alias*
+provenance: assignments may alias ModuleObject / CallableObject /
+ModuleNamespace identities; mutation closure operates on object identity at
+the statement of mutation (not spelling of final bindings). The same
+identity-flow is shared by bypass writer closure and interprocedural
 argument provenance (no divergent systems).
 
 Resolution for a bare call ``write_state(...)``:
@@ -23,7 +28,7 @@ name matches. Import follow uses :func:`python_import_space.module_candidates_in
 from __future__ import annotations
 
 import ast
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Literal
 
@@ -33,7 +38,7 @@ from ovk.compilers.authorization.python_import_space import (
     normalize_path,
 )
 
-_IMPLEMENTATION_VERSION = "0.4.0"
+_IMPLEMENTATION_VERSION = "0.7.0"
 _MAX_IMPORT_FOLLOW_DEPTH = 8
 
 BindingKind = Literal["function", "import_name", "import_module", "rebound"]
@@ -88,7 +93,7 @@ class CalleeResolveResult:
 
 @dataclass(frozen=True)
 class _MutationEffects:
-    """Collected module-export and callable-behavior mutation effects (#163)."""
+    """Collected module-export and callable-behavior mutation effects (#163/#165)."""
 
     # Defining module path → export names whose ModuleBindingIdentity is lost.
     export_mutations: Mapping[str, frozenset[str]]
@@ -96,6 +101,89 @@ class _MutationEffects:
     behavior_mutations: frozenset[tuple[str, str]]
     # Unsupported dynamic module surfaces (e.g. sys.modules) → full poison.
     unsupported_module_mutation: bool
+
+
+# ---------------------------------------------------------------------------
+# #165 object-alias identity lattice (narrow, security-relevant only)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ModuleObject:
+    """Identity of an imported / resolved module object."""
+
+    path: str
+
+
+@dataclass(frozen=True)
+class CallableObject:
+    """Identity of a source-grounded callable export."""
+
+    defining_path: str
+    export_name: str
+
+
+@dataclass(frozen=True)
+class ModuleNamespace:
+    """``module.__dict__`` / ``vars(module)`` namespace surface."""
+
+    module_path: str
+
+
+_ObjectAtom = ModuleObject | CallableObject | ModuleNamespace
+
+
+@dataclass(frozen=True)
+class _IdentityPointsTo:
+    """May-point-to set for one local name (Unknown > false PASS).
+
+    Distinguishes *bottom* (definitely no tracked module/callable identity —
+    used for closed-world severance) from *unknown* (may alias a tracked
+    object via an unmodeled value). Mutation of an unknown receiver may
+    spelling-poison matching exports; mutation of bottom does not.
+    """
+
+    known: frozenset[_ObjectAtom] = frozenset()
+    unknown: bool = False
+
+    @staticmethod
+    def bottom() -> _IdentityPointsTo:
+        return _IdentityPointsTo(known=frozenset(), unknown=False)
+
+    @staticmethod
+    def unknown_only() -> _IdentityPointsTo:
+        return _IdentityPointsTo(known=frozenset(), unknown=True)
+
+    @staticmethod
+    def precise(atom: _ObjectAtom) -> _IdentityPointsTo:
+        return _IdentityPointsTo(known=frozenset({atom}), unknown=False)
+
+    def join(self, other: _IdentityPointsTo) -> _IdentityPointsTo:
+        return _IdentityPointsTo(
+            known=self.known | other.known,
+            unknown=self.unknown or other.unknown,
+        )
+
+    def is_bottom(self) -> bool:
+        return not self.known and not self.unknown
+
+
+# Callable-object mutation surfaces (#163); unknown receivers that write these
+# lose CallableBehaviorIdentity across the closed world.
+_CALLABLE_BEHAVIOR_ATTRS = frozenset(
+    {
+        "__code__",
+        "__defaults__",
+        "__kwdefaults__",
+        "__annotations__",
+        "__dict__",
+        "__globals__",
+        "__closure__",
+        "__module__",
+        "__name__",
+        "__qualname__",
+    }
+)
 
 def import_module_name_from_importer(
     node: ast.ImportFrom,
@@ -442,51 +530,6 @@ def module_final_bindings(
     return bindings
 
 
-def _iter_module_level_executable_stmts(
-    stmts: Sequence[ast.stmt],
-) -> Iterable[tuple[int, ast.stmt]]:
-    """Yield (top_level_index, stmt) for every module-level executable stmt.
-
-    Recurses into if/else, try/except/else/finally, for/while, with, and match
-    suites. Does not enter function or class bodies.
-    """
-
-    for index, node in enumerate(stmts):
-        yield index, node
-        if isinstance(node, ast.If):
-            for _, child in _iter_module_level_executable_stmts(node.body):
-                yield index, child
-            for _, child in _iter_module_level_executable_stmts(node.orelse):
-                yield index, child
-        elif isinstance(node, ast.While):
-            for _, child in _iter_module_level_executable_stmts(node.body):
-                yield index, child
-            for _, child in _iter_module_level_executable_stmts(node.orelse):
-                yield index, child
-        elif isinstance(node, (ast.For, ast.AsyncFor)):
-            for _, child in _iter_module_level_executable_stmts(node.body):
-                yield index, child
-            for _, child in _iter_module_level_executable_stmts(node.orelse):
-                yield index, child
-        elif isinstance(node, (ast.With, ast.AsyncWith)):
-            for _, child in _iter_module_level_executable_stmts(node.body):
-                yield index, child
-        elif isinstance(node, ast.Try):
-            for _, child in _iter_module_level_executable_stmts(node.body):
-                yield index, child
-            for handler in node.handlers:
-                for _, child in _iter_module_level_executable_stmts(handler.body):
-                    yield index, child
-            for _, child in _iter_module_level_executable_stmts(node.orelse):
-                yield index, child
-            for _, child in _iter_module_level_executable_stmts(node.finalbody):
-                yield index, child
-        elif isinstance(node, ast.Match):
-            for case in node.cases:
-                for _, child in _iter_module_level_executable_stmts(case.body):
-                    yield index, child
-
-
 def _final_binding_establish_index(
     tree: ast.AST,
     name: str,
@@ -578,51 +621,37 @@ def _is_sys_modules_expr(node: ast.AST) -> bool:
     )
 
 
-def _module_namespace_surface(
-    node: ast.AST,
+def _with_as_targets_mutated(
+    body: Sequence[ast.stmt],
+    bound_names: set[str],
+) -> bool:
+    """True when a with-as bound name is the base of an attribute/subscript store."""
+
+    for stmt in body:
+        for node in ast.walk(stmt):
+            if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store):
+                if isinstance(node.value, ast.Name) and node.value.id in bound_names:
+                    return True
+            if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store):
+                if isinstance(node.value, ast.Name) and node.value.id in bound_names:
+                    return True
+            if isinstance(node, ast.Call):
+                parts = _setattr_target_and_name(node)
+                if parts is not None:
+                    obj, _name = parts
+                    if isinstance(obj, ast.Name) and obj.id in bound_names:
+                        return True
+    return False
+
+
+def _module_path_for_import_name(
+    module_name: str,
     *,
-    local_bindings: Mapping[str, FinalBinding],
-) -> str | None:
-    """Return module alias if ``node`` is that module's namespace surface.
-
-    Recognizes ``module``, ``module.__dict__``, and ``vars(module)``.
-    """
-
-    if isinstance(node, ast.Name):
-        binding = local_bindings.get(node.id)
-        if binding is not None and binding.kind == "import_module":
-            return node.id
-        return None
-    if isinstance(node, ast.Attribute) and node.attr == "__dict__":
-        return _module_namespace_surface(
-            node.value, local_bindings=local_bindings
-        )
-    if (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "vars"
-        and len(node.args) == 1
-        and not node.keywords
-    ):
-        return _module_namespace_surface(
-            node.args[0], local_bindings=local_bindings
-        )
-    return None
-
-
-def _resolve_import_module_path(
-    alias: str,
-    *,
-    path: str,
-    bindings_by_path: Mapping[str, Mapping[str, FinalBinding]],
     available_paths: frozenset[str],
     import_roots: tuple[str, ...],
 ) -> str | None:
-    binding = bindings_by_path.get(path, {}).get(alias)
-    if binding is None or binding.kind != "import_module" or binding.module_name is None:
-        return None
     candidates = module_candidates_in_manifest(
-        binding.module_name,
+        module_name,
         set(available_paths),
         import_roots=import_roots,
     )
@@ -631,47 +660,73 @@ def _resolve_import_module_path(
     return candidates[0]
 
 
-def _resolve_callable_identity(
-    expr: ast.AST,
+def _identity_from_final_binding(
+    name: str,
     *,
     path: str,
     bindings_by_path: Mapping[str, Mapping[str, FinalBinding]],
     available_paths: frozenset[str],
     import_roots: tuple[str, ...],
-) -> tuple[str, str] | None:
-    """Resolve ``expr`` to a (defining_path, export_name) callable identity."""
+) -> _IdentityPointsTo:
+    """Fallback identity from final module bindings when env lacks ``name``.
 
-    local = bindings_by_path.get(path, {})
-    if isinstance(expr, ast.Name):
-        binding = local.get(expr.id)
-        if binding is None:
-            return None
-        if binding.kind == "function":
-            return (path, expr.id)
-        if binding.kind == "import_name":
-            if binding.module_name is None or binding.imported_name is None:
-                return None
-            candidates = module_candidates_in_manifest(
-                binding.module_name,
-                set(available_paths),
-                import_roots=import_roots,
-            )
-            if len(candidates) != 1:
-                return None
-            return (candidates[0], binding.imported_name)
-        return None
-    if isinstance(expr, ast.Attribute) and isinstance(expr.value, ast.Name):
-        module_path = _resolve_import_module_path(
-            expr.value.id,
-            path=path,
-            bindings_by_path=bindings_by_path,
+    Unbound / non-tracked names are *bottom* (not unknown): closed-world
+    severance must remain precise so ``m = other; m.write_state = ...`` does
+    not spelling-poison after reassignment.
+    """
+
+    binding = bindings_by_path.get(path, {}).get(name)
+    if binding is None:
+        return _IdentityPointsTo.bottom()
+    if binding.kind == "import_module" and binding.module_name is not None:
+        module_path = _module_path_for_import_name(
+            binding.module_name,
             available_paths=available_paths,
             import_roots=import_roots,
         )
         if module_path is None:
-            return None
-        return (module_path, expr.attr)
-    return None
+            return _IdentityPointsTo.unknown_only()
+        return _IdentityPointsTo.precise(ModuleObject(module_path))
+    if binding.kind == "function":
+        return _IdentityPointsTo.precise(CallableObject(path, name))
+    if binding.kind == "import_name":
+        if binding.module_name is None or binding.imported_name is None:
+            return _IdentityPointsTo.unknown_only()
+        module_path = _module_path_for_import_name(
+            binding.module_name,
+            available_paths=available_paths,
+            import_roots=import_roots,
+        )
+        if module_path is None:
+            return _IdentityPointsTo.unknown_only()
+        return _IdentityPointsTo.precise(
+            CallableObject(module_path, binding.imported_name)
+        )
+    # rebound / unmodeled kinds: may no longer be the tracked object.
+    return _IdentityPointsTo.unknown_only()
+
+
+def _join_envs(
+    left: dict[str, _IdentityPointsTo],
+    right: dict[str, _IdentityPointsTo],
+) -> dict[str, _IdentityPointsTo]:
+    keys = set(left) | set(right)
+    joined: dict[str, _IdentityPointsTo] = {}
+    for key in keys:
+        lval = left.get(key)
+        rval = right.get(key)
+        if lval is None:
+            assert rval is not None
+            joined[key] = rval.join(_IdentityPointsTo.unknown_only())
+        elif rval is None:
+            joined[key] = lval.join(_IdentityPointsTo.unknown_only())
+        else:
+            joined[key] = lval.join(rval)
+    return joined
+
+
+def _copy_env(env: Mapping[str, _IdentityPointsTo]) -> dict[str, _IdentityPointsTo]:
+    return dict(env)
 
 
 def _is_setattr_call(call: ast.Call) -> bool:
@@ -701,6 +756,55 @@ def _setattr_target_and_name(
     return None
 
 
+_BENIGN_BUILTINS = frozenset(
+    {
+        "print",
+        "len",
+        "abs",
+        "min",
+        "max",
+        "sorted",
+        "list",
+        "dict",
+        "set",
+        "tuple",
+        "str",
+        "int",
+        "bool",
+        "float",
+        "range",
+        "enumerate",
+        "zip",
+        "iter",
+        "next",
+        "open",
+        "isinstance",
+        "issubclass",
+        "hasattr",
+        "getattr",
+        "id",
+        "hash",
+        "repr",
+        "format",
+        "sum",
+        "any",
+        "all",
+        "round",
+        "divmod",
+        "pow",
+        "bytearray",
+        "bytes",
+        "frozenset",
+        "object",
+        "type",
+        "super",
+        "property",
+        "staticmethod",
+        "classmethod",
+    }
+)
+
+
 def _collect_mutation_effects(
     trees: Mapping[str, ast.AST],
     bindings_by_path: Mapping[str, Mapping[str, FinalBinding]],
@@ -708,10 +812,13 @@ def _collect_mutation_effects(
     available_paths: frozenset[str],
     import_roots: tuple[str, ...],
 ) -> _MutationEffects:
-    """Collect module-export and callable-behavior mutations (#163).
+    """Collect module-export and callable-behavior mutations (#163 / #165).
 
-    Recursively inspects all module-level executable suites. Shared by bypass
-    writer closure and interprocedural argument provenance via CalleeResolver.
+    Walks module-level executable statements in order with a bounded
+    object-alias identity environment. Mutation closure keys off object
+    identity available at the mutation point; final bindings remain the
+    authority for authorizing call resolution after effects are applied.
+    Shared by bypass writer closure and interprocedural argument provenance.
     """
 
     export_mutations: dict[str, set[str]] = {}
@@ -739,96 +846,481 @@ def _collect_mutation_effects(
                 return
         behavior_mutations.add(identity)
 
-    def _handle_module_alias_export(
-        alias: str,
-        attr: str | None,
+    def _poison_atoms(
+        points: _IdentityPointsTo,
+        *,
+        export_name: str | None,
+        behavior: bool,
+        mutation_path: str,
+        mutation_index: int,
+    ) -> None:
+        for atom in points.known:
+            if isinstance(atom, ModuleObject):
+                _note_export(atom.path, "*" if export_name is None else export_name)
+            elif isinstance(atom, ModuleNamespace):
+                _note_export(
+                    atom.module_path, "*" if export_name is None else export_name
+                )
+            elif isinstance(atom, CallableObject) and behavior:
+                _note_behavior(
+                    (atom.defining_path, atom.export_name),
+                    mutation_path=mutation_path,
+                    mutation_index=mutation_index,
+                )
+
+    def _escape_identity(points: _IdentityPointsTo) -> None:
+        """Container escape of module/callable identity → poison (#165)."""
+
+        for atom in points.known:
+            if isinstance(atom, ModuleObject):
+                _note_export(atom.path, "*")
+            elif isinstance(atom, ModuleNamespace):
+                _note_export(atom.module_path, "*")
+            elif isinstance(atom, CallableObject):
+                behavior_mutations.add((atom.defining_path, atom.export_name))
+
+    def _lookup_name(
+        name: str,
+        env: Mapping[str, _IdentityPointsTo],
         *,
         path: str,
-    ) -> None:
-        module_path = _resolve_import_module_path(
-            alias,
+    ) -> _IdentityPointsTo:
+        if name in env:
+            return env[name]
+        return _identity_from_final_binding(
+            name,
             path=path,
             bindings_by_path=bindings_by_path,
             available_paths=available_paths,
             import_roots=import_roots,
         )
-        if module_path is None:
-            return
-        _note_export(module_path, "*" if attr is None else attr)
 
-    def _scan_assign_target(
-        target: ast.AST,
+    def _has_tracked_identity(points: _IdentityPointsTo) -> bool:
+        return any(
+            isinstance(a, (ModuleObject, CallableObject, ModuleNamespace))
+            for a in points.known
+        )
+
+    def _escape_if_tracked(points: _IdentityPointsTo) -> None:
+        if _has_tracked_identity(points):
+            _escape_identity(points)
+
+    # Statement-scan context so value-position calls (Assign RHS, nested
+    # make()(), defaults) still follow local helpers for mutation effects.
+    _scan_ctx: dict[str, object] = {
+        "index": 0,
+        "visited_fns": set(),
+        "local_fns": None,
+    }
+
+    def _poison_unknown_receiver(
         *,
-        path: str,
-        index: int,
-        local_bindings: Mapping[str, FinalBinding],
+        export_name: str | None,
+        behavior: bool,
     ) -> None:
-        nonlocal unsupported
-        # module.name = ... / callable.attr = ...
-        if isinstance(target, ast.Attribute):
-            if _is_sys_modules_expr(target.value) or (
-                isinstance(target.value, ast.Subscript)
-                and _is_sys_modules_expr(target.value.value)
-            ):
-                unsupported = True
-                # Static sys.modules["mod"].name when possible.
-                if (
-                    isinstance(target.value, ast.Subscript)
-                    and _is_sys_modules_expr(target.value.value)
-                ):
-                    key = _static_str(target.value.slice)
-                    attr = target.attr
-                    if key is not None:
-                        candidates = module_candidates_in_manifest(
-                            key,
-                            set(available_paths),
+        """Spelling poison when the receiver *may* be a tracked object.
+
+        Closed-world: an ``unknown`` (not bottom) receiver that mutates a
+        static export name may be any module exporting that name; a dynamic
+        name or callable-behavior surface poisons broadly. Severed aliases
+        use bottom and do not enter this path.
+        """
+
+        if behavior or (export_name is not None and export_name in _CALLABLE_BEHAVIOR_ATTRS):
+            for mod_path, bindings in bindings_by_path.items():
+                for local, binding in bindings.items():
+                    if binding.kind == "function":
+                        behavior_mutations.add((mod_path, local))
+                    elif (
+                        binding.kind == "import_name"
+                        and binding.module_name is not None
+                        and binding.imported_name is not None
+                    ):
+                        resolved = _module_path_for_import_name(
+                            binding.module_name,
+                            available_paths=available_paths,
                             import_roots=import_roots,
                         )
-                        if len(candidates) == 1:
-                            _note_export(candidates[0], attr)
-                        else:
-                            for mod_path in available_paths:
-                                _note_export(mod_path, "*")
+                        if resolved is not None:
+                            behavior_mutations.add(
+                                (resolved, binding.imported_name)
+                            )
+            if export_name is None or export_name in _CALLABLE_BEHAVIOR_ATTRS:
+                # Dynamic / behavior-shaped write on unknown callable surface.
+                for mod_path in available_paths:
+                    _note_export(mod_path, "*")
+            return
+        if export_name is None:
+            for mod_path in available_paths:
+                _note_export(mod_path, "*")
+            return
+        for mod_path in available_paths:
+            _note_export(mod_path, export_name)
+
+    def _eval_expr(
+        expr: ast.AST,
+        env: Mapping[str, _IdentityPointsTo],
+        *,
+        path: str,
+    ) -> _IdentityPointsTo:
+        if isinstance(expr, ast.Name):
+            return _lookup_name(expr.id, env, path=path)
+        if isinstance(expr, ast.NamedExpr):
+            # Walrus: identity is the RHS value (binding applied at stmt level).
+            return _eval_expr(expr.value, env, path=path)
+        if isinstance(expr, ast.IfExp):
+            # Conditional value: may-point-to join (Unknown > false PASS).
+            return _eval_expr(expr.body, env, path=path).join(
+                _eval_expr(expr.orelse, env, path=path)
+            )
+        if isinstance(expr, ast.BoolOp):
+            points = _IdentityPointsTo()
+            for value in expr.values:
+                points = points.join(_eval_expr(value, env, path=path))
+            return points
+        if isinstance(expr, ast.Attribute):
+            if expr.attr == "__dict__":
+                base = _eval_expr(expr.value, env, path=path)
+                known: set[_ObjectAtom] = set()
+                for atom in base.known:
+                    if isinstance(atom, ModuleObject):
+                        known.add(ModuleNamespace(atom.path))
+                    elif isinstance(atom, ModuleNamespace):
+                        known.add(atom)
+                return _IdentityPointsTo(known=frozenset(known), unknown=base.unknown)
+            base = _eval_expr(expr.value, env, path=path)
+            # module.attr → CallableObject when base is ModuleObject
+            known_callables: set[_ObjectAtom] = set()
+            for atom in base.known:
+                if isinstance(atom, ModuleObject):
+                    known_callables.add(CallableObject(atom.path, expr.attr))
+            if known_callables:
+                return _IdentityPointsTo(
+                    known=frozenset(known_callables),
+                    unknown=base.unknown,
+                )
+            if base.known or base.unknown:
+                return _IdentityPointsTo.unknown_only()
+            return _IdentityPointsTo.unknown_only()
+        if (
+            isinstance(expr, ast.Call)
+            and isinstance(expr.func, ast.Name)
+            and expr.func.id == "vars"
+            and len(expr.args) == 1
+            and not expr.keywords
+        ):
+            base = _eval_expr(expr.args[0], env, path=path)
+            known_ns: set[_ObjectAtom] = set()
+            for atom in base.known:
+                if isinstance(atom, ModuleObject):
+                    known_ns.add(ModuleNamespace(atom.path))
+                elif isinstance(atom, ModuleNamespace):
+                    known_ns.add(atom)
+            return _IdentityPointsTo(known=frozenset(known_ns), unknown=base.unknown)
+        if (
+            isinstance(expr, ast.Call)
+            and isinstance(expr.func, ast.Name)
+            and expr.func.id == "getattr"
+            and len(expr.args) >= 2
+            and not expr.keywords
+        ):
+            # getattr(module, "export") may alias a callable; model when attr is
+            # static, otherwise escape the receiver (Unknown > false PASS).
+            owner = _eval_expr(expr.args[0], env, path=path)
+            attr = _static_str(expr.args[1])
+            if attr == "__dict__":
+                known_ns: set[_ObjectAtom] = set()
+                for atom in owner.known:
+                    if isinstance(atom, ModuleObject):
+                        known_ns.add(ModuleNamespace(atom.path))
+                    elif isinstance(atom, ModuleNamespace):
+                        known_ns.add(atom)
+                if known_ns or owner.unknown:
+                    return _IdentityPointsTo(
+                        known=frozenset(known_ns),
+                        unknown=owner.unknown,
+                    )
+            if attr is not None:
+                known_callables = set()
+                for atom in owner.known:
+                    if isinstance(atom, ModuleObject):
+                        known_callables.add(CallableObject(atom.path, attr))
+                    elif isinstance(atom, ModuleNamespace):
+                        known_callables.add(CallableObject(atom.module_path, attr))
+                if known_callables:
+                    return _IdentityPointsTo(
+                        known=frozenset(known_callables),
+                        unknown=owner.unknown,
+                    )
+            _escape_if_tracked(owner)
+            return _IdentityPointsTo.unknown_only()
+        if isinstance(expr, (ast.Tuple, ast.List, ast.Set)):
+            for elt in expr.elts:
+                if isinstance(elt, ast.Starred):
+                    _escape_identity(_eval_expr(elt.value, env, path=path))
+                else:
+                    points = _eval_expr(elt, env, path=path)
+                    _escape_if_tracked(points)
+            return _IdentityPointsTo.unknown_only()
+        if isinstance(expr, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+            # Comprehension packing is an unmodeled container escape.
+            _escape_if_tracked(_eval_expr(expr.elt, env, path=path))
+            for gen in expr.generators:
+                _escape_if_tracked(_eval_expr(gen.iter, env, path=path))
+                for if_clause in gen.ifs:
+                    _escape_if_tracked(_eval_expr(if_clause, env, path=path))
+            return _IdentityPointsTo.unknown_only()
+        if isinstance(expr, ast.DictComp):
+            _escape_if_tracked(_eval_expr(expr.key, env, path=path))
+            _escape_if_tracked(_eval_expr(expr.value, env, path=path))
+            for gen in expr.generators:
+                _escape_if_tracked(_eval_expr(gen.iter, env, path=path))
+                for if_clause in gen.ifs:
+                    _escape_if_tracked(_eval_expr(if_clause, env, path=path))
+            return _IdentityPointsTo.unknown_only()
+        if isinstance(expr, ast.Dict):
+            for key, value in zip(expr.keys, expr.values):
+                for part in (key, value):
+                    if part is None:
+                        continue
+                    points = _eval_expr(part, env, path=path)
+                    _escape_if_tracked(points)
+            return _IdentityPointsTo.unknown_only()
+        if isinstance(expr, ast.Starred):
+            points = _eval_expr(expr.value, env, path=path)
+            _escape_if_tracked(points)
+            return _IdentityPointsTo.unknown_only()
+        if isinstance(expr, ast.Subscript):
+            # Container projection is unmodeled → UNKNOWN (may escape).
+            base = _eval_expr(expr.value, env, path=path)
+            _escape_if_tracked(base)
+            return _IdentityPointsTo.unknown_only()
+        if isinstance(expr, ast.BinOp):
+            for side in (expr.left, expr.right):
+                points = _eval_expr(side, env, path=path)
+                _escape_if_tracked(points)
+            return _IdentityPointsTo.unknown_only()
+        if isinstance(expr, ast.Call):
+            # Value-position / nested calls must still follow local helpers
+            # (e.g. ``f = make(); f()``, ``make()()``, defaults). Special cases
+            # ``vars`` / ``getattr`` are handled above.
+            env_dict = env if isinstance(env, dict) else dict(env)
+            _scan_call(
+                expr,
+                path=path,
+                index=int(_scan_ctx["index"]),  # type: ignore[arg-type]
+                env=env_dict,
+                visited_fns=_scan_ctx["visited_fns"],  # type: ignore[arg-type]
+                local_fns=_scan_ctx["local_fns"],  # type: ignore[arg-type]
+            )
+            return _IdentityPointsTo.unknown_only()
+        return _IdentityPointsTo.unknown_only()
+
+    def _bind_target_names(
+        target: ast.AST,
+        points: _IdentityPointsTo,
+        env: dict[str, _IdentityPointsTo],
+    ) -> None:
+        if isinstance(target, ast.Name):
+            env[target.id] = points
+        elif isinstance(target, ast.Tuple | ast.List):
+            # Unpack: identity escapes unless we model element-wise (we don't).
+            if any(
+                isinstance(a, (ModuleObject, CallableObject, ModuleNamespace))
+                for a in points.known
+            ):
+                _escape_identity(points)
+            for elt in target.elts:
+                if isinstance(elt, ast.Starred):
+                    if isinstance(elt.value, ast.Name):
+                        env[elt.value.id] = _IdentityPointsTo.unknown_only()
+                    elif isinstance(elt.value, (ast.Tuple, ast.List)):
+                        _bind_target_names(elt.value, _IdentityPointsTo.unknown_only(), env)
+                elif isinstance(elt, ast.Name):
+                    env[elt.id] = _IdentityPointsTo.unknown_only()
+                elif isinstance(elt, (ast.Tuple, ast.List)):
+                    _bind_target_names(elt, _IdentityPointsTo.unknown_only(), env)
+                else:
+                    # Attribute/subscript unpack target is a mutation surface.
+                    pass
+        elif isinstance(target, ast.Starred) and isinstance(target.value, ast.Name):
+            env[target.value.id] = _IdentityPointsTo.unknown_only()
+
+    def _apply_import_identities(
+        node: ast.AST,
+        env: dict[str, _IdentityPointsTo],
+        *,
+        path: str,
+    ) -> None:
+        if isinstance(node, ast.ImportFrom):
+            if any(alias.name == "*" for alias in node.names):
+                for key in list(env):
+                    env[key] = _IdentityPointsTo.unknown_only()
+                return
+            module_name = import_module_name_from_importer(node, importer_path=path)
+            module_path = (
+                _module_path_for_import_name(
+                    module_name,
+                    available_paths=available_paths,
+                    import_roots=import_roots,
+                )
+                if module_name is not None
+                else None
+            )
+            for alias in node.names:
+                local = alias.asname or alias.name
+                if module_path is None:
+                    env[local] = _IdentityPointsTo.unknown_only()
+                else:
+                    env[local] = _IdentityPointsTo.precise(
+                        CallableObject(module_path, alias.name)
+                    )
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname:
+                    module_path = _module_path_for_import_name(
+                        alias.name,
+                        available_paths=available_paths,
+                        import_roots=import_roots,
+                    )
+                    env[alias.asname] = (
+                        _IdentityPointsTo.precise(ModuleObject(module_path))
+                        if module_path is not None
+                        else _IdentityPointsTo.unknown_only()
+                    )
+                else:
+                    top = alias.name.split(".", 1)[0]
+                    module_path = _module_path_for_import_name(
+                        top,
+                        available_paths=available_paths,
+                        import_roots=import_roots,
+                    )
+                    env[top] = (
+                        _IdentityPointsTo.precise(ModuleObject(module_path))
+                        if module_path is not None
+                        else _IdentityPointsTo.unknown_only()
+                    )
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.decorator_list:
+                env[node.name] = _IdentityPointsTo.unknown_only()
+            else:
+                env[node.name] = _IdentityPointsTo.precise(
+                    CallableObject(path, node.name)
+                )
+        elif isinstance(node, ast.ClassDef):
+            env[node.name] = _IdentityPointsTo.unknown_only()
+
+    def _mutate_through_expr(
+        base: ast.AST,
+        *,
+        export_name: str | None,
+        behavior: bool,
+        env: Mapping[str, _IdentityPointsTo],
+        path: str,
+        index: int,
+    ) -> None:
+        nonlocal unsupported
+        if _is_sys_modules_expr(base) or (
+            isinstance(base, ast.Subscript) and _is_sys_modules_expr(base.value)
+        ):
+            unsupported = True
+            if (
+                isinstance(base, ast.Subscript)
+                and _is_sys_modules_expr(base.value)
+            ):
+                key = _static_str(base.slice)
+                attr = export_name
+                if key is not None:
+                    candidates = module_candidates_in_manifest(
+                        key,
+                        set(available_paths),
+                        import_roots=import_roots,
+                    )
+                    if len(candidates) == 1:
+                        _note_export(candidates[0], attr if attr is not None else "*")
                     else:
                         for mod_path in available_paths:
                             _note_export(mod_path, "*")
                 else:
                     for mod_path in available_paths:
                         _note_export(mod_path, "*")
-                return
-            if isinstance(target.value, ast.Name):
-                alias = target.value.id
-                binding = local_bindings.get(alias)
-                if binding is not None and binding.kind == "import_module":
-                    _handle_module_alias_export(alias, target.attr, path=path)
-                    return
-                identity = _resolve_callable_identity(
+            else:
+                for mod_path in available_paths:
+                    _note_export(mod_path, "*")
+            return
+        points = _eval_expr(base, env, path=path)
+        _poison_atoms(
+            points,
+            export_name=export_name,
+            behavior=behavior,
+            mutation_path=path,
+            mutation_index=index,
+        )
+        if points.unknown:
+            _poison_unknown_receiver(export_name=export_name, behavior=behavior)
+
+    def _scan_assign_target(
+        target: ast.AST,
+        *,
+        path: str,
+        index: int,
+        env: dict[str, _IdentityPointsTo],
+        value_points: _IdentityPointsTo | None,
+    ) -> None:
+        nonlocal unsupported
+        if isinstance(target, ast.Name):
+            if value_points is not None:
+                env[target.id] = value_points
+            else:
+                env[target.id] = _IdentityPointsTo.unknown_only()
+            return
+        if isinstance(target, (ast.Tuple, ast.List)):
+            if value_points is not None:
+                _bind_target_names(target, value_points, env)
+            else:
+                _bind_target_names(target, _IdentityPointsTo.unknown_only(), env)
+            return
+        if isinstance(target, ast.Attribute):
+            # Bind walrus names appearing in the attribute base.
+            for child in ast.walk(target.value):
+                if isinstance(child, ast.NamedExpr) and isinstance(
+                    child.target, ast.Name
+                ):
+                    env[child.target.id] = _eval_expr(child.value, env, path=path)
+            # sys.modules[...] surfaces (#163) — check before identity eval.
+            if _is_sys_modules_expr(target.value) or (
+                isinstance(target.value, ast.Subscript)
+                and _is_sys_modules_expr(target.value.value)
+            ):
+                _mutate_through_expr(
                     target.value,
+                    export_name=target.attr,
+                    behavior=False,
+                    env=env,
                     path=path,
-                    bindings_by_path=bindings_by_path,
-                    available_paths=available_paths,
-                    import_roots=import_roots,
+                    index=index,
                 )
-                if identity is not None:
-                    _note_behavior(
-                        identity, mutation_path=path, mutation_index=index
-                    )
-                    return
-            # helpers.write_state.__code__ = ... (Attribute of Attribute)
-            if isinstance(target.value, ast.Attribute):
-                identity = _resolve_callable_identity(
-                    target.value,
-                    path=path,
-                    bindings_by_path=bindings_by_path,
-                    available_paths=available_paths,
-                    import_roots=import_roots,
-                )
-                if identity is not None:
-                    _note_behavior(
-                        identity, mutation_path=path, mutation_index=index
-                    )
                 return
-        # module.__dict__[name] / vars(module)[name] / callable.__globals__[k]
+            # Attribute write on module → export; on callable → behavior.
+            # helpers.write_state.__code__: base eval → CallableObject.
+            base_points = _eval_expr(target.value, env, path=path)
+            for atom in base_points.known:
+                if isinstance(atom, ModuleObject):
+                    _note_export(atom.path, target.attr)
+                elif isinstance(atom, ModuleNamespace):
+                    _note_export(atom.module_path, target.attr)
+                elif isinstance(atom, CallableObject):
+                    _note_behavior(
+                        (atom.defining_path, atom.export_name),
+                        mutation_path=path,
+                        mutation_index=index,
+                    )
+            if base_points.unknown:
+                _poison_unknown_receiver(
+                    export_name=target.attr,
+                    behavior=target.attr in _CALLABLE_BEHAVIOR_ATTRS,
+                )
+            return
         if isinstance(target, ast.Subscript):
             if _is_sys_modules_expr(target.value):
                 unsupported = True
@@ -848,247 +1340,324 @@ def _collect_mutation_effects(
                     for mod_path in available_paths:
                         _note_export(mod_path, "*")
                 return
-            surface = _module_namespace_surface(
-                target.value, local_bindings=local_bindings
-            )
-            if surface is not None:
-                key = _static_str(target.slice)
-                _handle_module_alias_export(surface, key, path=path)
-                return
-            # fn.__globals__[x] / fn.__dict__[x] / any callable subscript write
-            if isinstance(target.value, ast.Attribute):
-                identity = _resolve_callable_identity(
-                    target.value.value,
-                    path=path,
-                    bindings_by_path=bindings_by_path,
-                    available_paths=available_paths,
-                    import_roots=import_roots,
-                )
-                if identity is not None:
+            key = _static_str(target.slice)
+            base_points = _eval_expr(target.value, env, path=path)
+            for atom in base_points.known:
+                if isinstance(atom, ModuleNamespace):
+                    _note_export(atom.module_path, key if key is not None else "*")
+                elif isinstance(atom, ModuleObject):
+                    # Rare: subscript on module object itself.
+                    _note_export(atom.path, key if key is not None else "*")
+                elif isinstance(atom, CallableObject):
                     _note_behavior(
-                        identity, mutation_path=path, mutation_index=index
+                        (atom.defining_path, atom.export_name),
+                        mutation_path=path,
+                        mutation_index=index,
                     )
-                    return
-            identity = _resolve_callable_identity(
-                target.value,
-                path=path,
-                bindings_by_path=bindings_by_path,
-                available_paths=available_paths,
-                import_roots=import_roots,
-            )
-            if identity is not None:
-                _note_behavior(
-                    identity, mutation_path=path, mutation_index=index
+            if base_points.unknown:
+                _poison_unknown_receiver(
+                    export_name=key,
+                    behavior=key is not None and key in _CALLABLE_BEHAVIOR_ATTRS,
                 )
+            # fn.__globals__[x] where base is Attribute
+            if isinstance(target.value, ast.Attribute):
+                owner = _eval_expr(target.value.value, env, path=path)
+                _poison_atoms(
+                    owner,
+                    export_name=None,
+                    behavior=True,
+                    mutation_path=path,
+                    mutation_index=index,
+                )
+                if owner.unknown:
+                    _poison_unknown_receiver(export_name=None, behavior=True)
+            return
 
-    def _scan_stmts(
-        stmts: Sequence[ast.stmt],
+    def _formal_bindings_for_call(
+        call: ast.Call,
+        fn: ast.FunctionDef | ast.AsyncFunctionDef,
+        env: Mapping[str, _IdentityPointsTo],
+        *,
+        path: str,
+    ) -> dict[str, _IdentityPointsTo] | None:
+        """Bind actual→formal identities for a local helper (#165).
+
+        Supports positional-only, ordinary, and keyword-only parameters plus
+        default-value identity when an actual is omitted. ``*args``/``**kwargs``
+        escape tracked actuals (container loss).
+        """
+
+        posonly = [a.arg for a in fn.args.posonlyargs]
+        ordinary = [a.arg for a in fn.args.args]
+        kwonly = [a.arg for a in fn.args.kwonlyargs]
+        positional_params = posonly + ordinary
+
+        if fn.args.vararg is not None or fn.args.kwarg is not None:
+            # Escaping into *args/**kwargs loses precise formal identity.
+            for arg in call.args:
+                points = _eval_expr(arg, env, path=path)
+                if any(
+                    isinstance(a, (ModuleObject, CallableObject, ModuleNamespace))
+                    for a in points.known
+                ):
+                    _escape_identity(points)
+            for kw in call.keywords:
+                points = _eval_expr(kw.value, env, path=path)
+                if any(
+                    isinstance(a, (ModuleObject, CallableObject, ModuleNamespace))
+                    for a in points.known
+                ):
+                    _escape_identity(points)
+            return None
+
+        formals: dict[str, _IdentityPointsTo] = {}
+        for index, arg in enumerate(call.args):
+            if index >= len(positional_params):
+                points = _eval_expr(arg, env, path=path)
+                _escape_identity(points)
+                continue
+            formals[positional_params[index]] = _eval_expr(arg, env, path=path)
+        for kw in call.keywords:
+            if kw.arg is None:
+                _escape_identity(_eval_expr(kw.value, env, path=path))
+                continue
+            if kw.arg in positional_params or kw.arg in kwonly:
+                formals[kw.arg] = _eval_expr(kw.value, env, path=path)
+            else:
+                points = _eval_expr(kw.value, env, path=path)
+                if any(
+                    isinstance(a, (ModuleObject, CallableObject, ModuleNamespace))
+                    for a in points.known
+                ):
+                    _escape_identity(points)
+
+        # Default-value identity for omitted formals (evaluated in caller env).
+        defaults = list(fn.args.defaults)
+        if defaults:
+            default_start = len(positional_params) - len(defaults)
+            for offset, default_expr in enumerate(defaults):
+                param = positional_params[default_start + offset]
+                if param not in formals:
+                    formals[param] = _eval_expr(default_expr, env, path=path)
+        for param, default_expr in zip(fn.args.kwonlyargs, fn.args.kw_defaults):
+            if default_expr is None or param.arg in formals:
+                continue
+            formals[param.arg] = _eval_expr(default_expr, env, path=path)
+        return formals
+
+    def _scan_nested_defs_conservatively(
+        fn_node: ast.FunctionDef | ast.AsyncFunctionDef,
         *,
         path: str,
         index: int,
-        local_bindings: Mapping[str, FinalBinding],
+        call_env: dict[str, _IdentityPointsTo],
         visited_fns: set[int],
+        local_fns: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None,
     ) -> None:
-        for stmt in stmts:
-            if isinstance(stmt, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
-                targets: list[ast.AST]
-                if isinstance(stmt, ast.Assign):
-                    targets = list(stmt.targets)
-                else:
-                    targets = [stmt.target]
-                for target in targets:
-                    _scan_assign_target(
-                        target,
-                        path=path,
-                        index=index,
-                        local_bindings=local_bindings,
-                    )
-            elif isinstance(stmt, ast.Delete):
-                for target in stmt.targets:
-                    _scan_assign_target(
-                        target,
-                        path=path,
-                        index=index,
-                        local_bindings=local_bindings,
-                    )
-            elif isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
-                _scan_call(
-                    stmt.value,
-                    path=path,
-                    index=index,
-                    local_bindings=local_bindings,
-                    visited_fns=visited_fns,
-                )
-            elif isinstance(stmt, ast.If):
+        """May-execute nested defs (returned/stored closures) under call_env."""
+
+        for child in fn_node.body:
+            for node in ast.walk(child):
+                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                nested_id = id(node)
+                if nested_id in visited_fns:
+                    continue
+                visited_fns.add(nested_id)
+                nest_env = _copy_env(call_env)
+                for arg in (
+                    list(node.args.posonlyargs)
+                    + list(node.args.args)
+                    + list(node.args.kwonlyargs)
+                ):
+                    # Nested formals are unmodeled unless this nested def is
+                    # itself followed as a callee; keep free-var identities.
+                    nest_env[arg.arg] = _IdentityPointsTo.unknown_only()
+                nested_local = dict(local_fns or {})
+                nested_local[node.name] = node
+                for stmt in node.body:
+                    if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        nested_local[stmt.name] = stmt
                 _scan_stmts(
-                    stmt.body,
+                    node.body,
                     path=path,
                     index=index,
-                    local_bindings=local_bindings,
+                    env=nest_env,
                     visited_fns=visited_fns,
+                    local_fns=nested_local,
                 )
-                _scan_stmts(
-                    stmt.orelse,
-                    path=path,
-                    index=index,
-                    local_bindings=local_bindings,
-                    visited_fns=visited_fns,
-                )
-            elif isinstance(stmt, (ast.For, ast.AsyncFor, ast.While)):
-                _scan_stmts(
-                    list(stmt.body) + list(stmt.orelse),
-                    path=path,
-                    index=index,
-                    local_bindings=local_bindings,
-                    visited_fns=visited_fns,
-                )
-            elif isinstance(stmt, (ast.With, ast.AsyncWith)):
-                _scan_stmts(
-                    stmt.body,
-                    path=path,
-                    index=index,
-                    local_bindings=local_bindings,
-                    visited_fns=visited_fns,
-                )
-            elif isinstance(stmt, ast.Try):
-                _scan_stmts(
-                    stmt.body,
-                    path=path,
-                    index=index,
-                    local_bindings=local_bindings,
-                    visited_fns=visited_fns,
-                )
-                for handler in stmt.handlers:
-                    _scan_stmts(
-                        handler.body,
-                        path=path,
-                        index=index,
-                        local_bindings=local_bindings,
-                        visited_fns=visited_fns,
-                    )
-                _scan_stmts(
-                    list(stmt.orelse) + list(stmt.finalbody),
-                    path=path,
-                    index=index,
-                    local_bindings=local_bindings,
-                    visited_fns=visited_fns,
-                )
-            elif isinstance(stmt, ast.Match):
-                for case in stmt.cases:
-                    _scan_stmts(
-                        case.body,
-                        path=path,
-                        index=index,
-                        local_bindings=local_bindings,
-                        visited_fns=visited_fns,
-                    )
 
     def _follow_local_callee(
         call: ast.Call,
         *,
         path: str,
         index: int,
-        local_bindings: Mapping[str, FinalBinding],
+        env: dict[str, _IdentityPointsTo],
         visited_fns: set[int],
+        local_fns: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None = None,
     ) -> None:
-        """Scan bodies of local functions invoked at module level (#163 audit)."""
-
         func = call.func
         if isinstance(func, ast.Lambda):
-            # Lambdas cannot assign, but can call setattr / mutate via calls.
-            if isinstance(func.body, ast.Call):
-                _scan_call(
-                    func.body,
-                    path=path,
-                    index=index,
-                    local_bindings=local_bindings,
-                    visited_fns=visited_fns,
-                )
+            # Bind lambda formals from actuals for the single expression body.
+            params = [a.arg for a in func.args.args]
+            if (
+                func.args.vararg is None
+                and func.args.kwarg is None
+                and not func.args.posonlyargs
+                and not func.args.kwonlyargs
+                and len(call.args) <= len(params)
+                and all(kw.arg is not None for kw in call.keywords)
+            ):
+                call_env = _copy_env(env)
+                for i, arg in enumerate(call.args):
+                    if i < len(params):
+                        call_env[params[i]] = _eval_expr(arg, env, path=path)
+                    else:
+                        _escape_if_tracked(_eval_expr(arg, env, path=path))
+                for kw in call.keywords:
+                    assert kw.arg is not None
+                    if kw.arg in params:
+                        call_env[kw.arg] = _eval_expr(kw.value, env, path=path)
+                    else:
+                        _escape_if_tracked(_eval_expr(kw.value, env, path=path))
+                if isinstance(func.body, ast.Call):
+                    _scan_call(
+                        func.body,
+                        path=path,
+                        index=index,
+                        env=call_env,
+                        visited_fns=visited_fns,
+                        local_fns=local_fns,
+                    )
+                else:
+                    _escape_if_tracked(_eval_expr(func.body, call_env, path=path))
+            else:
+                for arg in call.args:
+                    _escape_if_tracked(_eval_expr(arg, env, path=path))
+                for kw in call.keywords:
+                    _escape_if_tracked(_eval_expr(kw.value, env, path=path))
             return
-        if not isinstance(func, ast.Name):
-            return
-        if func.id in {
-            "print",
-            "len",
-            "abs",
-            "min",
-            "max",
-            "sorted",
-            "list",
-            "dict",
-            "set",
-            "tuple",
-            "str",
-            "int",
-            "bool",
-            "float",
-            "range",
-            "enumerate",
-            "zip",
-            "iter",
-            "next",
-            "open",
-            "isinstance",
-            "issubclass",
-            "hasattr",
-            "getattr",
-            "id",
-            "hash",
-            "repr",
-            "format",
-            "sum",
-            "any",
-            "all",
-            "round",
-            "divmod",
-            "pow",
-            "bytearray",
-            "bytes",
-            "frozenset",
-            "object",
-            "type",
-            "super",
-            "property",
-            "staticmethod",
-            "classmethod",
-        }:
-            return
-        binding = local_bindings.get(func.id)
-        if (
-            binding is not None
-            and binding.kind == "function"
-            and binding.function_node is not None
-        ):
-            fn_id = id(binding.function_node)
-            if fn_id in visited_fns:
-                return
-            visited_fns.add(fn_id)
-            _scan_stmts(
-                binding.function_node.body,
+        if isinstance(func, ast.Call):
+            # Chained call ``make()()``: evaluate the callee expression first so
+            # returned nested helpers still contribute mutation effects.
+            _scan_call(
+                func,
                 path=path,
                 index=index,
-                local_bindings=local_bindings,
+                env=env,
                 visited_fns=visited_fns,
+                local_fns=local_fns,
             )
+            for arg in call.args:
+                _escape_if_tracked(_eval_expr(arg, env, path=path))
+            for kw in call.keywords:
+                _escape_if_tracked(_eval_expr(kw.value, env, path=path))
             return
-        # Unresolved / imported callee at module level that receives a module
-        # alias: cannot prove absence of export mutation.
-        for arg in call.args:
-            if isinstance(arg, ast.Name):
-                arg_binding = local_bindings.get(arg.id)
-                if (
-                    arg_binding is not None
-                    and arg_binding.kind == "import_module"
+        if isinstance(func, ast.Attribute):
+            # ModuleNamespace method receivers (e.g. d.get) escape; ModuleObject
+            # receivers of ordinary calls do not.
+            receiver = _eval_expr(func.value, env, path=path)
+            if any(isinstance(a, ModuleNamespace) for a in receiver.known):
+                _escape_identity(receiver)
+            for arg in call.args:
+                points = _eval_expr(arg, env, path=path)
+                if any(
+                    isinstance(a, (ModuleObject, CallableObject, ModuleNamespace))
+                    for a in points.known
                 ):
-                    _handle_module_alias_export(arg.id, None, path=path)
+                    _escape_identity(points)
+            for kw in call.keywords:
+                points = _eval_expr(kw.value, env, path=path)
+                if any(
+                    isinstance(a, (ModuleObject, CallableObject, ModuleNamespace))
+                    for a in points.known
+                ):
+                    _escape_identity(points)
+            return
+        if not isinstance(func, ast.Name):
+            # Unmodeled callee receiving identity-bearing actuals → escape.
+            for arg in call.args:
+                points = _eval_expr(arg, env, path=path)
+                if any(
+                    isinstance(a, (ModuleObject, CallableObject, ModuleNamespace))
+                    for a in points.known
+                ):
+                    _escape_identity(points)
+            for kw in call.keywords:
+                points = _eval_expr(kw.value, env, path=path)
+                if any(
+                    isinstance(a, (ModuleObject, CallableObject, ModuleNamespace))
+                    for a in points.known
+                ):
+                    _escape_identity(points)
+            return
+        if func.id in _BENIGN_BUILTINS:
+            return
+        # Resolve local function from nested scan map / module final bindings.
+        fn_node: ast.FunctionDef | ast.AsyncFunctionDef | None = None
+        if local_fns is not None and func.id in local_fns:
+            fn_node = local_fns[func.id]
+        if fn_node is None:
+            binding = bindings_by_path.get(path, {}).get(func.id)
+            if (
+                binding is not None
+                and binding.kind == "function"
+                and binding.function_node is not None
+            ):
+                fn_node = binding.function_node
+        if fn_node is None:
+            # Unresolved / imported callee receiving module/callable actual.
+            for arg in call.args:
+                arg_points = _eval_expr(arg, env, path=path)
+                for atom in arg_points.known:
+                    if isinstance(atom, ModuleObject):
+                        _note_export(atom.path, "*")
+                    elif isinstance(atom, ModuleNamespace):
+                        _note_export(atom.module_path, "*")
+                    elif isinstance(atom, CallableObject):
+                        behavior_mutations.add(
+                            (atom.defining_path, atom.export_name)
+                        )
+            return
+        fn_id = id(fn_node)
+        if fn_id in visited_fns:
+            return
+        visited_fns.add(fn_id)
+        formals = _formal_bindings_for_call(call, fn_node, env, path=path)
+        call_env = _copy_env(env)
+        if formals is not None:
+            call_env.update(formals)
+        nested_fns = dict(local_fns or {})
+        for stmt in fn_node.body:
+            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                nested_fns[stmt.name] = stmt
+        _scan_stmts(
+            fn_node.body,
+            path=path,
+            index=index,
+            env=call_env,
+            visited_fns=visited_fns,
+            local_fns=nested_fns,
+        )
+        # Nested defs may be returned/stored and invoked later — scan their
+        # bodies under the closure environment (Unknown > false PASS).
+        _scan_nested_defs_conservatively(
+            fn_node,
+            path=path,
+            index=index,
+            call_env=call_env,
+            visited_fns=visited_fns,
+            local_fns=nested_fns,
+        )
 
     def _scan_call(
         call: ast.Call,
         *,
         path: str,
         index: int,
-        local_bindings: Mapping[str, FinalBinding],
+        env: dict[str, _IdentityPointsTo],
         visited_fns: set[int] | None = None,
+        local_fns: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None = None,
     ) -> None:
         nonlocal unsupported
         if visited_fns is None:
@@ -1096,107 +1665,402 @@ def _collect_mutation_effects(
         setattr_parts = _setattr_target_and_name(call)
         if setattr_parts is not None:
             obj, name_expr = setattr_parts
-            if _is_sys_modules_expr(obj) or (
-                isinstance(obj, ast.Subscript) and _is_sys_modules_expr(obj.value)
-            ):
-                unsupported = True
-                for mod_path in available_paths:
-                    _note_export(mod_path, "*")
-                return
             attr = _static_str(name_expr)
-            surface = _module_namespace_surface(
-                obj, local_bindings=local_bindings
-            )
-            if surface is not None:
-                _handle_module_alias_export(surface, attr, path=path)
-                return
-            if isinstance(obj, ast.Name):
-                binding = local_bindings.get(obj.id)
-                if binding is not None and binding.kind == "import_module":
-                    _handle_module_alias_export(obj.id, attr, path=path)
-                    return
-            identity = _resolve_callable_identity(
+            _mutate_through_expr(
                 obj,
+                export_name=attr,
+                behavior=True,
+                env=env,
                 path=path,
-                bindings_by_path=bindings_by_path,
-                available_paths=available_paths,
-                import_roots=import_roots,
+                index=index,
             )
-            if identity is not None:
-                _note_behavior(
-                    identity, mutation_path=path, mutation_index=index
-                )
             return
 
-        # module.__dict__.update(...) / vars(module).update(...)
         func = call.func
         if (
             isinstance(func, ast.Attribute)
             and func.attr
             in {"update", "setdefault", "pop", "clear", "__setitem__"}
         ):
-            surface = _module_namespace_surface(
-                func.value, local_bindings=local_bindings
-            )
-            if surface is not None:
-                _handle_module_alias_export(surface, None, path=path)
-                return
+            base_points = _eval_expr(func.value, env, path=path)
+            # module namespace dict methods → export poison
+            for atom in base_points.known:
+                if isinstance(atom, ModuleNamespace):
+                    _note_export(atom.module_path, "*")
+                elif isinstance(atom, ModuleObject):
+                    _note_export(atom.path, "*")
+                elif isinstance(atom, CallableObject):
+                    _note_behavior(
+                        (atom.defining_path, atom.export_name),
+                        mutation_path=path,
+                        mutation_index=index,
+                    )
             # callable.__globals__.update(...)
             if isinstance(func.value, ast.Attribute):
-                identity = _resolve_callable_identity(
-                    func.value.value,
-                    path=path,
-                    bindings_by_path=bindings_by_path,
-                    available_paths=available_paths,
-                    import_roots=import_roots,
+                owner = _eval_expr(func.value.value, env, path=path)
+                _poison_atoms(
+                    owner,
+                    export_name=None,
+                    behavior=True,
+                    mutation_path=path,
+                    mutation_index=index,
                 )
-                if identity is not None:
-                    _note_behavior(
-                        identity, mutation_path=path, mutation_index=index
-                    )
             return
 
         _follow_local_callee(
             call,
             path=path,
             index=index,
-            local_bindings=local_bindings,
+            env=env,
             visited_fns=visited_fns,
+            local_fns=local_fns,
         )
 
-    for path, tree in trees.items():
-        local_bindings = bindings_by_path.get(path, {})
-        body: Sequence[ast.stmt] = getattr(tree, "body", ())
-        for index, node in _iter_module_level_executable_stmts(body):
-            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
-                targets = (
-                    list(node.targets)
-                    if isinstance(node, ast.Assign)
-                    else [node.target]
-                )
-                for target in targets:
-                    _scan_assign_target(
-                        target,
-                        path=path,
-                        index=index,
-                        local_bindings=local_bindings,
-                    )
-            elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
-                _scan_call(
-                    node.value,
+    def _scan_stmts(
+        stmts: Sequence[ast.stmt],
+        *,
+        path: str,
+        index: int,
+        env: dict[str, _IdentityPointsTo],
+        visited_fns: set[int],
+        local_fns: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None = None,
+    ) -> None:
+        nonlocal unsupported
+        # Mutable nested-def map for this statement sequence.
+        active_fns: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = dict(
+            local_fns or {}
+        )
+        for stmt in stmts:
+            _scan_ctx["index"] = index
+            _scan_ctx["visited_fns"] = visited_fns
+            _scan_ctx["local_fns"] = active_fns
+            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                active_fns[stmt.name] = stmt
+                # Defaults evaluate at definition time — container packing escapes.
+                for default in stmt.args.defaults:
+                    _eval_expr(default, env, path=path)
+                for default in stmt.args.kw_defaults:
+                    if default is not None:
+                        _eval_expr(default, env, path=path)
+                # Decorators execute at definition: @deco / @deco(...) may mutate.
+                for deco in stmt.decorator_list:
+                    if isinstance(deco, ast.Call):
+                        _scan_call(
+                            deco,
+                            path=path,
+                            index=index,
+                            env=env,
+                            visited_fns=visited_fns,
+                            local_fns=active_fns,
+                        )
+                    else:
+                        synthetic = ast.Call(
+                            func=deco,
+                            args=[ast.Name(id=stmt.name, ctx=ast.Load())],
+                            keywords=[],
+                        )
+                        _scan_call(
+                            synthetic,
+                            path=path,
+                            index=index,
+                            env=env,
+                            visited_fns=visited_fns,
+                            local_fns=active_fns,
+                        )
+                _apply_import_identities(stmt, env, path=path)
+                continue
+            if isinstance(stmt, ast.ClassDef):
+                for deco in stmt.decorator_list:
+                    if isinstance(deco, ast.Call):
+                        _scan_call(
+                            deco,
+                            path=path,
+                            index=index,
+                            env=env,
+                            visited_fns=visited_fns,
+                            local_fns=active_fns,
+                        )
+                    else:
+                        _escape_if_tracked(_eval_expr(deco, env, path=path))
+                # Class body executes at definition time.
+                class_env = _copy_env(env)
+                _scan_stmts(
+                    stmt.body,
                     path=path,
                     index=index,
-                    local_bindings=local_bindings,
-                    visited_fns=set(),
+                    env=class_env,
+                    visited_fns=visited_fns,
+                    local_fns=active_fns,
                 )
-            elif isinstance(node, ast.Delete):
-                for target in node.targets:
+                _apply_import_identities(stmt, env, path=path)
+                continue
+            if isinstance(stmt, (ast.Import, ast.ImportFrom)):
+                _apply_import_identities(stmt, env, path=path)
+                continue
+            if isinstance(stmt, ast.Assign):
+                value_points = _eval_expr(stmt.value, env, path=path)
+                # Chained targets share the same RHS identity (#165).
+                for target in stmt.targets:
                     _scan_assign_target(
                         target,
                         path=path,
                         index=index,
-                        local_bindings=local_bindings,
+                        env=env,
+                        value_points=value_points,
                     )
+                # Walrus bindings inside RHS.
+                for child in ast.walk(stmt.value):
+                    if isinstance(child, ast.NamedExpr) and isinstance(
+                        child.target, ast.Name
+                    ):
+                        env[child.target.id] = _eval_expr(
+                            child.value, env, path=path
+                        )
+                continue
+            if isinstance(stmt, ast.AnnAssign):
+                value_points = (
+                    _eval_expr(stmt.value, env, path=path)
+                    if stmt.value is not None
+                    else _IdentityPointsTo.unknown_only()
+                )
+                _scan_assign_target(
+                    stmt.target,
+                    path=path,
+                    index=index,
+                    env=env,
+                    value_points=value_points,
+                )
+                continue
+            if isinstance(stmt, ast.AugAssign):
+                if isinstance(stmt.target, ast.Name):
+                    # Name += rebinds / replaces the local; treat as severed
+                    # bottom so a later attr write does not spelling-poison.
+                    env[stmt.target.id] = _IdentityPointsTo.bottom()
+                else:
+                    _scan_assign_target(
+                        stmt.target,
+                        path=path,
+                        index=index,
+                        env=env,
+                        value_points=_IdentityPointsTo.unknown_only(),
+                    )
+                continue
+            if isinstance(stmt, ast.Delete):
+                for target in stmt.targets:
+                    if isinstance(target, ast.Name):
+                        env[target.id] = _IdentityPointsTo.unknown_only()
+                    else:
+                        _scan_assign_target(
+                            target,
+                            path=path,
+                            index=index,
+                            env=env,
+                            value_points=None,
+                        )
+                continue
+            if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+                _scan_call(
+                    stmt.value,
+                    path=path,
+                    index=index,
+                    env=env,
+                    visited_fns=visited_fns,
+                    local_fns=active_fns,
+                )
+                continue
+            if isinstance(stmt, ast.If):
+                env_body = _copy_env(env)
+                _scan_stmts(
+                    stmt.body,
+                    path=path,
+                    index=index,
+                    env=env_body,
+                    visited_fns=visited_fns,
+                    local_fns=active_fns,
+                )
+                env_else = _copy_env(env)
+                _scan_stmts(
+                    stmt.orelse,
+                    path=path,
+                    index=index,
+                    env=env_else,
+                    visited_fns=visited_fns,
+                    local_fns=active_fns,
+                )
+                joined = _join_envs(env_body, env_else)
+                env.clear()
+                env.update(joined)
+                continue
+            if isinstance(stmt, (ast.For, ast.AsyncFor)):
+                # Evaluate iter for container escape; loop target is unmodeled.
+                _eval_expr(stmt.iter, env, path=path)
+                _bind_target_names(
+                    stmt.target, _IdentityPointsTo.unknown_only(), env
+                )
+                env_body = _copy_env(env)
+                _scan_stmts(
+                    list(stmt.body) + list(stmt.orelse),
+                    path=path,
+                    index=index,
+                    env=env_body,
+                    visited_fns=visited_fns,
+                    local_fns=active_fns,
+                )
+                joined = _join_envs(env, env_body)
+                env.clear()
+                env.update(joined)
+                continue
+            if isinstance(stmt, ast.While):
+                env_body = _copy_env(env)
+                _scan_stmts(
+                    list(stmt.body) + list(stmt.orelse),
+                    path=path,
+                    index=index,
+                    env=env_body,
+                    visited_fns=visited_fns,
+                    local_fns=active_fns,
+                )
+                joined = _join_envs(env, env_body)
+                env.clear()
+                env.update(joined)
+                continue
+            if isinstance(stmt, (ast.With, ast.AsyncWith)):
+                bound_as: set[str] = set()
+                for item in stmt.items:
+                    subject = _eval_expr(item.context_expr, env, path=path)
+                    if item.optional_vars is not None:
+                        # Unmodeled context-manager projection: escape subject
+                        # identity and bind the target as unknown.
+                        _escape_if_tracked(subject)
+                        names = _collect_store_names(item.optional_vars)
+                        bound_as.update(names)
+                        _bind_target_names(
+                            item.optional_vars,
+                            _IdentityPointsTo.unknown_only(),
+                            env,
+                        )
+                if bound_as and _with_as_targets_mutated(stmt.body, bound_as):
+                    # Opaque with-as alias mutated — cannot prove export/callable
+                    # identity remains (Unknown > false PASS).
+                    unsupported = True
+                env_body = _copy_env(env)
+                _scan_stmts(
+                    stmt.body,
+                    path=path,
+                    index=index,
+                    env=env_body,
+                    visited_fns=visited_fns,
+                    local_fns=active_fns,
+                )
+                joined = _join_envs(env, env_body)
+                env.clear()
+                env.update(joined)
+                continue
+            if isinstance(stmt, ast.Try):
+                env_body = _copy_env(env)
+                _scan_stmts(
+                    stmt.body,
+                    path=path,
+                    index=index,
+                    env=env_body,
+                    visited_fns=visited_fns,
+                    local_fns=active_fns,
+                )
+                branch_envs = [env_body]
+                for handler in stmt.handlers:
+                    env_h = _copy_env(env)
+                    if handler.name:
+                        env_h[handler.name] = _IdentityPointsTo.unknown_only()
+                    _scan_stmts(
+                        handler.body,
+                        path=path,
+                        index=index,
+                        env=env_h,
+                        visited_fns=visited_fns,
+                        local_fns=active_fns,
+                    )
+                    branch_envs.append(env_h)
+                env_else = _copy_env(env_body)
+                _scan_stmts(
+                    stmt.orelse,
+                    path=path,
+                    index=index,
+                    env=env_else,
+                    visited_fns=visited_fns,
+                    local_fns=active_fns,
+                )
+                branch_envs.append(env_else)
+                merged = branch_envs[0]
+                for other in branch_envs[1:]:
+                    merged = _join_envs(merged, other)
+                env_final = _copy_env(merged)
+                _scan_stmts(
+                    stmt.finalbody,
+                    path=path,
+                    index=index,
+                    env=env_final,
+                    visited_fns=visited_fns,
+                    local_fns=active_fns,
+                )
+                env.clear()
+                env.update(env_final)
+                continue
+            if isinstance(stmt, ast.Match):
+                subject = _eval_expr(stmt.subject, env, path=path)
+                branch_envs: list[dict[str, _IdentityPointsTo]] = []
+                for case in stmt.cases:
+                    env_c = _copy_env(env)
+                    pattern_names = _collect_match_pattern_names(case.pattern)
+                    if pattern_names:
+                        # Pattern bind is an unmodeled projection of subject.
+                        _escape_if_tracked(subject)
+                    for name in pattern_names:
+                        env_c[name] = _IdentityPointsTo.unknown_only()
+                    _scan_stmts(
+                        case.body,
+                        path=path,
+                        index=index,
+                        env=env_c,
+                        visited_fns=visited_fns,
+                        local_fns=active_fns,
+                    )
+                    branch_envs.append(env_c)
+                if not branch_envs:
+                    continue
+                merged = branch_envs[0]
+                for other in branch_envs[1:]:
+                    merged = _join_envs(merged, other)
+                # Match may not be exhaustive — join with pre-match env.
+                merged = _join_envs(env, merged)
+                env.clear()
+                env.update(merged)
+                continue
+            if isinstance(stmt, ast.Expr):
+                for child in ast.walk(stmt):
+                    if isinstance(child, ast.NamedExpr) and isinstance(
+                        child.target, ast.Name
+                    ):
+                        env[child.target.id] = _eval_expr(
+                            child.value, env, path=path
+                        )
+
+    # Top-level walk per module: statement-order identity environment (#165).
+    for path, tree in trees.items():
+        env: dict[str, _IdentityPointsTo] = {}
+        body: Sequence[ast.stmt] = getattr(tree, "body", ())
+        module_fns: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                module_fns[node.name] = node
+        for index, node in enumerate(body):
+            _scan_stmts(
+                [node],
+                path=path,
+                index=index,
+                env=env,
+                visited_fns=set(),
+                local_fns=module_fns,
+            )
 
     return _MutationEffects(
         export_mutations={
