@@ -93,7 +93,7 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id="assurance.fastapi.bypass_authority.ast_v1",
-        extractor_version="0.7.0",
+        extractor_version="0.7.1",
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
@@ -156,6 +156,18 @@ class _RequestStateAliasEnv:
             and value.attr == "state"
             and isinstance(value.value, ast.Name)
             and value.value.id in self.request_names
+        ):
+            return True
+        # getattr(request, "state") / getattr(req, "state") — otherwise a later
+        # ``state.field = client`` write is omitted from closed-world accounting.
+        if (
+            isinstance(value, ast.Call)
+            and isinstance(value.func, ast.Name)
+            and value.func.id == "getattr"
+            and len(value.args) >= 2
+            and self._is_request_expr(value.args[0])
+            and isinstance(value.args[1], ast.Constant)
+            and value.args[1].value == "state"
         ):
             return True
         return False
@@ -560,6 +572,30 @@ def _collect_writes_in_function(
             request_aliases.poison_names(assigned)
             return
 
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            # Nested writers must be accounted; omission beside a trusted
+            # literal would otherwise false-PASS closed-world authority.
+            writes.extend(
+                _collect_writes_in_function(
+                    statement,
+                    path=path,
+                    handler_param_names=frozenset(),
+                )
+            )
+            return
+
+        if isinstance(statement, ast.ClassDef):
+            for child in statement.body:
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    writes.extend(
+                        _collect_writes_in_function(
+                            child,
+                            path=path,
+                            handler_param_names=frozenset(),
+                        )
+                    )
+            return
+
         # Ordinary statements: setattr / wildcard calls anywhere in this node.
         _record_dynamic_calls(
             statement,
@@ -585,11 +621,20 @@ def _collect_state_writes(
 ) -> tuple[StateAttributeWrite, ...]:
     writes: list[StateAttributeWrite] = []
     # Prefer per-function alias tracking so rebinding inside a writer is proved.
-    functions = [
-        node
-        for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    ]
+    # Class methods are writers too; omitting them beside a trusted literal
+    # false-PASSes closed-world authority.
+    functions: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            functions.append(node)
+        elif isinstance(node, ast.ClassDef):
+            for child in node.body:
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    functions.append(child)
+                elif isinstance(child, ast.ClassDef):
+                    for nested in child.body:
+                        if isinstance(nested, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                            functions.append(nested)
     if functions:
         for fn in functions:
             fn_param_names = frozenset(

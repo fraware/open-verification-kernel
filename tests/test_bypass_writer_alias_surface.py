@@ -132,6 +132,65 @@ def handler(request):
     assert findings[0].write_count >= 2
 
 
+def test_getattr_state_alias_client_write_cannot_establish() -> None:
+    """``state = getattr(request, \"state\")`` must not omit a client write."""
+
+    findings = analyze_bypass_authority(
+        """
+def middleware(request, bypass_filter):
+    request.state.bypass_filter = True
+    state = getattr(request, "state")
+    state.bypass_filter = bypass_filter
+
+def handler(request):
+    return request.state.bypass_filter
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("<module>"),
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].write_count >= 2
+
+
+def test_nested_function_client_write_cannot_establish() -> None:
+    findings = analyze_bypass_authority(
+        """
+def middleware(request, bypass_filter):
+    request.state.bypass_filter = True
+    def inner():
+        request.state.bypass_filter = bypass_filter
+    inner()
+
+def handler(request):
+    return request.state.bypass_filter
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("<module>"),
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].write_count >= 2
+
+
+def test_class_method_client_write_cannot_establish() -> None:
+    findings = analyze_bypass_authority(
+        """
+class Middleware:
+    def attach_client(self, request, bypass_filter):
+        request.state.bypass_filter = bypass_filter
+
+def trusted(request):
+    request.state.bypass_filter = True
+
+def handler(request):
+    return request.state.bypass_filter
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("<module>"),
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].write_count >= 2
+
+
 def test_pe_compile_refuses_established_when_req_client_writer_present() -> None:
     files = {
         "app/middleware.py": """
