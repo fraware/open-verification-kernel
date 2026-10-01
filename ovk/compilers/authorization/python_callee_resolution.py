@@ -24,7 +24,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
-_IMPLEMENTATION_VERSION = "0.1.0"
+_IMPLEMENTATION_VERSION = "0.2.0"
 _MAX_IMPORT_FOLLOW_DEPTH = 8
 
 BindingKind = Literal["function", "import_name", "import_module", "rebound"]
@@ -132,6 +132,39 @@ def _collect_store_names(target: ast.AST) -> list[str]:
     return names
 
 
+def _collect_match_pattern_names(pattern: ast.AST) -> list[str]:
+    """Names bound by a ``match`` pattern (module-scope adversary)."""
+
+    names: list[str] = []
+    if isinstance(pattern, ast.MatchAs):
+        if pattern.name:
+            names.append(pattern.name)
+        if pattern.pattern is not None:
+            names.extend(_collect_match_pattern_names(pattern.pattern))
+    elif isinstance(pattern, ast.MatchStar):
+        if pattern.name:
+            names.append(pattern.name)
+    elif isinstance(pattern, ast.MatchMapping):
+        if pattern.rest:
+            names.append(pattern.rest)
+        for item in pattern.patterns:
+            names.extend(_collect_match_pattern_names(item))
+    elif isinstance(pattern, (ast.MatchSequence, ast.MatchOr)):
+        for item in pattern.patterns:
+            names.extend(_collect_match_pattern_names(item))
+    elif isinstance(pattern, ast.MatchClass):
+        for item in pattern.patterns:
+            names.extend(_collect_match_pattern_names(item))
+        for item in pattern.kwd_patterns:
+            names.extend(_collect_match_pattern_names(item))
+    return names
+
+
+def _mark_rebound(bindings: dict[str, FinalBinding], names: list[str]) -> None:
+    for name in names:
+        bindings[name] = FinalBinding(kind="rebound")
+
+
 def module_final_bindings(
     tree: ast.AST,
     *,
@@ -142,6 +175,10 @@ def module_final_bindings(
     Later statements win. ``def name`` then ``from ext import name`` leaves an
     import binding. ``from local import name`` then ``name = wrapper`` leaves a
     rebound binding (UNKNOWN unless independently resolved).
+
+    Module-level ``for``/``with``/``except``/``match``/``del`` stores and star
+    imports also overwrite prior function identity — omitting them lets a stale
+    ``def write_state`` authorize after runtime rebinding (Unknown > false PASS).
     """
 
     bindings: dict[str, FinalBinding] = {}
@@ -155,10 +192,9 @@ def module_final_bindings(
             bindings[node.name] = FinalBinding(kind="rebound")
         elif isinstance(node, ast.ImportFrom):
             if any(alias.name == "*" for alias in node.names):
-                # Star imports poison every name they might bind — mark as
-                # deferred by leaving no precise binding and recording nothing
-                # authoritative. Callers that need star-import detection check
-                # the tree separately; here we only refuse false certainty.
+                # ``from M import *`` may overwrite any previously bound name.
+                # Names rebound *after* the star regain precise identity.
+                _mark_rebound(bindings, list(bindings))
                 continue
             module_name = import_module_name_from_importer(node, importer_path=path)
             for alias in node.names:
@@ -189,12 +225,38 @@ def module_final_bindings(
                     )
         elif isinstance(node, ast.Assign):
             for target in node.targets:
-                for name in _collect_store_names(target):
-                    bindings[name] = FinalBinding(kind="rebound")
+                _mark_rebound(bindings, _collect_store_names(target))
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             bindings[node.target.id] = FinalBinding(kind="rebound")
         elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
             bindings[node.target.id] = FinalBinding(kind="rebound")
+        elif isinstance(node, ast.Delete):
+            for target in node.targets:
+                _mark_rebound(bindings, _collect_store_names(target))
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            _mark_rebound(bindings, _collect_store_names(node.target))
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if item.optional_vars is not None:
+                    _mark_rebound(
+                        bindings, _collect_store_names(item.optional_vars)
+                    )
+        elif isinstance(node, ast.Try):
+            for handler in node.handlers:
+                if handler.name:
+                    bindings[handler.name] = FinalBinding(kind="rebound")
+        elif isinstance(node, ast.Match):
+            for case in node.cases:
+                _mark_rebound(
+                    bindings, _collect_match_pattern_names(case.pattern)
+                )
+        elif isinstance(node, ast.Expr):
+            # Module-level walrus ``(name := value)`` rebinds ``name``.
+            for child in ast.walk(node):
+                if isinstance(child, ast.NamedExpr) and isinstance(
+                    child.target, ast.Name
+                ):
+                    bindings[child.target.id] = FinalBinding(kind="rebound")
     return bindings
 
 
