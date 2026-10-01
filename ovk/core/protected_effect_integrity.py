@@ -196,12 +196,15 @@ def _edge_control_points_independently_proved(
     *,
     ir: AssuranceIR,
     cut_evidence: AuthorizationCutSetEvidence,
+    effect: ProtectedEffect,
 ) -> bool:
     """Prove bypass-claimed cut edges via exact control-point evidence.
 
     Edges are never proved by raw global edge-string membership. Each bypass
     edge on the cut must have AuthorizationControlPointEvidence binding the
-    same CFG digest, protected effect, and edge id. Unscoped bypass claims
+    same CFG digest, protected effect, principal/effect/resource, entrypoint,
+    and edge id, with ``scoped_edge_id`` equal to
+    ``ScopedEdge(CFG digest, entrypoint, local edge)``. Unscoped bypass claims
     (missing CFG digest) fail closed for any cut containing the edge.
     Edges never claimed by bypass evidence remain structural projections of
     body guard members.
@@ -212,12 +215,19 @@ def _edge_control_points_independently_proved(
     control_points = [
         item
         for item in ir.authorization_control_point_evidence
-        if item.protected_effect_id == cut_evidence.protected_effect_id
+        if item.protected_effect_id == effect.protected_effect_id
+        and item.principal_id == effect.principal_id
+        and item.effect_id == effect.effect_id
+        and item.resource_id == effect.resource_id
+        and item.entrypoint == cut_evidence.entrypoint
         and item.control_flow_summary_digest
         == cut_evidence.control_flow_summary_digest
         and item.edge_id in cut_evidence.edge_control_points
     ]
     proved_local_edges = {item.edge_id for item in control_points}
+    bypass_by_id = {
+        item.evidence_id: item for item in ir.bypass_authority_evidence
+    }
     bypass_claimed: set[str] = set()
     for item in ir.bypass_authority_evidence:
         if item.control_point_edge_id is None:
@@ -240,19 +250,30 @@ def _edge_control_points_independently_proved(
         if not matching:
             return False
         if not any(
-            item.principal_id and item.effect_id and item.resource_id
+            item.principal_id == effect.principal_id
+            and item.effect_id == effect.effect_id
+            and item.resource_id == effect.resource_id
+            and item.entrypoint == cut_evidence.entrypoint
+            and item.control_flow_summary_digest
+            == cut_evidence.control_flow_summary_digest
+            and item.protected_effect_id == effect.protected_effect_id
             for item in matching
         ):
             return False
-        # Require the backing bypass evidence to be established under this CFG.
-        established = any(
-            item.status == "established"
-            and item.control_point_edge_id == edge_id
-            and item.control_flow_summary_digest
-            == cut_evidence.control_flow_summary_digest
-            for item in ir.bypass_authority_evidence
-        )
-        if not established:
+        # Bind each control point to exact established bypass evidence.
+        bound = False
+        for item in matching:
+            bypass = bypass_by_id.get(item.bypass_evidence_id)
+            if (
+                bypass is not None
+                and bypass.status == "established"
+                and bypass.control_point_edge_id == edge_id
+                and bypass.control_flow_summary_digest
+                == cut_evidence.control_flow_summary_digest
+            ):
+                bound = True
+                break
+        if not bound:
             return False
     return True
 
@@ -367,6 +388,7 @@ def _collective_cut_on_path(
         if not _edge_control_points_independently_proved(
             ir=ir,
             cut_evidence=evidence,
+            effect=effect,
         ):
             continue
         members = [guards_by_id[guard_id] for guard_id in evidence.guard_ids]

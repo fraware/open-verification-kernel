@@ -302,7 +302,8 @@ class AuthorizationControlPointEvidence(BaseModel):
 
     Raw handler-local edge strings are not security identities. An authorizing
     cut member must bind guard, protected effect, principal/effect/resource,
-    CFG digest, entrypoint, and the local edge endpoints together.
+    CFG digest, entrypoint, and the local edge endpoints together. Each control
+    point also binds the exact underlying bypass-authority evidence id (#154).
     """
 
     evidence_id: str
@@ -315,6 +316,7 @@ class AuthorizationControlPointEvidence(BaseModel):
     control_flow_summary_digest: str
     edge_id: str
     scoped_edge_id: str
+    bypass_evidence_id: str
     origin: SemanticOrigin
 
     @field_validator(
@@ -328,6 +330,7 @@ class AuthorizationControlPointEvidence(BaseModel):
         "control_flow_summary_digest",
         "edge_id",
         "scoped_edge_id",
+        "bypass_evidence_id",
     )
     @classmethod
     def _control_point_fields_non_empty(cls, value: str) -> str:
@@ -337,6 +340,23 @@ class AuthorizationControlPointEvidence(BaseModel):
                 "authorization control-point evidence fields must be non-empty"
             )
         return value
+
+    @model_validator(mode="after")
+    def _scoped_edge_matches_components(self) -> "AuthorizationControlPointEvidence":
+        from ovk.compilers.authorization.handler_control_flow import (
+            scoped_control_flow_edge_id_from_local,
+        )
+
+        expected = scoped_control_flow_edge_id_from_local(
+            control_flow_summary_digest=self.control_flow_summary_digest,
+            entrypoint=self.entrypoint,
+            local_edge_id=self.edge_id,
+        )
+        if self.scoped_edge_id != expected:
+            raise ValueError(
+                "scoped_edge_id must equal ScopedEdge(CFG digest, entrypoint, local edge)"
+            )
+        return self
 
 
 class AuthorizationCutSetEvidence(BaseModel):

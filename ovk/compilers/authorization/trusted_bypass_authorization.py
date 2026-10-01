@@ -303,6 +303,7 @@ def build_authorization_control_point_evidence(
         control_flow_summary_digest=evidence.control_flow_summary_digest,
         edge_id=evidence.control_point_edge_id,
         scoped_edge_id=scoped,
+        bypass_evidence_id=evidence.evidence_id,
         origin=origin,
     )
 
