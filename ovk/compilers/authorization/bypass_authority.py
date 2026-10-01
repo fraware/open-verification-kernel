@@ -303,8 +303,9 @@ class _RequestStateAliasEnv:
         """True when a store mutates governed state outside the field theorem.
 
         Covers ``state.__dict__[…]``, ``request.state.__dict__[…]``,
-        ``vars(state)[…]``, and other unresolved subscript/descriptor forms on
-        a proved or plausible state container.
+        ``getattr(state, \"__dict__\")[…]``, ``vars(state)[…]``, and other
+        unresolved subscript/descriptor forms on a proved or plausible state
+        container.
         """
 
         if isinstance(target, ast.Subscript):
@@ -315,6 +316,16 @@ class _RequestStateAliasEnv:
                 and base.func.id == "vars"
                 and base.args
                 and self.is_request_or_state_expr(base.args[0])
+            ):
+                return True
+            if (
+                isinstance(base, ast.Call)
+                and isinstance(base.func, ast.Name)
+                and base.func.id == "getattr"
+                and len(base.args) >= 2
+                and self._container_is_state(base.args[0])
+                and isinstance(base.args[1], ast.Constant)
+                and base.args[1].value in {"__dict__", "__slots__"}
             ):
                 return True
             if (

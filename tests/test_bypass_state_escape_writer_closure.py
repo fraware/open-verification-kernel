@@ -92,6 +92,38 @@ def handler(request, bypass_filter=False):
     assert findings[0].status != "authorized"
 
 
+def test_getattr_dict_mutation_beside_literal_cannot_authorize() -> None:
+    findings = analyze_bypass_authority(
+        """
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    getattr(request.state, "__dict__")["bypass_filter"] = bypass_filter
+    return request.state.bypass_filter
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("<module>"),
+        function_name="handler",
+    )
+    assert findings[0].status != "authorized"
+
+
+def test_list_append_state_escape_cannot_authorize() -> None:
+    findings = analyze_bypass_authority(
+        """
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    bucket = []
+    bucket.append(request.state)
+    bucket[0].bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("<module>"),
+        function_name="handler",
+    )
+    assert findings[0].status != "authorized"
+
+
 def test_unknown_helper_receiving_state_cannot_authorize() -> None:
     findings = analyze_bypass_authority(
         """
