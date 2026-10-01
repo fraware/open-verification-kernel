@@ -251,6 +251,26 @@ def handler(request, bypass_filter=False):
     assert findings[0].status != "authorized"
 
 
+def test_rebound_writer_helper_cannot_authorize_via_stale_def() -> None:
+    """Module-level ``write_state = other`` must not close over the original def."""
+
+    findings = analyze_bypass_authority(
+        """
+def write_state(state, value):
+    state.bypass_filter = True
+write_state = evil_writer
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("<module>"),
+        function_name="handler",
+    )
+    assert findings[0].status != "authorized"
+
+
 def test_unknown_helper_receiving_state_cannot_authorize() -> None:
     findings = analyze_bypass_authority(
         """

@@ -35,7 +35,7 @@ ArgumentProvenanceKind = Literal[
     "unknown",
 ]
 
-_IMPLEMENTATION_VERSION = "0.1.0"
+_IMPLEMENTATION_VERSION = "0.2.0"
 
 
 @dataclass(frozen=True)
@@ -100,17 +100,65 @@ def _function_params(
     return tuple(item.arg for item in args.args)
 
 
+def _collect_store_names(target: ast.AST) -> list[str]:
+    names: list[str] = []
+    if isinstance(target, ast.Name):
+        names.append(target.id)
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for elt in target.elts:
+            names.extend(_collect_store_names(elt))
+    return names
+
+
+def _module_final_callee_bindings(
+    tree: ast.AST,
+) -> dict[str, Literal["function", "rebound"]]:
+    """Track module-scope final bindings for bare callee names.
+
+    ``def generate`` then ``generate = other`` leaves the name rebound: later
+    ``generate(...)`` must not be treated as the original function identity
+    (Unknown > false server_internal). A later ``def generate`` restores the
+    function binding. Imports alone do not count as rebinding — they are
+    resolved through the import-alias theorem.
+    """
+
+    bindings: dict[str, Literal["function", "rebound"]] = {}
+    for node in getattr(tree, "body", ()):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            bindings[node.name] = "function"
+        elif isinstance(node, ast.ClassDef):
+            bindings[node.name] = "rebound"
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                for name in _collect_store_names(target):
+                    bindings[name] = "rebound"
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            bindings[node.target.id] = "rebound"
+        elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+            bindings[node.target.id] = "rebound"
+    return bindings
+
+
 def _index_functions(
     files: Mapping[str, str],
 ) -> dict[str, tuple[str, ast.FunctionDef | ast.AsyncFunctionDef]]:
-    """Map simple function name -> unique (path, node) when unambiguous."""
+    """Map simple function name -> unique (path, node) when unambiguous.
+
+    Module-level rebinding after ``def name`` removes that definition from the
+    unique callee index so caller provenance cannot authorize against a stale
+    function identity.
+    """
 
     found: dict[str, list[tuple[str, ast.FunctionDef | ast.AsyncFunctionDef]]] = {}
     for path, source in files.items():
         tree = ast.parse(source, filename=path)
+        final_bindings = _module_final_callee_bindings(tree)
         for node in tree.body:
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                found.setdefault(node.name, []).append((_normalize(path), node))
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if final_bindings.get(node.name) != "function":
+                continue
+            found.setdefault(node.name, []).append((_normalize(path), node))
     unique: dict[str, tuple[str, ast.FunctionDef | ast.AsyncFunctionDef]] = {}
     for name, items in found.items():
         if len(items) == 1:
@@ -328,24 +376,47 @@ def analyze_interprocedural_argument_provenance(
                 )
             )
             continue
+        module_bindings = _module_final_callee_bindings(tree)
+        module_rebound = frozenset(
+            name
+            for name, kind in module_bindings.items()
+            if kind == "rebound"
+        )
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
             caller = _enclosing_function(tree, node)
-            shadowed = _shadowed_names_in_function(caller)
+            shadowed = _shadowed_names_in_function(caller) | module_rebound
             resolved = _resolve_callee_name(
                 node.func,
                 import_aliases=aliases,
                 shadowed_names=shadowed,
             )
             if resolved is None:
-                # Shadowed Name matching the callee is a local binding, not a
-                # global callsite — omit without poisoning provenance.
+                # Shadowed Name matching the callee is a local or module-level
+                # rebinding, not the indexed global callee — omit without
+                # counting as an authorizing callsite. Module-level rebinding of
+                # the callee name still poisons when it might have targeted the
+                # original identity through an unresolved form.
                 if (
                     isinstance(node.func, ast.Name)
                     and node.func.id == callee_name
                     and node.func.id in shadowed
                 ):
+                    if node.func.id in module_rebound:
+                        unresolved = True
+                        bindings.append(
+                            CallsiteBinding(
+                                callsite_id=(
+                                    f"callsite:{path}:{getattr(node, 'lineno', 0)}"
+                                ),
+                                path=path,
+                                actual_expression=ast.unparse(node),
+                                origin_kind="unknown_origin",
+                                evidence_id=None,
+                                unresolved_reason="module_level_callee_rebinding",
+                            )
+                        )
                     continue
                 # Deferred callee forms that might target this callee must
                 # poison provenance. Silent omit enables false server_internal.

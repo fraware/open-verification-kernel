@@ -154,8 +154,30 @@ def _build_unit_callee_index(
 ) -> _UnitCalleeIndex:
     buckets: dict[str, list[_ResolvedUnitFunction]] = {}
     for path, tree in sorted(trees.items()):
+        # Module-level rebinding after ``def name`` removes that definition from
+        # the unique callee index (same theorem as interprocedural provenance).
+        final_bindings: dict[str, str] = {}
         for node in getattr(tree, "body", ()):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                final_bindings[node.name] = "function"
+            elif isinstance(node, ast.ClassDef):
+                final_bindings[node.name] = "rebound"
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        final_bindings[target.id] = "rebound"
+            elif isinstance(node, ast.AnnAssign) and isinstance(
+                node.target, ast.Name
+            ):
+                final_bindings[node.target.id] = "rebound"
+            elif isinstance(node, ast.AugAssign) and isinstance(
+                node.target, ast.Name
+            ):
+                final_bindings[node.target.id] = "rebound"
+        for node in getattr(tree, "body", ()):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if final_bindings.get(node.name) != "function":
+                    continue
                 buckets.setdefault(node.name, []).append(
                     _ResolvedUnitFunction(path=path, node=node)
                 )

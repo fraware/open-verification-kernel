@@ -268,3 +268,70 @@ def route(request):
     assert result.reason == "no_accounted_callsites"
     assert result.callsites == ()
 
+
+def test_module_level_rebinding_does_not_authorize_original_callee() -> None:
+    """``generate = other_callable`` after ``def generate`` must not authorize."""
+
+    result = analyze_interprocedural_argument_provenance(
+        {
+            "app/mod.py": """
+def generate(request, bypass_filter: bool = False):
+    request.state.bypass_filter = bypass_filter
+generate = other_callable
+def route(request):
+    generate(request, True)
+""".strip(),
+        },
+        callee_name="generate",
+        parameter="bypass_filter",
+        scope_proof=_scope("app/mod.py"),
+    )
+    assert result.provenance == "unknown"
+    assert result.reason == "callee_not_uniquely_resolved"
+
+
+def test_module_level_import_rebinding_poisons_callsite() -> None:
+    result = analyze_interprocedural_argument_provenance(
+        {
+            "app/helper.py": """
+def generate(request, bypass_filter: bool = False):
+    request.state.bypass_filter = bypass_filter
+""".strip(),
+            "app/caller.py": """
+from app.helper import generate
+generate = other_callable
+def route(request):
+    generate(request, True)
+""".strip(),
+        },
+        callee_name="generate",
+        parameter="bypass_filter",
+        scope_proof=_scope("app/helper.py", "app/caller.py"),
+    )
+    assert result.provenance == "unknown"
+    assert result.reason == "unresolved_callsite_or_deferred_form"
+    assert any(
+        item.unresolved_reason == "module_level_callee_rebinding"
+        for item in result.callsites
+    )
+
+
+def test_later_def_restores_function_binding_after_temp_rebind() -> None:
+    """A later ``def generate`` restores the authorizing function identity."""
+
+    result = analyze_interprocedural_argument_provenance(
+        {
+            "app/mod.py": """
+generate = other_callable
+def generate(request, bypass_filter: bool = False):
+    request.state.bypass_filter = bypass_filter
+def route(request):
+    generate(request, True)
+""".strip(),
+        },
+        callee_name="generate",
+        parameter="bypass_filter",
+        scope_proof=_scope("app/mod.py"),
+    )
+    assert result.provenance == "server_internal"
+
