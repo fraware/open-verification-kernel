@@ -917,7 +917,7 @@ class FastApiDependencyEffectExtractor:
                 if key.startswith("request.state."):
                     field_searched = key.rsplit(".", 1)[-1]
                     break
-            closure_files = materials.repository_python_files
+            closure_files = materials.closure_files_for_revision(head=True)
             scope_proof = None
             derived_scope_digest = None
             if (
@@ -935,7 +935,7 @@ class FastApiDependencyEffectExtractor:
                         analyzed_paths=tuple(closure_files),
                         field_searched=field_searched,
                         import_resolution_status=(
-                            "authenticated_revision_python_manifest_v1"
+                            "authenticated_revision_python_manifest_v2"
                         ),
                     )
                     scope_proof = derived_scope.as_closed_world_scope_proof()

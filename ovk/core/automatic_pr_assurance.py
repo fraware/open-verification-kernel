@@ -274,26 +274,36 @@ def _load_exact_source_materials(
     if not selected:
         return None, ["source_profile_matched_no_files"]
 
-    # Full authenticated Python universe for closed-world writer accounting.
-    # Independent of source_paths so omitted writers cannot false-PASS.
-    python_paths = sorted(
-        path
-        for path in (head_paths or [])
-        if path.endswith(".py")
-    )
-    if len(python_paths) > profile.max_files:
-        return None, ["repository_python_manifest_file_limit_exceeded"]
+    # Full authenticated Python universes for closed-world writer accounting.
+    # Independent of source_paths / semantic-extraction budgets so omitted
+    # writers cannot false-PASS and large repos remain closure-capable (#155).
+    def _load_python_manifest(
+        revision: str,
+        paths: list[str] | None,
+    ) -> tuple[dict[str, str] | None, list[str]]:
+        python_paths = sorted(
+            path for path in (paths or []) if path.endswith(".py")
+        )
+        if len(python_paths) > profile.closure_max_files:
+            return None, ["repository_python_manifest_file_limit_exceeded"]
+        loaded: dict[str, str] = {}
+        python_bytes = 0
+        for path in python_paths:
+            text = _read_revision_file(revision, path)
+            if text is None:
+                return None, [f"repository_python_unavailable:{path}"]
+            python_bytes += len(text.encode("utf-8"))
+            if python_bytes > profile.closure_max_total_bytes:
+                return None, ["repository_python_manifest_byte_limit_exceeded"]
+            loaded[path] = text
+        return loaded, []
 
-    repository_python_files: dict[str, str] = {}
-    python_bytes = 0
-    for path in python_paths:
-        text = _read_revision_file(head_sha, path)
-        if text is None:
-            return None, [f"repository_python_unavailable:{path}"]
-        python_bytes += len(text.encode("utf-8"))
-        if python_bytes > profile.max_total_bytes:
-            return None, ["repository_python_manifest_byte_limit_exceeded"]
-        repository_python_files[path] = text
+    head_manifest, head_errors = _load_python_manifest(head_sha, head_paths)
+    if head_errors:
+        return None, head_errors
+    base_manifest, base_errors = _load_python_manifest(base_sha, base_paths)
+    if base_errors:
+        return None, base_errors
 
     return (
         AuthMaterials(
@@ -302,7 +312,9 @@ def _load_exact_source_materials(
             repo=repo,
             base_revision=base_sha,
             head_revision=head_sha,
-            repository_python_files=repository_python_files,
+            repository_python_files=head_manifest,
+            head_repository_python_files=head_manifest,
+            base_repository_python_files=base_manifest,
         ),
         [],
     )
@@ -321,6 +333,9 @@ def _compile_base_and_head_ir(
         repo=materials.repo,
         base_revision=materials.base_revision,
         head_revision=materials.base_revision,
+        repository_python_files=materials.base_repository_python_files,
+        base_repository_python_files=materials.base_repository_python_files,
+        head_repository_python_files=materials.base_repository_python_files,
     )
     base_ir = extractor.compile(base_materials, runtime_profile)
     head_ir = extractor.compile(materials, runtime_profile)

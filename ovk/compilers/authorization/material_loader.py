@@ -15,10 +15,14 @@ class AuthMaterials:
     """Paired base/head source files keyed by relative path.
 
     ``head_files`` / ``base_files`` are the PE profile ``source_paths`` view.
-    ``repository_python_files`` is the complete authenticated Python manifest
-    for closed-world writer accounting and must not be filtered by
-    ``source_paths``. When absent, product compile refuses repository-closed
-    bypass authorization (Unknown > false PASS).
+    ``head_repository_python_files`` / ``base_repository_python_files`` are the
+    complete authenticated Python manifests for closed-world writer accounting
+    and must not be filtered by ``source_paths``. When head closure is absent,
+    product compile refuses repository-closed bypass authorization
+    (Unknown > false PASS).
+
+    ``repository_python_files`` remains as a compatibility alias for the head
+    revision manifest.
     """
 
     base_files: dict[str, str] = field(default_factory=dict)
@@ -27,6 +31,19 @@ class AuthMaterials:
     head_revision: str | None = None
     repo: str | None = None
     repository_python_files: dict[str, str] | None = None
+    base_repository_python_files: dict[str, str] | None = None
+    head_repository_python_files: dict[str, str] | None = None
+
+    def __post_init__(self) -> None:
+        # Normalize dual-manifest fields while preserving the legacy alias.
+        head = self.head_repository_python_files
+        if head is None and self.repository_python_files is not None:
+            object.__setattr__(
+                self, "head_repository_python_files", self.repository_python_files
+            )
+            head = self.repository_python_files
+        if self.repository_python_files is None and head is not None:
+            object.__setattr__(self, "repository_python_files", head)
 
     @property
     def paths(self) -> list[str]:
@@ -43,6 +60,13 @@ class AuthMaterials:
 
     def has_head(self) -> bool:
         return any(text.strip() for text in self.head_files.values())
+
+    def closure_files_for_revision(self, *, head: bool) -> dict[str, str] | None:
+        """Return the complete Python manifest for base or head when present."""
+
+        if head:
+            return self.head_repository_python_files or self.repository_python_files
+        return self.base_repository_python_files
 
 
 def load_materials_from_dirs(

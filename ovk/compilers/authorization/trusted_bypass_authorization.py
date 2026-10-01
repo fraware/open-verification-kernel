@@ -424,6 +424,7 @@ def effect_bindings_from_ir(ir: AssuranceIR) -> dict[str, tuple[str, str]]:
 _REPO_CLOSURE_IMPORT_STATUSES = frozenset(
     {
         "authenticated_revision_python_manifest_v1",
+        "authenticated_revision_python_manifest_v2",
         "unit_local_static_imports_v1",
     }
 )
