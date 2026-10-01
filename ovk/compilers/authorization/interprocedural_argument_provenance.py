@@ -6,7 +6,9 @@ every statically accounted callsite actual that binds to ``p``.
 Supported callsites: direct ``Name`` calls and uniquely resolved imported /
 module-attribute function calls with ordinary positional/keyword arguments
 over a finite acyclic call graph, under caller-relative module-qualified
-callee identity (#160).
+callee identity (#160). Request-time callable identity (#167) is applied
+when the callsite sits inside a function body: mutations of module exports /
+callable behavior before the callsite invalidate authorizing identity.
 
 Deferred forms (*args, **kwargs, getattr, ambiguous imports, external
 imports, cycles, etc.) yield UNKNOWN. Absence of an observed external
@@ -23,6 +25,9 @@ from typing import Literal
 
 from ovk.compilers.authorization.bypass_authority import ClosedWorldScopeProof
 from ovk.compilers.authorization.python_callee_resolution import (
+    CalleeResolver,
+    CalleeResolveResult,
+    begin_request_time_identity_session,
     build_callee_resolver_from_sources,
     index_unique_module_functions,
     normalize_path,
@@ -42,7 +47,7 @@ ArgumentProvenanceKind = Literal[
     "unknown",
 ]
 
-_IMPLEMENTATION_VERSION = "0.8.0"
+_IMPLEMENTATION_VERSION = "0.10.0"
 
 
 @dataclass(frozen=True)
@@ -208,6 +213,40 @@ def _enclosing_function(
     return None
 
 
+def _resolve_callsite_with_request_time_identity(
+    resolver: CalleeResolver,
+    *,
+    path: str,
+    caller: ast.FunctionDef | ast.AsyncFunctionDef | None,
+    call: ast.Call,
+    shadowed_names: frozenset[str],
+) -> CalleeResolveResult:
+    """Resolve ``call`` under module bindings + request-time identity (#167)."""
+
+    if caller is None:
+        return resolver.resolve_call(
+            call.func,
+            caller_path=path,
+            shadowed_names=shadowed_names,
+        )
+    session = begin_request_time_identity_session(
+        resolver, path=path, fn=caller
+    )
+    call_lineno = getattr(call, "lineno", None)
+    for stmt in caller.body:
+        stmt_lineno = getattr(stmt, "lineno", None)
+        # Observe only statements that strictly precede the callsite so
+        # mutations after the call cannot poison this resolve (phase-sensitive).
+        if (
+            call_lineno is not None
+            and stmt_lineno is not None
+            and stmt_lineno >= call_lineno
+        ):
+            break
+        session.observe_statement(stmt)
+    return session.resolve_call(call.func, shadowed_names=shadowed_names)
+
+
 def analyze_interprocedural_argument_provenance(
     files: Mapping[str, str],
     *,
@@ -269,9 +308,11 @@ def analyze_interprocedural_argument_provenance(
                 continue
             caller = _enclosing_function(tree, node)
             shadowed = _shadowed_names_in_function(caller)
-            resolved = resolver.resolve_call(
-                node.func,
-                caller_path=path,
+            resolved = _resolve_callsite_with_request_time_identity(
+                resolver,
+                path=path,
+                caller=caller,
+                call=node,
                 shadowed_names=shadowed,
             )
             if resolved.callee is None:
@@ -297,6 +338,7 @@ def analyze_interprocedural_argument_provenance(
                         "ambiguous_manifest",
                         "import_follow_depth",
                         "callable_behavior_unknown",
+                        "request_time_callable_identity_unknown",
                     }:
                         unresolved = True
                         bindings.append(
@@ -314,8 +356,10 @@ def analyze_interprocedural_argument_provenance(
                     continue
                 # Deferred Attribute / compound forms that might target this
                 # callee must poison provenance. Silent omit enables false
-                # server_internal.
-                if _maybe_targets_callee(node.func, callee_name):
+                # server_internal. Request-time identity unknown is the same.
+                if reason == "request_time_callable_identity_unknown" or _maybe_targets_callee(
+                    node.func, callee_name
+                ):
                     unresolved = True
                     bindings.append(
                         CallsiteBinding(

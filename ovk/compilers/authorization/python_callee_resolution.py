@@ -1,4 +1,4 @@
-"""Caller-relative Python callee resolution (#160 / #161 / #163 / #165).
+"""Caller-relative Python callee resolution (#160 / #161 / #163 / #165 / #167).
 
 Replaces repository-global simple-name callee indexing with resolution that
 honours the caller's module-level final bindings and authenticated-manifest
@@ -14,6 +14,11 @@ ModuleNamespace identities; mutation closure operates on object identity at
 the statement of mutation (not spelling of final bindings). The same
 identity-flow is shared by bypass writer closure and interprocedural
 argument provenance (no divergent systems).
+
+#167 adds phase-sensitive *request-time* callable identity: handler-body
+mutations of module exports / callable behavior invalidate authorizing
+identity from the mutation point onward (Unknown > false PASS), reusing
+the same identity environment via RequestTimeIdentitySession.
 
 Resolution for a bare call ``write_state(...)``:
 1. local function binding in the caller module
@@ -38,7 +43,7 @@ from ovk.compilers.authorization.python_import_space import (
     normalize_path,
 )
 
-_IMPLEMENTATION_VERSION = "0.7.0"
+_IMPLEMENTATION_VERSION = "0.9.0"
 _MAX_IMPORT_FOLLOW_DEPTH = 8
 
 BindingKind = Literal["function", "import_name", "import_module", "rebound"]
@@ -736,6 +741,13 @@ def _is_setattr_call(call: ast.Call) -> bool:
     )
 
 
+def _is_delattr_call(call: ast.Call) -> bool:
+    func = call.func
+    return (isinstance(func, ast.Name) and func.id == "delattr") or (
+        isinstance(func, ast.Attribute) and func.attr == "__delattr__"
+    )
+
+
 def _setattr_target_and_name(
     call: ast.Call,
 ) -> tuple[ast.AST, ast.AST] | None:
@@ -754,6 +766,95 @@ def _setattr_target_and_name(
         # obj.__setattr__(name, value)
         return (func.value, call.args[0])
     return None
+
+
+def _delattr_target_and_name(
+    call: ast.Call,
+) -> tuple[ast.AST, ast.AST] | None:
+    """Return (target_obj, name_expr) for delattr-shaped calls."""
+
+    if not _is_delattr_call(call) or len(call.args) < 1:
+        return None
+    func = call.func
+    if isinstance(func, ast.Name) and func.id == "delattr":
+        if len(call.args) < 2:
+            return None
+        return (call.args[0], call.args[1])
+    if isinstance(func, ast.Attribute) and func.attr == "__delattr__":
+        if isinstance(func.value, ast.Name) and func.value.id == "object":
+            if len(call.args) < 2:
+                return None
+            return (call.args[0], call.args[1])
+        return (func.value, call.args[0])
+    return None
+
+
+def _unwrap_await(expr: ast.AST) -> ast.AST:
+    """Peel ``Await`` wrappers so async helper calls remain visible."""
+
+    while isinstance(expr, ast.Await):
+        expr = expr.value
+    return expr
+
+
+def _class_method_by_name(
+    class_node: ast.ClassDef,
+    method_name: str,
+) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+    for child in class_node.body:
+        if (
+            isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and child.name == method_name
+        ):
+            return child
+    return None
+
+
+def _attrsetter_static_name(call: ast.Call) -> str | None:
+    """Return the static attribute name for ``operator.attrsetter("x")``."""
+
+    func = call.func
+    if isinstance(func, ast.Name) and func.id == "attrsetter" and call.args:
+        return _static_str(call.args[0])
+    if (
+        isinstance(func, ast.Attribute)
+        and func.attr == "attrsetter"
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "operator"
+        and call.args
+    ):
+        return _static_str(call.args[0])
+    return None
+
+
+def _methodcaller_static_name(call: ast.Call) -> str | None:
+    """Return the static method name for ``operator.methodcaller("x")``."""
+
+    func = call.func
+    if isinstance(func, ast.Name) and func.id == "methodcaller" and call.args:
+        return _static_str(call.args[0])
+    if (
+        isinstance(func, ast.Attribute)
+        and func.attr == "methodcaller"
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "operator"
+        and call.args
+    ):
+        return _static_str(call.args[0])
+    return None
+
+
+def _getattr_static_name(call: ast.Call) -> str | None:
+    """Return the static attribute name for ``getattr(obj, "x")``."""
+
+    if not (
+        isinstance(call.func, ast.Name)
+        and call.func.id == "getattr"
+        and len(call.args) >= 2
+        and not call.keywords
+    ):
+        return None
+    return _static_str(call.args[1])
 
 
 _BENIGN_BUILTINS = frozenset(
@@ -775,6 +876,8 @@ _BENIGN_BUILTINS = frozenset(
         "range",
         "enumerate",
         "zip",
+        "map",
+        "filter",
         "iter",
         "next",
         "open",
@@ -805,28 +908,282 @@ _BENIGN_BUILTINS = frozenset(
 )
 
 
-def _collect_mutation_effects(
+
+@dataclass
+class _MutationAccum:
+    """Mutable module-export / callable-behavior mutation accumulation."""
+
+    export_mutations: dict[str, set[str]]
+    behavior_mutations: set[tuple[str, str]]
+    unsupported: bool = False
+
+    @staticmethod
+    def fresh() -> "_MutationAccum":
+        return _MutationAccum(export_mutations={}, behavior_mutations=set())
+
+    def as_effects(self) -> _MutationEffects:
+        return _MutationEffects(
+            export_mutations={
+                path: frozenset(names)
+                for path, names in self.export_mutations.items()
+            },
+            behavior_mutations=frozenset(self.behavior_mutations),
+            unsupported_module_mutation=self.unsupported,
+        )
+
+    def export_poisoned(self, module_path: str, name: str) -> bool:
+        names = self.export_mutations.get(module_path)
+        if not names:
+            return False
+        return "*" in names or name in names
+
+    def behavior_poisoned(self, identity: tuple[str, str]) -> bool:
+        return identity in self.behavior_mutations
+
+
+@dataclass
+class RequestTimeIdentitySession:
+    """Phase-sensitive callable identity during request-time execution (#167).
+
+    Reuses the #166 object-alias identity environment. Mutations of module
+    exports / callable behavior observed on the selected handler (and bounded
+    direct callees) invalidate authorizing identity from that program point
+    onward unless a subsequent source-grounded rebinding re-establishes it.
+    """
+
+    path: str
+    accum: _MutationAccum
+    env: dict[str, _IdentityPointsTo]
+    local_fns: dict[str, ast.FunctionDef | ast.AsyncFunctionDef]
+    visited_fns: set[int]
+    _scan_stmts: object
+    _resolver: "CalleeResolver"
+    _reestablished_exports: dict[tuple[str, str], tuple[str, str]]
+    _reestablished_behaviors: set[tuple[str, str]]
+
+    def observe_statement(self, stmt: ast.stmt) -> None:
+        """Apply identity mutations / alias updates for one statement."""
+
+        self._scan_stmts(  # type: ignore[operator]
+            [stmt],
+            path=self.path,
+            index=0,
+            env=self.env,
+            visited_fns=self.visited_fns,
+            local_fns=self.local_fns,
+        )
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            self.local_fns[stmt.name] = stmt
+            if not stmt.decorator_list:
+                key = (self.path, stmt.name)
+                self._reestablished_behaviors.add(key)
+                self.accum.behavior_mutations.discard(key)
+        self._maybe_reestablish_from_assign(stmt)
+
+    def copy_env(self) -> dict[str, _IdentityPointsTo]:
+        return _copy_env(self.env)
+
+    def join_env(self, other: Mapping[str, _IdentityPointsTo]) -> None:
+        joined = _join_envs(self.env, other)
+        self.env.clear()
+        self.env.update(joined)
+
+    def restore_env(self, saved: Mapping[str, _IdentityPointsTo]) -> None:
+        self.env.clear()
+        self.env.update(_copy_env(saved))
+
+    def merge_identity_effects(self, other: RequestTimeIdentitySession) -> None:
+        """Union request-time poisons from a callee/helper session into this one."""
+
+        for path, names in other.accum.export_mutations.items():
+            bucket = self.accum.export_mutations.setdefault(path, set())
+            bucket.update(names)
+        self.accum.behavior_mutations.update(other.accum.behavior_mutations)
+        self.accum.unsupported = self.accum.unsupported or other.accum.unsupported
+        for key, value in other._reestablished_exports.items():
+            self._reestablished_exports[key] = value
+        self._reestablished_behaviors.update(other._reestablished_behaviors)
+
+    def _maybe_reestablish_from_assign(self, stmt: ast.stmt) -> None:
+        """Re-establish export identity only from a session-fresh source def.
+
+        Assigning an arbitrary module-level function (e.g. ``evil``) must keep
+        the export poisoned. Only a nested ``def`` observed in this session
+        (recorded in ``_reestablished_behaviors``) may restore a module export
+        attribute binding (#167 case 9).
+        """
+
+        if isinstance(stmt, ast.Assign):
+            targets = list(stmt.targets)
+            value = stmt.value
+        elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+            targets = [stmt.target]
+            value = stmt.value
+        else:
+            return
+        if not isinstance(value, ast.Name) or value.id not in self.env:
+            return
+        rhs = self.env[value.id]
+        callable_atoms = [a for a in rhs.known if isinstance(a, CallableObject)]
+        if len(callable_atoms) != 1 or rhs.unknown:
+            return
+        atom = callable_atoms[0]
+        if (atom.defining_path, atom.export_name) not in self._reestablished_behaviors:
+            return
+        for target in targets:
+            if not isinstance(target, ast.Attribute):
+                continue
+            if not isinstance(target.value, ast.Name):
+                continue
+            base = self.env.get(target.value.id)
+            if base is None:
+                continue
+            for mod in base.known:
+                if isinstance(mod, ModuleObject):
+                    module_path = mod.path
+                elif isinstance(mod, ModuleNamespace):
+                    module_path = mod.module_path
+                else:
+                    continue
+                names = self.accum.export_mutations.get(module_path)
+                if names and target.attr in names:
+                    names.discard(target.attr)
+                self.accum.behavior_mutations.discard(
+                    (atom.defining_path, atom.export_name)
+                )
+                self._reestablished_exports[(module_path, target.attr)] = (
+                    atom.defining_path,
+                    atom.export_name,
+                )
+
+    def blocks_resolved_callee(self, callee: ResolvedCallee) -> bool:
+        """True when request-time mutations make ``callee`` identity UNKNOWN."""
+
+        identity = callee.identity
+        if (
+            identity in self.accum.behavior_mutations
+            and identity not in self._reestablished_behaviors
+        ):
+            return True
+        path, name = identity
+        if self.accum.export_poisoned(path, name):
+            if (path, name) not in self._reestablished_exports:
+                return True
+            restored = self._reestablished_exports[(path, name)]
+            if restored != identity:
+                return True
+            if restored in self.accum.behavior_mutations:
+                return True
+        return False
+
+    def resolve_call(
+        self,
+        func: ast.AST,
+        *,
+        shadowed_names: frozenset[str] = frozenset(),
+    ) -> CalleeResolveResult:
+        """Resolve ``func`` under module bindings + request-time overlay."""
+
+        if isinstance(func, ast.Name) and func.id in self.local_fns:
+            node = self.local_fns[func.id]
+            if func.id in shadowed_names or (
+                self.path,
+                func.id,
+            ) in self._reestablished_behaviors:
+                result = CalleeResolveResult(
+                    callee=ResolvedCallee(path=self.path, node=node),
+                )
+                if result.callee is not None and self.blocks_resolved_callee(
+                    result.callee
+                ):
+                    return CalleeResolveResult(
+                        callee=None,
+                        reason="request_time_callable_identity_unknown",
+                    )
+                return result
+
+        result = self._resolver.resolve_call(
+            func,
+            caller_path=self.path,
+            shadowed_names=shadowed_names,
+        )
+        if result.callee is not None and self.blocks_resolved_callee(result.callee):
+            return CalleeResolveResult(
+                callee=None,
+                reason="request_time_callable_identity_unknown",
+            )
+        if (
+            result.callee is None
+            and isinstance(func, ast.Attribute)
+            and isinstance(func.value, ast.Name)
+        ):
+            base = self.env.get(func.value.id)
+            if base is None:
+                return result
+            for atom in base.known:
+                if not isinstance(atom, ModuleObject):
+                    continue
+                if self.accum.export_poisoned(atom.path, func.attr):
+                    return CalleeResolveResult(
+                        callee=None,
+                        reason="request_time_callable_identity_unknown",
+                    )
+                restored = self._reestablished_exports.get((atom.path, func.attr))
+                if restored is not None:
+                    rpath, rname = restored
+                    binding = self._resolver.bindings_by_path.get(rpath, {}).get(
+                        rname
+                    )
+                    if (
+                        binding is not None
+                        and binding.kind == "function"
+                        and binding.function_node is not None
+                        and binding.behavior_established
+                    ):
+                        return CalleeResolveResult(
+                            callee=ResolvedCallee(
+                                path=rpath, node=binding.function_node
+                            )
+                        )
+                binding = self._resolver.bindings_by_path.get(atom.path, {}).get(
+                    func.attr
+                )
+                if (
+                    binding is not None
+                    and binding.kind == "function"
+                    and binding.function_node is not None
+                    and binding.behavior_established
+                    and not self.accum.export_poisoned(atom.path, func.attr)
+                    and (atom.path, func.attr) not in self.accum.behavior_mutations
+                ):
+                    return CalleeResolveResult(
+                        callee=ResolvedCallee(
+                            path=atom.path, node=binding.function_node
+                        )
+                    )
+        return result
+
+
+def _build_identity_scanner(
     trees: Mapping[str, ast.AST],
     bindings_by_path: Mapping[str, Mapping[str, FinalBinding]],
     *,
     available_paths: frozenset[str],
     import_roots: tuple[str, ...],
-) -> _MutationEffects:
-    """Collect module-export and callable-behavior mutations (#163 / #165).
+    accum: _MutationAccum,
+):
+    """Shared #165/#167 object-alias identity scanner closed over ``accum``."""
 
-    Walks module-level executable statements in order with a bounded
-    object-alias identity environment. Mutation closure keys off object
-    identity available at the mutation point; final bindings remain the
-    authority for authorizing call resolution after effects are applied.
-    Shared by bypass writer closure and interprocedural argument provenance.
-    """
-
-    export_mutations: dict[str, set[str]] = {}
-    behavior_mutations: set[tuple[str, str]] = set()
-    unsupported = False
+    lambda_bindings: dict[str, ast.Lambda] = {}
+    # Name → class method FunctionDef for bound-method aliases (``p = m.poison``).
+    method_bindings: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+    # Nested / module ClassDef registry for method-call following (#167 harden).
+    class_registry: dict[str, ast.ClassDef] = {}
+    # Local name → class name for ``m = Mut()`` instance aliases.
+    instance_class_of: dict[str, str] = {}
 
     def _note_export(module_path: str, name: str) -> None:
-        export_mutations.setdefault(module_path, set()).add(name)
+        accum.export_mutations.setdefault(module_path, set()).add(name)
 
     def _note_behavior(
         identity: tuple[str, str],
@@ -844,7 +1201,7 @@ def _collect_mutation_effects(
             # not poison the final object.
             if establish is not None and mutation_index < establish:
                 return
-        behavior_mutations.add(identity)
+        accum.behavior_mutations.add(identity)
 
     def _poison_atoms(
         points: _IdentityPointsTo,
@@ -877,7 +1234,7 @@ def _collect_mutation_effects(
             elif isinstance(atom, ModuleNamespace):
                 _note_export(atom.module_path, "*")
             elif isinstance(atom, CallableObject):
-                behavior_mutations.add((atom.defining_path, atom.export_name))
+                accum.behavior_mutations.add((atom.defining_path, atom.export_name))
 
     def _lookup_name(
         name: str,
@@ -911,7 +1268,147 @@ def _collect_mutation_effects(
         "index": 0,
         "visited_fns": set(),
         "local_fns": None,
+        "local_classes": None,
     }
+
+    def _register_module_classes(path: str) -> None:
+        tree = trees.get(path)
+        if tree is None:
+            return
+        for node in getattr(tree, "body", ()):
+            if isinstance(node, ast.ClassDef):
+                class_registry[node.name] = node
+
+    def _lookup_class(
+        name: str,
+        local_classes: Mapping[str, ast.ClassDef] | None,
+    ) -> ast.ClassDef | None:
+        if local_classes is not None and name in local_classes:
+            return local_classes[name]
+        return class_registry.get(name)
+
+    def _resolve_receiver_class(
+        receiver: ast.AST,
+        *,
+        local_classes: Mapping[str, ast.ClassDef] | None,
+    ) -> ast.ClassDef | None:
+        """Resolve ``Mut`` / ``Mut()`` / instance aliases to a ClassDef."""
+
+        if isinstance(receiver, ast.Name):
+            direct = _lookup_class(receiver.id, local_classes)
+            if direct is not None:
+                return direct
+            cname = instance_class_of.get(receiver.id)
+            if cname is not None:
+                return _lookup_class(cname, local_classes)
+            return None
+        if isinstance(receiver, ast.Call) and isinstance(receiver.func, ast.Name):
+            return _lookup_class(receiver.func.id, local_classes)
+        return None
+
+    def _resolve_attribute_method(
+        func: ast.Attribute,
+        *,
+        local_classes: Mapping[str, ast.ClassDef] | None,
+    ) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+        class_node = _resolve_receiver_class(
+            func.value, local_classes=local_classes
+        )
+        if class_node is None:
+            return None
+        return _class_method_by_name(class_node, func.attr)
+
+    def _methods_named(
+        method_name: str,
+        *,
+        local_classes: Mapping[str, ast.ClassDef] | None,
+    ) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
+        """Conservative may-execute set of methods with ``method_name``."""
+
+        seen: set[int] = set()
+        methods: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
+        classes: dict[str, ast.ClassDef] = dict(class_registry)
+        if local_classes is not None:
+            classes.update(local_classes)
+        for class_node in classes.values():
+            method = _class_method_by_name(class_node, method_name)
+            if method is None or id(method) in seen:
+                continue
+            seen.add(id(method))
+            methods.append(method)
+        return methods
+
+    def _follow_methods_named(
+        method_name: str,
+        call: ast.Call,
+        *,
+        path: str,
+        index: int,
+        env: dict[str, _IdentityPointsTo],
+        visited_fns: set[int],
+        local_fns: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None,
+        local_classes: Mapping[str, ast.ClassDef] | None,
+    ) -> bool:
+        methods = _methods_named(method_name, local_classes=local_classes)
+        if not methods:
+            return False
+        for method in methods:
+            _scan_fn_body(
+                method,
+                path=path,
+                index=index,
+                env=env,
+                visited_fns=visited_fns,
+                local_fns=local_fns,
+                local_classes=local_classes,
+                formals=_formal_bindings_for_call(call, method, env, path=path),
+            )
+        return True
+
+    def _scan_fn_body(
+        fn_node: ast.FunctionDef | ast.AsyncFunctionDef,
+        *,
+        path: str,
+        index: int,
+        env: dict[str, _IdentityPointsTo],
+        visited_fns: set[int],
+        local_fns: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None,
+        local_classes: Mapping[str, ast.ClassDef] | None,
+        formals: Mapping[str, _IdentityPointsTo] | None = None,
+    ) -> None:
+        fn_id = id(fn_node)
+        if fn_id in visited_fns:
+            return
+        visited_fns.add(fn_id)
+        call_env = _copy_env(env)
+        if formals is not None:
+            call_env.update(formals)
+        nested_fns = dict(local_fns or {})
+        nested_classes = dict(local_classes or {})
+        for stmt in fn_node.body:
+            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                nested_fns[stmt.name] = stmt
+            elif isinstance(stmt, ast.ClassDef):
+                nested_classes[stmt.name] = stmt
+                class_registry[stmt.name] = stmt
+        _scan_stmts(
+            fn_node.body,
+            path=path,
+            index=index,
+            env=call_env,
+            visited_fns=visited_fns,
+            local_fns=nested_fns,
+            local_classes=nested_classes,
+        )
+        _scan_nested_defs_conservatively(
+            fn_node,
+            path=path,
+            index=index,
+            call_env=call_env,
+            visited_fns=visited_fns,
+            local_fns=nested_fns,
+            local_classes=nested_classes,
+        )
 
     def _poison_unknown_receiver(
         *,
@@ -930,7 +1427,7 @@ def _collect_mutation_effects(
             for mod_path, bindings in bindings_by_path.items():
                 for local, binding in bindings.items():
                     if binding.kind == "function":
-                        behavior_mutations.add((mod_path, local))
+                        accum.behavior_mutations.add((mod_path, local))
                     elif (
                         binding.kind == "import_name"
                         and binding.module_name is not None
@@ -942,7 +1439,7 @@ def _collect_mutation_effects(
                             import_roots=import_roots,
                         )
                         if resolved is not None:
-                            behavior_mutations.add(
+                            accum.behavior_mutations.add(
                                 (resolved, binding.imported_name)
                             )
             if export_name is None or export_name in _CALLABLE_BEHAVIOR_ATTRS:
@@ -963,6 +1460,7 @@ def _collect_mutation_effects(
         *,
         path: str,
     ) -> _IdentityPointsTo:
+        expr = _unwrap_await(expr)
         if isinstance(expr, ast.Name):
             return _lookup_name(expr.id, env, path=path)
         if isinstance(expr, ast.NamedExpr):
@@ -1112,6 +1610,7 @@ def _collect_mutation_effects(
                 env=env_dict,
                 visited_fns=_scan_ctx["visited_fns"],  # type: ignore[arg-type]
                 local_fns=_scan_ctx["local_fns"],  # type: ignore[arg-type]
+                local_classes=_scan_ctx["local_classes"],  # type: ignore[arg-type]
             )
             return _IdentityPointsTo.unknown_only()
         return _IdentityPointsTo.unknown_only()
@@ -1219,11 +1718,10 @@ def _collect_mutation_effects(
         path: str,
         index: int,
     ) -> None:
-        nonlocal unsupported
         if _is_sys_modules_expr(base) or (
             isinstance(base, ast.Subscript) and _is_sys_modules_expr(base.value)
         ):
-            unsupported = True
+            accum.unsupported = True
             if (
                 isinstance(base, ast.Subscript)
                 and _is_sys_modules_expr(base.value)
@@ -1267,7 +1765,6 @@ def _collect_mutation_effects(
         env: dict[str, _IdentityPointsTo],
         value_points: _IdentityPointsTo | None,
     ) -> None:
-        nonlocal unsupported
         if isinstance(target, ast.Name):
             if value_points is not None:
                 env[target.id] = value_points
@@ -1323,7 +1820,7 @@ def _collect_mutation_effects(
             return
         if isinstance(target, ast.Subscript):
             if _is_sys_modules_expr(target.value):
-                unsupported = True
+                accum.unsupported = True
                 key = _static_str(target.slice)
                 if key is not None:
                     candidates = module_candidates_in_manifest(
@@ -1453,6 +1950,7 @@ def _collect_mutation_effects(
         call_env: dict[str, _IdentityPointsTo],
         visited_fns: set[int],
         local_fns: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None,
+        local_classes: Mapping[str, ast.ClassDef] | None = None,
     ) -> None:
         """May-execute nested defs (returned/stored closures) under call_env."""
 
@@ -1475,9 +1973,13 @@ def _collect_mutation_effects(
                     nest_env[arg.arg] = _IdentityPointsTo.unknown_only()
                 nested_local = dict(local_fns or {})
                 nested_local[node.name] = node
+                nested_classes = dict(local_classes or {})
                 for stmt in node.body:
                     if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
                         nested_local[stmt.name] = stmt
+                    elif isinstance(stmt, ast.ClassDef):
+                        nested_classes[stmt.name] = stmt
+                        class_registry[stmt.name] = stmt
                 _scan_stmts(
                     node.body,
                     path=path,
@@ -1485,6 +1987,7 @@ def _collect_mutation_effects(
                     env=nest_env,
                     visited_fns=visited_fns,
                     local_fns=nested_local,
+                    local_classes=nested_classes,
                 )
 
     def _follow_local_callee(
@@ -1495,6 +1998,7 @@ def _collect_mutation_effects(
         env: dict[str, _IdentityPointsTo],
         visited_fns: set[int],
         local_fns: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None = None,
+        local_classes: Mapping[str, ast.ClassDef] | None = None,
     ) -> None:
         func = call.func
         if isinstance(func, ast.Lambda):
@@ -1528,6 +2032,7 @@ def _collect_mutation_effects(
                         env=call_env,
                         visited_fns=visited_fns,
                         local_fns=local_fns,
+                        local_classes=local_classes,
                     )
                 else:
                     _escape_if_tracked(_eval_expr(func.body, call_env, path=path))
@@ -1537,7 +2042,68 @@ def _collect_mutation_effects(
                 for kw in call.keywords:
                     _escape_if_tracked(_eval_expr(kw.value, env, path=path))
             return
+        # Name-bound lambda: ``poison = lambda: setattr(...); poison()``.
+        if isinstance(func, ast.Name) and func.id in lambda_bindings:
+            bound = lambda_bindings[func.id]
+            synthetic = ast.Call(
+                func=bound,
+                args=list(call.args),
+                keywords=list(call.keywords),
+            )
+            _follow_local_callee(
+                synthetic,
+                path=path,
+                index=index,
+                env=env,
+                visited_fns=visited_fns,
+                local_fns=local_fns,
+                local_classes=local_classes,
+            )
+            return
+        # Bound method alias: ``p = Mut().poison; p()``.
+        if isinstance(func, ast.Name) and func.id in method_bindings:
+            _scan_fn_body(
+                method_bindings[func.id],
+                path=path,
+                index=index,
+                env=env,
+                visited_fns=visited_fns,
+                local_fns=local_fns,
+                local_classes=local_classes,
+                formals=_formal_bindings_for_call(
+                    call, method_bindings[func.id], env, path=path
+                ),
+            )
+            return
         if isinstance(func, ast.Call):
+            # getattr(obj, "poison")() — follow the named method when static.
+            getattr_name = _getattr_static_name(func)
+            if getattr_name is not None:
+                if _follow_methods_named(
+                    getattr_name,
+                    call,
+                    path=path,
+                    index=index,
+                    env=env,
+                    visited_fns=visited_fns,
+                    local_fns=local_fns,
+                    local_classes=local_classes,
+                ):
+                    return
+            # operator.methodcaller("poison")(obj)
+            methodcaller_name = _methodcaller_static_name(func)
+            if methodcaller_name is not None:
+                if _follow_methods_named(
+                    methodcaller_name,
+                    call,
+                    path=path,
+                    index=index,
+                    env=env,
+                    visited_fns=visited_fns,
+                    local_fns=local_fns,
+                    local_classes=local_classes,
+                ):
+                    return
             # Chained call ``make()()``: evaluate the callee expression first so
             # returned nested helpers still contribute mutation effects.
             _scan_call(
@@ -1547,6 +2113,7 @@ def _collect_mutation_effects(
                 env=env,
                 visited_fns=visited_fns,
                 local_fns=local_fns,
+                local_classes=local_classes,
             )
             for arg in call.args:
                 _escape_if_tracked(_eval_expr(arg, env, path=path))
@@ -1554,6 +2121,37 @@ def _collect_mutation_effects(
                 _escape_if_tracked(_eval_expr(kw.value, env, path=path))
             return
         if isinstance(func, ast.Attribute):
+            # Method calls: Mut().poison() / Mut.poison() / instance.poison().
+            method = _resolve_attribute_method(
+                func, local_classes=local_classes
+            )
+            if method is not None:
+                _scan_fn_body(
+                    method,
+                    path=path,
+                    index=index,
+                    env=env,
+                    visited_fns=visited_fns,
+                    local_fns=local_fns,
+                    local_classes=local_classes,
+                    formals=_formal_bindings_for_call(
+                        call, method, env, path=path
+                    ),
+                )
+                return
+            # Factory / opaque receivers: may-execute every registered method
+            # with this name (Unknown > false PASS).
+            if _follow_methods_named(
+                func.attr,
+                call,
+                path=path,
+                index=index,
+                env=env,
+                visited_fns=visited_fns,
+                local_fns=local_fns,
+                local_classes=local_classes,
+            ):
+                return
             # ModuleNamespace method receivers (e.g. d.get) escape; ModuleObject
             # receivers of ordinary calls do not.
             receiver = _eval_expr(func.value, env, path=path)
@@ -1592,6 +2190,30 @@ def _collect_mutation_effects(
                     _escape_identity(points)
             return
         if func.id in _BENIGN_BUILTINS:
+            # Container / higher-order builtins must still evaluate arguments so
+            # ``list(genexp)``, ``map(fn, …)`` cannot hide request-time mutations.
+            if func.id in {"map", "filter"} and call.args:
+                synthetic = ast.Call(
+                    func=call.args[0],
+                    args=list(call.args[1:]),
+                    keywords=list(call.keywords),
+                )
+                _follow_local_callee(
+                    synthetic,
+                    path=path,
+                    index=index,
+                    env=env,
+                    visited_fns=visited_fns,
+                    local_fns=local_fns,
+                    local_classes=local_classes,
+                )
+                for arg in call.args[1:]:
+                    _eval_expr(arg, env, path=path)
+                return
+            for arg in call.args:
+                _eval_expr(arg, env, path=path)
+            for kw in call.keywords:
+                _eval_expr(kw.value, env, path=path)
             return
         # Resolve local function from nested scan map / module final bindings.
         fn_node: ast.FunctionDef | ast.AsyncFunctionDef | None = None
@@ -1615,39 +2237,19 @@ def _collect_mutation_effects(
                     elif isinstance(atom, ModuleNamespace):
                         _note_export(atom.module_path, "*")
                     elif isinstance(atom, CallableObject):
-                        behavior_mutations.add(
+                        accum.behavior_mutations.add(
                             (atom.defining_path, atom.export_name)
                         )
             return
-        fn_id = id(fn_node)
-        if fn_id in visited_fns:
-            return
-        visited_fns.add(fn_id)
-        formals = _formal_bindings_for_call(call, fn_node, env, path=path)
-        call_env = _copy_env(env)
-        if formals is not None:
-            call_env.update(formals)
-        nested_fns = dict(local_fns or {})
-        for stmt in fn_node.body:
-            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                nested_fns[stmt.name] = stmt
-        _scan_stmts(
-            fn_node.body,
-            path=path,
-            index=index,
-            env=call_env,
-            visited_fns=visited_fns,
-            local_fns=nested_fns,
-        )
-        # Nested defs may be returned/stored and invoked later — scan their
-        # bodies under the closure environment (Unknown > false PASS).
-        _scan_nested_defs_conservatively(
+        _scan_fn_body(
             fn_node,
             path=path,
             index=index,
-            call_env=call_env,
+            env=env,
             visited_fns=visited_fns,
-            local_fns=nested_fns,
+            local_fns=local_fns,
+            local_classes=local_classes,
+            formals=_formal_bindings_for_call(call, fn_node, env, path=path),
         )
 
     def _scan_call(
@@ -1658,8 +2260,8 @@ def _collect_mutation_effects(
         env: dict[str, _IdentityPointsTo],
         visited_fns: set[int] | None = None,
         local_fns: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None = None,
+        local_classes: Mapping[str, ast.ClassDef] | None = None,
     ) -> None:
-        nonlocal unsupported
         if visited_fns is None:
             visited_fns = set()
         setattr_parts = _setattr_target_and_name(call)
@@ -1675,6 +2277,35 @@ def _collect_mutation_effects(
                 index=index,
             )
             return
+        delattr_parts = _delattr_target_and_name(call)
+        if delattr_parts is not None:
+            obj, name_expr = delattr_parts
+            attr = _static_str(name_expr)
+            _mutate_through_expr(
+                obj,
+                export_name=attr,
+                behavior=True,
+                env=env,
+                path=path,
+                index=index,
+            )
+            return
+        # operator.attrsetter("write_state")(helpers, evil)
+        if (
+            isinstance(call.func, ast.Call)
+            and len(call.args) >= 2
+        ):
+            setter_attr = _attrsetter_static_name(call.func)
+            if setter_attr is not None:
+                _mutate_through_expr(
+                    call.args[0],
+                    export_name=setter_attr,
+                    behavior=True,
+                    env=env,
+                    path=path,
+                    index=index,
+                )
+                return
 
         func = call.func
         if (
@@ -1714,6 +2345,7 @@ def _collect_mutation_effects(
             env=env,
             visited_fns=visited_fns,
             local_fns=local_fns,
+            local_classes=local_classes,
         )
 
     def _scan_stmts(
@@ -1724,16 +2356,18 @@ def _collect_mutation_effects(
         env: dict[str, _IdentityPointsTo],
         visited_fns: set[int],
         local_fns: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None = None,
+        local_classes: Mapping[str, ast.ClassDef] | None = None,
     ) -> None:
-        nonlocal unsupported
-        # Mutable nested-def map for this statement sequence.
+        # Mutable nested-def / class maps for this statement sequence.
         active_fns: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = dict(
             local_fns or {}
         )
+        active_classes: dict[str, ast.ClassDef] = dict(local_classes or {})
         for stmt in stmts:
             _scan_ctx["index"] = index
             _scan_ctx["visited_fns"] = visited_fns
             _scan_ctx["local_fns"] = active_fns
+            _scan_ctx["local_classes"] = active_classes
             if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 active_fns[stmt.name] = stmt
                 # Defaults evaluate at definition time — container packing escapes.
@@ -1752,6 +2386,7 @@ def _collect_mutation_effects(
                             env=env,
                             visited_fns=visited_fns,
                             local_fns=active_fns,
+                            local_classes=active_classes,
                         )
                     else:
                         synthetic = ast.Call(
@@ -1766,10 +2401,13 @@ def _collect_mutation_effects(
                             env=env,
                             visited_fns=visited_fns,
                             local_fns=active_fns,
+                            local_classes=active_classes,
                         )
                 _apply_import_identities(stmt, env, path=path)
                 continue
             if isinstance(stmt, ast.ClassDef):
+                active_classes[stmt.name] = stmt
+                class_registry[stmt.name] = stmt
                 for deco in stmt.decorator_list:
                     if isinstance(deco, ast.Call):
                         _scan_call(
@@ -1779,6 +2417,7 @@ def _collect_mutation_effects(
                             env=env,
                             visited_fns=visited_fns,
                             local_fns=active_fns,
+                            local_classes=active_classes,
                         )
                     else:
                         _escape_if_tracked(_eval_expr(deco, env, path=path))
@@ -1791,6 +2430,7 @@ def _collect_mutation_effects(
                     env=class_env,
                     visited_fns=visited_fns,
                     local_fns=active_fns,
+                    local_classes=active_classes,
                 )
                 _apply_import_identities(stmt, env, path=path)
                 continue
@@ -1808,6 +2448,35 @@ def _collect_mutation_effects(
                         env=env,
                         value_points=value_points,
                     )
+                    # Name-bound lambdas / bound methods followed on later calls.
+                    if isinstance(target, ast.Name):
+                        if isinstance(stmt.value, ast.Lambda):
+                            lambda_bindings[target.id] = stmt.value
+                            method_bindings.pop(target.id, None)
+                            instance_class_of.pop(target.id, None)
+                        elif isinstance(stmt.value, ast.Attribute):
+                            lambda_bindings.pop(target.id, None)
+                            instance_class_of.pop(target.id, None)
+                            method = _resolve_attribute_method(
+                                stmt.value, local_classes=active_classes
+                            )
+                            if method is not None:
+                                method_bindings[target.id] = method
+                            else:
+                                method_bindings.pop(target.id, None)
+                        elif (
+                            isinstance(stmt.value, ast.Call)
+                            and isinstance(stmt.value.func, ast.Name)
+                            and _lookup_class(stmt.value.func.id, active_classes)
+                            is not None
+                        ):
+                            lambda_bindings.pop(target.id, None)
+                            method_bindings.pop(target.id, None)
+                            instance_class_of[target.id] = stmt.value.func.id
+                        else:
+                            lambda_bindings.pop(target.id, None)
+                            method_bindings.pop(target.id, None)
+                            instance_class_of.pop(target.id, None)
                 # Walrus bindings inside RHS.
                 for child in ast.walk(stmt.value):
                     if isinstance(child, ast.NamedExpr) and isinstance(
@@ -1816,6 +2485,10 @@ def _collect_mutation_effects(
                         env[child.target.id] = _eval_expr(
                             child.value, env, path=path
                         )
+                        if isinstance(child.value, ast.Lambda):
+                            lambda_bindings[child.target.id] = child.value
+                        else:
+                            lambda_bindings.pop(child.target.id, None)
                 continue
             if isinstance(stmt, ast.AnnAssign):
                 value_points = (
@@ -1830,6 +2503,11 @@ def _collect_mutation_effects(
                     env=env,
                     value_points=value_points,
                 )
+                if isinstance(stmt.target, ast.Name):
+                    if isinstance(stmt.value, ast.Lambda):
+                        lambda_bindings[stmt.target.id] = stmt.value
+                    else:
+                        lambda_bindings.pop(stmt.target.id, None)
                 continue
             if isinstance(stmt, ast.AugAssign):
                 if isinstance(stmt.target, ast.Name):
@@ -1858,16 +2536,19 @@ def _collect_mutation_effects(
                             value_points=None,
                         )
                 continue
-            if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
-                _scan_call(
-                    stmt.value,
-                    path=path,
-                    index=index,
-                    env=env,
-                    visited_fns=visited_fns,
-                    local_fns=active_fns,
-                )
-                continue
+            if isinstance(stmt, ast.Expr):
+                expr_value = _unwrap_await(stmt.value)
+                if isinstance(expr_value, ast.Call):
+                    _scan_call(
+                        expr_value,
+                        path=path,
+                        index=index,
+                        env=env,
+                        visited_fns=visited_fns,
+                        local_fns=active_fns,
+                        local_classes=active_classes,
+                    )
+                    continue
             if isinstance(stmt, ast.If):
                 env_body = _copy_env(env)
                 _scan_stmts(
@@ -1877,6 +2558,7 @@ def _collect_mutation_effects(
                     env=env_body,
                     visited_fns=visited_fns,
                     local_fns=active_fns,
+                    local_classes=active_classes,
                 )
                 env_else = _copy_env(env)
                 _scan_stmts(
@@ -1886,6 +2568,7 @@ def _collect_mutation_effects(
                     env=env_else,
                     visited_fns=visited_fns,
                     local_fns=active_fns,
+                    local_classes=active_classes,
                 )
                 joined = _join_envs(env_body, env_else)
                 env.clear()
@@ -1905,6 +2588,7 @@ def _collect_mutation_effects(
                     env=env_body,
                     visited_fns=visited_fns,
                     local_fns=active_fns,
+                    local_classes=active_classes,
                 )
                 joined = _join_envs(env, env_body)
                 env.clear()
@@ -1919,6 +2603,7 @@ def _collect_mutation_effects(
                     env=env_body,
                     visited_fns=visited_fns,
                     local_fns=active_fns,
+                    local_classes=active_classes,
                 )
                 joined = _join_envs(env, env_body)
                 env.clear()
@@ -1942,7 +2627,7 @@ def _collect_mutation_effects(
                 if bound_as and _with_as_targets_mutated(stmt.body, bound_as):
                     # Opaque with-as alias mutated — cannot prove export/callable
                     # identity remains (Unknown > false PASS).
-                    unsupported = True
+                    accum.unsupported = True
                 env_body = _copy_env(env)
                 _scan_stmts(
                     stmt.body,
@@ -1951,6 +2636,7 @@ def _collect_mutation_effects(
                     env=env_body,
                     visited_fns=visited_fns,
                     local_fns=active_fns,
+                    local_classes=active_classes,
                 )
                 joined = _join_envs(env, env_body)
                 env.clear()
@@ -1965,6 +2651,7 @@ def _collect_mutation_effects(
                     env=env_body,
                     visited_fns=visited_fns,
                     local_fns=active_fns,
+                    local_classes=active_classes,
                 )
                 branch_envs = [env_body]
                 for handler in stmt.handlers:
@@ -1978,6 +2665,7 @@ def _collect_mutation_effects(
                         env=env_h,
                         visited_fns=visited_fns,
                         local_fns=active_fns,
+                        local_classes=active_classes,
                     )
                     branch_envs.append(env_h)
                 env_else = _copy_env(env_body)
@@ -1988,6 +2676,7 @@ def _collect_mutation_effects(
                     env=env_else,
                     visited_fns=visited_fns,
                     local_fns=active_fns,
+                    local_classes=active_classes,
                 )
                 branch_envs.append(env_else)
                 merged = branch_envs[0]
@@ -2001,6 +2690,7 @@ def _collect_mutation_effects(
                     env=env_final,
                     visited_fns=visited_fns,
                     local_fns=active_fns,
+                    local_classes=active_classes,
                 )
                 env.clear()
                 env.update(env_final)
@@ -2023,6 +2713,7 @@ def _collect_mutation_effects(
                         env=env_c,
                         visited_fns=visited_fns,
                         local_fns=active_fns,
+                        local_classes=active_classes,
                     )
                     branch_envs.append(env_c)
                 if not branch_envs:
@@ -2044,31 +2735,136 @@ def _collect_mutation_effects(
                             child.value, env, path=path
                         )
 
-    # Top-level walk per module: statement-order identity environment (#165).
-    for path, tree in trees.items():
-        env: dict[str, _IdentityPointsTo] = {}
-        body: Sequence[ast.stmt] = getattr(tree, "body", ())
-        module_fns: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
-        for node in body:
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                module_fns[node.name] = node
-        for index, node in enumerate(body):
-            _scan_stmts(
-                [node],
-                path=path,
-                index=index,
-                env=env,
-                visited_fns=set(),
-                local_fns=module_fns,
-            )
 
-    return _MutationEffects(
-        export_mutations={
-            path: frozenset(names) for path, names in export_mutations.items()
-        },
-        behavior_mutations=frozenset(behavior_mutations),
-        unsupported_module_mutation=unsupported,
+    def seed_env_for_path(path: str) -> dict[str, _IdentityPointsTo]:
+        env: dict[str, _IdentityPointsTo] = {}
+        for name in bindings_by_path.get(path, {}):
+            env[name] = _identity_from_final_binding(
+                name,
+                path=path,
+                bindings_by_path=bindings_by_path,
+                available_paths=available_paths,
+                import_roots=import_roots,
+            )
+        return env
+
+    def local_fns_for_path(
+        path: str,
+    ) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
+        tree = trees.get(path)
+        result: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+        if tree is None:
+            return result
+        for node in getattr(tree, "body", ()):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                result[node.name] = node
+        return result
+
+    def scan_module_init() -> None:
+        # Top-level walk per module: statement-order identity environment (#165).
+        for path, tree in trees.items():
+            _register_module_classes(path)
+            env: dict[str, _IdentityPointsTo] = {}
+            body: Sequence[ast.stmt] = getattr(tree, "body", ())
+            module_fns: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+            module_classes: dict[str, ast.ClassDef] = {}
+            for node in body:
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    module_fns[node.name] = node
+                elif isinstance(node, ast.ClassDef):
+                    module_classes[node.name] = node
+            for index, node in enumerate(body):
+                _scan_stmts(
+                    [node],
+                    path=path,
+                    index=index,
+                    env=env,
+                    visited_fns=set(),
+                    local_fns=module_fns,
+                    local_classes=module_classes,
+                )
+
+    def seed_class_registry() -> None:
+        for path in trees:
+            _register_module_classes(path)
+
+    class _IdentityScanner:
+        pass
+
+    scanner = _IdentityScanner()
+    scanner.scan_stmts = _scan_stmts  # type: ignore[method-assign]
+    scanner.scan_module_init = scan_module_init  # type: ignore[method-assign]
+    scanner.seed_env_for_path = seed_env_for_path  # type: ignore[method-assign]
+    scanner.local_fns_for_path = local_fns_for_path  # type: ignore[method-assign]
+    scanner.seed_class_registry = seed_class_registry  # type: ignore[method-assign]
+    return scanner
+
+
+def _collect_mutation_effects(
+    trees: Mapping[str, ast.AST],
+    bindings_by_path: Mapping[str, Mapping[str, FinalBinding]],
+    *,
+    available_paths: frozenset[str],
+    import_roots: tuple[str, ...],
+) -> _MutationEffects:
+    """Collect module-export and callable-behavior mutations (#163 / #165).
+
+    Walks module-level executable statements in order with a bounded
+    object-alias identity environment. Mutation closure keys off object
+    identity available at the mutation point; final bindings remain the
+    authority for authorizing call resolution after effects are applied.
+    Shared by bypass writer closure and interprocedural argument provenance.
+    """
+
+    accum = _MutationAccum.fresh()
+    scanner = _build_identity_scanner(
+        trees,
+        bindings_by_path,
+        available_paths=available_paths,
+        import_roots=import_roots,
+        accum=accum,
     )
+    scanner.scan_module_init()
+    return accum.as_effects()
+
+
+def begin_request_time_identity_session(
+    resolver: "CalleeResolver",
+    *,
+    path: str,
+    fn: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> RequestTimeIdentitySession:
+    """Start a phase-sensitive identity session for request-time execution (#167).
+
+    Seeds the #166 identity environment from module final bindings (already
+    closed under module-init mutation effects) and scans the selected function
+    body incrementally so authorizing resolve sees program-point identity.
+    """
+
+    path_n = normalize_path(path)
+    accum = _MutationAccum.fresh()
+    scanner = _build_identity_scanner(
+        resolver.trees,
+        resolver.bindings_by_path,
+        available_paths=resolver.available_paths,
+        import_roots=resolver.import_roots,
+        accum=accum,
+    )
+    scanner.seed_class_registry()
+    env = scanner.seed_env_for_path(path_n)
+    local_fns = dict(scanner.local_fns_for_path(path_n))
+    return RequestTimeIdentitySession(
+        path=path_n,
+        accum=accum,
+        env=env,
+        local_fns=local_fns,
+        visited_fns=set(),
+        _scan_stmts=scanner.scan_stmts,
+        _resolver=resolver,
+        _reestablished_exports={},
+        _reestablished_behaviors=set(),
+    )
+
 
 
 def _apply_mutation_effects(
