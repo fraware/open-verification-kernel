@@ -1,4 +1,4 @@
-"""Caller-relative Python callee resolution (#160 / #161 / #163 / #165 / #167).
+"""Caller-relative Python callee resolution (#160 / #161 / #163 / #165 / #167 / #169).
 
 Replaces repository-global simple-name callee indexing with resolution that
 honours the caller's module-level final bindings and authenticated-manifest
@@ -19,6 +19,10 @@ argument provenance (no divergent systems).
 mutations of module exports / callable behavior invalidate authorizing
 identity from the mutation point onward (Unknown > false PASS), reusing
 the same identity environment via RequestTimeIdentitySession.
+
+#169 forks and joins the *whole* request-time abstract state across
+control-flow predecessors (may-poison / must-reestablish) so branch-local
+re-establishment cannot clear poisons that remain elsewhere.
 
 Resolution for a bare call ``write_state(...)``:
 1. local function binding in the caller module
@@ -43,7 +47,7 @@ from ovk.compilers.authorization.python_import_space import (
     normalize_path,
 )
 
-_IMPLEMENTATION_VERSION = "0.9.0"
+_IMPLEMENTATION_VERSION = "0.10.0"
 _MAX_IMPORT_FOLLOW_DEPTH = 8
 
 BindingKind = Literal["function", "import_name", "import_module", "rebound"]
@@ -942,13 +946,142 @@ class _MutationAccum:
 
 
 @dataclass
+class RequestTimeIdentityState:
+    """Full request-time abstract identity state for control-flow join (#169).
+
+    Alias points-to is a may-point-to lattice. Mutation poisons are may
+    (union). Re-establishments are must (same callable identity on every
+    feasible predecessor). ``visited_fns`` is branch-local: forked per
+    predecessor so distinct identity inputs are not memoized across branches.
+    """
+
+    env: dict[str, _IdentityPointsTo]
+    export_mutations: dict[str, set[str]]
+    behavior_mutations: set[tuple[str, str]]
+    unsupported: bool
+    reestablished_exports: dict[tuple[str, str], tuple[str, str]]
+    reestablished_behaviors: set[tuple[str, str]]
+    local_fns: dict[str, ast.FunctionDef | ast.AsyncFunctionDef]
+    visited_fns: set[int]
+
+
+def _match_pattern_irrefutable(pattern: ast.AST) -> bool:
+    """True for patterns that always match (``case _`` / ``case x``)."""
+
+    if isinstance(pattern, ast.MatchAs) and pattern.pattern is None:
+        return True
+    if isinstance(pattern, ast.MatchOr):
+        return bool(pattern.patterns) and all(
+            _match_pattern_irrefutable(item) for item in pattern.patterns
+        )
+    return False
+
+
+def _match_exhaustive(stmt: ast.Match) -> bool:
+    """Conservative exhaustiveness: only an irrefutable final case proves it."""
+
+    return bool(stmt.cases) and _match_pattern_irrefutable(stmt.cases[-1].pattern)
+
+
+def _join_request_time_identity_states(
+    states: Sequence[RequestTimeIdentityState],
+) -> RequestTimeIdentityState:
+    """Join feasible predecessor states (Unknown > false PASS)."""
+
+    if not states:
+        raise ValueError("join requires at least one predecessor state")
+    joined_env = _copy_env(states[0].env)
+    for state in states[1:]:
+        joined_env = _join_envs(joined_env, state.env)
+
+    export_mutations: dict[str, set[str]] = {}
+    behavior_mutations: set[tuple[str, str]] = set()
+    unsupported = False
+    for state in states:
+        for path, names in state.export_mutations.items():
+            export_mutations.setdefault(path, set()).update(names)
+        behavior_mutations.update(state.behavior_mutations)
+        unsupported = unsupported or state.unsupported
+
+    reestablished_exports: dict[tuple[str, str], tuple[str, str]] = {}
+    all_reest_keys: set[tuple[str, str]] = set()
+    for state in states:
+        all_reest_keys.update(state.reestablished_exports)
+    for key in all_reest_keys:
+        values: list[tuple[str, str]] = []
+        agreed = True
+        for state in states:
+            restored = state.reestablished_exports.get(key)
+            if restored is None:
+                agreed = False
+                break
+            values.append(restored)
+        if agreed and values and all(value == values[0] for value in values):
+            reestablished_exports[key] = values[0]
+            # Uniform re-establishment clears the may-poison for this export.
+            path, name = key
+            names = export_mutations.get(path)
+            if names is not None:
+                names.discard(name)
+                if not names:
+                    del export_mutations[path]
+        else:
+            # Partial / disagreeing re-establishment cannot authorize.
+            path, name = key
+            export_mutations.setdefault(path, set()).add(name)
+            for state in states:
+                restored = state.reestablished_exports.get(key)
+                if restored is not None:
+                    behavior_mutations.add(restored)
+
+    reestablished_behaviors = set(states[0].reestablished_behaviors)
+    for state in states[1:]:
+        reestablished_behaviors &= state.reestablished_behaviors
+    any_reest_behaviors: set[tuple[str, str]] = set()
+    for state in states:
+        any_reest_behaviors.update(state.reestablished_behaviors)
+    for key in any_reest_behaviors - reestablished_behaviors:
+        behavior_mutations.add(key)
+    for key in reestablished_behaviors:
+        behavior_mutations.discard(key)
+
+    local_fns: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+    common_names = set(states[0].local_fns)
+    for state in states[1:]:
+        common_names &= set(state.local_fns)
+    for name in common_names:
+        nodes = [state.local_fns[name] for state in states]
+        if all(node is nodes[0] for node in nodes):
+            local_fns[name] = nodes[0]
+
+    visited_fns = set(states[0].visited_fns)
+    for state in states[1:]:
+        visited_fns &= state.visited_fns
+
+    return RequestTimeIdentityState(
+        env=joined_env,
+        export_mutations=export_mutations,
+        behavior_mutations=behavior_mutations,
+        unsupported=unsupported,
+        reestablished_exports=reestablished_exports,
+        reestablished_behaviors=reestablished_behaviors,
+        local_fns=local_fns,
+        visited_fns=visited_fns,
+    )
+
+
+@dataclass
 class RequestTimeIdentitySession:
-    """Phase-sensitive callable identity during request-time execution (#167).
+    """Phase-sensitive callable identity during request-time execution (#167/#169).
 
     Reuses the #166 object-alias identity environment. Mutations of module
     exports / callable behavior observed on the selected handler (and bounded
     direct callees) invalidate authorizing identity from that program point
     onward unless a subsequent source-grounded rebinding re-establishes it.
+
+    Control-flow join (#169) forks and joins the whole abstract state — not
+    only alias points-to — so branch-local re-establishment cannot clear
+    poisons that remain on other feasible predecessors.
     """
 
     path: str
@@ -979,6 +1112,49 @@ class RequestTimeIdentitySession:
                 self._reestablished_behaviors.add(key)
                 self.accum.behavior_mutations.discard(key)
         self._maybe_reestablish_from_assign(stmt)
+
+    def snapshot(self) -> RequestTimeIdentityState:
+        """Deep-copy the full request-time abstract state."""
+
+        return RequestTimeIdentityState(
+            env=_copy_env(self.env),
+            export_mutations={
+                path: set(names)
+                for path, names in self.accum.export_mutations.items()
+            },
+            behavior_mutations=set(self.accum.behavior_mutations),
+            unsupported=self.accum.unsupported,
+            reestablished_exports=dict(self._reestablished_exports),
+            reestablished_behaviors=set(self._reestablished_behaviors),
+            local_fns=dict(self.local_fns),
+            visited_fns=set(self.visited_fns),
+        )
+
+    def fork(self) -> RequestTimeIdentityState:
+        """Fork state for one feasible control-flow predecessor."""
+
+        return self.snapshot()
+
+    def restore(self, state: RequestTimeIdentityState) -> None:
+        """Replace the live session with a previously forked/snapshotted state."""
+
+        self.env.clear()
+        self.env.update(_copy_env(state.env))
+        self.accum.export_mutations = {
+            path: set(names) for path, names in state.export_mutations.items()
+        }
+        self.accum.behavior_mutations = set(state.behavior_mutations)
+        self.accum.unsupported = state.unsupported
+        self._reestablished_exports = dict(state.reestablished_exports)
+        self._reestablished_behaviors = set(state.reestablished_behaviors)
+        self.local_fns = dict(state.local_fns)
+        self.visited_fns = set(state.visited_fns)
+
+    def join(self, states: Sequence[RequestTimeIdentityState]) -> None:
+        """Install the sound join of feasible predecessor states."""
+
+        joined = _join_request_time_identity_states(states)
+        self.restore(joined)
 
     def copy_env(self) -> dict[str, _IdentityPointsTo]:
         return _copy_env(self.env)

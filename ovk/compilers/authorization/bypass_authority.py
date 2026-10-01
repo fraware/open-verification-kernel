@@ -27,6 +27,7 @@ from typing import Literal, Mapping
 from ovk.compilers.authorization.python_callee_resolution import (
     CalleeResolver,
     RequestTimeIdentitySession,
+    RequestTimeIdentityState,
     begin_request_time_identity_session,
     build_callee_resolver,
     import_module_name_from_importer,
@@ -110,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.16.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.17.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -596,6 +597,54 @@ def _bind_call_actuals(
     return binding
 
 
+def _match_pattern_bound_names(pattern: ast.AST) -> set[str]:
+    """Names bound by a ``match`` pattern (request/state alias poisoning)."""
+
+    names: set[str] = set()
+    if isinstance(pattern, ast.MatchAs):
+        if pattern.name:
+            names.add(pattern.name)
+        if pattern.pattern is not None:
+            names.update(_match_pattern_bound_names(pattern.pattern))
+    elif isinstance(pattern, ast.MatchStar):
+        if pattern.name:
+            names.add(pattern.name)
+    elif isinstance(pattern, ast.MatchMapping):
+        if pattern.rest:
+            names.add(pattern.rest)
+        for item in pattern.patterns:
+            names.update(_match_pattern_bound_names(item))
+    elif isinstance(pattern, (ast.MatchSequence, ast.MatchOr)):
+        for item in pattern.patterns:
+            names.update(_match_pattern_bound_names(item))
+    elif isinstance(pattern, ast.MatchClass):
+        for item in pattern.patterns:
+            names.update(_match_pattern_bound_names(item))
+        for item in pattern.kwd_patterns:
+            names.update(_match_pattern_bound_names(item))
+    return names
+
+
+def _match_pattern_irrefutable(pattern: ast.AST) -> bool:
+    """True for patterns that always match (``case _`` / ``case x``)."""
+
+    if isinstance(pattern, ast.MatchAs) and pattern.pattern is None:
+        return True
+    if isinstance(pattern, ast.MatchOr):
+        return bool(pattern.patterns) and all(
+            _match_pattern_irrefutable(item) for item in pattern.patterns
+        )
+    return False
+
+
+def _match_statement_exhaustive(statement: ast.Match) -> bool:
+    """Conservative exhaustiveness: only an irrefutable final case proves it."""
+
+    return bool(statement.cases) and _match_pattern_irrefutable(
+        statement.cases[-1].pattern
+    )
+
+
 def _collect_writes_in_function(
     fn: ast.FunctionDef | ast.AsyncFunctionDef,
     *,
@@ -1001,19 +1050,23 @@ def _collect_writes_in_function(
             assigned_on_branches = _collect_assigned_names_in_statements(
                 list(statement.body) + list(statement.orelse)
             )
-            env0 = identity_session.copy_env() if identity_session is not None else None
+            pre: RequestTimeIdentityState | None = (
+                identity_session.fork() if identity_session is not None else None
+            )
             for child in statement.body:
                 _visit_statement(child, control_dependent=True)
-            env_body = (
-                identity_session.copy_env() if identity_session is not None else None
+            body_state = (
+                identity_session.snapshot() if identity_session is not None else None
             )
-            if identity_session is not None and env0 is not None:
-                # Restore pre-branch aliases; poisons stay (Unknown > false PASS).
-                identity_session.restore_env(env0)
+            if identity_session is not None and pre is not None:
+                identity_session.restore(pre)
             for child in statement.orelse:
                 _visit_statement(child, control_dependent=True)
-            if identity_session is not None and env_body is not None:
-                identity_session.join_env(env_body)
+            if identity_session is not None and body_state is not None:
+                else_state = identity_session.snapshot()
+                # If: both branches. While with empty orelse: else_state is the
+                # zero-iteration predecessor after restore.
+                identity_session.join([body_state, else_state])
             for name in assigned_on_branches:
                 alias_state.poison(name)
             request_aliases.poison_names(assigned_on_branches)
@@ -1037,12 +1090,13 @@ def _collect_writes_in_function(
                 list(statement.body) + list(statement.orelse)
             )
             assigned.update(_collect_assign_target_names(statement.target))
-            env0 = identity_session.copy_env() if identity_session is not None else None
+            pre = identity_session.fork() if identity_session is not None else None
             for child in list(statement.body) + list(statement.orelse):
                 _visit_statement(child, control_dependent=True)
-            if identity_session is not None and env0 is not None:
-                # Loop may not execute — join with pre-loop env.
-                identity_session.join_env(env0)
+            if identity_session is not None and pre is not None:
+                # Loop may not execute — join with zero-iteration predecessor.
+                body_state = identity_session.snapshot()
+                identity_session.join([pre, body_state])
             for name in assigned:
                 alias_state.poison(name)
             request_aliases.poison_names(assigned)
@@ -1076,34 +1130,64 @@ def _collect_writes_in_function(
                 assigned.update(_collect_assigned_names_in_statements(handler.body))
                 if handler.name:
                     assigned.add(handler.name)
-            env0 = identity_session.copy_env() if identity_session is not None else None
+            pre = identity_session.fork() if identity_session is not None else None
             for child in statement.body:
                 _visit_statement(child, control_dependent=True)
-            env_body = (
-                identity_session.copy_env() if identity_session is not None else None
+            body_state = (
+                identity_session.snapshot() if identity_session is not None else None
             )
-            branch_envs: list[dict] = []
-            if env_body is not None:
-                branch_envs.append(env_body)
+            handler_states: list[RequestTimeIdentityState] = []
             for handler in statement.handlers:
-                if identity_session is not None and env0 is not None:
-                    identity_session.restore_env(env0)
+                if identity_session is not None and pre is not None:
+                    identity_session.restore(pre)
                 for child in handler.body:
                     _visit_statement(child, control_dependent=True)
                 if identity_session is not None:
-                    branch_envs.append(identity_session.copy_env())
-            if identity_session is not None and env_body is not None:
-                identity_session.restore_env(env_body)
+                    handler_states.append(identity_session.snapshot())
+            if identity_session is not None and body_state is not None:
+                identity_session.restore(body_state)
             for child in statement.orelse:
                 _visit_statement(child, control_dependent=True)
             if identity_session is not None:
-                branch_envs.append(identity_session.copy_env())
-                if env0 is not None:
-                    identity_session.restore_env(env0)
-                for env_b in branch_envs:
-                    identity_session.join_env(env_b)
+                normal_state = identity_session.snapshot()
+                # Join normal + exceptional, then run finally on that state.
+                predecessors = [normal_state, *handler_states]
+                identity_session.join(predecessors)
             for child in statement.finalbody:
                 _visit_statement(child, control_dependent=True)
+            for name in assigned:
+                alias_state.poison(name)
+            request_aliases.poison_names(assigned)
+            return
+
+        if isinstance(statement, ast.Match):
+            _mark_name_uses(statement.subject, alias_state)
+            assigned: set[str] = set()
+            for case in statement.cases:
+                assigned.update(_collect_assigned_names_in_statements(list(case.body)))
+                assigned.update(_match_pattern_bound_names(case.pattern))
+            pre = identity_session.fork() if identity_session is not None else None
+            case_states: list[RequestTimeIdentityState] = []
+            for case in statement.cases:
+                if identity_session is not None and pre is not None:
+                    identity_session.restore(pre)
+                # Pattern bindings sever precise request/state aliasing.
+                pattern_names = _match_pattern_bound_names(case.pattern)
+                request_aliases.poison_names(pattern_names)
+                for name in pattern_names:
+                    alias_state.poison(name)
+                for child in case.body:
+                    _visit_statement(child, control_dependent=True)
+                if identity_session is not None:
+                    case_states.append(identity_session.snapshot())
+            if identity_session is not None and pre is not None:
+                predecessors = list(case_states)
+                if not _match_statement_exhaustive(statement):
+                    predecessors.append(pre)
+                if predecessors:
+                    identity_session.join(predecessors)
+                else:
+                    identity_session.restore(pre)
             for name in assigned:
                 alias_state.poison(name)
             request_aliases.poison_names(assigned)

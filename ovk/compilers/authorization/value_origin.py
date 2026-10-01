@@ -272,6 +272,11 @@ def _collect_assigned_names_in_statements(statements: list[ast.stmt]) -> set[str
                     assigned.add(handler.name)
                 for child in handler.body:
                     _visit(child)
+        elif isinstance(statement, ast.Match):
+            for case in statement.cases:
+                assigned.update(_match_pattern_names_for_assign(case.pattern))
+                for child in case.body:
+                    _visit(child)
         for attr in ("body", "orelse", "finalbody"):
             block = getattr(statement, attr, None)
             if isinstance(block, list):
@@ -282,6 +287,34 @@ def _collect_assigned_names_in_statements(statements: list[ast.stmt]) -> set[str
     for statement in statements:
         _visit(statement)
     return assigned
+
+
+def _match_pattern_names_for_assign(pattern: ast.AST) -> set[str]:
+    """Names bound by a match pattern (alias poisoning under #169)."""
+
+    names: set[str] = set()
+    if isinstance(pattern, ast.MatchAs):
+        if pattern.name:
+            names.add(pattern.name)
+        if pattern.pattern is not None:
+            names.update(_match_pattern_names_for_assign(pattern.pattern))
+    elif isinstance(pattern, ast.MatchStar):
+        if pattern.name:
+            names.add(pattern.name)
+    elif isinstance(pattern, ast.MatchMapping):
+        if pattern.rest:
+            names.add(pattern.rest)
+        for item in pattern.patterns:
+            names.update(_match_pattern_names_for_assign(item))
+    elif isinstance(pattern, (ast.MatchSequence, ast.MatchOr)):
+        for item in pattern.patterns:
+            names.update(_match_pattern_names_for_assign(item))
+    elif isinstance(pattern, ast.MatchClass):
+        for item in pattern.patterns:
+            names.update(_match_pattern_names_for_assign(item))
+        for item in pattern.kwd_patterns:
+            names.update(_match_pattern_names_for_assign(item))
+    return names
 
 
 def _apply_assignment(
