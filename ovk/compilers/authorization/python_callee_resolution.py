@@ -252,16 +252,22 @@ def _names_bound_by_statement(node: ast.AST) -> set[str]:
         for child in ast.walk(node):
             if isinstance(child, ast.NamedExpr) and isinstance(child.target, ast.Name):
                 names.add(child.target.id)
-        if isinstance(node.value, ast.Call) and isinstance(
-            node.value.func, ast.Attribute
-        ):
-            if _is_module_namespace_expr(node.value.func.value) and node.value.func.attr in {
-                "update",
-                "setdefault",
-                "pop",
-                "clear",
-                "__setitem__",
-            }:
+        if isinstance(node.value, ast.Call):
+            func = node.value.func
+            if isinstance(func, ast.Name) and func.id in {"exec", "eval", "compile"}:
+                names.add("*")
+            elif (
+                isinstance(func, ast.Attribute)
+                and _is_module_namespace_expr(func.value)
+                and func.attr
+                in {
+                    "update",
+                    "setdefault",
+                    "pop",
+                    "clear",
+                    "__setitem__",
+                }
+            ):
                 names.add("*")
     return names
 
@@ -352,16 +358,22 @@ def _apply_precise_binding(
         for child in ast.walk(node):
             if isinstance(child, ast.NamedExpr) and isinstance(child.target, ast.Name):
                 bindings[child.target.id] = FinalBinding(kind="rebound")
-        if isinstance(node.value, ast.Call) and isinstance(
-            node.value.func, ast.Attribute
-        ):
-            if _is_module_namespace_expr(node.value.func.value) and node.value.func.attr in {
-                "update",
-                "setdefault",
-                "pop",
-                "clear",
-                "__setitem__",
-            }:
+        if isinstance(node.value, ast.Call):
+            func = node.value.func
+            if isinstance(func, ast.Name) and func.id in {"exec", "eval", "compile"}:
+                _mark_rebound(bindings, list(bindings))
+            elif (
+                isinstance(func, ast.Attribute)
+                and _is_module_namespace_expr(func.value)
+                and func.attr
+                in {
+                    "update",
+                    "setdefault",
+                    "pop",
+                    "clear",
+                    "__setitem__",
+                }
+            ):
                 _mark_rebound(bindings, list(bindings))
 
 

@@ -365,6 +365,21 @@ __dict__["write_state"] = evil
     assert findings[0].status == "unknown"
 
 
+def test_exec_rebinding_cannot_authorize() -> None:
+    findings = analyze_bypass_authority(
+        f"""
+def write_state(state, value):
+    state.bypass_filter = True
+exec("write_state = evil")
+{_handler_template()}
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("<module>"),
+        function_name="handler",
+    )
+    assert findings[0].status == "unknown"
+
+
 def test_cross_module_exported_name_mutation_cannot_authorize() -> None:
     findings = analyze_bypass_authority_unit(
         {
