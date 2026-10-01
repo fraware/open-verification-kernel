@@ -14,10 +14,11 @@ from ovk.compilers.authorization.protected_effect_fastapi_dependency import (
 )
 
 
-def _scope(*paths: str) -> ClosedWorldScopeProof:
+def _scope(*paths: str, import_roots: tuple[str, ...] = ()) -> ClosedWorldScopeProof:
     return ClosedWorldScopeProof(
         accounted_paths=tuple(paths),
         source_roots=(".",),
+        python_import_roots=import_roots,
     )
 
 
@@ -379,7 +380,7 @@ def handler(request, bypass_filter=False):
         entry_path="app/routes.py",
         function_name="handler",
         bypass_fields=frozenset({"bypass_filter"}),
-        scope_proof=_scope("app/helpers.py", "app/routes.py"),
+        scope_proof=_scope("app/helpers.py", "app/routes.py", import_roots=('app',)),
     )
     # Caller-local ``write_state`` resolves; client value still violates.
     assert findings[0].status == "violated"
@@ -407,7 +408,7 @@ def handler(request, bypass_filter=False):
         entry_path="app/routes.py",
         function_name="handler",
         bypass_fields=frozenset({"bypass_filter"}),
-        scope_proof=_scope("app/local_helpers.py", "app/routes.py"),
+        scope_proof=_scope("app/local_helpers.py", "app/routes.py", import_roots=('app',)),
     )
     assert findings[0].status == "unknown"
 
@@ -433,7 +434,7 @@ def handler(request, bypass_filter=False):
         entry_path="app/routes.py",
         function_name="handler",
         bypass_fields=frozenset({"bypass_filter"}),
-        scope_proof=_scope("app/helpers.py", "app/routes.py"),
+        scope_proof=_scope("app/helpers.py", "app/routes.py", import_roots=('app',)),
     )
     assert findings[0].status == "violated"
     assert findings[0].reason == "client_controlled_bypass_write"
@@ -479,7 +480,7 @@ def handler(request, bypass_filter=False):
         entry_path="app/routes.py",
         function_name="handler",
         bypass_fields=frozenset({"bypass_filter"}),
-        scope_proof=_scope("app/helpers.py", "app/routes.py"),
+        scope_proof=_scope("app/helpers.py", "app/routes.py", import_roots=('app',)),
     )
     assert findings[0].status == "unknown"
 
@@ -505,7 +506,7 @@ def handler(request, bypass_filter=False):
         entry_path="app/routes.py",
         function_name="handler",
         bypass_fields=frozenset({"bypass_filter"}),
-        scope_proof=_scope("app/helpers.py", "app/routes.py"),
+        scope_proof=_scope("app/helpers.py", "app/routes.py", import_roots=('app',)),
     )
     assert findings[0].status == "violated"
     assert findings[0].reason == "client_controlled_bypass_write"
@@ -560,7 +561,7 @@ def handler(request, bypass_filter=False):
         entry_path="app/routes.py",
         function_name="handler",
         bypass_fields=frozenset({"bypass_filter"}),
-        scope_proof=_scope("app/helpers.py", "app/routes.py"),
+        scope_proof=_scope("app/helpers.py", "app/routes.py", import_roots=('app',)),
     )
     assert findings[0].status == "unknown"
 
@@ -586,7 +587,7 @@ def handler(request, bypass_filter=False):
         entry_path="app/routes.py",
         function_name="handler",
         bypass_fields=frozenset({"bypass_filter"}),
-        scope_proof=_scope("app/helpers.py", "app/routes.py"),
+        scope_proof=_scope("app/helpers.py", "app/routes.py", import_roots=('app',)),
     )
     assert findings[0].status == "violated"
     assert findings[0].reason == "client_controlled_bypass_write"
@@ -611,7 +612,7 @@ def handler(request, bypass_filter=False):
         entry_path="pkg/sub/routes.py",
         function_name="handler",
         bypass_fields=frozenset({"bypass_filter"}),
-        scope_proof=_scope("pkg/helpers.py", "pkg/sub/routes.py"),
+        scope_proof=_scope("pkg/helpers.py", "pkg/sub/routes.py", import_roots=('pkg',)),
     )
     assert findings[0].status == "violated"
     assert findings[0].reason == "client_controlled_bypass_write"
@@ -641,6 +642,7 @@ def handler(request, bypass_filter=False):
             "app/helpers/impl.py",
             "app/helpers/__init__.py",
             "app/routes.py",
+            import_roots=("app",),
         ),
     )
     assert findings[0].status == "violated"
@@ -704,7 +706,7 @@ def write_state(state, value):
         entry_path="app/a.py",
         function_name="handler",
         bypass_fields=frozenset({"bypass_filter"}),
-        scope_proof=_scope("app/a.py", "app/b.py"),
+        scope_proof=_scope("app/a.py", "app/b.py", import_roots=('app',)),
     )
     assert findings[0].status == "violated"
     assert findings[0].reason == "client_controlled_bypass_write"

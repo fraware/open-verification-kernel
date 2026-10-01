@@ -204,6 +204,12 @@
         },
         "additionalProperties": false
       }
+    },
+    "python_import_roots": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1},
+      "description": "Trusted Python import-space roots for module identity (#161)."
     }
   },
   "additionalProperties": false

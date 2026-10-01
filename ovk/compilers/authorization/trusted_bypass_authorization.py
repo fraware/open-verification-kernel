@@ -425,6 +425,7 @@ _REPO_CLOSURE_IMPORT_STATUSES = frozenset(
     {
         "authenticated_revision_python_manifest_v1",
         "authenticated_revision_python_manifest_v2",
+        "authenticated_revision_python_manifest_v3",
         "unit_local_static_imports_v1",
     }
 )

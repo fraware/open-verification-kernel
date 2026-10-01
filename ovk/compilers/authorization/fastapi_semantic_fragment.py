@@ -503,6 +503,9 @@ def profile_semantic_digest(profile: Any) -> str:
             )
         },
         "principal_parameter": profile.principal_parameter,
+        "python_import_roots": list(
+            getattr(profile, "python_import_roots", []) or []
+        ),
     }
     return content_digest(payload)
 
@@ -1600,7 +1603,7 @@ def assemble_fastapi_assurance_ir(
         ),
         extractor=AssuranceExtractorIdentity(
             extractor_id="assurance.fastapi.dependency_effects.ast_v1",
-            extractor_version="0.27.0",
+            extractor_version="0.28.0",
             source_profile_id="assurance.fastapi.dependency_effects.ast_v1",
         ),
         coverage=AssuranceCoverage(

@@ -156,7 +156,10 @@ def finalize_fastapi_assurance_ir(
                 analyzed_paths=tuple(closure_files),
                 field_searched=field_searched,
                 import_resolution_status=(
-                    "authenticated_revision_python_manifest_v2"
+                    "authenticated_revision_python_manifest_v3"
+                ),
+                python_import_roots=tuple(
+                    getattr(profile, "python_import_roots", []) or []
                 ),
             )
             scope_proof = derived_scope.as_closed_world_scope_proof()
@@ -306,6 +309,8 @@ class FastApiDependencyEffectProfile:
     trusted_bypass_authorities: dict[str, tuple[str, ...]] = field(
         default_factory=dict
     )
+    # Trusted Python import-space roots for module identity (#161).
+    python_import_roots: tuple[str, ...] = ()
     # Handler-body helper call name -> governed semantics. Matched by profile
     # key only; effectiveness stays unproved until implementation evidence.
     body_authorization_helpers: dict[str, BodyAuthorizationHelperSemantics] = field(

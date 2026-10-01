@@ -225,6 +225,27 @@ class ProtectedEffectProfileConfig(BaseModel):
     trusted_bypass_authorities: dict[str, TrustedBypassAuthorityConfig] = Field(
         default_factory=dict
     )
+    python_import_roots: list[str] = Field(default_factory=list)
+
+    @field_validator("python_import_roots")
+    @classmethod
+    def _python_import_roots_valid(cls, values: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            item = str(value).strip().replace("\\", "/").strip("/")
+            if item in ("", "."):
+                # Repo-root is always available via exact-path proof; ignore.
+                continue
+            if ".." in PurePosixPath(item).parts:
+                raise ValueError(
+                    "python_import_roots must be repository-relative and cannot contain '..'"
+                )
+            if item in seen:
+                raise ValueError("python_import_roots must be unique")
+            seen.add(item)
+            normalized.append(item)
+        return normalized
 
     @field_validator("source_paths")
     @classmethod
@@ -504,6 +525,7 @@ class ProtectedEffectProfileConfig(BaseModel):
                 payload["trusted_bypass_authorities"].items()
             )
         }
+        payload["python_import_roots"] = sorted(payload.get("python_import_roots") or [])
         return payload
 
     @property
@@ -584,6 +606,7 @@ class ProtectedEffectProfileConfig(BaseModel):
                 key: tuple(value.effects)
                 for key, value in self.trusted_bypass_authorities.items()
             },
+            python_import_roots=tuple(self.python_import_roots),
         )
 
 

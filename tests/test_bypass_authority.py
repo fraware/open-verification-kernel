@@ -8,10 +8,15 @@ from ovk.compilers.authorization.bypass_authority import (
 )
 
 
-def _scope(*paths: str, source_roots: tuple[str, ...] = (".",)) -> ClosedWorldScopeProof:
+def _scope(
+    *paths: str,
+    source_roots: tuple[str, ...] = (".",),
+    import_roots: tuple[str, ...] = (),
+) -> ClosedWorldScopeProof:
     return ClosedWorldScopeProof(
         accounted_paths=tuple(paths),
         source_roots=source_roots,
+        python_import_roots=import_roots,
     )
 
 
@@ -351,6 +356,7 @@ def handler(request):
             "src/acme/auth.py",
             "lib/acme/auth.py",
             "app/handler.py",
+            import_roots=("src", "lib"),
         ),
     )
     assert findings[0].status == "unknown"
@@ -489,7 +495,7 @@ def handler(request):
 
 
 def test_nonconventional_python_layout_resolves_local_import() -> None:
-    """``python/acme/...`` must resolve without backend/src special-casing."""
+    """``python/acme/...`` resolves via trusted ``python_import_roots`` (#161)."""
 
     from ovk.compilers.authorization.bypass_authority import (
         analyze_bypass_authority_unit,
@@ -511,7 +517,7 @@ def handler(request):
         files,
         entry_path="python/acme/routes.py",
         bypass_fields=frozenset({"bypass_filter"}),
-        scope_proof=_scope(*files, source_roots=(".",)),
+        scope_proof=_scope(*files, source_roots=(".",), import_roots=("python",)),
     )
     assert findings[0].closed_world is not None
     assert findings[0].closed_world.complete is True
@@ -543,6 +549,7 @@ def handler(request):
         scope_proof=_scope(
             "backend/open_webui/routers/openai.py",
             source_roots=("backend",),
+            import_roots=("backend",),
         ),
     )
     assert findings[0].closed_world is not None
