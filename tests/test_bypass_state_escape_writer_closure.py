@@ -107,6 +107,102 @@ def handler(request, bypass_filter=False):
     assert findings[0].status != "authorized"
 
 
+def test_dict_attr_alias_mutation_beside_literal_cannot_authorize() -> None:
+    """``d = request.state.__dict__; d[field]=client`` must not authorize."""
+
+    findings = analyze_bypass_authority(
+        """
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    d = request.state.__dict__
+    d["bypass_filter"] = bypass_filter
+    return request.state.bypass_filter
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("<module>"),
+        function_name="handler",
+    )
+    assert findings[0].status != "authorized"
+
+
+def test_object_getattribute_dict_mutation_cannot_authorize() -> None:
+    findings = analyze_bypass_authority(
+        """
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    object.__getattribute__(request.state, "__dict__")["bypass_filter"] = bypass_filter
+    return request.state.bypass_filter
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("<module>"),
+        function_name="handler",
+    )
+    assert findings[0].status != "authorized"
+
+
+def test_state_getattribute_dict_mutation_cannot_authorize() -> None:
+    findings = analyze_bypass_authority(
+        """
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    request.state.__getattribute__("__dict__")["bypass_filter"] = bypass_filter
+    return request.state.bypass_filter
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("<module>"),
+        function_name="handler",
+    )
+    assert findings[0].status != "authorized"
+
+
+def test_operator_attrgetter_dict_mutation_cannot_authorize() -> None:
+    findings = analyze_bypass_authority(
+        """
+import operator
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    operator.attrgetter("__dict__")(request.state)["bypass_filter"] = bypass_filter
+    return request.state.bypass_filter
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("<module>"),
+        function_name="handler",
+    )
+    assert findings[0].status != "authorized"
+
+
+def test_tuple_unpack_state_escape_cannot_authorize() -> None:
+    findings = analyze_bypass_authority(
+        """
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    (s,) = (request.state,)
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("<module>"),
+        function_name="handler",
+    )
+    assert findings[0].status != "authorized"
+
+
+def test_list_unpack_state_escape_cannot_authorize() -> None:
+    findings = analyze_bypass_authority(
+        """
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    [s] = [request.state]
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("<module>"),
+        function_name="handler",
+    )
+    assert findings[0].status != "authorized"
+
+
 def test_list_append_state_escape_cannot_authorize() -> None:
     findings = analyze_bypass_authority(
         """

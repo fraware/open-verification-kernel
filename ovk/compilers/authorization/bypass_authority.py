@@ -94,8 +94,9 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.8.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.8.1"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
+_STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
 # Builtins that observe request/state without a mutation channel under the
 # bounded escape theorem. ``setattr`` is handled separately as a write.
@@ -299,38 +300,135 @@ class _RequestStateAliasEnv:
     def is_request_or_state_expr(self, value: ast.AST) -> bool:
         return self._is_request_expr(value) or self._is_state_expr(value)
 
+    def call_receives_request_or_state(self, call: ast.Call) -> bool:
+        for arg in call.args:
+            if isinstance(arg, ast.Starred):
+                if self.is_request_or_state_expr(arg.value):
+                    return True
+                continue
+            if self.is_request_or_state_expr(arg):
+                return True
+        for kw in call.keywords:
+            if kw.value is not None and self.is_request_or_state_expr(kw.value):
+                return True
+        if isinstance(call.func, ast.Attribute):
+            if self.is_request_or_state_expr(call.func.value):
+                return True
+        return False
+
+    def is_state_dict_surface(self, value: ast.AST) -> bool:
+        """True for ``state.__dict__`` / ``vars(state)`` / ``__getattribute__`` surfaces."""
+
+        if (
+            isinstance(value, ast.Attribute)
+            and value.attr in _STATE_DICT_ATTRS
+            and self._container_is_state(value.value)
+        ):
+            return True
+        if not isinstance(value, ast.Call):
+            return False
+        if (
+            isinstance(value.func, ast.Name)
+            and value.func.id == "vars"
+            and value.args
+            and self.is_request_or_state_expr(value.args[0])
+        ):
+            return True
+        if (
+            isinstance(value.func, ast.Name)
+            and value.func.id == "getattr"
+            and len(value.args) >= 2
+            and self._container_is_state(value.args[0])
+            and isinstance(value.args[1], ast.Constant)
+            and value.args[1].value in _STATE_DICT_ATTRS
+        ):
+            return True
+        # object.__getattribute__(state, "__dict__")
+        if (
+            isinstance(value.func, ast.Attribute)
+            and value.func.attr == "__getattribute__"
+            and len(value.args) >= 2
+            and isinstance(value.args[1], ast.Constant)
+            and value.args[1].value in _STATE_DICT_ATTRS
+            and self._container_is_state(value.args[0])
+        ):
+            return True
+        # state.__getattribute__("__dict__")
+        if (
+            isinstance(value.func, ast.Attribute)
+            and value.func.attr == "__getattribute__"
+            and self._container_is_state(value.func.value)
+            and value.args
+            and isinstance(value.args[0], ast.Constant)
+            and value.args[0].value in _STATE_DICT_ATTRS
+        ):
+            return True
+        return False
+
+    def packs_request_or_state_identity(self, value: ast.AST) -> bool:
+        """True when request/state identity is packed into a container literal."""
+
+        if isinstance(value, (ast.Tuple, ast.List, ast.Set)):
+            for elt in value.elts:
+                if isinstance(elt, ast.Starred):
+                    nested = elt.value
+                else:
+                    nested = elt
+                if self.is_request_or_state_expr(nested):
+                    return True
+                if self.packs_request_or_state_identity(nested):
+                    return True
+            return False
+        if isinstance(value, ast.Dict):
+            for key, val in zip(value.keys, value.values):
+                for item in (key, val):
+                    if item is None:
+                        continue
+                    if self.is_request_or_state_expr(item):
+                        return True
+                    if self.packs_request_or_state_identity(item):
+                        return True
+            return False
+        return False
+
+    def assignment_escapes_state_identity(
+        self, target: ast.AST, value: ast.AST
+    ) -> bool:
+        """True when an assignment escapes governed identity outside Name aliasing.
+
+        ``state = request.state`` remains the supported Name alias theorem.
+        Packing into tuples/lists, aliasing ``__dict__``, or storing into
+        non-Name targets is residual escape (Unknown > false PASS).
+        """
+
+        if self.is_state_dict_surface(value):
+            return True
+        if self.packs_request_or_state_identity(value):
+            return True
+        if self.is_request_or_state_expr(value) and not isinstance(target, ast.Name):
+            return True
+        return False
+
     def is_poison_state_store(self, target: ast.AST) -> bool:
         """True when a store mutates governed state outside the field theorem.
 
         Covers ``state.__dict__[…]``, ``request.state.__dict__[…]``,
-        ``getattr(state, \"__dict__\")[…]``, ``vars(state)[…]``, and other
-        unresolved subscript/descriptor forms on a proved or plausible state
-        container.
+        ``getattr(state, \"__dict__\")[…]``, ``vars(state)[…]``,
+        ``object.__getattribute__(state, \"__dict__\")[…]``, Call-shaped
+        dict surfaces such as ``operator.attrgetter(\"__dict__\")(state)[…]``,
+        and other unresolved subscript/descriptor forms on a proved or
+        plausible state container.
         """
 
         if isinstance(target, ast.Subscript):
             base = target.value
-            if (
-                isinstance(base, ast.Call)
-                and isinstance(base.func, ast.Name)
-                and base.func.id == "vars"
-                and base.args
-                and self.is_request_or_state_expr(base.args[0])
-            ):
+            if self.is_state_dict_surface(base):
                 return True
-            if (
-                isinstance(base, ast.Call)
-                and isinstance(base.func, ast.Name)
-                and base.func.id == "getattr"
-                and len(base.args) >= 2
-                and self._container_is_state(base.args[0])
-                and isinstance(base.args[1], ast.Constant)
-                and base.args[1].value in {"__dict__", "__slots__"}
-            ):
+            if isinstance(base, ast.Call) and self.call_receives_request_or_state(base):
                 return True
             if (
                 isinstance(base, ast.Attribute)
-                and base.attr == "__dict__"
+                and base.attr in _STATE_DICT_ATTRS
                 and self._container_is_state(base.value)
             ):
                 return True
@@ -339,7 +437,7 @@ class _RequestStateAliasEnv:
             if self._is_state_expr(base) and _constant_str_key(target.slice) is None:
                 return True
             return False
-        if isinstance(target, ast.Attribute) and target.attr == "__dict__":
+        if isinstance(target, ast.Attribute) and target.attr in _STATE_DICT_ATTRS:
             return self._container_is_state(target.value)
         return False
 
@@ -571,17 +669,15 @@ def _collect_writes_in_function(
                 control_dependent=control_dependent,
             )
             return
+        if request_aliases.assignment_escapes_state_identity(target, value):
+            _record_escape(
+                statement,
+                ast.unparse(statement),
+                control_dependent=control_dependent,
+            )
+            return
         field, exact = request_aliases.field_from_assign_target(target)
         if field is None:
-            # request/state escaping into an unresolved store target.
-            if request_aliases.is_request_or_state_expr(value) and not isinstance(
-                target, ast.Name
-            ):
-                _record_escape(
-                    statement,
-                    ast.unparse(statement),
-                    control_dependent=control_dependent,
-                )
             return
         writes.append(
             StateAttributeWrite(
@@ -660,22 +756,7 @@ def _collect_writes_in_function(
         return True
 
     def _call_receives_request_or_state(call: ast.Call) -> bool:
-        for arg in call.args:
-            if isinstance(arg, ast.Starred):
-                if request_aliases.is_request_or_state_expr(arg.value):
-                    return True
-                continue
-            if request_aliases.is_request_or_state_expr(arg):
-                return True
-        for kw in call.keywords:
-            if kw.value is not None and request_aliases.is_request_or_state_expr(
-                kw.value
-            ):
-                return True
-        if isinstance(call.func, ast.Attribute):
-            if request_aliases.is_request_or_state_expr(call.func.value):
-                return True
-        return False
+        return request_aliases.call_receives_request_or_state(call)
 
     def _record_dynamic_calls(
         statement: ast.stmt,
