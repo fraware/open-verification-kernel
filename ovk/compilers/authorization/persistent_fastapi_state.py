@@ -270,6 +270,12 @@ def _state_payload(
         "contract_composition_state": _contract_state_payload(
             state.contract_composition_state
         ),
+        "head_repository_python_manifest_digest": (
+            state.head_repository_python_manifest_digest
+        ),
+        "derived_closed_world_scope_digest": (
+            state.derived_closed_world_scope_digest
+        ),
     }
 
 
@@ -324,6 +330,16 @@ def _state_from_payload(
         fragments=fragments,
         assurance_ir_digest=str(payload["assurance_ir_digest"]),
         contract_composition_state=contract_state,
+        head_repository_python_manifest_digest=(
+            str(payload["head_repository_python_manifest_digest"])
+            if payload.get("head_repository_python_manifest_digest") is not None
+            else None
+        ),
+        derived_closed_world_scope_digest=(
+            str(payload["derived_closed_world_scope_digest"])
+            if payload.get("derived_closed_world_scope_digest") is not None
+            else None
+        ),
     )
 
 
