@@ -11,6 +11,11 @@ in statically resolvable unit-local imports are accounted. Unresolvable or
 dynamic imports make the closed-world condition incomplete — authorized PASS
 is refused (Unknown > false PASS). Absence of a discovered writer is never
 positive proof of trust.
+
+Request/state escape analysis (#156): governed state identity must not leave
+the supported theorem through helper arguments, ``__dict__`` / ``vars``
+mutation, unresolved method calls, or similar channels without either a
+bounded interprocedural writer closure or an explicit UNKNOWN.
 """
 
 from __future__ import annotations
@@ -89,17 +94,74 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.8.0"
+_MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
+
+# Builtins that observe request/state without a mutation channel under the
+# bounded escape theorem. ``setattr`` is handled separately as a write.
+_NON_MUTATING_STATE_OBSERVERS = frozenset(
+    {
+        "getattr",
+        "hasattr",
+        "isinstance",
+        "issubclass",
+        "id",
+        "type",
+        "bool",
+        "repr",
+        "str",
+        "len",
+        "ascii",
+        "hash",
+    }
+)
+
+
 def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     return SemanticOrigin(
         path=path,
         extractor_id="assurance.fastapi.bypass_authority.ast_v1",
-        extractor_version="0.7.1",
+        extractor_version=_BYPASS_AUTHORITY_EXTRACTOR_VERSION,
         source_range=SourceRange(
             path=path,
             start_line=getattr(node, "lineno", None),
             end_line=getattr(node, "end_lineno", getattr(node, "lineno", None)),
         ),
     )
+
+
+@dataclass(frozen=True)
+class _ResolvedUnitFunction:
+    path: str
+    node: ast.FunctionDef | ast.AsyncFunctionDef
+
+
+@dataclass(frozen=True)
+class _UnitCalleeIndex:
+    """Module-level bare-name → unique function, or None when ambiguous."""
+
+    by_name: Mapping[str, _ResolvedUnitFunction | None]
+
+    def resolve(self, name: str) -> _ResolvedUnitFunction | None:
+        if name not in self.by_name:
+            return None
+        return self.by_name[name]
+
+
+def _build_unit_callee_index(
+    trees: Mapping[str, ast.AST],
+) -> _UnitCalleeIndex:
+    buckets: dict[str, list[_ResolvedUnitFunction]] = {}
+    for path, tree in sorted(trees.items()):
+        for node in getattr(tree, "body", ()):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                buckets.setdefault(node.name, []).append(
+                    _ResolvedUnitFunction(path=path, node=node)
+                )
+    by_name: dict[str, _ResolvedUnitFunction | None] = {}
+    for name, items in buckets.items():
+        by_name[name] = items[0] if len(items) == 1 else None
+    return _UnitCalleeIndex(by_name=by_name)
 
 
 @dataclass
@@ -234,6 +296,42 @@ class _RequestStateAliasEnv:
     def _container_is_supported_state(self, node: ast.AST) -> bool:
         return self._is_state_expr(node)
 
+    def is_request_or_state_expr(self, value: ast.AST) -> bool:
+        return self._is_request_expr(value) or self._is_state_expr(value)
+
+    def is_poison_state_store(self, target: ast.AST) -> bool:
+        """True when a store mutates governed state outside the field theorem.
+
+        Covers ``state.__dict__[…]``, ``request.state.__dict__[…]``,
+        ``vars(state)[…]``, and other unresolved subscript/descriptor forms on
+        a proved or plausible state container.
+        """
+
+        if isinstance(target, ast.Subscript):
+            base = target.value
+            if (
+                isinstance(base, ast.Call)
+                and isinstance(base.func, ast.Name)
+                and base.func.id == "vars"
+                and base.args
+                and self.is_request_or_state_expr(base.args[0])
+            ):
+                return True
+            if (
+                isinstance(base, ast.Attribute)
+                and base.attr == "__dict__"
+                and self._container_is_state(base.value)
+            ):
+                return True
+            # Descriptor / unresolved subscript on proved state (non-field key
+            # already handled by field_from_assign_target as __dynamic__).
+            if self._is_state_expr(base) and _constant_str_key(target.slice) is None:
+                return True
+            return False
+        if isinstance(target, ast.Attribute) and target.attr == "__dict__":
+            return self._container_is_state(target.value)
+        return False
+
 
 def _constant_str_key(node: ast.AST) -> str | None:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -336,11 +434,63 @@ def _setattr_name_and_value(
     return node.args[1], node.args[2]
 
 
+def _function_param_names(
+    fn: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> tuple[str, ...]:
+    names: list[str] = []
+    for arg in list(fn.args.posonlyargs) + list(fn.args.args):
+        if arg.arg in {"self", "cls"}:
+            continue
+        names.append(arg.arg)
+    for arg in fn.args.kwonlyargs:
+        names.append(arg.arg)
+    return tuple(names)
+
+
+def _bind_call_actuals(
+    fn: ast.FunctionDef | ast.AsyncFunctionDef,
+    call: ast.Call,
+) -> dict[str, ast.AST] | None:
+    """Map callee formals to call actuals under the ordinary-argument theorem.
+
+    Returns None when *args/**kwargs, unexpected keywords, or arity mismatch
+    make the binding unresolvable (escape → UNKNOWN).
+    """
+
+    if any(isinstance(arg, ast.Starred) for arg in call.args):
+        return None
+    if any(kw.arg is None for kw in call.keywords):
+        return None
+    if fn.args.vararg is not None or fn.args.kwarg is not None:
+        return None
+
+    formals = _function_param_names(fn)
+    binding: dict[str, ast.AST] = {}
+    if len(call.args) > len(formals):
+        return None
+    for index, actual in enumerate(call.args):
+        binding[formals[index]] = actual
+    formal_set = set(formals)
+    for kw in call.keywords:
+        assert kw.arg is not None
+        if kw.arg not in formal_set:
+            return None
+        if kw.arg in binding:
+            return None
+        binding[kw.arg] = kw.value
+    return binding
+
+
 def _collect_writes_in_function(
     fn: ast.FunctionDef | ast.AsyncFunctionDef,
     *,
     path: str,
     handler_param_names: frozenset[str],
+    callee_index: _UnitCalleeIndex | None = None,
+    seed_request_aliases: _RequestStateAliasEnv | None = None,
+    seed_alias_state: AliasState | None = None,
+    call_stack: frozenset[tuple[str, str]] | None = None,
+    depth: int = 0,
 ) -> list[StateAttributeWrite]:
     """Collect state writes under statement-order alias tracking.
 
@@ -352,16 +502,22 @@ def _collect_writes_in_function(
     Request/state name aliases (``req = request``, ``state = request.state``)
     participate in the supported write theorem. Other ``*.state.<field>``
     mutations are still recorded (as dynamic) so they cannot be omitted.
+
+    Escape analysis (#156): passing request/request.state into an unresolved
+    callee, unresolved ``__dict__`` / ``vars(state)`` stores, and similar
+    mutation channels force dynamic wildcard writes (Unknown > false PASS)
+    unless a bounded interprocedural theorem resolves the callee.
     """
 
     writes: list[StateAttributeWrite] = []
-    alias_state = AliasState()
-    fn_params = frozenset(
-        arg.arg
-        for arg in list(fn.args.posonlyargs) + list(fn.args.args)
-        if arg.arg not in {"self", "cls"}
-    )
-    request_aliases = _RequestStateAliasEnv.seed(param_names=fn_params)
+    alias_state = seed_alias_state if seed_alias_state is not None else AliasState()
+    fn_params = frozenset(_function_param_names(fn))
+    if seed_request_aliases is not None:
+        request_aliases = seed_request_aliases
+    else:
+        request_aliases = _RequestStateAliasEnv.seed(param_names=fn_params)
+    stack = call_stack or frozenset()
+    frame = (_normalize_unit_path(path), fn.name)
 
     def _classify(node: ast.AST) -> ValueOriginEvidence:
         return classify_expression_origin(
@@ -369,6 +525,24 @@ def _collect_writes_in_function(
             path=path,
             handler_param_names=handler_param_names,
             alias_state=alias_state,
+        )
+
+    def _record_escape(
+        node: ast.AST,
+        expression: str,
+        *,
+        control_dependent: bool,
+    ) -> None:
+        writes.append(
+            StateAttributeWrite(
+                field_name="__wildcard__",
+                value_expression=expression,
+                origin=_classify(node),
+                dynamic=True,
+                source_range=_origin(path, node).source_range,
+                path=path,
+                control_dependent=control_dependent,
+            )
         )
 
     def _record_assign_target(
@@ -379,8 +553,24 @@ def _collect_writes_in_function(
         dynamic: bool,
         control_dependent: bool,
     ) -> None:
+        if request_aliases.is_poison_state_store(target):
+            _record_escape(
+                statement,
+                ast.unparse(statement),
+                control_dependent=control_dependent,
+            )
+            return
         field, exact = request_aliases.field_from_assign_target(target)
         if field is None:
+            # request/state escaping into an unresolved store target.
+            if request_aliases.is_request_or_state_expr(value) and not isinstance(
+                target, ast.Name
+            ):
+                _record_escape(
+                    statement,
+                    ast.unparse(statement),
+                    control_dependent=control_dependent,
+                )
             return
         writes.append(
             StateAttributeWrite(
@@ -393,6 +583,88 @@ def _collect_writes_in_function(
                 control_dependent=control_dependent,
             )
         )
+
+    def _try_interprocedural(
+        call: ast.Call,
+        *,
+        control_dependent: bool,
+    ) -> bool:
+        """Resolve a local Name callee that receives request/state; else False."""
+
+        if callee_index is None or not isinstance(call.func, ast.Name):
+            return False
+        if depth >= _MAX_INTERPROCEDURAL_WRITER_DEPTH:
+            return False
+        resolved = callee_index.resolve(call.func.id)
+        if resolved is None:
+            return False
+        callee_frame = (_normalize_unit_path(resolved.path), resolved.node.name)
+        if callee_frame in stack or callee_frame == frame:
+            return False
+        binding = _bind_call_actuals(resolved.node, call)
+        if binding is None:
+            return False
+        carries_identity = any(
+            request_aliases.is_request_or_state_expr(actual)
+            for actual in binding.values()
+        )
+        if not carries_identity:
+            return False
+
+        callee_aliases = _RequestStateAliasEnv.seed(param_names=frozenset())
+        callee_alias_state = AliasState()
+        for formal, actual in binding.items():
+            if request_aliases._is_request_expr(actual):
+                callee_aliases.request_names.add(formal)
+            elif request_aliases._is_state_expr(actual):
+                callee_aliases.state_names.add(formal)
+            # Propagate value-origin evidence through formals.
+            origin = _classify(actual)
+            callee_alias_state.bind(formal, origin)
+
+        collected = _collect_writes_in_function(
+            resolved.node,
+            path=resolved.path,
+            handler_param_names=handler_param_names,
+            callee_index=callee_index,
+            seed_request_aliases=callee_aliases,
+            seed_alias_state=callee_alias_state,
+            call_stack=stack | {frame},
+            depth=depth + 1,
+        )
+        if control_dependent:
+            collected = [
+                StateAttributeWrite(
+                    field_name=item.field_name,
+                    value_expression=item.value_expression,
+                    origin=item.origin,
+                    dynamic=item.dynamic,
+                    source_range=item.source_range,
+                    path=item.path,
+                    control_dependent=True,
+                )
+                for item in collected
+            ]
+        writes.extend(collected)
+        return True
+
+    def _call_receives_request_or_state(call: ast.Call) -> bool:
+        for arg in call.args:
+            if isinstance(arg, ast.Starred):
+                if request_aliases.is_request_or_state_expr(arg.value):
+                    return True
+                continue
+            if request_aliases.is_request_or_state_expr(arg):
+                return True
+        for kw in call.keywords:
+            if kw.value is not None and request_aliases.is_request_or_state_expr(
+                kw.value
+            ):
+                return True
+        if isinstance(call.func, ast.Attribute):
+            if request_aliases.is_request_or_state_expr(call.func.value):
+                return True
+        return False
 
     def _record_dynamic_calls(
         statement: ast.stmt,
@@ -424,6 +696,7 @@ def _collect_writes_in_function(
                         control_dependent=control_dependent,
                     )
                 )
+                continue
             rendered = ast.unparse(node)
             state_markers = (
                 ["request.state"]
@@ -434,16 +707,26 @@ def _collect_writes_in_function(
                 token in rendered
                 for token in ("update(", "copy(", "__dict__", "vars(")
             ):
-                writes.append(
-                    StateAttributeWrite(
-                        field_name="__wildcard__",
-                        value_expression=rendered,
-                        origin=_classify(node),
-                        dynamic=True,
-                        source_range=_origin(path, node).source_range,
-                        path=path,
-                        control_dependent=control_dependent,
-                    )
+                _record_escape(
+                    node,
+                    rendered,
+                    control_dependent=control_dependent,
+                )
+                continue
+            # Escape: request/state flows into a call. Resolve local callees
+            # under the bounded interprocedural theorem; otherwise UNKNOWN.
+            if _call_receives_request_or_state(node):
+                if (
+                    isinstance(node.func, ast.Name)
+                    and node.func.id in _NON_MUTATING_STATE_OBSERVERS
+                ):
+                    continue
+                if _try_interprocedural(node, control_dependent=control_dependent):
+                    continue
+                _record_escape(
+                    node,
+                    rendered,
+                    control_dependent=control_dependent,
                 )
 
     def _note_alias_bindings(statement: ast.stmt) -> None:
@@ -467,6 +750,15 @@ def _collect_writes_in_function(
                     dynamic=False,
                     control_dependent=control_dependent,
                 )
+            # Calls on the RHS may escape request/state even when the store is
+            # a simple Name alias (alias noted below; escape still recorded).
+            if isinstance(statement.value, ast.Call) or any(
+                isinstance(child, ast.Call) for child in ast.walk(statement.value)
+            ):
+                _record_dynamic_calls(
+                    statement,
+                    control_dependent=control_dependent,
+                )
             _note_alias_bindings(statement)
             apply_statement_bindings(
                 statement,
@@ -484,6 +776,13 @@ def _collect_writes_in_function(
                 dynamic=False,
                 control_dependent=control_dependent,
             )
+            if isinstance(statement.value, ast.Call) or any(
+                isinstance(child, ast.Call) for child in ast.walk(statement.value)
+            ):
+                _record_dynamic_calls(
+                    statement,
+                    control_dependent=control_dependent,
+                )
             _note_alias_bindings(statement)
             apply_statement_bindings(
                 statement,
@@ -580,6 +879,9 @@ def _collect_writes_in_function(
                     statement,
                     path=path,
                     handler_param_names=frozenset(),
+                    callee_index=callee_index,
+                    call_stack=stack | {frame},
+                    depth=depth,
                 )
             )
             return
@@ -592,11 +894,36 @@ def _collect_writes_in_function(
                             child,
                             path=path,
                             handler_param_names=frozenset(),
+                            callee_index=callee_index,
+                            call_stack=stack | {frame},
+                            depth=depth,
                         )
                     )
             return
 
-        # Ordinary statements: setattr / wildcard calls anywhere in this node.
+        if isinstance(statement, ast.Return) and statement.value is not None:
+            # Returning request.state escapes state identity into an unresolved
+            # caller theorem → UNKNOWN. Bare ``return request`` is not itself a
+            # state mutation channel under this bounded escape relation.
+            if request_aliases._is_state_expr(statement.value):
+                _record_escape(
+                    statement,
+                    ast.unparse(statement),
+                    control_dependent=control_dependent,
+                )
+            _record_dynamic_calls(
+                statement,
+                control_dependent=control_dependent,
+            )
+            apply_statement_bindings(
+                statement,
+                path=path,
+                handler_param_names=handler_param_names,
+                alias_state=alias_state,
+            )
+            return
+
+        # Ordinary statements: setattr / escape / interprocedural calls.
         _record_dynamic_calls(
             statement,
             control_dependent=control_dependent,
@@ -618,6 +945,7 @@ def _collect_state_writes(
     *,
     path: str,
     externally_bound_function_name: str | None,
+    callee_index: _UnitCalleeIndex | None = None,
 ) -> tuple[StateAttributeWrite, ...]:
     writes: list[StateAttributeWrite] = []
     # Prefer per-function alias tracking so rebinding inside a writer is proved.
@@ -637,11 +965,7 @@ def _collect_state_writes(
                             functions.append(nested)
     if functions:
         for fn in functions:
-            fn_param_names = frozenset(
-                arg.arg
-                for arg in list(fn.args.posonlyargs) + list(fn.args.args)
-                if arg.arg not in {"self", "cls"}
-            )
+            fn_param_names = frozenset(_function_param_names(fn))
             writes.extend(
                 _collect_writes_in_function(
                     fn,
@@ -651,6 +975,7 @@ def _collect_state_writes(
                         if fn.name == externally_bound_function_name
                         else frozenset()
                     ),
+                    callee_index=callee_index,
                 )
             )
         # Module-level writes (outside functions) still matter.
@@ -1172,7 +1497,12 @@ def analyze_bypass_authority_unit(
         scope_proof=scope_proof,
     )
 
-    entry_tree = ast.parse(normalized[entry], filename=entry)
+    trees: dict[str, ast.AST] = {}
+    for path, source in sorted(normalized.items()):
+        trees[path] = ast.parse(source, filename=path)
+    callee_index = _build_unit_callee_index(trees)
+
+    entry_tree = trees[entry]
     entry_functions = [
         node
         for node in entry_tree.body
@@ -1189,8 +1519,7 @@ def analyze_bypass_authority_unit(
     # unresolved until an interprocedural caller-provenance theorem establishes
     # their origin.
     all_writes: list[StateAttributeWrite] = []
-    for path, source in sorted(normalized.items()):
-        tree = ast.parse(source, filename=path)
+    for path, tree in sorted(trees.items()):
         all_writes.extend(
             _collect_state_writes(
                 tree,
@@ -1198,6 +1527,7 @@ def analyze_bypass_authority_unit(
                 externally_bound_function_name=(
                     handler.name if handler is not None and path == entry else None
                 ),
+                callee_index=callee_index,
             )
         )
     reads = _collect_state_reads(handler if handler is not None else entry_tree)
