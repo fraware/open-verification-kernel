@@ -203,6 +203,37 @@ def handler(request, bypass_filter=False):
     assert findings[0].status != "authorized"
 
 
+def test_walrus_dict_mutation_beside_literal_cannot_authorize() -> None:
+    findings = analyze_bypass_authority(
+        """
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    (d := request.state.__dict__)["bypass_filter"] = bypass_filter
+    return request.state.bypass_filter
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("<module>"),
+        function_name="handler",
+    )
+    assert findings[0].status != "authorized"
+
+
+def test_for_iter_state_pack_cannot_authorize() -> None:
+    findings = analyze_bypass_authority(
+        """
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    for s in [request.state]:
+        s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""".strip(),
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope("<module>"),
+        function_name="handler",
+    )
+    assert findings[0].status != "authorized"
+
+
 def test_list_append_state_escape_cannot_authorize() -> None:
     findings = analyze_bypass_authority(
         """

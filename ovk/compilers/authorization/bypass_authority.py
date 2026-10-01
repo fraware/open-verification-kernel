@@ -94,7 +94,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.8.1"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.8.2"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -319,6 +319,8 @@ class _RequestStateAliasEnv:
     def is_state_dict_surface(self, value: ast.AST) -> bool:
         """True for ``state.__dict__`` / ``vars(state)`` / ``__getattribute__`` surfaces."""
 
+        if isinstance(value, ast.NamedExpr):
+            return self.is_state_dict_surface(value.value)
         if (
             isinstance(value, ast.Attribute)
             and value.attr in _STATE_DICT_ATTRS
@@ -368,6 +370,8 @@ class _RequestStateAliasEnv:
     def packs_request_or_state_identity(self, value: ast.AST) -> bool:
         """True when request/state identity is packed into a container literal."""
 
+        if isinstance(value, ast.NamedExpr):
+            return self.packs_request_or_state_identity(value.value)
         if isinstance(value, (ast.Tuple, ast.List, ast.Set)):
             for elt in value.elts:
                 if isinstance(elt, ast.Starred):
@@ -401,12 +405,30 @@ class _RequestStateAliasEnv:
         non-Name targets is residual escape (Unknown > false PASS).
         """
 
+        if isinstance(value, ast.NamedExpr):
+            return self.assignment_escapes_state_identity(target, value.value)
         if self.is_state_dict_surface(value):
             return True
         if self.packs_request_or_state_identity(value):
             return True
         if self.is_request_or_state_expr(value) and not isinstance(target, ast.Name):
             return True
+        return False
+
+    def expression_escapes_state_identity(self, value: ast.AST) -> bool:
+        """True when an expression embeds a residual state-identity escape channel."""
+
+        if self.is_state_dict_surface(value) or self.packs_request_or_state_identity(
+            value
+        ):
+            return True
+        for node in ast.walk(value):
+            if not isinstance(node, ast.NamedExpr):
+                continue
+            if self.is_state_dict_surface(node.value) or self.packs_request_or_state_identity(
+                node.value
+            ):
+                return True
         return False
 
     def is_poison_state_store(self, target: ast.AST) -> bool:
@@ -416,12 +438,14 @@ class _RequestStateAliasEnv:
         ``getattr(state, \"__dict__\")[…]``, ``vars(state)[…]``,
         ``object.__getattribute__(state, \"__dict__\")[…]``, Call-shaped
         dict surfaces such as ``operator.attrgetter(\"__dict__\")(state)[…]``,
-        and other unresolved subscript/descriptor forms on a proved or
-        plausible state container.
+        walrus-bound dict surfaces, and other unresolved subscript/descriptor
+        forms on a proved or plausible state container.
         """
 
         if isinstance(target, ast.Subscript):
             base = target.value
+            if isinstance(base, ast.NamedExpr):
+                base = base.value
             if self.is_state_dict_surface(base):
                 return True
             if isinstance(base, ast.Call) and self.call_receives_request_or_state(base):
@@ -828,6 +852,22 @@ def _collect_writes_in_function(
         elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
             request_aliases.note_binding(statement.target, statement.value)
 
+    def _note_named_expr_bindings(
+        node: ast.AST, *, control_dependent: bool
+    ) -> None:
+        for child in ast.walk(node):
+            if not isinstance(child, ast.NamedExpr):
+                continue
+            request_aliases.note_binding(child.target, child.value)
+            if request_aliases.assignment_escapes_state_identity(
+                child.target, child.value
+            ):
+                _record_escape(
+                    child,
+                    ast.unparse(child),
+                    control_dependent=control_dependent,
+                )
+
     def _visit_statement(
         statement: ast.stmt,
         *,
@@ -851,6 +891,15 @@ def _collect_writes_in_function(
                     statement,
                     control_dependent=control_dependent,
                 )
+            if request_aliases.expression_escapes_state_identity(statement.value):
+                _record_escape(
+                    statement,
+                    ast.unparse(statement),
+                    control_dependent=control_dependent,
+                )
+            _note_named_expr_bindings(
+                statement.value, control_dependent=control_dependent
+            )
             _note_alias_bindings(statement)
             apply_statement_bindings(
                 statement,
@@ -875,6 +924,15 @@ def _collect_writes_in_function(
                     statement,
                     control_dependent=control_dependent,
                 )
+            if request_aliases.expression_escapes_state_identity(statement.value):
+                _record_escape(
+                    statement,
+                    ast.unparse(statement),
+                    control_dependent=control_dependent,
+                )
+            _note_named_expr_bindings(
+                statement.value, control_dependent=control_dependent
+            )
             _note_alias_bindings(statement)
             apply_statement_bindings(
                 statement,
@@ -914,6 +972,18 @@ def _collect_writes_in_function(
 
         if isinstance(statement, (ast.For, ast.AsyncFor)):
             _mark_name_uses(statement.iter, alias_state)
+            # ``for s in [request.state]: s.field = client`` must not authorize.
+            if (
+                request_aliases.is_request_or_state_expr(statement.iter)
+                or request_aliases.packs_request_or_state_identity(statement.iter)
+                or request_aliases.is_state_dict_surface(statement.iter)
+                or request_aliases.expression_escapes_state_identity(statement.iter)
+            ):
+                _record_escape(
+                    statement,
+                    ast.unparse(statement),
+                    control_dependent=True,
+                )
             assigned = _collect_assigned_names_in_statements(
                 list(statement.body) + list(statement.orelse)
             )
@@ -1003,6 +1073,15 @@ def _collect_writes_in_function(
                     ast.unparse(statement),
                     control_dependent=control_dependent,
                 )
+            if request_aliases.expression_escapes_state_identity(statement.value):
+                _record_escape(
+                    statement,
+                    ast.unparse(statement),
+                    control_dependent=control_dependent,
+                )
+            _note_named_expr_bindings(
+                statement.value, control_dependent=control_dependent
+            )
             _record_dynamic_calls(
                 statement,
                 control_dependent=control_dependent,
@@ -1014,6 +1093,17 @@ def _collect_writes_in_function(
                 alias_state=alias_state,
             )
             return
+
+        if isinstance(statement, ast.Expr):
+            if request_aliases.expression_escapes_state_identity(statement.value):
+                _record_escape(
+                    statement,
+                    ast.unparse(statement),
+                    control_dependent=control_dependent,
+                )
+            _note_named_expr_bindings(
+                statement.value, control_dependent=control_dependent
+            )
 
         # Ordinary statements: setattr / escape / interprocedural calls.
         _record_dynamic_calls(
