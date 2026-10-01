@@ -272,3 +272,78 @@ m = helpers
     )
     assert findings[0].status == "authorized"
     assert findings[0].reason == "source_proved_server_authority_write"
+
+
+def test_getattr_alias_cannot_authorize() -> None:
+    findings = _unit(
+        f"""
+import helpers
+f = getattr(helpers, "write_state")
+f.__code__ = evil.__code__
+{_handler_attr()}
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_ternary_and_boolop_alias_cannot_authorize() -> None:
+    findings = _unit(
+        f"""
+from helpers import write_state
+f = write_state if True else other
+f.__code__ = evil.__code__
+{_handler_attr("write_state")}
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_walrus_attr_mutation_cannot_authorize() -> None:
+    findings = _unit(
+        f"""
+import helpers
+(m := helpers).write_state = evil
+{_handler_attr()}
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_nested_helper_closure_mutation_cannot_authorize() -> None:
+    findings = _unit(
+        f"""
+import helpers
+def outer(mod):
+    def inner():
+        mod.write_state = evil
+    inner()
+outer(helpers)
+{_handler_attr()}
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_comprehension_container_escape_cannot_authorize() -> None:
+    findings = _unit(
+        f"""
+import helpers
+xs = [helpers for _ in [0]]
+xs[0].write_state = evil
+{_handler_attr()}
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_match_alias_escape_cannot_authorize() -> None:
+    findings = _unit(
+        f"""
+import helpers
+match helpers:
+    case m:
+        m.write_state = evil
+{_handler_attr()}
+"""
+    )
+    assert findings[0].status == "unknown"

@@ -42,7 +42,7 @@ ArgumentProvenanceKind = Literal[
     "unknown",
 ]
 
-_IMPLEMENTATION_VERSION = "0.6.0"
+_IMPLEMENTATION_VERSION = "0.7.0"
 
 
 @dataclass(frozen=True)
