@@ -966,6 +966,52 @@ class AssuranceIR(BaseModel):
     claims: list[AssuranceClaim] = Field(default_factory=list)
     assumptions: dict[str, str] = Field(default_factory=dict)
 
+    @model_validator(mode="after")
+    def _control_point_bypass_cross_refs(self) -> "AssuranceIR":
+        """Defense-in-depth: control points must cite coherent bypass evidence.
+
+        Malformed externally supplied IR must not authorize via mismatched
+        entrypoint/CFG/edge cross-references even when individual objects are
+        locally well-formed.
+        """
+
+        bypass_by_id = {
+            item.evidence_id: item for item in self.bypass_authority_evidence
+        }
+        for point in self.authorization_control_point_evidence:
+            bypass = bypass_by_id.get(point.bypass_evidence_id)
+            if bypass is None:
+                raise ValueError(
+                    "authorization control-point bypass_evidence_id must reference "
+                    "bypass_authority_evidence"
+                )
+            if (
+                bypass.entrypoint is not None
+                and bypass.entrypoint != point.entrypoint
+            ):
+                raise ValueError(
+                    "authorization control-point entrypoint must equal bound "
+                    "bypass_authority_evidence.entrypoint"
+                )
+            if (
+                bypass.control_flow_summary_digest is not None
+                and bypass.control_flow_summary_digest
+                != point.control_flow_summary_digest
+            ):
+                raise ValueError(
+                    "authorization control-point CFG digest must equal bound "
+                    "bypass_authority_evidence.control_flow_summary_digest"
+                )
+            if (
+                bypass.control_point_edge_id is not None
+                and bypass.control_point_edge_id != point.edge_id
+            ):
+                raise ValueError(
+                    "authorization control-point edge_id must equal bound "
+                    "bypass_authority_evidence.control_point_edge_id"
+                )
+        return self
+
     def canonical_payload(self) -> dict:
         """Return order-stable JSON payload for identity and evidence binding."""
 

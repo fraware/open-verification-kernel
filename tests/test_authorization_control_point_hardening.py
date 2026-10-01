@@ -192,6 +192,39 @@ def test_edge_proof_requires_exact_effect_binding_and_bypass_id() -> None:
     assert not _edge_control_points_independently_proved(
         ir=ir, cut_evidence=cut, effect=effect
     )
+
+    # Restore a matching control point, then mismatch bypass entrypoint.
+    ir.authorization_control_point_evidence[0] = AuthorizationControlPointEvidence(
+        evidence_id="acp:ok",
+        guard_id="g:bypass",
+        protected_effect_id="pe:refund",
+        principal_id="p:user",
+        effect_id="e:refund",
+        resource_id="r:authorized",
+        entrypoint=entry,
+        control_flow_summary_digest=digest,
+        edge_id=edge_id,
+        scoped_edge_id=scoped,
+        bypass_evidence_id="bypass:filter",
+        origin=_origin(line=2),
+    )
+    ir.bypass_authority_evidence[0] = BypassAuthorityEvidence(
+        evidence_id="bypass:filter",
+        field_name="bypass_filter",
+        read_expression="request.state.bypass_filter",
+        read_origin=_origin(line=2),
+        status="established",
+        control_point_edge_id=edge_id,
+        control_flow_summary_digest=digest,
+        entrypoint="POST /other",
+        writer_evidence_ids=["vo:1"],
+        closed_world_scope_digest="scope:1",
+        reason="test",
+        origin=_origin(line=2),
+    )
+    assert not _edge_control_points_independently_proved(
+        ir=ir, cut_evidence=cut, effect=effect
+    )
     obligation = compile_protected_effect_integrity(ir)[0]
     evaluation = evaluate_protected_effect_integrity(ir)
     assert evaluation[0].status != "pass"

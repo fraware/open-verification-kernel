@@ -270,6 +270,7 @@ def _edge_control_points_independently_proved(
                 and bypass.control_point_edge_id == edge_id
                 and bypass.control_flow_summary_digest
                 == cut_evidence.control_flow_summary_digest
+                and bypass.entrypoint == cut_evidence.entrypoint
             ):
                 bound = True
                 break
