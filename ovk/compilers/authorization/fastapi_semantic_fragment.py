@@ -44,6 +44,7 @@ from ovk.core.assurance_ir import (
     FunctionContract,
     GuardDominanceEvidence,
     GuardEffectivenessEvidence,
+    HelperEffectivenessEvidence,
     PrincipalRef,
     ProtectedEffect,
     ResourceBinding,
@@ -399,6 +400,9 @@ class FastApiFileSemanticFragment:
     guard_effectiveness_dependencies: dict[str, str | None] = field(
         default_factory=dict
     )
+    helper_implementation_dependencies: dict[str, str | None] = field(
+        default_factory=dict
+    )
     route_attachment_digest: str = field(
         default_factory=lambda: content_digest([])
     )
@@ -410,6 +414,7 @@ class FastApiFileSemanticFragment:
     guard_dominance_evidence: tuple[GuardDominanceEvidence, ...] = ()
     authorization_cut_set_evidence: tuple[AuthorizationCutSetEvidence, ...] = ()
     value_origin_evidence: tuple[ValueOriginEvidence, ...] = ()
+    helper_effectiveness_evidence: tuple[HelperEffectivenessEvidence, ...] = ()
     protected_effects: tuple[ProtectedEffect, ...] = ()
     resource_bindings: tuple[ResourceBinding, ...] = ()
     contract_uses: tuple[ContractUse, ...] = ()
@@ -607,6 +612,8 @@ def bind_route_file_summary(
     unsupported: list[str] = []
     dependencies: dict[str, str | None] = {}
     guard_effectiveness_dependencies: dict[str, str | None] = {}
+    helper_implementation_dependencies: dict[str, str | None] = {}
+    helper_effectiveness_evidence: dict[str, HelperEffectivenessEvidence] = {}
 
     for handler_summary in file_summary.handlers:
         handler = _bind_external_router_path_interpretations(
@@ -990,6 +997,9 @@ def bind_route_file_summary(
                     source_files or {file_summary.path: ""},
                     helper_name=helper_leaf,
                 )
+                helper_implementation_dependencies[helper_key] = (
+                    implementation.implementation_digest or None
+                )
                 effectiveness = (
                     "established"
                     if implementation.status == "established"
@@ -1014,12 +1024,29 @@ def bind_route_file_summary(
                     ):
                         effectiveness = "unproved"
                         effectiveness_reason = "helper_callsite_name_rebound"
-                evidence_ids: list[str] = []
-                if effectiveness == "established":
-                    evidence_ids = [
-                        f"body_helper_impl:{helper_key}:"
-                        f"{implementation.path}:{implementation.line}"
-                    ]
+                helper_evidence = HelperEffectivenessEvidence(
+                    evidence_id=implementation.evidence_id
+                    or _semantic_id(
+                        "bhe",
+                        f"{helper_key}:{implementation.path}:{implementation.line}",
+                    ),
+                    helper_name=helper_key,
+                    qualified_symbol=implementation.qualified_symbol
+                    or f"{implementation.path}:{helper_leaf}@{implementation.line}",
+                    definition_path=implementation.path,
+                    definition_line=implementation.line,
+                    source_digest=implementation.source_digest
+                    or content_digest(""),
+                    implementation_digest=implementation.implementation_digest
+                    or content_digest(""),
+                    status="established" if effectiveness == "established" else "unproved",
+                    reason=effectiveness_reason,
+                    origin=helper_call.origin,
+                )
+                helper_effectiveness_evidence[helper_evidence.evidence_id] = (
+                    helper_evidence
+                )
+                evidence_ids: list[str] = [helper_evidence.evidence_id]
                 body_helper_guard_id = _semantic_id(
                     "guard",
                     (
@@ -1322,6 +1349,9 @@ def bind_route_file_summary(
         guard_effectiveness_dependencies=dict(
             sorted(guard_effectiveness_dependencies.items())
         ),
+        helper_implementation_dependencies=dict(
+            sorted(helper_implementation_dependencies.items())
+        ),
         route_attachment_digest=effective_attachment_digest,
         unsupported_constructs=tuple(sorted(set(unsupported))),
         principals=tuple(
@@ -1354,6 +1384,12 @@ def bind_route_file_summary(
                 key=lambda item: item.evidence_id,
             )
         ),
+        helper_effectiveness_evidence=tuple(
+            sorted(
+                helper_effectiveness_evidence.values(),
+                key=lambda item: item.evidence_id,
+            )
+        ),
         protected_effects=tuple(
             sorted(
                 protected.values(),
@@ -1379,6 +1415,7 @@ def fragment_dependencies_match(
     contracts_by_name: Mapping[str, FunctionContract],
     guard_effectiveness_by_name: Mapping[str, GuardEffectivenessEvidence] | None = None,
     route_attachment_digest: str | None = None,
+    source_files: Mapping[str, str] | None = None,
 ) -> bool:
     """Return whether profile and consumed contract versions are unchanged."""
 
@@ -1410,10 +1447,29 @@ def fragment_dependencies_match(
         )
         for name in fragment.guard_effectiveness_dependencies
     }
-    return (
+    if (
         current_guard_effectiveness
-        == fragment.guard_effectiveness_dependencies
-    )
+        != fragment.guard_effectiveness_dependencies
+    ):
+        return False
+    # Helper implementation digests must match the current source universe
+    # (same files full binding would see). Missing source_files refuses reuse.
+    if fragment.helper_implementation_dependencies:
+        if source_files is None:
+            return False
+        current_helper_digests: dict[str, str | None] = {}
+        for helper_key in fragment.helper_implementation_dependencies:
+            leaf = helper_key.split(".")[-1]
+            implementation = analyze_body_helper_implementation(
+                source_files,
+                helper_name=leaf,
+            )
+            current_helper_digests[helper_key] = (
+                implementation.implementation_digest or None
+            )
+        if current_helper_digests != fragment.helper_implementation_dependencies:
+            return False
+    return True
 
 
 
@@ -1478,6 +1534,7 @@ def assemble_fastapi_assurance_ir(
     dominance_evidence: dict[str, GuardDominanceEvidence] = {}
     cut_set_evidence: dict[str, AuthorizationCutSetEvidence] = {}
     value_origins: dict[str, ValueOriginEvidence] = {}
+    helper_effectiveness: dict[str, HelperEffectivenessEvidence] = {}
     protected: dict[str, ProtectedEffect] = {}
     bindings: dict[str, ResourceBinding] = {}
     contract_uses: dict[str, ContractUse] = {}
@@ -1514,6 +1571,8 @@ def assemble_fastapi_assurance_ir(
             cut_set_evidence[item.evidence_id] = item
         for item in fragment.value_origin_evidence:
             value_origins[item.evidence_id] = item
+        for item in fragment.helper_effectiveness_evidence:
+            helper_effectiveness[item.evidence_id] = item
         for item in fragment.protected_effects:
             protected[item.protected_effect_id] = item
         for item in fragment.resource_bindings:
@@ -1541,7 +1600,7 @@ def assemble_fastapi_assurance_ir(
         ),
         extractor=AssuranceExtractorIdentity(
             extractor_id="assurance.fastapi.dependency_effects.ast_v1",
-            extractor_version="0.26.0",
+            extractor_version="0.27.0",
             source_profile_id="assurance.fastapi.dependency_effects.ast_v1",
         ),
         coverage=AssuranceCoverage(
@@ -1581,6 +1640,10 @@ def assemble_fastapi_assurance_ir(
         ),
         value_origin_evidence=sorted(
             value_origins.values(),
+            key=lambda item: item.evidence_id,
+        ),
+        helper_effectiveness_evidence=sorted(
+            helper_effectiveness.values(),
             key=lambda item: item.evidence_id,
         ),
         protected_effects=sorted(

@@ -1,16 +1,17 @@
-"""Body-authorization-helper implementation evidence (#148 / #151).
+"""Body-authorization-helper implementation evidence (#148 / #151 / #152).
 
 Profile declaration alone never establishes effectiveness. A reachable
 denial-shaped raise is also insufficient: it does not prove the raise
 implements the authorization policy represented by the profile
 (Unknown > false PASS). Helpers therefore remain ``unproved`` until a
 machine-checkable authorization predicate or digest-bound contract is
-modeled (#152+).
+modeled.
 
-No-op, shadowed, dead-code-only, and unresolved definitions stay unproved
-with distinct diagnostic reasons. Callsite-local rebinding (nested def,
-parameter, or assignment of the helper name inside the enclosing handler)
-also refuses establishment even when a module-level definition exists.
+Implementation analysis still resolves the exact callee symbol and records
+source/semantic digests so fragments can dependency-track helper bodies
+(#152). No-op, shadowed, dead-code-only, and unresolved definitions stay
+unproved with distinct diagnostic reasons. Callsite-local rebinding also
+refuses establishment even when a module-level definition exists.
 """
 
 from __future__ import annotations
@@ -18,6 +19,8 @@ from __future__ import annotations
 import ast
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+
+from ovk.core.bundle import content_digest
 
 
 @dataclass(frozen=True)
@@ -27,6 +30,10 @@ class BodyHelperImplementationEvidence:
     line: int
     status: str
     reason: str
+    qualified_symbol: str = ""
+    source_digest: str = ""
+    implementation_digest: str = ""
+    evidence_id: str = ""
 
 
 def _is_http_exception_constructor(node: ast.AST) -> bool:
@@ -278,6 +285,83 @@ def helper_name_locally_rebound_in_handler(
     return False
 
 
+def _definition_source_digest(
+    files: Mapping[str, str],
+    *,
+    path: str,
+) -> str:
+    source = files.get(path)
+    if source is None:
+        return content_digest("")
+    return content_digest(source)
+
+
+def _implementation_digest(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> str:
+    """Digest the exact callee definition shape (signature + body)."""
+
+    payload = {
+        "kind": type(node).__name__,
+        "name": node.name,
+        "args": ast.dump(node.args, include_attributes=False),
+        "body": [ast.dump(stmt, include_attributes=False) for stmt in node.body],
+        "decorator_list": [
+            ast.dump(item, include_attributes=False) for item in node.decorator_list
+        ],
+        "returns": (
+            ast.dump(node.returns, include_attributes=False)
+            if node.returns is not None
+            else None
+        ),
+    }
+    return content_digest(payload)
+
+
+def _evidence(
+    *,
+    helper_name: str,
+    path: str,
+    line: int,
+    status: str,
+    reason: str,
+    files: Mapping[str, str],
+    node: ast.FunctionDef | ast.AsyncFunctionDef | None = None,
+) -> BodyHelperImplementationEvidence:
+    qualified = f"{path}:{helper_name}@{line}" if line > 0 else f"{path}:{helper_name}"
+    source_digest = (
+        _definition_source_digest(files, path=path)
+        if path != "<missing>"
+        else content_digest("")
+    )
+    impl_digest = (
+        _implementation_digest(node) if node is not None else content_digest("")
+    )
+    evidence_id = content_digest(
+        {
+            "helper_name": helper_name,
+            "qualified_symbol": qualified,
+            "path": path,
+            "line": line,
+            "status": status,
+            "reason": reason,
+            "source_digest": source_digest,
+            "implementation_digest": impl_digest,
+        }
+    )
+    return BodyHelperImplementationEvidence(
+        helper_name=helper_name,
+        path=path,
+        line=line,
+        status=status,
+        reason=reason,
+        qualified_symbol=qualified,
+        source_digest=source_digest,
+        implementation_digest=impl_digest,
+        evidence_id=f"bhe:{evidence_id[:24]}",
+    )
+
+
 def analyze_body_helper_implementation(
     files: Mapping[str, str],
     *,
@@ -287,46 +371,56 @@ def analyze_body_helper_implementation(
 
     definitions = _collect_definitions(files, helper_name=helper_name)
     if not definitions:
-        return BodyHelperImplementationEvidence(
+        return _evidence(
             helper_name=helper_name,
             path="<missing>",
             line=0,
             status="unproved",
             reason="helper_definition_missing",
+            files=files,
         )
     if len(definitions) > 1:
         path, node = definitions[0]
-        return BodyHelperImplementationEvidence(
+        return _evidence(
             helper_name=helper_name,
             path=path,
             line=getattr(node, "lineno", 0) or 0,
             status="unproved",
             reason="helper_definition_shadowed",
+            files=files,
+            node=node,
         )
     path, node = definitions[0]
+    line = getattr(node, "lineno", 0) or 0
     if _body_is_noop(list(node.body)):
-        return BodyHelperImplementationEvidence(
+        return _evidence(
             helper_name=helper_name,
             path=path,
-            line=getattr(node, "lineno", 0) or 0,
+            line=line,
             status="unproved",
             reason="helper_implementation_noop",
+            files=files,
+            node=node,
         )
     if _block_has_reachable_fail_closed_raise(list(node.body)):
         # #151: a reachable raise is diagnostic only — never establishes
         # authorization effectiveness. Irrelevant / inverted / probabilistic
         # denials would otherwise false-PASS under an unchanged profile.
-        return BodyHelperImplementationEvidence(
+        return _evidence(
             helper_name=helper_name,
             path=path,
-            line=getattr(node, "lineno", 0) or 0,
+            line=line,
             status="unproved",
             reason="helper_reachable_raise_insufficient",
+            files=files,
+            node=node,
         )
-    return BodyHelperImplementationEvidence(
+    return _evidence(
         helper_name=helper_name,
         path=path,
-        line=getattr(node, "lineno", 0) or 0,
+        line=line,
         status="unproved",
         reason="helper_implementation_unproved",
+        files=files,
+        node=node,
     )

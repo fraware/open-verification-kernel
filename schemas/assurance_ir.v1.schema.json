@@ -118,6 +118,9 @@
     "bypass_authority_evidence": {
       "type": "array"
     },
+    "helper_effectiveness_evidence": {
+      "type": "array"
+    },
     "protected_effects": {
       "type": "array"
     },

@@ -51,6 +51,7 @@ from ovk.core.assurance_ir import (
     EffectRef,
     FunctionContract,
     GuardDominanceEvidence,
+    HelperEffectivenessEvidence,
     PrincipalRef,
     ProtectedEffect,
     ResourceBinding,
@@ -62,7 +63,7 @@ from ovk.core.bundle import content_digest
 
 
 PERSISTENT_FASTAPI_STATE_SCHEMA = "ovk.fastapi_incremental_state_cache.v1"
-PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION = "0.25.0"
+PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION = "0.26.0"
 DEFAULT_PERSISTENT_FASTAPI_STATE_DIR = Path(
     ".verification/cache/fastapi-incremental-state"
 )
@@ -91,6 +92,9 @@ def _fragment_payload(fragment: FastApiFileSemanticFragment) -> dict[str, Any]:
         "guard_effectiveness_dependencies": dict(
             sorted(fragment.guard_effectiveness_dependencies.items())
         ),
+        "helper_implementation_dependencies": dict(
+            sorted(fragment.helper_implementation_dependencies.items())
+        ),
         "route_attachment_digest": fragment.route_attachment_digest,
         "unsupported_constructs": list(fragment.unsupported_constructs),
         "principals": _models(fragment.principals),
@@ -102,6 +106,9 @@ def _fragment_payload(fragment: FastApiFileSemanticFragment) -> dict[str, Any]:
             fragment.authorization_cut_set_evidence
         ),
         "value_origin_evidence": _models(fragment.value_origin_evidence),
+        "helper_effectiveness_evidence": _models(
+            fragment.helper_effectiveness_evidence
+        ),
         "protected_effects": _models(fragment.protected_effects),
         "resource_bindings": _models(fragment.resource_bindings),
         "contract_uses": _models(fragment.contract_uses),
@@ -124,6 +131,12 @@ def _fragment_from_payload(payload: dict[str, Any]) -> FastApiFileSemanticFragme
             str(name): (str(version) if version is not None else None)
             for name, version in (
                 payload.get("guard_effectiveness_dependencies") or {}
+            ).items()
+        },
+        helper_implementation_dependencies={
+            str(name): (str(version) if version is not None else None)
+            for name, version in (
+                payload.get("helper_implementation_dependencies") or {}
             ).items()
         },
         route_attachment_digest=str(payload["route_attachment_digest"]),
@@ -158,6 +171,10 @@ def _fragment_from_payload(payload: dict[str, Any]) -> FastApiFileSemanticFragme
         value_origin_evidence=tuple(
             ValueOriginEvidence.model_validate(item)
             for item in payload.get("value_origin_evidence") or []
+        ),
+        helper_effectiveness_evidence=tuple(
+            HelperEffectivenessEvidence.model_validate(item)
+            for item in payload.get("helper_effectiveness_evidence") or []
         ),
         protected_effects=tuple(
             ProtectedEffect.model_validate(item)
