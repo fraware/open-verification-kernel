@@ -22,7 +22,7 @@ from ovk.compilers.authorization.bypass_authority import ClosedWorldScopeProof
 from ovk.core.bundle import content_digest
 
 
-_IMPLEMENTATION_VERSION = "0.3.0"
+_IMPLEMENTATION_VERSION = "0.4.0"
 _CONVENTIONAL_PYTHON_SOURCE_ROOTS = ("backend", "src")
 
 
@@ -39,12 +39,14 @@ class DerivedClosedWorldScopeProof:
     field_searched: str | None
     unsupported_dynamics: tuple[str, ...]
     import_resolution_status: str
+    python_import_roots: tuple[str, ...] = ()
     implementation_version: str = _IMPLEMENTATION_VERSION
 
     def as_closed_world_scope_proof(self) -> ClosedWorldScopeProof:
         return ClosedWorldScopeProof(
             accounted_paths=self.accounted_paths,
             source_roots=self.source_roots,
+            python_import_roots=self.python_import_roots,
         )
 
     def digest(self) -> str:
@@ -53,6 +55,7 @@ class DerivedClosedWorldScopeProof:
                 "repo": self.repo,
                 "revision": self.revision,
                 "source_roots": list(self.source_roots),
+                "python_import_roots": list(self.python_import_roots),
                 "accounted_paths": list(self.accounted_paths),
                 "file_manifest_digest": self.file_manifest_digest,
                 "analyzed_paths": list(self.analyzed_paths),
@@ -72,8 +75,9 @@ def derive_python_source_roots(paths: Sequence[str]) -> tuple[str, ...]:
     """Infer path-accounting roots from repository-relative paths.
 
     Conventional package roots such as ``backend/`` and ``src/`` remain useful
-    for path scoping displays, but import closure (#155) resolves modules from
-    the complete manifest without depending on these names for security.
+    for path scoping displays. Import identity (#161) uses trusted
+    ``python_import_roots`` (or exact repo-root / relative grounding), not
+    these path-accounting roots.
     Paths outside those conventions keep repository-root ``"."``. Empty input
     is refused.
     """
@@ -127,6 +131,7 @@ def derive_closed_world_scope_proof(
     field_searched: str | None = None,
     unsupported_dynamics: Sequence[str] = (),
     import_resolution_status: str = "unit_local_static_imports_v1",
+    python_import_roots: Sequence[str] = (),
 ) -> DerivedClosedWorldScopeProof:
     """Derive a content-addressed scope proof from repository materials.
 
@@ -156,6 +161,10 @@ def derive_closed_world_scope_proof(
     )
     if any(path not in normalized for path in analyzed):
         raise ValueError("analyzed_paths must be a subset of files")
+    from ovk.compilers.authorization.python_import_space import (
+        normalize_import_roots,
+    )
+
     return DerivedClosedWorldScopeProof(
         repo=repo,
         revision=revision,
@@ -166,6 +175,7 @@ def derive_closed_world_scope_proof(
         field_searched=field_searched,
         unsupported_dynamics=tuple(sorted(set(unsupported_dynamics))),
         import_resolution_status=import_resolution_status,
+        python_import_roots=normalize_import_roots(python_import_roots),
         implementation_version=_IMPLEMENTATION_VERSION,
     )
 

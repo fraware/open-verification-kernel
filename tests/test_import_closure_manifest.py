@@ -7,6 +7,9 @@ from ovk.compilers.authorization.bypass_authority import (
     _module_candidates_in_manifest,
     analyze_bypass_authority_unit,
 )
+from ovk.compilers.authorization.python_import_space import (
+    module_candidates_in_manifest,
+)
 from ovk.compilers.authorization.material_loader import AuthMaterials
 from ovk.core.protected_effect_profile import ProtectedEffectProfileConfig
 
@@ -17,15 +20,23 @@ def test_module_candidates_exact_one_multiple_none() -> None:
         "python/acme/routes.py",
         "src/acme/auth.py",
         "lib/other.py",
+        "acme/auth.py",
     }
-    assert _module_candidates_in_manifest("acme.auth", available) == (
+    # Without import roots, only exact repo-root paths bind.
+    assert module_candidates_in_manifest("acme.auth", available) == ("acme/auth.py",)
+    assert module_candidates_in_manifest("acme.routes", available) == ()
+    assert module_candidates_in_manifest("missing.mod", available) == ()
+    # Trusted roots contribute; multiple roots may be ambiguous.
+    assert module_candidates_in_manifest(
+        "acme.auth", available, import_roots=("python", "src")
+    ) == (
+        "acme/auth.py",
         "python/acme/auth.py",
         "src/acme/auth.py",
     )
-    assert _module_candidates_in_manifest("acme.routes", available) == (
-        "python/acme/routes.py",
-    )
-    assert _module_candidates_in_manifest("missing.mod", available) == ()
+    assert _module_candidates_in_manifest(
+        "acme.routes", available, import_roots=("python",)
+    ) == ("python/acme/routes.py",)
 
 
 def test_auth_materials_carries_base_and_head_closure() -> None:
@@ -83,6 +94,7 @@ def handler(request):
         scope_proof=ClosedWorldScopeProof(
             accounted_paths=tuple(files),
             source_roots=(".",),
+            python_import_roots=("server",),
         ),
     )
     assert findings[0].closed_world is not None

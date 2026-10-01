@@ -185,7 +185,7 @@ def test_complete_manifest_literal_writer_establishes_and_keeps_derived_digest()
         files=files,
         source_roots=derive_python_source_roots(files),
         field_searched="bypass_filter",
-        import_resolution_status="authenticated_revision_python_manifest_v2",
+        import_resolution_status="authenticated_revision_python_manifest_v3",
     )
     materials = AuthMaterials(
         base_files=files,
@@ -210,6 +210,7 @@ def test_complete_manifest_literal_writer_establishes_and_keeps_derived_digest()
                 "repo": derived.repo,
                 "revision": derived.revision,
                 "source_roots": list(derived.source_roots),
+                "python_import_roots": list(derived.python_import_roots),
                 "accounted_paths": list(derived.accounted_paths),
                 "file_manifest_digest": derived.file_manifest_digest,
                 "analyzed_paths": list(derived.analyzed_paths),
@@ -255,6 +256,7 @@ def handler(request):
         files=full,
         source_roots=roots,
         field_searched="bypass_filter",
+        python_import_roots=("backend",),
     )
     findings = analyze_bypass_authority_unit(
         full,
@@ -280,6 +282,7 @@ def handler(request):
             files=sparse,
             source_roots=source_roots,
             field_searched="bypass_filter",
+            python_import_roots=("backend",) if "backend" in source_roots else (),
         )
         sparse_findings = analyze_bypass_authority_unit(
             sparse,

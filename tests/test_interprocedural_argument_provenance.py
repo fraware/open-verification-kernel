@@ -8,10 +8,11 @@ from ovk.compilers.authorization.interprocedural_argument_provenance import (
 )
 
 
-def _scope(*paths: str) -> ClosedWorldScopeProof:
+def _scope(*paths: str, import_roots: tuple[str, ...] = ()) -> ClosedWorldScopeProof:
     return ClosedWorldScopeProof(
         accounted_paths=tuple(paths),
         source_roots=(".",),
+        python_import_roots=import_roots,
     )
 
 
@@ -31,7 +32,7 @@ def route(request):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/helper.py", "app/caller.py"),
+        scope_proof=_scope("app/helper.py", "app/caller.py", import_roots=('app',)),
     )
     assert result.provenance == "server_internal"
     assert result.callsites
@@ -54,7 +55,7 @@ def route(request, bypass_filter: bool = False):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/helper.py", "app/caller.py"),
+        scope_proof=_scope("app/helper.py", "app/caller.py", import_roots=('app',)),
     )
     assert result.provenance == "externally_bound_http"
     assert result.callsites[0].origin_kind == "externally_bound_http_value"
@@ -76,7 +77,7 @@ def route(request, args):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/helper.py", "app/caller.py"),
+        scope_proof=_scope("app/helper.py", "app/caller.py", import_roots=('app',)),
     )
     assert result.provenance == "unknown"
     assert result.reason == "unresolved_callsite_or_deferred_form"
@@ -90,7 +91,7 @@ def test_scope_mismatch_is_unknown() -> None:
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/helper.py"),
+        scope_proof=_scope("app/helper.py", import_roots=('app',)),
     )
     assert result.provenance == "unknown"
     assert result.reason == "scope_proof_file_set_mismatch"
@@ -106,7 +107,7 @@ def generate(request, bypass_filter: bool = False):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/helper.py"),
+        scope_proof=_scope("app/helper.py", import_roots=('app',)),
     )
     assert result.provenance == "unknown"
     assert result.reason == "no_accounted_callsites"
@@ -128,7 +129,7 @@ def route(request):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/helper.py", "app/caller.py"),
+        scope_proof=_scope("app/helper.py", "app/caller.py", import_roots=('app',)),
     )
     assert result.provenance == "server_internal"
     assert len(result.callsites) == 1
@@ -152,7 +153,7 @@ def route(request):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/helper.py", "app/caller.py"),
+        scope_proof=_scope("app/helper.py", "app/caller.py", import_roots=('app',)),
     )
     assert result.provenance == "unknown"
     assert any(
@@ -179,7 +180,7 @@ def route(request, bypass_filter: bool = False):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/helper.py", "app/caller.py"),
+        scope_proof=_scope("app/helper.py", "app/caller.py", import_roots=('app',)),
     )
     assert result.provenance == "externally_bound_http"
     assert len(result.callsites) == 1
@@ -204,7 +205,7 @@ def route(request, bypass_filter: bool = False, obj=None):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/helper.py", "app/caller.py"),
+        scope_proof=_scope("app/helper.py", "app/caller.py", import_roots=('app',)),
     )
     assert result.provenance == "unknown"
     assert any(
@@ -230,7 +231,7 @@ def route(generate):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/helper.py", "app/caller.py"),
+        scope_proof=_scope("app/helper.py", "app/caller.py", import_roots=('app',)),
     )
     assert result.provenance == "unknown"
     assert result.reason == "no_accounted_callsites"
@@ -254,7 +255,7 @@ def route(request):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/helper.py", "app/caller.py"),
+        scope_proof=_scope("app/helper.py", "app/caller.py", import_roots=('app',)),
     )
     assert result.provenance == "unknown"
     assert result.reason == "no_accounted_callsites"
@@ -278,7 +279,7 @@ def route(request):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/helper.py", "app/caller.py"),
+        scope_proof=_scope("app/helper.py", "app/caller.py", import_roots=('app',)),
     )
     assert result.provenance == "unknown"
     assert result.reason == "no_accounted_callsites"
@@ -300,7 +301,7 @@ def route(request):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/mod.py"),
+        scope_proof=_scope("app/mod.py", import_roots=('app',)),
     )
     assert result.provenance == "unknown"
     assert result.reason == "callee_not_uniquely_resolved"
@@ -319,7 +320,7 @@ def route(request):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/mod.py"),
+        scope_proof=_scope("app/mod.py", import_roots=('app',)),
     )
     assert result.provenance == "unknown"
     assert result.reason == "callee_not_uniquely_resolved"
@@ -343,7 +344,7 @@ def route(request):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/helper.py", "app/caller.py"),
+        scope_proof=_scope("app/helper.py", "app/caller.py", import_roots=('app',)),
     )
     assert result.provenance == "unknown"
     assert result.reason == "no_accounted_callsites"
@@ -364,7 +365,7 @@ def route(request):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/mod.py"),
+        scope_proof=_scope("app/mod.py", import_roots=('app',)),
     )
     assert result.provenance == "server_internal"
 
@@ -387,7 +388,7 @@ def route(request):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/helper.py", "app/caller.py"),
+        scope_proof=_scope("app/helper.py", "app/caller.py", import_roots=('app',)),
     )
     assert result.provenance == "unknown"
     assert result.reason == "no_accounted_callsites"
@@ -407,7 +408,7 @@ def route(request):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/helper.py", "app/caller.py"),
+        scope_proof=_scope("app/helper.py", "app/caller.py", import_roots=('app',)),
     )
     assert result.provenance == "unknown"
     assert result.reason == "no_accounted_callsites"
@@ -428,7 +429,7 @@ def route(request):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/mod.py"),
+        scope_proof=_scope("app/mod.py", import_roots=('app',)),
     )
     assert result.provenance == "unknown"
     assert result.reason == "callee_not_uniquely_resolved"
@@ -448,7 +449,7 @@ def route(request):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/mod.py"),
+        scope_proof=_scope("app/mod.py", import_roots=('app',)),
     )
     assert result.provenance == "unknown"
     assert result.reason == "callee_not_uniquely_resolved"
@@ -470,7 +471,7 @@ def route(request):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/mod.py"),
+        scope_proof=_scope("app/mod.py", import_roots=('app',)),
     )
     assert result.provenance == "unknown"
     assert result.reason == "callee_not_uniquely_resolved"
@@ -491,7 +492,7 @@ def route(request):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/mod.py"),
+        scope_proof=_scope("app/mod.py", import_roots=('app',)),
     )
     assert result.provenance == "unknown"
     assert result.reason == "callee_not_uniquely_resolved"
@@ -510,7 +511,7 @@ def route(request):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/mod.py"),
+        scope_proof=_scope("app/mod.py", import_roots=('app',)),
     )
     assert result.provenance == "unknown"
     assert result.reason == "callee_not_uniquely_resolved"
@@ -532,7 +533,7 @@ def route(request):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("pkg/helper.py", "pkg/sub/caller.py"),
+        scope_proof=_scope("pkg/helper.py", "pkg/sub/caller.py", import_roots=('pkg',)),
     )
     assert result.provenance == "server_internal"
     assert len(result.callsites) == 1
@@ -559,6 +560,7 @@ def route(request):
             "app/helper/impl.py",
             "app/helper/__init__.py",
             "app/caller.py",
+            import_roots=("app",),
         ),
     )
     assert result.provenance == "server_internal"
@@ -613,7 +615,7 @@ def route(request):
         },
         callee_name="generate",
         parameter="bypass_filter",
-        scope_proof=_scope("app/helper.py", "app/caller.py"),
+        scope_proof=_scope("app/helper.py", "app/caller.py", import_roots=('app',)),
     )
     assert result.provenance == "unknown"
     assert result.reason == "unresolved_callsite_or_deferred_form"
@@ -645,7 +647,7 @@ def handler(request, bypass_filter=False):
         entry_path="app/routes.py",
         function_name="handler",
         bypass_fields=frozenset({"bypass_filter"}),
-        scope_proof=_scope("app/helpers.py", "app/routes.py"),
+        scope_proof=_scope("app/helpers.py", "app/routes.py", import_roots=('app',)),
     )
     prov = analyze_interprocedural_argument_provenance(
         {
@@ -662,7 +664,7 @@ def route(request, bypass_filter: bool = False):
         },
         callee_name="write_state",
         parameter="bypass_filter",
-        scope_proof=_scope("app/helpers.py", "app/routes.py"),
+        scope_proof=_scope("app/helpers.py", "app/routes.py", import_roots=('app',)),
     )
     assert writer[0].status == "violated"
     assert prov.provenance == "externally_bound_http"

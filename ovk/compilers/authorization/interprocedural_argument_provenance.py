@@ -42,7 +42,7 @@ ArgumentProvenanceKind = Literal[
     "unknown",
 ]
 
-_IMPLEMENTATION_VERSION = "0.3.1"
+_IMPLEMENTATION_VERSION = "0.4.0"
 
 
 @dataclass(frozen=True)
@@ -83,6 +83,7 @@ def _scope_digest(scope_proof: ClosedWorldScopeProof) -> str:
         {
             "accounted_paths": list(scope_proof.accounted_paths),
             "source_roots": list(scope_proof.source_roots),
+            "python_import_roots": list(scope_proof.python_import_roots),
             "implementation_version": _IMPLEMENTATION_VERSION,
         }
     )
@@ -231,7 +232,10 @@ def analyze_interprocedural_argument_provenance(
             reason="scope_proof_file_set_mismatch",
         )
 
-    resolver = build_callee_resolver_from_sources(normalized)
+    resolver = build_callee_resolver_from_sources(
+        normalized,
+        import_roots=scope_proof.python_import_roots,
+    )
     functions = index_unique_module_functions(resolver.trees)
     if callee_name not in functions:
         return InterproceduralArgumentProvenanceResult(

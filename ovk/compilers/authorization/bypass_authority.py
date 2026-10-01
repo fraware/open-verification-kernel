@@ -27,6 +27,12 @@ from typing import Literal, Mapping
 from ovk.compilers.authorization.python_callee_resolution import (
     CalleeResolver,
     build_callee_resolver,
+    import_module_name_from_importer,
+)
+from ovk.compilers.authorization.python_import_space import (
+    module_candidates_in_manifest,
+    normalize_import_roots,
+    top_level_appears_local,
 )
 from ovk.compilers.authorization.value_origin import (
     AliasState,
@@ -54,12 +60,15 @@ class ClosedWorldScopeProof:
     """Caller-supplied proof boundary for repository writer accounting.
 
     accounted_paths is the complete Python source set claimed for this analysis
-    scope. source_roots map repository paths to importable module names, e.g.
-    ("backend",) for backend/open_webui/... -> open_webui....
+    scope. source_roots are path-accounting roots (membership only).
+    python_import_roots are trusted import-space roots for the shared module
+    identity theorem (#161); empty means only exact repo-root paths and
+    relative imports are import-grounded.
     """
 
     accounted_paths: tuple[str, ...]
     source_roots: tuple[str, ...]
+    python_import_roots: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -71,6 +80,7 @@ class ClosedWorldCondition:
     source_roots: tuple[str, ...]
     unresolvable_imports: tuple[str, ...]
     reason: str
+    python_import_roots: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -98,7 +108,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.9.1"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.10.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -1270,43 +1280,20 @@ def _path_relative_to_root(path: str, root: str) -> str | None:
 def _module_candidates_in_manifest(
     module: str,
     available_paths: set[str],
+    *,
+    import_roots: tuple[str, ...] = (),
 ) -> tuple[str, ...]:
-    """Locate repository paths that could bind an absolute import.
+    """Shared import-space theorem (#161); kept as a thin alias for tests."""
 
-    Searches the complete authenticated Python manifest for
-    ``*/<module/path>.py`` and ``*/<module/path>/__init__.py`` without
-    encoding conventional source-root names (backend/src). Exactly one
-    candidate establishes a local binding; multiple mean ambiguity;
-    none means external *unless* the import is relative or the top-level
-    name already appears as a local package path in the manifest.
-    """
-
-    stem = module.replace(".", "/")
-    wanted = (f"{stem}.py", f"{stem}/__init__.py")
-    found: set[str] = set()
-    for path in available_paths:
-        for suffix in wanted:
-            if path == suffix or path.endswith("/" + suffix):
-                found.add(path)
-                break
-    return tuple(sorted(found))
+    return module_candidates_in_manifest(
+        module,
+        available_paths,
+        import_roots=import_roots,
+    )
 
 
 def _top_level_appears_local(top: str, available_paths: set[str]) -> bool:
-    """True when ``top`` already names a path segment under the manifest.
-
-    Used so ``from app.missing import ...`` cannot be classified external
-    when ``app/...`` paths are present (Unknown > false PASS).
-    """
-
-    if not top or "." in top:
-        return False
-    for path in available_paths:
-        if path == f"{top}.py" or path.startswith(f"{top}/"):
-            return True
-        if f"/{top}/" in f"/{path}/" or path.endswith(f"/{top}.py"):
-            return True
-    return False
+    return top_level_appears_local(top, available_paths)
 
 
 def _module_path_in_unit(
@@ -1314,15 +1301,16 @@ def _module_path_in_unit(
     *,
     available_paths: set[str],
     source_roots: tuple[str, ...] | None = None,
+    import_roots: tuple[str, ...] | None = None,
 ) -> str | None:
-    """Resolve an absolute module name from the complete manifest.
+    """Resolve an absolute module name under the shared import-root theorem."""
 
-    ``source_roots`` is retained for call-site compatibility but is not used
-    by the security theorem (#155).
-    """
-
-    del source_roots  # security theorem is manifest-complete, not root-special-cased
-    candidates = _module_candidates_in_manifest(module, available_paths)
+    del source_roots  # path-accounting roots are not import identity
+    candidates = module_candidates_in_manifest(
+        module,
+        available_paths,
+        import_roots=import_roots or (),
+    )
     return candidates[0] if len(candidates) == 1 else None
 
 
@@ -1333,26 +1321,7 @@ def _import_module_name_from_importer(
 ) -> str | None:
     """Resolve ImportFrom to an absolute module name from the importer path."""
 
-    if not node.level or node.level <= 0:
-        return node.module
-
-    importer = _normalize_unit_path(importer_path)
-    parts = importer.split("/")
-    if not parts:
-        return None
-    if parts[-1].endswith(".py"):
-        parts[-1] = parts[-1][:-3]
-    if parts and parts[-1] == "__init__":
-        parts = parts[:-1]
-    else:
-        parts = parts[:-1]
-    if node.level - 1 > len(parts):
-        return None
-    if node.level > 1:
-        parts = parts[: -(node.level - 1)]
-    if node.module:
-        parts = list(parts) + node.module.split(".")
-    return ".".join(parts) if parts else None
+    return import_module_name_from_importer(node, importer_path=importer_path)
 
 
 def _import_module_name(
@@ -1364,7 +1333,7 @@ def _import_module_name(
     """Resolve ImportFrom to an import-space module name."""
 
     del source_roots
-    return _import_module_name_from_importer(node, importer_path=importer_path)
+    return import_module_name_from_importer(node, importer_path=importer_path)
 
 
 def _evaluate_closed_world(
@@ -1384,6 +1353,7 @@ def _evaluate_closed_world(
             source_roots=(),
             unresolvable_imports=("scope_proof_missing",),
             reason="closed_world_scope_proof_missing",
+            python_import_roots=(),
         )
 
     proof_paths = {
@@ -1393,6 +1363,7 @@ def _evaluate_closed_world(
     source_roots = tuple(
         sorted({_normalize_source_root(root) for root in scope_proof.source_roots})
     )
+    import_roots = normalize_import_roots(scope_proof.python_import_roots)
     scope_errors: list[str] = []
     if proof_paths != available:
         for missing in sorted(proof_paths - available):
@@ -1415,6 +1386,7 @@ def _evaluate_closed_world(
             source_roots=source_roots,
             unresolvable_imports=tuple(sorted(set(scope_errors))),
             reason="closed_world_scope_proof_mismatch",
+            python_import_roots=import_roots,
         )
 
     unresolvable: list[str] = []
@@ -1439,14 +1411,18 @@ def _evaluate_closed_world(
                 if module_name is None:
                     unresolvable.append(f"{norm}:unresolved_relative_import")
                     continue
-                candidates = _module_candidates_in_manifest(module_name, available)
+                candidates = module_candidates_in_manifest(
+                    module_name,
+                    available,
+                    import_roots=import_roots,
+                )
                 if len(candidates) == 0:
                     # Relative imports are always repository-local. Absolute
                     # imports whose top-level name already appears under the
                     # manifest are also local misses — never external.
                     relative = bool(node.level and node.level > 0)
                     top = module_name.split(".", 1)[0]
-                    if relative or _top_level_appears_local(top, available):
+                    if relative or top_level_appears_local(top, available):
                         kind = (
                             "unresolvable_relative_import"
                             if relative
@@ -1461,12 +1437,14 @@ def _evaluate_closed_world(
                     )
             elif isinstance(node, ast.Import):
                 for alias in node.names:
-                    candidates = _module_candidates_in_manifest(
-                        alias.name, available
+                    candidates = module_candidates_in_manifest(
+                        alias.name,
+                        available,
+                        import_roots=import_roots,
                     )
                     if len(candidates) == 0:
                         top = alias.name.split(".", 1)[0]
-                        if _top_level_appears_local(top, available):
+                        if top_level_appears_local(top, available):
                             unresolvable.append(
                                 f"{norm}:unresolvable_local_import:{alias.name}"
                             )
@@ -1501,6 +1479,7 @@ def _evaluate_closed_world(
             if complete
             else "closed_world_incomplete_unresolvable_imports"
         ),
+        python_import_roots=import_roots,
     )
 
 
@@ -1671,7 +1650,12 @@ def analyze_bypass_authority_unit(
     trees: dict[str, ast.AST] = {}
     for path, source in sorted(normalized.items()):
         trees[path] = ast.parse(source, filename=path)
-    callee_resolver = build_callee_resolver(trees)
+    import_roots = (
+        normalize_import_roots(scope_proof.python_import_roots)
+        if scope_proof is not None
+        else ()
+    )
+    callee_resolver = build_callee_resolver(trees, import_roots=import_roots)
 
     entry_tree = trees[entry]
     entry_functions = [
@@ -1753,6 +1737,9 @@ def bypass_authority_digest(findings: tuple[BypassAuthorityFinding, ...]) -> str
                         "complete": item.closed_world.complete,
                         "accounted_paths": list(item.closed_world.accounted_paths),
                         "source_roots": list(item.closed_world.source_roots),
+                        "python_import_roots": list(
+                            item.closed_world.python_import_roots
+                        ),
                         "unresolvable_imports": list(
                             item.closed_world.unresolvable_imports
                         ),
