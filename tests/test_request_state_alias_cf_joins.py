@@ -4,6 +4,9 @@ Closes false PASSes where:
 1. Guarded final ``case _ if cond:`` was treated as exhaustive.
 2. A shared mutable request/state alias env let one CF branch erase
    aliases before another branch's client write was scanned.
+3. Cross-kind CF join dropped a name present as request on one predecessor
+   and state on another, omitting governed may-state writes.
+4. Interprocedural transfer promoted caller may-aliases to callee must-aliases.
 
 Unknown > false PASS. Held-out FormalPR partitions are not frozen.
 """
@@ -12,7 +15,9 @@ from __future__ import annotations
 
 from ovk.compilers.authorization.bypass_authority import (
     ClosedWorldScopeProof,
+    _RequestStateAliasEnv,
     analyze_bypass_authority_unit,
+    join_request_state_alias_envs,
 )
 from ovk.compilers.authorization.incremental_fastapi_compiler import (
     compile_incremental_fastapi_assurance,
@@ -427,7 +432,7 @@ async def handler(request, bypass_filter: bool = False, user = Depends(get_curre
 def test_persistent_state_round_trip_and_version_invalidation(tmp_path) -> None:
     """13. Persistent-state round trip and version invalidation."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.36.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.37.0"
 
     trusted_helpers = """
 def write_state(state, value):
@@ -491,7 +496,7 @@ async def handler(request, user = Depends(get_current_user)):
     import json
 
     record = json.loads(cache_path.read_text(encoding="utf-8"))
-    record["key_components"]["implementation_version"] = "0.35.0"
+    record["key_components"]["implementation_version"] = "0.36.0"
     record["key_digest"] = content_digest(record["key_components"])
     cache_path.write_text(
         json.dumps(record, indent=2, sort_keys=True) + "\n",
@@ -574,4 +579,422 @@ async def handler(request, bypass_filter: bool = False, user = Depends(get_curre
         item.status != "established" for item in ir.bypass_authority_evidence
     )
     for item in ir.bypass_authority_evidence:
+        assert item.reason != "source_proved_server_authority_write"
+
+
+def test_join_cross_kind_keeps_both_may_sets() -> None:
+    """Cross-kind join retains the name in both may-request and may-state."""
+
+    request_pred = _RequestStateAliasEnv(
+        request_names={"x"},
+        state_names=set(),
+    )
+    state_pred = _RequestStateAliasEnv(
+        request_names=set(),
+        state_names={"x"},
+    )
+    joined = join_request_state_alias_envs([request_pred, state_pred])
+    assert "x" not in joined.request_names
+    assert "x" not in joined.state_names
+    assert "x" in joined.may_request_names
+    assert "x" in joined.may_state_names
+
+    import ast
+
+    classification = joined.classify(ast.Name(id="x", ctx=ast.Load()))
+    assert classification.may_request is True
+    assert classification.may_state is True
+    assert classification.must_request is False
+    assert classification.must_state is False
+    formal_env = _RequestStateAliasEnv(request_names=set(), state_names=set())
+    formal_env.apply_classification("formal", classification)
+    assert "formal" in formal_env.may_request_names
+    assert "formal" in formal_env.may_state_names
+    assert "formal" not in formal_env.request_names
+    assert "formal" not in formal_env.state_names
+
+
+def test_cross_kind_join_client_write_via_state_never_authorized() -> None:
+    """1. Request on one branch, state on another, then x.field = client → never authorized."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    if bypass_filter:
+        x = request
+    else:
+        x = request.state
+    x.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_cross_kind_join_client_write_via_state_reversed_never_authorized() -> None:
+    """2. Same as (1) with branch order reversed."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    if bypass_filter:
+        x = request.state
+    else:
+        x = request
+    x.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_cross_kind_join_request_state_field_write_is_dynamic() -> None:
+    """3. Request on one branch, state on another, then x.state.field = client → dynamic."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    if bypass_filter:
+        x = request
+    else:
+        x = request.state
+    x.state.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_cross_kind_joined_alias_into_helper_never_authorized() -> None:
+    """4. Cross-kind joined alias passed into a helper must not authorize."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    if bypass_filter:
+        x = request
+    else:
+        x = request.state
+    helpers.write_state(x, True)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_may_state_actual_helper_literal_write_no_positive_authority() -> None:
+    """5. May-state actual → helper literal state write must NOT establish positive authority."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    if bypass_filter:
+        state = request.state
+    helpers.write_state(state, True)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_may_request_actual_helper_state_attr_literal_no_positive_authority() -> None:
+    """6. May-request actual → helper req.state.field = literal must NOT establish positive authority."""
+
+    findings = _unit(
+        """
+import helpers
+
+def write_via_request(req, value):
+    req.state.bypass_filter = value
+
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    if bypass_filter:
+        req = request
+    write_via_request(req, True)
+    return request.state.bypass_filter
+""",
+        helpers="""
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip(),
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_dual_may_actual_preserves_both_kinds_in_formal() -> None:
+    """7. Actual in both may_request and may_state preserves both in formal."""
+
+    findings = _unit(
+        """
+import helpers
+
+def touch_both(x, value):
+    x.bypass_filter = value
+    x.state.bypass_filter = value
+
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    if bypass_filter:
+        x = request
+    else:
+        x = request.state
+    touch_both(x, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_two_hop_helper_preserves_may_status() -> None:
+    """8. Two-hop helper propagation preserves may status."""
+
+    findings = _unit(
+        """
+import helpers
+
+def inner(state, value):
+    state.bypass_filter = value
+
+def outer(state, value):
+    inner(state, value)
+
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    if bypass_filter:
+        state = request.state
+    outer(state, True)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_keyword_actual_formal_preserves_may_status() -> None:
+    """9. Keyword actual→formal preserves may status."""
+
+    findings = _unit(
+        """
+import helpers
+
+def write_state(*, state, value):
+    state.bypass_filter = value
+
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    if bypass_filter:
+        st = request.state
+    write_state(state=st, value=True)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_cross_kind_and_may_cases_via_setattr() -> None:
+    """10. Same cross-kind / may-promotion cases using setattr."""
+
+    findings_cross = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    if bypass_filter:
+        x = request
+    else:
+        x = request.state
+    setattr(x, "bypass_filter", bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings_cross[0].status != "authorized"
+    assert findings_cross[0].status in {"violated", "unknown"}
+
+    findings_may = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    if bypass_filter:
+        state = request.state
+    setattr(state, "bypass_filter", True)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings_may[0].status != "authorized"
+    assert findings_may[0].reason != "source_proved_server_authority_write"
+    assert findings_may[0].status in {"violated", "unknown"}
+
+
+def test_e2e_cross_kind_join_never_source_proved_authorize() -> None:
+    """12. End-to-end PE: cross-kind counterexample never yields source_proved_server_authority_write."""
+
+    helpers = """
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    routes = """
+from fastapi import Depends, FastAPI
+import helpers
+app = FastAPI()
+
+@app.post("/chat")
+async def handler(request, bypass_filter: bool = False, user = Depends(get_current_user)):
+    request.state.bypass_filter = True
+    if bypass_filter:
+        x = request
+    else:
+        x = request.state
+    x.bypass_filter = bypass_filter
+    if request.state.bypass_filter:
+        return sink(user)
+    return sink(user)
+""".strip()
+    repo = {
+        "app/helpers.py": helpers + "\n",
+        "app/routes.py": routes,
+    }
+    materials = AuthMaterials(
+        base_files=dict(repo),
+        head_files=dict(repo),
+        repo="example/alias-cross-kind-e2e",
+        base_revision="base",
+        head_revision="head",
+        repository_python_files=repo,
+        head_repository_python_files=repo,
+        base_repository_python_files=repo,
+    )
+    profile = FastApiDependencyEffectProfile(
+        sink_effects={"sink": "model.invoke"},
+        sink_static_resources={"sink": "chat"},
+        trusted_bypass_authorities={
+            "request.state.bypass_filter": ("model.invoke",),
+        },
+        principal_parameter="user",
+    )
+    parsed = parse_head_python_materials(materials)
+    contracts = build_contract_summary_index(
+        materials,
+        parsed_trees=parsed.trees,
+        source_digests=parsed.source_digests,
+    )
+    routes_idx = build_route_summary_index(
+        materials,
+        parsed_trees=parsed.trees,
+        source_digests=parsed.source_digests,
+    )
+    ir = FastApiDependencyEffectExtractor().compile(
+        materials,
+        profile,
+        parsed_index=parsed,
+        contract_summary_index=contracts,
+        route_summary_index=routes_idx,
+    )
+    assert all(
+        item.status != "established" for item in ir.bypass_authority_evidence
+    )
+    for item in ir.bypass_authority_evidence:
+        assert item.reason != "source_proved_server_authority_write"
+
+def test_cross_kind_full_equals_incremental() -> None:
+    """11. full == incremental for the cross-kind alias join counterexample."""
+
+    trusted_helpers = """
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    cross_kind_routes = """
+from fastapi import Depends, FastAPI
+import helpers
+app = FastAPI()
+
+@app.post("/chat")
+async def handler(request, bypass_filter: bool = False, user = Depends(get_current_user)):
+    request.state.bypass_filter = True
+    if bypass_filter:
+        x = request
+    else:
+        x = request.state
+    x.bypass_filter = bypass_filter
+    if request.state.bypass_filter:
+        return sink(user)
+    return sink(user)
+""".strip()
+
+    profile = FastApiDependencyEffectProfile(
+        sink_effects={"sink": "model.invoke"},
+        sink_static_resources={"sink": "chat"},
+        trusted_bypass_authorities={
+            "request.state.bypass_filter": ("model.invoke",),
+        },
+        principal_parameter="user",
+    )
+    repo = {
+        "app/helpers.py": trusted_helpers + "\n",
+        "app/routes.py": cross_kind_routes,
+    }
+    materials = AuthMaterials(
+        base_files=dict(repo),
+        head_files=dict(repo),
+        repo="example/alias-cross-kind-incremental",
+        base_revision="base",
+        head_revision="head-1",
+        repository_python_files=repo,
+        head_repository_python_files=repo,
+        base_repository_python_files=repo,
+    )
+    parsed = parse_head_python_materials(materials)
+    contracts = build_contract_summary_index(
+        materials,
+        parsed_trees=parsed.trees,
+        source_digests=parsed.source_digests,
+    )
+    routes = build_route_summary_index(
+        materials,
+        parsed_trees=parsed.trees,
+        source_digests=parsed.source_digests,
+    )
+    incremental = compile_incremental_fastapi_assurance(
+        materials,
+        profile,
+        parsed_index=parsed,
+        contract_summary_index=contracts,
+        route_summary_index=routes,
+    )
+    full = FastApiDependencyEffectExtractor().compile(
+        materials,
+        profile,
+        parsed_index=parsed,
+        contract_summary_index=contracts,
+        route_summary_index=routes,
+    )
+    assert incremental.ir.canonical_payload() == full.canonical_payload()
+    assert all(
+        item.status != "established"
+        for item in incremental.ir.bypass_authority_evidence
+    )
+    for item in incremental.ir.bypass_authority_evidence:
         assert item.reason != "source_proved_server_authority_write"

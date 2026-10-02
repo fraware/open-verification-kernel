@@ -111,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.18.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.19.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -148,6 +148,30 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     )
 
 
+@dataclass(frozen=True)
+class AliasClassification:
+    """Independent must/may request and state facts for one expression.
+
+    A single name may be may-request and may-state simultaneously after a
+    cross-kind CF join. Facts are transferred independently (not if/elif) so
+    interprocedural formals and local rebinds preserve strength (#171 lattice).
+    """
+
+    must_request: bool = False
+    may_request: bool = False
+    must_state: bool = False
+    may_state: bool = False
+
+    @property
+    def any_alias(self) -> bool:
+        return (
+            self.must_request
+            or self.may_request
+            or self.must_state
+            or self.may_state
+        )
+
+
 @dataclass
 class _RequestStateAliasEnv:
     """Track names proved to alias ``request`` or ``request.state`` (#153/#171).
@@ -162,6 +186,9 @@ class _RequestStateAliasEnv:
     - write through may-alias → recorded dynamic/uncertain (no positive authority)
     Feasible predecessors are forked and joined so branch-local rebinding cannot
     erase writes that remain reachable on other predecessors.
+
+    Cross-kind disagreement (request on one predecessor, state on another) keeps
+    the name in both may sets — deleting it would omit governed writes.
     """
 
     request_names: set[str]
@@ -200,40 +227,39 @@ class _RequestStateAliasEnv:
 
         self.restore(join_request_state_alias_envs(states))
 
-    def note_binding(self, target: ast.AST, value: ast.AST) -> None:
-        if not isinstance(target, ast.Name):
-            # Complex targets poison nothing specific; leave env unchanged.
-            return
-        name = target.id
-        if self._is_must_request_expr(value):
-            self.request_names.add(name)
-            self.may_request_names.discard(name)
-            self.state_names.discard(name)
-            self.may_state_names.discard(name)
-            return
-        if self._is_may_only_request_expr(value):
-            self.may_request_names.add(name)
-            self.request_names.discard(name)
-            self.state_names.discard(name)
-            self.may_state_names.discard(name)
-            return
-        if self._is_must_state_expr(value):
-            self.state_names.add(name)
-            self.may_state_names.discard(name)
-            self.request_names.discard(name)
-            self.may_request_names.discard(name)
-            return
-        if self._is_may_only_state_expr(value):
-            self.may_state_names.add(name)
-            self.state_names.discard(name)
-            self.request_names.discard(name)
-            self.may_request_names.discard(name)
-            return
-        # Rebind of a previously aliased name to an unrelated value.
+    def classify(self, value: ast.AST) -> AliasClassification:
+        """Return independent must/may request and state facts for ``value``."""
+
+        return AliasClassification(
+            must_request=self._is_must_request_expr(value),
+            may_request=self._is_may_only_request_expr(value),
+            must_state=self._is_must_state_expr(value),
+            may_state=self._is_may_only_state_expr(value),
+        )
+
+    def apply_classification(self, name: str, classification: AliasClassification) -> None:
+        """Install ``name`` under ``classification``, preserving dual may facts."""
+
         self.request_names.discard(name)
         self.state_names.discard(name)
         self.may_request_names.discard(name)
         self.may_state_names.discard(name)
+        if not classification.any_alias:
+            return
+        if classification.must_request:
+            self.request_names.add(name)
+        if classification.may_request:
+            self.may_request_names.add(name)
+        if classification.must_state:
+            self.state_names.add(name)
+        if classification.may_state:
+            self.may_state_names.add(name)
+
+    def note_binding(self, target: ast.AST, value: ast.AST) -> None:
+        if not isinstance(target, ast.Name):
+            # Complex targets poison nothing specific; leave env unchanged.
+            return
+        self.apply_classification(target.id, self.classify(value))
 
     def poison_names(self, names: set[str]) -> None:
         for name in names:
@@ -559,10 +585,15 @@ def join_request_state_alias_envs(
 ) -> _RequestStateAliasEnv:
     """Join request/state alias envs across feasible CF predecessors (#171).
 
-    Must-alias is the intersection of must sets. May-alias is the union of
+    Must-alias is the intersection of must sets: a name is must-K only when
+    every predecessor carries exact kind K. May-alias is the union of
     (must ∪ may) across predecessors minus the resulting must set, so a name
     that aliases on only some predecessors remains visible for dynamic write
     accounting without contributing exact closed-world authority.
+
+    Cross-kind disagreement (request-kind on one predecessor, state-kind on
+    another) keeps the name in both may sets. Dropping the conflict would omit
+    governed state writes reachable through the state-kind predecessor.
     """
 
     if not states:
@@ -578,12 +609,6 @@ def join_request_state_alias_envs(
         may_state |= state.state_names | state.may_state_names
     may_request -= must_request
     may_state -= must_state
-    # Conflicting request vs state classification across predecessors: drop.
-    conflict = (must_request | may_request) & (must_state | may_state)
-    must_request -= conflict
-    must_state -= conflict
-    may_request -= conflict
-    may_state -= conflict
     return _RequestStateAliasEnv(
         request_names=must_request,
         state_names=must_state,
@@ -971,10 +996,11 @@ def _collect_writes_in_function(
         callee_aliases = _RequestStateAliasEnv.seed(param_names=frozenset())
         callee_alias_state = AliasState()
         for formal, actual in binding.items():
-            if request_aliases._is_request_expr(actual):
-                callee_aliases.request_names.add(formal)
-            elif request_aliases._is_state_expr(actual):
-                callee_aliases.state_names.add(formal)
+            # Preserve must/may strength independently. A cross-kind may-alias
+            # actual can be both may-request and may-state; if/elif promotion
+            # of may→must would false-PASS helper literal writes.
+            classification = request_aliases.classify(actual)
+            callee_aliases.apply_classification(formal, classification)
             # Propagate value-origin evidence through formals.
             origin = _classify(actual)
             callee_alias_state.bind(formal, origin)
