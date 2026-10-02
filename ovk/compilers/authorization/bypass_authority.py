@@ -111,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.19.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.20.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -155,6 +155,9 @@ class AliasClassification:
     A single name may be may-request and may-state simultaneously after a
     cross-kind CF join. Facts are transferred independently (not if/elif) so
     interprocedural formals and local rebinds preserve strength (#171 lattice).
+
+    Expression-level IfExp joins use the same lattice: union of may facts;
+    must only when every arm agrees on the same exact kind.
     """
 
     must_request: bool = False
@@ -169,6 +172,38 @@ class AliasClassification:
             or self.may_request
             or self.must_state
             or self.may_state
+        )
+
+    @staticmethod
+    def join(
+        left: "AliasClassification", right: "AliasClassification"
+    ) -> "AliasClassification":
+        """Join two expression classifications (IfExp arms / nested conditionals).
+
+        Mirrors ``join_request_state_alias_envs`` for a single binding: must is
+        intersection; may is union of (must ∪ may) minus the resulting must.
+        Cross-kind disagreement yields dual may — never poison.
+        """
+
+        must_request = left.must_request and right.must_request
+        must_state = left.must_state and right.must_state
+        may_request = (
+            left.must_request
+            or left.may_request
+            or right.must_request
+            or right.may_request
+        ) and not must_request
+        may_state = (
+            left.must_state
+            or left.may_state
+            or right.must_state
+            or right.may_state
+        ) and not must_state
+        return AliasClassification(
+            must_request=must_request,
+            may_request=may_request,
+            must_state=must_state,
+            may_state=may_state,
         )
 
 
@@ -228,8 +263,20 @@ class _RequestStateAliasEnv:
         self.restore(join_request_state_alias_envs(states))
 
     def classify(self, value: ast.AST) -> AliasClassification:
-        """Return independent must/may request and state facts for ``value``."""
+        """Return independent must/may request and state facts for ``value``.
 
+        ``IfExp`` arms are classified independently and joined (nested IfExp
+        included). ``NamedExpr`` unwraps to its RHS so walrus forms share the
+        same lattice. Cross-kind arms become dual may — not poison.
+        """
+
+        if isinstance(value, ast.NamedExpr):
+            return self.classify(value.value)
+        if isinstance(value, ast.IfExp):
+            return AliasClassification.join(
+                self.classify(value.body),
+                self.classify(value.orelse),
+            )
         return AliasClassification(
             must_request=self._is_must_request_expr(value),
             may_request=self._is_may_only_request_expr(value),
@@ -381,6 +428,15 @@ class _RequestStateAliasEnv:
             if base in self.may_state_names:
                 return target.attr, False
 
+        # Expression-level state identity (IfExp / NamedExpr / nested forms):
+        # ``(request.state if f else request).field = ...`` must still account.
+        if isinstance(target, ast.Attribute):
+            classification = self.classify(target.value)
+            if classification.must_state:
+                return target.attr, True
+            if classification.may_state:
+                return target.attr, False
+
         # request.state[field] / req.state[field] / state[field]
         if isinstance(target, ast.Subscript):
             field = _constant_str_key(target.slice)
@@ -412,7 +468,9 @@ class _RequestStateAliasEnv:
         return self._is_must_state_expr(node)
 
     def is_request_or_state_expr(self, value: ast.AST) -> bool:
-        return self._is_request_expr(value) or self._is_state_expr(value)
+        # Prefer classify so IfExp / NamedExpr dual-may identity is visible to
+        # escape and interprocedural actual checks (Unknown > false PASS).
+        return self.classify(value).any_alias
 
     def call_receives_request_or_state(self, call: ast.Call) -> bool:
         for arg in call.args:
@@ -658,9 +716,11 @@ def _is_request_state_setattr_call(
     env = aliases or _RequestStateAliasEnv(request_names={"request"}, state_names=set())
 
     def _state_arg(arg: ast.AST) -> tuple[bool, bool]:
-        if env._is_must_state_expr(arg):
+        # Classify covers IfExp / NamedExpr joins; must_state → exact theorem.
+        classification = env.classify(arg)
+        if classification.must_state:
             return True, True
-        if env._is_may_only_state_expr(arg):
+        if classification.may_state:
             return True, False
         if (
             isinstance(arg, ast.Attribute)
@@ -671,10 +731,6 @@ def _is_request_state_setattr_call(
                 return True, True
             if arg.value.id in env.may_request_names:
                 return True, False
-            return True, False
-        if isinstance(arg, ast.Name) and arg.id in env.state_names:
-            return True, True
-        if isinstance(arg, ast.Name) and arg.id in env.may_state_names:
             return True, False
         return False, False
 
@@ -1231,6 +1287,17 @@ def _collect_writes_in_function(
 
         if isinstance(statement, (ast.If, ast.While)):
             _mark_name_uses(statement.test, alias_state)
+            # Walrus in the test binds before the branch decision
+            # (``if (x := request.state if f else request): x.field = ...``).
+            _note_named_expr_bindings(
+                statement.test, control_dependent=control_dependent
+            )
+            if request_aliases.expression_escapes_state_identity(statement.test):
+                _record_escape(
+                    statement,
+                    ast.unparse(statement),
+                    control_dependent=control_dependent,
+                )
             pre_identity: RequestTimeIdentityState | None = (
                 identity_session.fork() if identity_session is not None else None
             )

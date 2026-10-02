@@ -7,6 +7,9 @@ Closes false PASSes where:
 3. Cross-kind CF join dropped a name present as request on one predecessor
    and state on another, omitting governed may-state writes.
 4. Interprocedural transfer promoted caller may-aliases to callee must-aliases.
+5. Expression-level ``IfExp`` cross-kind arms were unclassified (poisoned),
+   so only a literal ``request.state.field = True`` remained and could
+   yield ``source_proved_server_authority_write``.
 
 Unknown > false PASS. Held-out FormalPR partitions are not frozen.
 """
@@ -14,6 +17,7 @@ Unknown > false PASS. Held-out FormalPR partitions are not frozen.
 from __future__ import annotations
 
 from ovk.compilers.authorization.bypass_authority import (
+    AliasClassification,
     ClosedWorldScopeProof,
     _RequestStateAliasEnv,
     analyze_bypass_authority_unit,
@@ -432,7 +436,7 @@ async def handler(request, bypass_filter: bool = False, user = Depends(get_curre
 def test_persistent_state_round_trip_and_version_invalidation(tmp_path) -> None:
     """13. Persistent-state round trip and version invalidation."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.37.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.38.0"
 
     trusted_helpers = """
 def write_state(state, value):
@@ -496,7 +500,7 @@ async def handler(request, user = Depends(get_current_user)):
     import json
 
     record = json.loads(cache_path.read_text(encoding="utf-8"))
-    record["key_components"]["implementation_version"] = "0.36.0"
+    record["key_components"]["implementation_version"] = "0.37.0"
     record["key_digest"] = content_digest(record["key_components"])
     cache_path.write_text(
         json.dumps(record, indent=2, sort_keys=True) + "\n",
@@ -997,4 +1001,304 @@ async def handler(request, bypass_filter: bool = False, user = Depends(get_curre
         for item in incremental.ir.bypass_authority_evidence
     )
     for item in incremental.ir.bypass_authority_evidence:
+        assert item.reason != "source_proved_server_authority_write"
+
+
+def test_ifexp_classify_cross_kind_keeps_dual_may() -> None:
+    """IfExp arms of differing kind join to dual may (not poison)."""
+
+    import ast
+
+    env = _RequestStateAliasEnv.seed(param_names=frozenset({"request", "flag"}))
+    tree = ast.parse("x = request.state if flag else request")
+    assign = tree.body[0]
+    assert isinstance(assign, ast.Assign)
+    classification = env.classify(assign.value)
+    assert classification.may_request is True
+    assert classification.may_state is True
+    assert classification.must_request is False
+    assert classification.must_state is False
+    env.note_binding(assign.targets[0], assign.value)
+    assert "x" in env.may_request_names
+    assert "x" in env.may_state_names
+    assert "x" not in env.request_names
+    assert "x" not in env.state_names
+
+    same_kind = AliasClassification.join(
+        AliasClassification(must_request=True),
+        AliasClassification(must_request=True),
+    )
+    assert same_kind.must_request is True
+    assert same_kind.may_request is False
+
+
+def test_ifexp_cross_kind_client_write_never_authorized() -> None:
+    """1. ``x = request.state if flag else request`` then ``x.field = client`` → never authorized."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    x = request.state if bypass_filter else request
+    x.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_ifexp_cross_kind_client_write_reversed_never_authorized() -> None:
+    """2. Branch order reversed: ``x = request if flag else request.state`` → same."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    x = request if bypass_filter else request.state
+    x.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_nested_ifexp_mixed_arms_dual_may_dynamic_write() -> None:
+    """3. Nested IfExp with mixed request/state arms → dual may / dynamic write."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False, other=False):
+    request.state.bypass_filter = True
+    x = (request.state if bypass_filter else request) if other else request
+    x.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_ifexp_may_state_helper_literal_write_no_positive_authority() -> None:
+    """4. IfExp may-state passed into helper literal write → no positive authority."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    state = request.state if bypass_filter else request
+    helpers.write_state(state, True)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_ifexp_may_request_then_state_field_write_is_dynamic() -> None:
+    """5. IfExp may-request then ``x.state.field = client`` → dynamic/UNKNOWN as applicable."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    x = request if bypass_filter else request.state
+    x.state.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_walrus_ifexp_in_if_test_never_authorized() -> None:
+    """Walrus + IfExp in ``if`` test must note dual-may before the body write."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    if (x := (request.state if bypass_filter else request)):
+        x.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_annassign_ifexp_cross_kind_never_authorized() -> None:
+    """AnnAssign with cross-kind IfExp RHS gets the same dual-may treatment."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    x: object = request.state if bypass_filter else request
+    x.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_ifexp_cross_kind_full_equals_incremental() -> None:
+    """6. full == incremental for the IfExp cross-kind counterexample."""
+
+    trusted_helpers = """
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    ifexp_routes = """
+from fastapi import Depends, FastAPI
+import helpers
+app = FastAPI()
+
+@app.post("/chat")
+async def handler(request, bypass_filter: bool = False, user = Depends(get_current_user)):
+    request.state.bypass_filter = True
+    x = request.state if bypass_filter else request
+    x.bypass_filter = bypass_filter
+    if request.state.bypass_filter:
+        return sink(user)
+    return sink(user)
+""".strip()
+
+    profile = FastApiDependencyEffectProfile(
+        sink_effects={"sink": "model.invoke"},
+        sink_static_resources={"sink": "chat"},
+        trusted_bypass_authorities={
+            "request.state.bypass_filter": ("model.invoke",),
+        },
+        principal_parameter="user",
+    )
+    repo = {
+        "app/helpers.py": trusted_helpers + "\n",
+        "app/routes.py": ifexp_routes,
+    }
+    materials = AuthMaterials(
+        base_files=dict(repo),
+        head_files=dict(repo),
+        repo="example/alias-ifexp-cross-kind-incremental",
+        base_revision="base",
+        head_revision="head-1",
+        repository_python_files=repo,
+        head_repository_python_files=repo,
+        base_repository_python_files=repo,
+    )
+    parsed = parse_head_python_materials(materials)
+    contracts = build_contract_summary_index(
+        materials,
+        parsed_trees=parsed.trees,
+        source_digests=parsed.source_digests,
+    )
+    routes = build_route_summary_index(
+        materials,
+        parsed_trees=parsed.trees,
+        source_digests=parsed.source_digests,
+    )
+    incremental = compile_incremental_fastapi_assurance(
+        materials,
+        profile,
+        parsed_index=parsed,
+        contract_summary_index=contracts,
+        route_summary_index=routes,
+    )
+    full = FastApiDependencyEffectExtractor().compile(
+        materials,
+        profile,
+        parsed_index=parsed,
+        contract_summary_index=contracts,
+        route_summary_index=routes,
+    )
+    assert incremental.ir.canonical_payload() == full.canonical_payload()
+    assert all(
+        item.status != "established"
+        for item in incremental.ir.bypass_authority_evidence
+    )
+    for item in incremental.ir.bypass_authority_evidence:
+        assert item.reason != "source_proved_server_authority_write"
+
+
+def test_e2e_ifexp_cross_kind_never_source_proved_authorize() -> None:
+    """7. End-to-end PE regression for the IfExp counterexample."""
+
+    helpers = """
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    routes = """
+from fastapi import Depends, FastAPI
+import helpers
+app = FastAPI()
+
+@app.post("/chat")
+async def handler(request, bypass_filter: bool = False, user = Depends(get_current_user)):
+    request.state.bypass_filter = True
+    x = request.state if bypass_filter else request
+    x.bypass_filter = bypass_filter
+    if request.state.bypass_filter:
+        return sink(user)
+    return sink(user)
+""".strip()
+    repo = {
+        "app/helpers.py": helpers + "\n",
+        "app/routes.py": routes,
+    }
+    materials = AuthMaterials(
+        base_files=dict(repo),
+        head_files=dict(repo),
+        repo="example/alias-ifexp-cross-kind-e2e",
+        base_revision="base",
+        head_revision="head",
+        repository_python_files=repo,
+        head_repository_python_files=repo,
+        base_repository_python_files=repo,
+    )
+    profile = FastApiDependencyEffectProfile(
+        sink_effects={"sink": "model.invoke"},
+        sink_static_resources={"sink": "chat"},
+        trusted_bypass_authorities={
+            "request.state.bypass_filter": ("model.invoke",),
+        },
+        principal_parameter="user",
+    )
+    parsed = parse_head_python_materials(materials)
+    contracts = build_contract_summary_index(
+        materials,
+        parsed_trees=parsed.trees,
+        source_digests=parsed.source_digests,
+    )
+    routes_idx = build_route_summary_index(
+        materials,
+        parsed_trees=parsed.trees,
+        source_digests=parsed.source_digests,
+    )
+    ir = FastApiDependencyEffectExtractor().compile(
+        materials,
+        profile,
+        parsed_index=parsed,
+        contract_summary_index=contracts,
+        route_summary_index=routes_idx,
+    )
+    assert all(
+        item.status != "established" for item in ir.bypass_authority_evidence
+    )
+    for item in ir.bypass_authority_evidence:
         assert item.reason != "source_proved_server_authority_write"
