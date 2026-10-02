@@ -111,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.22.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.23.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -1109,6 +1109,32 @@ def _match_pattern_irrefutable(pattern: ast.AST) -> bool:
     return False
 
 
+def _with_as_body_mutates_names(
+    body: Sequence[ast.stmt],
+    bound_names: set[str],
+) -> bool:
+    """True when a with-as bound name is stored via attr/subscript/setattr."""
+
+    for stmt in body:
+        for node in ast.walk(stmt):
+            if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store):
+                if isinstance(node.value, ast.Name) and node.value.id in bound_names:
+                    return True
+            if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store):
+                if isinstance(node.value, ast.Name) and node.value.id in bound_names:
+                    return True
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "setattr"
+                and node.args
+                and isinstance(node.args[0], ast.Name)
+                and node.args[0].id in bound_names
+            ):
+                return True
+    return False
+
+
 def _match_statement_exhaustive(statement: ast.Match) -> bool:
     """Conservative exhaustiveness: final irrefutable case with no guard.
 
@@ -1430,6 +1456,41 @@ def _collect_writes_in_function(
                     ast.unparse(child),
                     control_dependent=control_dependent,
                 )
+            # Value-origin: walrus is outside the simple-rebinding calculus.
+            if isinstance(child.target, ast.Name):
+                alias_state.poison(child.target.id)
+
+    def _observe_executed_expression(
+        expr: ast.AST,
+        *,
+        control_dependent: bool,
+    ) -> None:
+        """Shared PE effect observer for every executed expression (#173).
+
+        Owns value-origin / name-use accounting, request/state alias + walrus
+        accounting, request/state call/mutation accounting (``_record_dynamic_calls``
+        equivalent), and request-time module/callable identity mutation
+        accounting via ``identity_session.observe_expression``. Control-flow
+        structure stays in the CF walker; expression effects must not diverge
+        between PE writer traversal and the identity scanner.
+        """
+
+        _mark_name_uses(expr, alias_state)
+        _note_named_expr_bindings(expr, control_dependent=control_dependent)
+        if request_aliases.expression_escapes_state_identity(expr):
+            _record_escape(
+                expr,
+                ast.unparse(expr),
+                control_dependent=control_dependent,
+            )
+        # Wrap as Expr so setattr / escape / interprocedural call accounting
+        # reuses the statement walker without inventing a second theorem.
+        _record_dynamic_calls(
+            ast.Expr(value=expr),  # type: ignore[arg-type]
+            control_dependent=control_dependent,
+        )
+        if identity_session is not None:
+            identity_session.observe_expression(expr)
 
     def _visit_statement(
         statement: ast.stmt,
@@ -1528,18 +1589,12 @@ def _collect_writes_in_function(
             return
 
         if isinstance(statement, (ast.If, ast.While)):
-            _mark_name_uses(statement.test, alias_state)
-            # Walrus in the test binds before the branch decision
-            # (``if (x := request.state if f else request): x.field = ...``).
-            _note_named_expr_bindings(
+            # Test executes before branch / loop body selection (#173).
+            # While: test runs at least once; nested short-circuit may-effects
+            # stay conservative via the shared observer (Unknown > false PASS).
+            _observe_executed_expression(
                 statement.test, control_dependent=control_dependent
             )
-            if request_aliases.expression_escapes_state_identity(statement.test):
-                _record_escape(
-                    statement,
-                    ast.unparse(statement),
-                    control_dependent=control_dependent,
-                )
             pre_identity: RequestTimeIdentityState | None = (
                 identity_session.fork() if identity_session is not None else None
             )
@@ -1570,13 +1625,15 @@ def _collect_writes_in_function(
             return
 
         if isinstance(statement, (ast.For, ast.AsyncFor)):
-            _mark_name_uses(statement.iter, alias_state)
+            # Iterable always executes before zero-iteration / body join (#173).
+            _observe_executed_expression(
+                statement.iter, control_dependent=control_dependent
+            )
             # ``for s in [request.state]: s.field = client`` must not authorize.
             if (
                 request_aliases.is_request_or_state_expr(statement.iter)
                 or request_aliases.packs_request_or_state_identity(statement.iter)
                 or request_aliases.is_state_dict_surface(statement.iter)
-                or request_aliases.expression_escapes_state_identity(statement.iter)
             ):
                 _record_escape(
                     statement,
@@ -1608,14 +1665,16 @@ def _collect_writes_in_function(
 
         if isinstance(statement, (ast.With, ast.AsyncWith)):
             assigned = _collect_assigned_names_in_statements(list(statement.body))
+            bound_as: set[str] = set()
             for item in statement.items:
-                _mark_name_uses(item.context_expr, alias_state)
-                _note_named_expr_bindings(
+                # context_expr effects are unconditional on entering (#173).
+                _observe_executed_expression(
                     item.context_expr, control_dependent=control_dependent
                 )
                 if item.optional_vars is not None:
                     as_names = _collect_assign_target_names(item.optional_vars)
                     assigned.update(as_names)
+                    bound_as.update(as_names)
                     # ``with nullcontext(request.state) as x`` / bare state CM:
                     # ``__enter__`` may return the governed identity — bind may
                     # before the body so client writes through ``x`` are counted.
@@ -1633,6 +1692,15 @@ def _collect_writes_in_function(
                         request_aliases.apply_classification(name, classification)
                         if not classification.any_alias:
                             alias_state.poison(name)
+                        # Opaque with-as projection for callable identity.
+                        if identity_session is not None:
+                            identity_session.bind_name_unknown(name)
+            if (
+                identity_session is not None
+                and bound_as
+                and _with_as_body_mutates_names(statement.body, bound_as)
+            ):
+                identity_session.mark_unsupported()
             for child in statement.body:
                 _visit_statement(
                     child,
@@ -1641,8 +1709,9 @@ def _collect_writes_in_function(
             for name in assigned:
                 alias_state.poison(name)
             request_aliases.poison_names(assigned)
-            if identity_session is not None:
-                identity_session.observe_statement(statement)
+            # Do not re-scan the whole With via observe_statement: context_expr
+            # was observed before the body, and body statements are observed
+            # individually (avoids post-body identity reordering (#173)).
             return
 
         if isinstance(statement, ast.Try):
@@ -1695,17 +1764,10 @@ def _collect_writes_in_function(
             return
 
         if isinstance(statement, ast.Match):
-            _mark_name_uses(statement.subject, alias_state)
-            # Walrus in the subject binds before case selection.
-            _note_named_expr_bindings(
+            # Subject executes once before case selection (#173).
+            _observe_executed_expression(
                 statement.subject, control_dependent=control_dependent
             )
-            if request_aliases.expression_escapes_state_identity(statement.subject):
-                _record_escape(
-                    statement,
-                    ast.unparse(statement),
-                    control_dependent=control_dependent,
-                )
             pre_identity = (
                 identity_session.fork() if identity_session is not None else None
             )
@@ -1729,16 +1791,12 @@ def _collect_writes_in_function(
                     # sever precise origins for rebound names.
                     alias_state.poison(name)
                 if case.guard is not None:
-                    _mark_name_uses(case.guard, alias_state)
-                    _note_named_expr_bindings(
+                    # Guard effects are path-dependent: possible on paths that
+                    # reach this guard; never omit; keep control_dependent so
+                    # they are not over-promoted to unconditional authority (#173).
+                    _observe_executed_expression(
                         case.guard, control_dependent=True
                     )
-                    if request_aliases.expression_escapes_state_identity(case.guard):
-                        _record_escape(
-                            case.guard,
-                            ast.unparse(case.guard),
-                            control_dependent=True,
-                        )
                 # Starred / rest binders yield containers, not field bases —
                 # escape when the subject still flows governed identity.
                 if _match_pattern_has_star(case.pattern):

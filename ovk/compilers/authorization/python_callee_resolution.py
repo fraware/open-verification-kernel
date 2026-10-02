@@ -47,7 +47,7 @@ from ovk.compilers.authorization.python_import_space import (
     normalize_path,
 )
 
-_IMPLEMENTATION_VERSION = "0.13.0"
+_IMPLEMENTATION_VERSION = "0.14.0"
 _MAX_IMPORT_FOLLOW_DEPTH = 8
 
 BindingKind = Literal["function", "import_name", "import_module", "rebound"]
@@ -1144,6 +1144,7 @@ class RequestTimeIdentitySession:
     local_fns: dict[str, ast.FunctionDef | ast.AsyncFunctionDef]
     visited_fns: set[int]
     _scan_stmts: object
+    _observe_expr: object
     _resolver: "CalleeResolver"
     _reestablished_exports: dict[tuple[str, str], tuple[str, str]]
     _reestablished_behaviors: set[tuple[str, str]]
@@ -1166,6 +1167,33 @@ class RequestTimeIdentitySession:
                 self._reestablished_behaviors.add(key)
                 self.accum.behavior_mutations.discard(key)
         self._maybe_reestablish_from_assign(stmt)
+
+    def observe_expression(self, expr: ast.AST) -> None:
+        """Apply identity mutations for one executed expression (#173).
+
+        Reuses ``_eval_expr`` recursive semantics so nested forms
+        (``flag and poison()``, ``poison() if flag else False``,
+        ``wrapper(poison())``, comprehensions, awaits) cannot diverge from
+        statement-position call scanning.
+        """
+
+        self._observe_expr(  # type: ignore[operator]
+            expr,
+            path=self.path,
+            env=self.env,
+            visited_fns=self.visited_fns,
+            local_fns=self.local_fns,
+        )
+
+    def bind_name_unknown(self, name: str) -> None:
+        """Sever precise identity for an unmodeled projection target (with-as)."""
+
+        self.env[name] = _IdentityPointsTo.unknown_only()
+
+    def mark_unsupported(self) -> None:
+        """Force UNKNOWN for opaque identity mutation channels."""
+
+        self.accum.unsupported = True
 
     def snapshot(self) -> RequestTimeIdentityState:
         """Deep-copy the full request-time abstract state."""
@@ -1694,8 +1722,16 @@ def _build_identity_scanner(
         if isinstance(expr, ast.Name):
             return _lookup_name(expr.id, env, path=path)
         if isinstance(expr, ast.NamedExpr):
-            # Walrus: identity is the RHS value (binding applied at stmt level).
-            return _eval_expr(expr.value, env, path=path)
+            # Walrus: evaluate RHS (including nested call effects) and bind when
+            # the environment is mutable (#173 executed-expression closure).
+            points = _eval_expr(expr.value, env, path=path)
+            if isinstance(expr.target, ast.Name) and isinstance(env, dict):
+                env[expr.target.id] = points
+                if isinstance(expr.value, ast.Lambda):
+                    lambda_bindings[expr.target.id] = expr.value
+                else:
+                    lambda_bindings.pop(expr.target.id, None)
+            return points
         if isinstance(expr, ast.IfExp):
             # Conditional value: may-point-to join (Unknown > false PASS).
             return _eval_expr(expr.body, env, path=path).join(
@@ -2707,18 +2743,7 @@ def _build_identity_scanner(
                             lambda_bindings.pop(target.id, None)
                             method_bindings.pop(target.id, None)
                             instance_class_of.pop(target.id, None)
-                # Walrus bindings inside RHS.
-                for child in ast.walk(stmt.value):
-                    if isinstance(child, ast.NamedExpr) and isinstance(
-                        child.target, ast.Name
-                    ):
-                        env[child.target.id] = _eval_expr(
-                            child.value, env, path=path
-                        )
-                        if isinstance(child.value, ast.Lambda):
-                            lambda_bindings[child.target.id] = child.value
-                        else:
-                            lambda_bindings.pop(child.target.id, None)
+                # Walrus bindings inside RHS are applied by _eval_expr (#173).
                 continue
             if isinstance(stmt, ast.AnnAssign):
                 value_points = (
@@ -2767,19 +2792,18 @@ def _build_identity_scanner(
                         )
                 continue
             if isinstance(stmt, ast.Expr):
-                expr_value = _unwrap_await(stmt.value)
-                if isinstance(expr_value, ast.Call):
-                    _scan_call(
-                        expr_value,
-                        path=path,
-                        index=index,
-                        env=env,
-                        visited_fns=visited_fns,
-                        local_fns=active_fns,
-                        local_classes=active_classes,
-                    )
-                    continue
+                # Any executed expression position — not only bare Call (#173).
+                _eval_expr(stmt.value, env, path=path)
+                continue
+            if isinstance(stmt, ast.Assert):
+                # Assert.test executes; msg may execute on failure (conservative).
+                _eval_expr(stmt.test, env, path=path)
+                if stmt.msg is not None:
+                    _eval_expr(stmt.msg, env, path=path)
+                continue
             if isinstance(stmt, ast.If):
+                # Test executes before branch selection (#173).
+                _eval_expr(stmt.test, env, path=path)
                 env_body = _copy_env(env)
                 _scan_stmts(
                     stmt.body,
@@ -2805,7 +2829,9 @@ def _build_identity_scanner(
                 env.update(joined)
                 continue
             if isinstance(stmt, (ast.For, ast.AsyncFor)):
-                # Evaluate iter for container escape; loop target is unmodeled.
+                # Evaluate iter for container escape / call effects; loop target
+                # is unmodeled. Iterable always executes before zero-iteration
+                # join (#173).
                 _eval_expr(stmt.iter, env, path=path)
                 _bind_target_names(
                     stmt.target, _IdentityPointsTo.unknown_only(), env
@@ -2825,6 +2851,10 @@ def _build_identity_scanner(
                 env.update(joined)
                 continue
             if isinstance(stmt, ast.While):
+                # Test executes (at least once) before body / zero-iteration
+                # join; nested short-circuit may-effects are conservative via
+                # _eval_expr BoolOp / IfExp joins (#173).
+                _eval_expr(stmt.test, env, path=path)
                 env_body = _copy_env(env)
                 _scan_stmts(
                     list(stmt.body) + list(stmt.orelse),
@@ -2936,6 +2966,9 @@ def _build_identity_scanner(
                         _escape_if_tracked(subject)
                     for name in pattern_names:
                         env_c[name] = _IdentityPointsTo.unknown_only()
+                    if case.guard is not None:
+                        # Guard executes on paths reaching this case (#173).
+                        _eval_expr(case.guard, env_c, path=path)
                     _scan_stmts(
                         case.body,
                         path=path,
@@ -2958,15 +2991,6 @@ def _build_identity_scanner(
                 env.clear()
                 env.update(merged)
                 continue
-            if isinstance(stmt, ast.Expr):
-                for child in ast.walk(stmt):
-                    if isinstance(child, ast.NamedExpr) and isinstance(
-                        child.target, ast.Name
-                    ):
-                        env[child.target.id] = _eval_expr(
-                            child.value, env, path=path
-                        )
-
 
     def seed_env_for_path(path: str) -> dict[str, _IdentityPointsTo]:
         env: dict[str, _IdentityPointsTo] = {}
@@ -3020,11 +3044,33 @@ def _build_identity_scanner(
         for path in trees:
             _register_module_classes(path)
 
+    def observe_expr(
+        expr: ast.AST,
+        *,
+        path: str,
+        env: dict[str, _IdentityPointsTo],
+        visited_fns: set[int],
+        local_fns: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None = None,
+        local_classes: Mapping[str, ast.ClassDef] | None = None,
+    ) -> None:
+        """Evaluate one executed expression for identity side effects (#173)."""
+
+        active_fns: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = dict(
+            local_fns or {}
+        )
+        active_classes: dict[str, ast.ClassDef] = dict(local_classes or {})
+        _scan_ctx["index"] = 0
+        _scan_ctx["visited_fns"] = visited_fns
+        _scan_ctx["local_fns"] = active_fns
+        _scan_ctx["local_classes"] = active_classes
+        _eval_expr(expr, env, path=path)
+
     class _IdentityScanner:
         pass
 
     scanner = _IdentityScanner()
     scanner.scan_stmts = _scan_stmts  # type: ignore[method-assign]
+    scanner.observe_expr = observe_expr  # type: ignore[method-assign]
     scanner.scan_module_init = scan_module_init  # type: ignore[method-assign]
     scanner.seed_env_for_path = seed_env_for_path  # type: ignore[method-assign]
     scanner.local_fns_for_path = local_fns_for_path  # type: ignore[method-assign]
@@ -3092,6 +3138,7 @@ def begin_request_time_identity_session(
         local_fns=local_fns,
         visited_fns=set(),
         _scan_stmts=scanner.scan_stmts,
+        _observe_expr=scanner.observe_expr,
         _resolver=resolver,
         _reestablished_exports={},
         _reestablished_behaviors=set(),
