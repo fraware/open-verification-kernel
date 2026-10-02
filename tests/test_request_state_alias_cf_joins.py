@@ -14,6 +14,8 @@ Closes false PASSes where:
    so ``x = flag and request.state or request`` omitted client writes through ``x``.
 7. Match subject-capturing ``as`` patterns poisoned binders, so
    ``match request.state: case object() as x:`` omitted writes through ``x``.
+8. Positional MatchClass peel assumed Call-arg order equals ``__match_args__``,
+   so reordered binders omitted client writes through the real state alias.
 
 Unknown > false PASS. Held-out FormalPR partitions are not frozen.
 """
@@ -440,7 +442,7 @@ async def handler(request, bypass_filter: bool = False, user = Depends(get_curre
 def test_persistent_state_round_trip_and_version_invalidation(tmp_path) -> None:
     """13. Persistent-state round trip and version invalidation."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.39.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.40.0"
 
     trusted_helpers = """
 def write_state(state, value):
@@ -1515,6 +1517,82 @@ def handler(request, bypass_filter=False):
     request.state.bypass_filter = True
     with nullcontext(request.state) as x:
         x.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_matchclass_positional_peel_match_args_reorder_never_authorized() -> None:
+    """Positional MatchClass must not 1:1-peel Call args (``__match_args__`` reorder).
+
+    ``Pair.__match_args__ = ("second", "first")`` makes ``case Pair(x, _)`` bind
+    ``x`` to ``second`` (= ``request.state``) while Call order is
+    ``(object(), request.state)``. A 1:1 positional peel bound ``x`` to
+    ``object()`` and omitted the client write → false PASS.
+    """
+
+    findings = _unit(
+        """
+import helpers
+class Pair:
+    __match_args__ = ("second", "first")
+    def __init__(self, first, second):
+        self.first = first
+        self.second = second
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    match Pair(object(), request.state):
+        case Pair(x, _):
+            x.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_matchclass_positional_default_order_still_accounts_client_write() -> None:
+    """Even when Call order matches default attrs, positional peel is refused."""
+
+    findings = _unit(
+        """
+import helpers
+class Box:
+    def __init__(self, a, b):
+        self.a = a
+        self.b = b
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    match Box(request.state, object()):
+        case Box(x, _):
+            x.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_matchclass_keyword_peel_accounts_client_write() -> None:
+    """Keyword-only MatchClass vs keyword Call remains a sound peel/may path."""
+
+    findings = _unit(
+        """
+import helpers
+class Box:
+    def __init__(self, a, b):
+        self.a = a
+        self.b = b
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    match Box(a=object(), b=request.state):
+        case Box(b=x):
+            x.bypass_filter = bypass_filter
     return request.state.bypass_filter
 """
     )

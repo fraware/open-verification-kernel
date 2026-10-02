@@ -111,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.21.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.22.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -974,9 +974,12 @@ def _apply_match_pattern_alias_bindings(
     Subject-capturing ``case object() as x`` / ``case x`` receive
     ``classify(matched)`` instead of being poisoned (poison omitted client
     writes through ``x`` → false PASS). Structural patterns peel literal
-    List/Tuple/Dict/Call subjects when shapes align. Unresolved nested
-    binders are cleared; when the matched value still flows request/state
-    identity, they receive a may-only join so governed writes stay visible.
+    List/Tuple/Dict subjects and keyword-only MatchClass vs keyword Calls
+    when shapes align. Positional MatchClass peels are not performed without
+    ``__match_args__`` (1:1 Call-arg peel false-PASSed reordered binders).
+    Unresolved nested binders are cleared; when the matched value still flows
+    request/state identity, they receive a may-only join so governed writes
+    stay visible.
     """
 
     def _bind_name(name: str | None, classification: AliasClassification) -> None:
@@ -1069,7 +1072,8 @@ def _apply_match_pattern_alias_bindings(
                 and all(kw.arg is not None for kw in value.keywords)
             ):
                 kw_map = {kw.arg: kw.value for kw in value.keywords if kw.arg}
-                # Keyword-only patterns against keyword construction.
+                # Keyword-only patterns against keyword construction use explicit
+                # attribute names — sound without ``__match_args__``.
                 if (
                     pat.kwd_attrs
                     and not pat.patterns
@@ -1078,28 +1082,11 @@ def _apply_match_pattern_alias_bindings(
                     for key, sub in zip(pat.kwd_attrs, pat.kwd_patterns):
                         _apply(sub, kw_map[key])
                     return
-                # Positional-only patterns against positional construction.
-                if (
-                    pat.patterns
-                    and not pat.kwd_attrs
-                    and len(pat.patterns) <= len(value.args)
-                ):
-                    for sub, arg in zip(pat.patterns, value.args):
-                        _apply(sub, arg)
-                    return
-                # Mixed patterns with fully aligned Call keywords + positionals.
-                if (
-                    pat.patterns
-                    and pat.kwd_attrs
-                    and len(pat.patterns) <= len(value.args)
-                    and all(key in kw_map for key in pat.kwd_attrs)
-                ):
-                    for sub, arg in zip(pat.patterns, value.args):
-                        _apply(sub, arg)
-                    for key, sub in zip(pat.kwd_attrs, pat.kwd_patterns):
-                        _apply(sub, kw_map[key])
-                    return
-            # Keyword pattern vs positional Call (unknown __match_args__) etc.
+            # Positional / mixed class patterns require ``__match_args__`` to map
+            # Call args onto attributes. Peeling Call positionals 1:1 is unsound
+            # when ``__match_args__`` reorders (client write through the real
+            # state binder was omitted → false PASS). May-flow Call identity
+            # instead; precise ``__match_args__`` peel remains OOS.
             _clear_or_flow(_match_pattern_bound_names(pat), value)
             return
         if isinstance(pat, ast.MatchStar):
