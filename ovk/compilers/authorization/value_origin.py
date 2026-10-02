@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass, field
+from typing import Sequence
 
 from ovk.core.assurance_ir import SemanticOrigin, ValueOriginEvidence
 from ovk.core.bundle import content_digest
@@ -55,6 +56,54 @@ class AliasState:
             self.poison(name)
             return
         self.bindings[name] = evidence
+
+    def snapshot(self) -> "AliasState":
+        """Deep-copy bindings for control-flow fork (#171)."""
+
+        return AliasState(bindings=dict(self.bindings), used=set(self.used))
+
+    def restore(self, other: "AliasState") -> None:
+        """Replace live state with a previously snapshotted predecessor."""
+
+        self.bindings = dict(other.bindings)
+        self.used = set(other.used)
+
+    def install_join(self, states: Sequence["AliasState"]) -> None:
+        """Install the sound join of feasible predecessor AliasStates."""
+
+        self.restore(join_alias_states(states))
+
+
+def join_alias_states(states: Sequence[AliasState]) -> AliasState:
+    """Join AliasState across feasible CF predecessors (Unknown > false PASS).
+
+    A binding survives only when every predecessor carries the same
+    non-poisoned evidence. Disagreement or absence on any predecessor poisons
+    the name so branch-local provenance cannot authorize post-join uses.
+    """
+
+    if not states:
+        raise ValueError("join_alias_states requires at least one predecessor")
+    all_names: set[str] = set()
+    used: set[str] = set()
+    for state in states:
+        all_names.update(state.bindings)
+        used.update(state.used)
+    bindings: dict[str, ValueOriginEvidence | object] = {}
+    for name in all_names:
+        values = [state.bindings.get(name) for state in states]
+        if any(value is None for value in values):
+            bindings[name] = _POISONED
+            continue
+        first = values[0]
+        if first is _POISONED or any(value is _POISONED for value in values):
+            bindings[name] = _POISONED
+            continue
+        if all(value == first for value in values):
+            bindings[name] = first  # type: ignore[assignment]
+        else:
+            bindings[name] = _POISONED
+    return AliasState(bindings=bindings, used=used)
 
 
 def _origin(path: str, node: ast.AST) -> SemanticOrigin:
