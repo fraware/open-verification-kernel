@@ -247,7 +247,7 @@ def test_guarded_irrefutable_safe_rebind_cannot_authorize_nomatch() -> None:
     """9. Guarded irrefutable safe rebind cannot authorize the no-match path."""
 
     findings = _unit(
-        f"""
+        """
 import helpers
 def evil(state, value):
     state.bypass_filter = value

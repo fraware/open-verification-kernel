@@ -21,7 +21,7 @@ bounded interprocedural writer closure or an explicit UNKNOWN.
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field as dc_field
 from typing import Literal, Mapping, Sequence
 
 from ovk.compilers.authorization.python_callee_resolution import (
@@ -166,8 +166,8 @@ class _RequestStateAliasEnv:
 
     request_names: set[str]
     state_names: set[str]
-    may_request_names: set[str] = field(default_factory=set)
-    may_state_names: set[str] = field(default_factory=set)
+    may_request_names: set[str] = dc_field(default_factory=set)
+    may_state_names: set[str] = dc_field(default_factory=set)
 
     @classmethod
     def seed(cls, *, param_names: frozenset[str]) -> "_RequestStateAliasEnv":
