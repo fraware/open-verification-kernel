@@ -47,7 +47,7 @@ from ovk.compilers.authorization.python_import_space import (
     normalize_path,
 )
 
-_IMPLEMENTATION_VERSION = "0.14.0"
+_IMPLEMENTATION_VERSION = "0.15.0"
 _MAX_IMPORT_FOLLOW_DEPTH = 8
 
 BindingKind = Literal["function", "import_name", "import_module", "rebound"]
@@ -1856,8 +1856,10 @@ def _build_identity_scanner(
             return _IdentityPointsTo.unknown_only()
         if isinstance(expr, ast.Subscript):
             # Container projection is unmodeled → UNKNOWN (may escape).
+            # Index/slice expressions still execute (``xs[poison()]``).
             base = _eval_expr(expr.value, env, path=path)
             _escape_if_tracked(base)
+            _eval_expr(expr.slice, env, path=path)
             return _IdentityPointsTo.unknown_only()
         if isinstance(expr, ast.BinOp):
             for side in (expr.left, expr.right):
@@ -1879,6 +1881,16 @@ def _build_identity_scanner(
                 local_classes=_scan_ctx["local_classes"],  # type: ignore[arg-type]
             )
             return _IdentityPointsTo.unknown_only()
+        if isinstance(expr, ast.Lambda):
+            # Lambda body is not executed at definition time.
+            return _IdentityPointsTo.unknown_only()
+        # Unmodeled expression forms still execute nested subexpressions
+        # (UnaryOp ``not poison()``, Compare, JoinedStr / f-strings, Slice, …).
+        # Omission here false-PASSes request-time callable-identity closure
+        # beside a later trusted helper write (Unknown > false PASS, #173).
+        for child in ast.iter_child_nodes(expr):
+            if isinstance(child, ast.expr):
+                _eval_expr(child, env, path=path)
         return _IdentityPointsTo.unknown_only()
 
     def _bind_target_names(
@@ -2765,6 +2777,8 @@ def _build_identity_scanner(
                         lambda_bindings.pop(stmt.target.id, None)
                 continue
             if isinstance(stmt, ast.AugAssign):
+                # RHS executes (``x += poison()``) before the store.
+                _eval_expr(stmt.value, env, path=path)
                 if isinstance(stmt.target, ast.Name):
                     # Name += rebinds / replaces the local; treat as severed
                     # bottom so a later attr write does not spelling-poison.
@@ -2916,6 +2930,10 @@ def _build_identity_scanner(
                 branch_envs = [env_body]
                 for handler in stmt.handlers:
                     env_h = _copy_env(env)
+                    # except TYPE executes before the handler body
+                    # (``except poison():``). Unknown > false PASS (#173).
+                    if handler.type is not None:
+                        _eval_expr(handler.type, env_h, path=path)
                     if handler.name:
                         env_h[handler.name] = _IdentityPointsTo.unknown_only()
                     _scan_stmts(
@@ -2990,6 +3008,17 @@ def _build_identity_scanner(
                     merged = _join_envs(env, merged)
                 env.clear()
                 env.update(merged)
+                continue
+            if isinstance(stmt, ast.Raise):
+                # raise exc from cause — both expressions execute.
+                if stmt.exc is not None:
+                    _eval_expr(stmt.exc, env, path=path)
+                if stmt.cause is not None:
+                    _eval_expr(stmt.cause, env, path=path)
+                continue
+            if isinstance(stmt, ast.Return) and stmt.value is not None:
+                # return value executes (args before callee in nested calls).
+                _eval_expr(stmt.value, env, path=path)
                 continue
 
     def seed_env_for_path(path: str) -> dict[str, _IdentityPointsTo]:

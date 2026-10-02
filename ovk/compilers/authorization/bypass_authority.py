@@ -111,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.23.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.24.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -1483,14 +1483,16 @@ def _collect_writes_in_function(
                 ast.unparse(expr),
                 control_dependent=control_dependent,
             )
+        # Identity first: arg-order mutators (``write_state(..., poison())``)
+        # must poison resolve before interprocedural write inlining.
+        if identity_session is not None:
+            identity_session.observe_expression(expr)
         # Wrap as Expr so setattr / escape / interprocedural call accounting
         # reuses the statement walker without inventing a second theorem.
         _record_dynamic_calls(
             ast.Expr(value=expr),  # type: ignore[arg-type]
             control_dependent=control_dependent,
         )
-        if identity_session is not None:
-            identity_session.observe_expression(expr)
 
     def _visit_statement(
         statement: ast.stmt,
@@ -1498,6 +1500,10 @@ def _collect_writes_in_function(
         control_dependent: bool = False,
     ) -> None:
         if isinstance(statement, ast.Assign):
+            # Observe identity before write inlining so RHS arg-order mutators
+            # invalidate authorizing resolve in the same statement.
+            if identity_session is not None:
+                identity_session.observe_statement(statement)
             for target in statement.targets:
                 _record_assign_target(
                     target,
@@ -1531,11 +1537,11 @@ def _collect_writes_in_function(
                 handler_param_names=handler_param_names,
                 alias_state=alias_state,
             )
-            if identity_session is not None:
-                identity_session.observe_statement(statement)
             return
 
         if isinstance(statement, ast.AnnAssign) and statement.value is not None:
+            if identity_session is not None:
+                identity_session.observe_statement(statement)
             _record_assign_target(
                 statement.target,
                 statement.value,
@@ -1566,11 +1572,11 @@ def _collect_writes_in_function(
                 handler_param_names=handler_param_names,
                 alias_state=alias_state,
             )
-            if identity_session is not None:
-                identity_session.observe_statement(statement)
             return
 
         if isinstance(statement, ast.AugAssign):
+            if identity_session is not None:
+                identity_session.observe_statement(statement)
             _record_assign_target(
                 statement.target,
                 statement.value,
@@ -1578,14 +1584,26 @@ def _collect_writes_in_function(
                 dynamic=True,
                 control_dependent=control_dependent,
             )
+            # RHS executes: setattr / escape / callable-identity mutators.
+            _record_dynamic_calls(
+                statement,
+                control_dependent=control_dependent,
+            )
+            if request_aliases.expression_escapes_state_identity(statement.value):
+                _record_escape(
+                    statement,
+                    ast.unparse(statement),
+                    control_dependent=control_dependent,
+                )
+            _note_named_expr_bindings(
+                statement.value, control_dependent=control_dependent
+            )
             apply_statement_bindings(
                 statement,
                 path=path,
                 handler_param_names=handler_param_names,
                 alias_state=alias_state,
             )
-            if identity_session is not None:
-                identity_session.observe_statement(statement)
             return
 
         if isinstance(statement, (ast.If, ast.While)):
@@ -1735,6 +1753,11 @@ def _collect_writes_in_function(
                 alias_state.restore(pre_alias_state)
                 if identity_session is not None and pre_identity is not None:
                     identity_session.restore(pre_identity)
+                # except TYPE executes when matching is considered (#173).
+                if handler.type is not None:
+                    _observe_executed_expression(
+                        handler.type, control_dependent=True
+                    )
                 if handler.name:
                     request_aliases.poison_names({handler.name})
                     alias_state.poison(handler.name)
@@ -1890,6 +1913,8 @@ def _collect_writes_in_function(
             # Returning request.state escapes state identity into an unresolved
             # caller theorem → UNKNOWN. Bare ``return request`` is not itself a
             # state mutation channel under this bounded escape relation.
+            if identity_session is not None:
+                identity_session.observe_statement(statement)
             if request_aliases._is_state_expr(statement.value):
                 _record_escape(
                     statement,
@@ -1915,8 +1940,6 @@ def _collect_writes_in_function(
                 handler_param_names=handler_param_names,
                 alias_state=alias_state,
             )
-            if identity_session is not None:
-                identity_session.observe_statement(statement)
             return
 
         if isinstance(statement, ast.Expr):
@@ -1930,6 +1953,9 @@ def _collect_writes_in_function(
                 statement.value, control_dependent=control_dependent
             )
 
+        # Identity before write inlining (same-statement arg-order mutators).
+        if identity_session is not None:
+            identity_session.observe_statement(statement)
         # Ordinary statements: setattr / escape / interprocedural calls.
         _record_dynamic_calls(
             statement,
@@ -1941,8 +1967,6 @@ def _collect_writes_in_function(
             handler_param_names=handler_param_names,
             alias_state=alias_state,
         )
-        if identity_session is not None:
-            identity_session.observe_statement(statement)
 
     for statement in fn.body:
         _visit_statement(statement)
