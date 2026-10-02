@@ -21,8 +21,8 @@ bounded interprocedural writer closure or an explicit UNKNOWN.
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass
-from typing import Literal, Mapping
+from dataclasses import dataclass, field as dc_field
+from typing import Literal, Mapping, Sequence
 
 from ovk.compilers.authorization.python_callee_resolution import (
     CalleeResolver,
@@ -111,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.17.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.22.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -148,18 +148,111 @@ def _origin(path: str, node: ast.AST) -> SemanticOrigin:
     )
 
 
+@dataclass(frozen=True)
+class AliasClassification:
+    """Independent must/may request and state facts for one expression.
+
+    A single name may be may-request and may-state simultaneously after a
+    cross-kind CF join. Facts are transferred independently (not if/elif) so
+    interprocedural formals and local rebinds preserve strength (#171 lattice).
+
+    Expression-level IfExp / BoolOp joins use the same lattice: union of may
+    facts; must only when every arm agrees on the same exact kind.
+    """
+
+    must_request: bool = False
+    may_request: bool = False
+    must_state: bool = False
+    may_state: bool = False
+
+    @property
+    def any_alias(self) -> bool:
+        return (
+            self.must_request
+            or self.may_request
+            or self.must_state
+            or self.may_state
+        )
+
+    def as_may_only(self) -> "AliasClassification":
+        """Weaken must facts to may (uncertain binders / ``with`` enter results)."""
+
+        return AliasClassification(
+            must_request=False,
+            may_request=self.must_request or self.may_request,
+            must_state=False,
+            may_state=self.must_state or self.may_state,
+        )
+
+    @staticmethod
+    def join(
+        left: "AliasClassification", right: "AliasClassification"
+    ) -> "AliasClassification":
+        """Join two expression classifications (IfExp / BoolOp arms).
+
+        Mirrors ``join_request_state_alias_envs`` for a single binding: must is
+        intersection; may is union of (must ∪ may) minus the resulting must.
+        Cross-kind disagreement yields dual may — never poison.
+        """
+
+        must_request = left.must_request and right.must_request
+        must_state = left.must_state and right.must_state
+        may_request = (
+            left.must_request
+            or left.may_request
+            or right.must_request
+            or right.may_request
+        ) and not must_request
+        may_state = (
+            left.must_state
+            or left.may_state
+            or right.must_state
+            or right.may_state
+        ) and not must_state
+        return AliasClassification(
+            must_request=must_request,
+            may_request=may_request,
+            must_state=must_state,
+            may_state=may_state,
+        )
+
+    @staticmethod
+    def join_all(
+        parts: Sequence["AliasClassification"],
+    ) -> "AliasClassification":
+        """Fold ``join`` across one or more classifications (empty → bottom)."""
+
+        if not parts:
+            return AliasClassification()
+        acc = parts[0]
+        for part in parts[1:]:
+            acc = AliasClassification.join(acc, part)
+        return acc
+
+
 @dataclass
 class _RequestStateAliasEnv:
-    """Track names proved to alias ``request`` or ``request.state`` (#153).
+    """Track names proved to alias ``request`` or ``request.state`` (#153/#171).
 
     Seeded with the literal parameter/name ``request``. Assignments such as
     ``req = request`` and ``state = request.state`` extend the supported alias
     theorem. Any other ``*.state.<field>`` mutation is still recorded so it
     cannot be omitted from closed-world accounting (Unknown > false PASS).
+
+    Control-flow join (#171) distinguishes must-alias vs may-alias:
+    - write through must-alias → exact theorem
+    - write through may-alias → recorded dynamic/uncertain (no positive authority)
+    Feasible predecessors are forked and joined so branch-local rebinding cannot
+    erase writes that remain reachable on other predecessors.
+
+    Cross-kind disagreement (request on one predecessor, state on another) keeps
+    the name in both may sets — deleting it would omit governed writes.
     """
 
     request_names: set[str]
     state_names: set[str]
+    may_request_names: set[str] = dc_field(default_factory=set)
+    may_state_names: set[str] = dc_field(default_factory=set)
 
     @classmethod
     def seed(cls, *, param_names: frozenset[str]) -> "_RequestStateAliasEnv":
@@ -169,32 +262,111 @@ class _RequestStateAliasEnv:
             request_names.add("request")
         return cls(request_names=set(request_names), state_names=set())
 
+    def snapshot(self) -> "_RequestStateAliasEnv":
+        """Deep-copy alias sets for control-flow fork."""
+
+        return _RequestStateAliasEnv(
+            request_names=set(self.request_names),
+            state_names=set(self.state_names),
+            may_request_names=set(self.may_request_names),
+            may_state_names=set(self.may_state_names),
+        )
+
+    def restore(self, other: "_RequestStateAliasEnv") -> None:
+        """Replace live alias sets with a previously snapshotted predecessor."""
+
+        self.request_names = set(other.request_names)
+        self.state_names = set(other.state_names)
+        self.may_request_names = set(other.may_request_names)
+        self.may_state_names = set(other.may_state_names)
+
+    def install_join(self, states: Sequence["_RequestStateAliasEnv"]) -> None:
+        """Install the sound must/may join of feasible predecessor alias envs."""
+
+        self.restore(join_request_state_alias_envs(states))
+
+    def classify(self, value: ast.AST) -> AliasClassification:
+        """Return independent must/may request and state facts for ``value``.
+
+        ``IfExp`` arms and ``BoolOp`` operands are classified independently and
+        joined (nested forms included). Short-circuit ``and``/``or`` may yield
+        any operand, so the join never promotes may→must. ``NamedExpr`` unwraps
+        to its RHS so walrus forms share the same lattice. Cross-kind arms
+        become dual may — not poison.
+        """
+
+        if isinstance(value, ast.NamedExpr):
+            return self.classify(value.value)
+        if isinstance(value, ast.IfExp):
+            return AliasClassification.join(
+                self.classify(value.body),
+                self.classify(value.orelse),
+            )
+        if isinstance(value, ast.BoolOp):
+            # ``flag and request.state or request`` → dual may; never drop arms.
+            return AliasClassification.join_all(
+                [self.classify(operand) for operand in value.values]
+            )
+        return AliasClassification(
+            must_request=self._is_must_request_expr(value),
+            may_request=self._is_may_only_request_expr(value),
+            must_state=self._is_must_state_expr(value),
+            may_state=self._is_may_only_state_expr(value),
+        )
+
+    def apply_classification(self, name: str, classification: AliasClassification) -> None:
+        """Install ``name`` under ``classification``, preserving dual may facts."""
+
+        self.request_names.discard(name)
+        self.state_names.discard(name)
+        self.may_request_names.discard(name)
+        self.may_state_names.discard(name)
+        if not classification.any_alias:
+            return
+        if classification.must_request:
+            self.request_names.add(name)
+        if classification.may_request:
+            self.may_request_names.add(name)
+        if classification.must_state:
+            self.state_names.add(name)
+        if classification.may_state:
+            self.may_state_names.add(name)
+
     def note_binding(self, target: ast.AST, value: ast.AST) -> None:
         if not isinstance(target, ast.Name):
             # Complex targets poison nothing specific; leave env unchanged.
             return
-        name = target.id
-        if self._is_request_expr(value):
-            self.request_names.add(name)
-            self.state_names.discard(name)
-            return
-        if self._is_state_expr(value):
-            self.state_names.add(name)
-            self.request_names.discard(name)
-            return
-        # Rebind of a previously aliased name to an unrelated value.
-        self.request_names.discard(name)
-        self.state_names.discard(name)
+        self.apply_classification(target.id, self.classify(value))
 
     def poison_names(self, names: set[str]) -> None:
         for name in names:
             self.request_names.discard(name)
             self.state_names.discard(name)
+            self.may_request_names.discard(name)
+            self.may_state_names.discard(name)
 
-    def _is_request_expr(self, value: ast.AST) -> bool:
+    def all_request_names(self) -> set[str]:
+        return set(self.request_names) | set(self.may_request_names)
+
+    def all_state_names(self) -> set[str]:
+        return set(self.state_names) | set(self.may_state_names)
+
+    def _is_must_request_expr(self, value: ast.AST) -> bool:
         return isinstance(value, ast.Name) and value.id in self.request_names
 
-    def _is_state_expr(self, value: ast.AST) -> bool:
+    def _is_may_only_request_expr(self, value: ast.AST) -> bool:
+        return (
+            isinstance(value, ast.Name)
+            and value.id in self.may_request_names
+            and value.id not in self.request_names
+        )
+
+    def _is_request_expr(self, value: ast.AST) -> bool:
+        return self._is_must_request_expr(value) or self._is_may_only_request_expr(
+            value
+        )
+
+    def _is_must_state_expr(self, value: ast.AST) -> bool:
         if isinstance(value, ast.Name) and value.id in self.state_names:
             return True
         if (
@@ -211,12 +383,41 @@ class _RequestStateAliasEnv:
             and isinstance(value.func, ast.Name)
             and value.func.id == "getattr"
             and len(value.args) >= 2
-            and self._is_request_expr(value.args[0])
+            and self._is_must_request_expr(value.args[0])
             and isinstance(value.args[1], ast.Constant)
             and value.args[1].value == "state"
         ):
             return True
         return False
+
+    def _is_may_only_state_expr(self, value: ast.AST) -> bool:
+        if isinstance(value, ast.Name) and value.id in self.may_state_names:
+            return True
+        if (
+            isinstance(value, ast.Attribute)
+            and value.attr == "state"
+            and isinstance(value.value, ast.Name)
+            and value.value.id in self.may_request_names
+            and value.value.id not in self.request_names
+        ):
+            return True
+        if (
+            isinstance(value, ast.Call)
+            and isinstance(value.func, ast.Name)
+            and value.func.id == "getattr"
+            and len(value.args) >= 2
+            and self._is_may_only_request_expr(value.args[0])
+            and isinstance(value.args[1], ast.Constant)
+            and value.args[1].value == "state"
+        ):
+            return True
+        return False
+
+    def _is_state_expr(self, value: ast.AST) -> bool:
+        return self._is_must_state_expr(value) or self._is_may_only_state_expr(value)
+
+    def is_request_expr(self, value: ast.AST) -> bool:
+        return self._is_request_expr(value)
 
     def is_state_expr(self, value: ast.AST) -> bool:
         return self._is_state_expr(value)
@@ -226,6 +427,7 @@ class _RequestStateAliasEnv:
 
         When the second element is False, the write is still counted but marked
         dynamic/unknown so closure cannot authorize while omitting it.
+        Must-alias yields exact=True; may-alias yields exact=False (#171).
         """
 
         # request.state.field / req.state.field
@@ -239,6 +441,8 @@ class _RequestStateAliasEnv:
             base = target.value.value.id
             if base in self.request_names:
                 return field, True
+            if base in self.may_request_names:
+                return field, False
             # Plausible Request-like alias (e.g. parameter ``req``) — record,
             # but do not treat as the supported exact theorem.
             return field, False
@@ -247,9 +451,21 @@ class _RequestStateAliasEnv:
         if (
             isinstance(target, ast.Attribute)
             and isinstance(target.value, ast.Name)
-            and target.value.id in self.state_names
         ):
-            return target.attr, True
+            base = target.value.id
+            if base in self.state_names:
+                return target.attr, True
+            if base in self.may_state_names:
+                return target.attr, False
+
+        # Expression-level state identity (IfExp / NamedExpr / nested forms):
+        # ``(request.state if f else request).field = ...`` must still account.
+        if isinstance(target, ast.Attribute):
+            classification = self.classify(target.value)
+            if classification.must_state:
+                return target.attr, True
+            if classification.may_state:
+                return target.attr, False
 
         # request.state[field] / req.state[field] / state[field]
         if isinstance(target, ast.Subscript):
@@ -278,10 +494,13 @@ class _RequestStateAliasEnv:
         return False
 
     def _container_is_supported_state(self, node: ast.AST) -> bool:
-        return self._is_state_expr(node)
+        # Exact theorem requires must-alias, not merely may-alias.
+        return self._is_must_state_expr(node)
 
     def is_request_or_state_expr(self, value: ast.AST) -> bool:
-        return self._is_request_expr(value) or self._is_state_expr(value)
+        # Prefer classify so IfExp / NamedExpr dual-may identity is visible to
+        # escape and interprocedural actual checks (Unknown > false PASS).
+        return self.classify(value).any_alias
 
     def call_receives_request_or_state(self, call: ast.Call) -> bool:
         for arg in call.args:
@@ -406,12 +625,21 @@ class _RequestStateAliasEnv:
         ):
             return True
         for node in ast.walk(value):
-            if not isinstance(node, ast.NamedExpr):
-                continue
-            if self.is_state_dict_surface(node.value) or self.packs_request_or_state_identity(
-                node.value
+            if isinstance(node, ast.NamedExpr):
+                if self.is_state_dict_surface(
+                    node.value
+                ) or self.packs_request_or_state_identity(node.value):
+                    return True
+            # Comprehension / generator iters packing request.state escape the
+            # Name-alias theorem (``setattr(s, …) for s in [request.state]``).
+            if isinstance(
+                node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
             ):
-                return True
+                for gen in node.generators:
+                    if self.is_request_or_state_expr(
+                        gen.iter
+                    ) or self.packs_request_or_state_identity(gen.iter):
+                        return True
         return False
 
     def is_poison_state_store(self, target: ast.AST) -> bool:
@@ -447,6 +675,43 @@ class _RequestStateAliasEnv:
         if isinstance(target, ast.Attribute) and target.attr in _STATE_DICT_ATTRS:
             return self._container_is_state(target.value)
         return False
+
+
+def join_request_state_alias_envs(
+    states: Sequence[_RequestStateAliasEnv],
+) -> _RequestStateAliasEnv:
+    """Join request/state alias envs across feasible CF predecessors (#171).
+
+    Must-alias is the intersection of must sets: a name is must-K only when
+    every predecessor carries exact kind K. May-alias is the union of
+    (must ∪ may) across predecessors minus the resulting must set, so a name
+    that aliases on only some predecessors remains visible for dynamic write
+    accounting without contributing exact closed-world authority.
+
+    Cross-kind disagreement (request-kind on one predecessor, state-kind on
+    another) keeps the name in both may sets. Dropping the conflict would omit
+    governed state writes reachable through the state-kind predecessor.
+    """
+
+    if not states:
+        raise ValueError("join_request_state_alias_envs requires at least one predecessor")
+    must_request = set(states[0].request_names)
+    must_state = set(states[0].state_names)
+    may_request: set[str] = set()
+    may_state: set[str] = set()
+    for state in states:
+        must_request &= state.request_names
+        must_state &= state.state_names
+        may_request |= state.request_names | state.may_request_names
+        may_state |= state.state_names | state.may_state_names
+    may_request -= must_request
+    may_state -= must_state
+    return _RequestStateAliasEnv(
+        request_names=must_request,
+        state_names=must_state,
+        may_request_names=may_request,
+        may_state_names=may_state,
+    )
 
 
 def _constant_str_key(node: ast.AST) -> str | None:
@@ -490,8 +755,12 @@ def _is_request_state_setattr_call(
     env = aliases or _RequestStateAliasEnv(request_names={"request"}, state_names=set())
 
     def _state_arg(arg: ast.AST) -> tuple[bool, bool]:
-        if env._is_state_expr(arg):
+        # Classify covers IfExp / NamedExpr joins; must_state → exact theorem.
+        classification = env.classify(arg)
+        if classification.must_state:
             return True, True
+        if classification.may_state:
+            return True, False
         if (
             isinstance(arg, ast.Attribute)
             and arg.attr == "state"
@@ -499,9 +768,9 @@ def _is_request_state_setattr_call(
         ):
             if arg.value.id in env.request_names:
                 return True, True
+            if arg.value.id in env.may_request_names:
+                return True, False
             return True, False
-        if isinstance(arg, ast.Name) and arg.id in env.state_names:
-            return True, True
         return False, False
 
     if isinstance(node.func, ast.Name) and node.func.id == "setattr" and len(node.args) >= 3:
@@ -598,7 +867,7 @@ def _bind_call_actuals(
 
 
 def _match_pattern_bound_names(pattern: ast.AST) -> set[str]:
-    """Names bound by a ``match`` pattern (request/state alias poisoning)."""
+    """Names bound by a ``match`` pattern (request/state alias tracking)."""
 
     names: set[str] = set()
     if isinstance(pattern, ast.MatchAs):
@@ -625,6 +894,209 @@ def _match_pattern_bound_names(pattern: ast.AST) -> set[str]:
     return names
 
 
+def _match_pattern_has_star(pattern: ast.AST) -> bool:
+    """True when a pattern binds via ``MatchStar`` / mapping ``rest``."""
+
+    if isinstance(pattern, ast.MatchStar):
+        return True
+    if isinstance(pattern, ast.MatchAs) and pattern.pattern is not None:
+        return _match_pattern_has_star(pattern.pattern)
+    if isinstance(pattern, ast.MatchMapping):
+        if pattern.rest:
+            return True
+        return any(_match_pattern_has_star(item) for item in pattern.patterns)
+    if isinstance(pattern, (ast.MatchSequence, ast.MatchOr)):
+        return any(_match_pattern_has_star(item) for item in pattern.patterns)
+    if isinstance(pattern, ast.MatchClass):
+        return any(
+            _match_pattern_has_star(item)
+            for item in (*pattern.patterns, *pattern.kwd_patterns)
+        )
+    return False
+
+
+def _name_classification_from_env(
+    aliases: _RequestStateAliasEnv, name: str
+) -> AliasClassification:
+    return AliasClassification(
+        must_request=name in aliases.request_names,
+        may_request=name in aliases.may_request_names,
+        must_state=name in aliases.state_names,
+        may_state=name in aliases.may_state_names,
+    )
+
+
+def _uncertain_alias_flow_in_expr(
+    aliases: _RequestStateAliasEnv, value: ast.AST
+) -> AliasClassification:
+    """May-only join of request/state identities embedded in ``value``."""
+
+    parts: list[AliasClassification] = []
+    direct = aliases.classify(value)
+    if direct.any_alias:
+        parts.append(direct.as_may_only())
+    if isinstance(value, (ast.List, ast.Tuple, ast.Set)):
+        for elt in value.elts:
+            nested = elt.value if isinstance(elt, ast.Starred) else elt
+            part = aliases.classify(nested)
+            if part.any_alias:
+                parts.append(part.as_may_only())
+    elif isinstance(value, ast.Dict):
+        for key, val in zip(value.keys, value.values):
+            for item in (key, val):
+                if item is None:
+                    continue
+                part = aliases.classify(item)
+                if part.any_alias:
+                    parts.append(part.as_may_only())
+    elif isinstance(value, ast.Call):
+        for arg in value.args:
+            nested = arg.value if isinstance(arg, ast.Starred) else arg
+            part = aliases.classify(nested)
+            if part.any_alias:
+                parts.append(part.as_may_only())
+        for kw in value.keywords:
+            if kw.value is None:
+                continue
+            part = aliases.classify(kw.value)
+            if part.any_alias:
+                parts.append(part.as_may_only())
+    return AliasClassification.join_all(parts)
+
+
+def _apply_match_pattern_alias_bindings(
+    aliases: _RequestStateAliasEnv,
+    pattern: ast.AST,
+    matched: ast.AST,
+) -> None:
+    """Bind match pattern names from ``matched`` under the alias lattice.
+
+    Subject-capturing ``case object() as x`` / ``case x`` receive
+    ``classify(matched)`` instead of being poisoned (poison omitted client
+    writes through ``x`` → false PASS). Structural patterns peel literal
+    List/Tuple/Dict subjects and keyword-only MatchClass vs keyword Calls
+    when shapes align. Positional MatchClass peels are not performed without
+    ``__match_args__`` (1:1 Call-arg peel false-PASSed reordered binders).
+    Unresolved nested binders are cleared; when the matched value still flows
+    request/state identity, they receive a may-only join so governed writes
+    stay visible.
+    """
+
+    def _bind_name(name: str | None, classification: AliasClassification) -> None:
+        if not name:
+            return
+        aliases.apply_classification(name, classification)
+
+    def _clear_or_flow(names: set[str], value: ast.AST) -> None:
+        local_flow = _uncertain_alias_flow_in_expr(aliases, value)
+        for name in names:
+            _bind_name(
+                name,
+                local_flow if local_flow.any_alias else AliasClassification(),
+            )
+
+    def _apply(pat: ast.AST, value: ast.AST) -> None:
+        if isinstance(pat, ast.MatchAs):
+            # ``case x`` / ``case P as x`` capture the matched value itself.
+            if pat.name:
+                _bind_name(pat.name, aliases.classify(value))
+            if pat.pattern is not None:
+                _apply(pat.pattern, value)
+            return
+        if isinstance(pat, ast.MatchOr):
+            arm_maps: list[dict[str, AliasClassification]] = []
+            for alt in pat.patterns:
+                snap = aliases.snapshot()
+                _apply(alt, value)
+                arm_maps.append(
+                    {
+                        name: _name_classification_from_env(aliases, name)
+                        for name in _match_pattern_bound_names(alt)
+                    }
+                )
+                aliases.restore(snap)
+            names = set().union(*(arm.keys() for arm in arm_maps)) if arm_maps else set()
+            for name in names:
+                parts = [arm[name] for arm in arm_maps if name in arm]
+                if not parts:
+                    continue
+                joined = AliasClassification.join_all(parts)
+                if len(parts) != len(arm_maps):
+                    joined = joined.as_may_only()
+                _bind_name(name, joined)
+            return
+        if isinstance(pat, ast.MatchSequence):
+            elts: list[ast.AST] | None = None
+            if isinstance(value, (ast.List, ast.Tuple)) and not any(
+                isinstance(elt, ast.Starred) for elt in value.elts
+            ):
+                elts = list(value.elts)
+            if (
+                elts is not None
+                and not any(isinstance(p, ast.MatchStar) for p in pat.patterns)
+                and len(pat.patterns) == len(elts)
+            ):
+                for sub, elt in zip(pat.patterns, elts):
+                    _apply(sub, elt)
+                return
+            _clear_or_flow(_match_pattern_bound_names(pat), value)
+            return
+        if isinstance(pat, ast.MatchMapping):
+            if (
+                isinstance(value, ast.Dict)
+                and pat.rest is None
+                and all(
+                    k is not None and isinstance(k, ast.Constant) for k in value.keys
+                )
+                and all(isinstance(k, ast.Constant) for k in pat.keys)
+            ):
+                value_by_key = {
+                    key.value: val
+                    for key, val in zip(value.keys, value.values)
+                    if isinstance(key, ast.Constant)
+                }
+                if all(
+                    isinstance(k, ast.Constant) and k.value in value_by_key
+                    for k in pat.keys
+                ):
+                    for key, sub in zip(pat.keys, pat.patterns):
+                        assert isinstance(key, ast.Constant)
+                        _apply(sub, value_by_key[key.value])
+                    return
+            _clear_or_flow(_match_pattern_bound_names(pat), value)
+            return
+        if isinstance(pat, ast.MatchClass):
+            if (
+                isinstance(value, ast.Call)
+                and not any(isinstance(arg, ast.Starred) for arg in value.args)
+                and all(kw.arg is not None for kw in value.keywords)
+            ):
+                kw_map = {kw.arg: kw.value for kw in value.keywords if kw.arg}
+                # Keyword-only patterns against keyword construction use explicit
+                # attribute names — sound without ``__match_args__``.
+                if (
+                    pat.kwd_attrs
+                    and not pat.patterns
+                    and all(key in kw_map for key in pat.kwd_attrs)
+                ):
+                    for key, sub in zip(pat.kwd_attrs, pat.kwd_patterns):
+                        _apply(sub, kw_map[key])
+                    return
+            # Positional / mixed class patterns require ``__match_args__`` to map
+            # Call args onto attributes. Peeling Call positionals 1:1 is unsound
+            # when ``__match_args__`` reorders (client write through the real
+            # state binder was omitted → false PASS). May-flow Call identity
+            # instead; precise ``__match_args__`` peel remains OOS.
+            _clear_or_flow(_match_pattern_bound_names(pat), value)
+            return
+        if isinstance(pat, ast.MatchStar):
+            _clear_or_flow({pat.name} if pat.name else set(), value)
+            return
+        _clear_or_flow(_match_pattern_bound_names(pat), value)
+
+    _apply(pattern, matched)
+
+
 def _match_pattern_irrefutable(pattern: ast.AST) -> bool:
     """True for patterns that always match (``case _`` / ``case x``)."""
 
@@ -638,11 +1110,17 @@ def _match_pattern_irrefutable(pattern: ast.AST) -> bool:
 
 
 def _match_statement_exhaustive(statement: ast.Match) -> bool:
-    """Conservative exhaustiveness: only an irrefutable final case proves it."""
+    """Conservative exhaustiveness: final irrefutable case with no guard.
 
-    return bool(statement.cases) and _match_pattern_irrefutable(
-        statement.cases[-1].pattern
-    )
+    A guarded final ``case _ if cond:`` is not exhaustive — when the guard is
+    false the body does not run, so the no-match predecessor must be retained
+    (#171). Unknown > false PASS.
+    """
+
+    if not statement.cases:
+        return False
+    final = statement.cases[-1]
+    return _match_pattern_irrefutable(final.pattern) and final.guard is None
 
 
 def _collect_writes_in_function(
@@ -816,10 +1294,11 @@ def _collect_writes_in_function(
         callee_aliases = _RequestStateAliasEnv.seed(param_names=frozenset())
         callee_alias_state = AliasState()
         for formal, actual in binding.items():
-            if request_aliases._is_request_expr(actual):
-                callee_aliases.request_names.add(formal)
-            elif request_aliases._is_state_expr(actual):
-                callee_aliases.state_names.add(formal)
+            # Preserve must/may strength independently. A cross-kind may-alias
+            # actual can be both may-request and may-state; if/elif promotion
+            # of may→must would false-PASS helper literal writes.
+            classification = request_aliases.classify(actual)
+            callee_aliases.apply_classification(formal, classification)
             # Propagate value-origin evidence through formals.
             origin = _classify(actual)
             callee_alias_state.bind(formal, origin)
@@ -897,8 +1376,11 @@ def _collect_writes_in_function(
             rendered = ast.unparse(node)
             state_markers = (
                 ["request.state"]
-                + [f"{name}.state" for name in sorted(request_aliases.request_names)]
-                + sorted(request_aliases.state_names)
+                + [
+                    f"{name}.state"
+                    for name in sorted(request_aliases.all_request_names())
+                ]
+                + sorted(request_aliases.all_state_names())
             )
             if any(marker in rendered for marker in state_markers) and any(
                 token in rendered
@@ -1047,29 +1529,44 @@ def _collect_writes_in_function(
 
         if isinstance(statement, (ast.If, ast.While)):
             _mark_name_uses(statement.test, alias_state)
-            assigned_on_branches = _collect_assigned_names_in_statements(
-                list(statement.body) + list(statement.orelse)
+            # Walrus in the test binds before the branch decision
+            # (``if (x := request.state if f else request): x.field = ...``).
+            _note_named_expr_bindings(
+                statement.test, control_dependent=control_dependent
             )
-            pre: RequestTimeIdentityState | None = (
+            if request_aliases.expression_escapes_state_identity(statement.test):
+                _record_escape(
+                    statement,
+                    ast.unparse(statement),
+                    control_dependent=control_dependent,
+                )
+            pre_identity: RequestTimeIdentityState | None = (
                 identity_session.fork() if identity_session is not None else None
             )
+            pre_aliases = request_aliases.snapshot()
+            pre_alias_state = alias_state.snapshot()
             for child in statement.body:
                 _visit_statement(child, control_dependent=True)
-            body_state = (
+            body_identity = (
                 identity_session.snapshot() if identity_session is not None else None
             )
-            if identity_session is not None and pre is not None:
-                identity_session.restore(pre)
+            body_aliases = request_aliases.snapshot()
+            body_alias_state = alias_state.snapshot()
+            request_aliases.restore(pre_aliases)
+            alias_state.restore(pre_alias_state)
+            if identity_session is not None and pre_identity is not None:
+                identity_session.restore(pre_identity)
             for child in statement.orelse:
                 _visit_statement(child, control_dependent=True)
-            if identity_session is not None and body_state is not None:
-                else_state = identity_session.snapshot()
-                # If: both branches. While with empty orelse: else_state is the
-                # zero-iteration predecessor after restore.
-                identity_session.join([body_state, else_state])
-            for name in assigned_on_branches:
-                alias_state.poison(name)
-            request_aliases.poison_names(assigned_on_branches)
+            else_aliases = request_aliases.snapshot()
+            else_alias_state = alias_state.snapshot()
+            if identity_session is not None and body_identity is not None:
+                else_identity = identity_session.snapshot()
+                # If: both branches. While with empty orelse: else_identity is
+                # the zero-iteration predecessor after restore.
+                identity_session.join([body_identity, else_identity])
+            request_aliases.install_join([body_aliases, else_aliases])
+            alias_state.install_join([body_alias_state, else_alias_state])
             return
 
         if isinstance(statement, (ast.For, ast.AsyncFor)):
@@ -1086,28 +1583,56 @@ def _collect_writes_in_function(
                     ast.unparse(statement),
                     control_dependent=True,
                 )
-            assigned = _collect_assigned_names_in_statements(
-                list(statement.body) + list(statement.orelse)
+            # Loop target severs precise aliasing for the iterated path only;
+            # zero-iteration join preserves may-alias (#171).
+            pre_identity = (
+                identity_session.fork() if identity_session is not None else None
             )
-            assigned.update(_collect_assign_target_names(statement.target))
-            pre = identity_session.fork() if identity_session is not None else None
+            pre_aliases = request_aliases.snapshot()
+            pre_alias_state = alias_state.snapshot()
+            target_names = _collect_assign_target_names(statement.target)
+            request_aliases.poison_names(target_names)
+            for name in target_names:
+                alias_state.poison(name)
             for child in list(statement.body) + list(statement.orelse):
                 _visit_statement(child, control_dependent=True)
-            if identity_session is not None and pre is not None:
+            body_aliases = request_aliases.snapshot()
+            body_alias_state = alias_state.snapshot()
+            if identity_session is not None and pre_identity is not None:
                 # Loop may not execute — join with zero-iteration predecessor.
-                body_state = identity_session.snapshot()
-                identity_session.join([pre, body_state])
-            for name in assigned:
-                alias_state.poison(name)
-            request_aliases.poison_names(assigned)
+                body_identity = identity_session.snapshot()
+                identity_session.join([pre_identity, body_identity])
+            request_aliases.install_join([pre_aliases, body_aliases])
+            alias_state.install_join([pre_alias_state, body_alias_state])
             return
 
         if isinstance(statement, (ast.With, ast.AsyncWith)):
             assigned = _collect_assigned_names_in_statements(list(statement.body))
             for item in statement.items:
                 _mark_name_uses(item.context_expr, alias_state)
+                _note_named_expr_bindings(
+                    item.context_expr, control_dependent=control_dependent
+                )
                 if item.optional_vars is not None:
-                    assigned.update(_collect_assign_target_names(item.optional_vars))
+                    as_names = _collect_assign_target_names(item.optional_vars)
+                    assigned.update(as_names)
+                    # ``with nullcontext(request.state) as x`` / bare state CM:
+                    # ``__enter__`` may return the governed identity — bind may
+                    # before the body so client writes through ``x`` are counted.
+                    enter_flow = _uncertain_alias_flow_in_expr(
+                        request_aliases, item.context_expr
+                    )
+                    direct = request_aliases.classify(item.context_expr)
+                    if enter_flow.any_alias:
+                        classification = enter_flow
+                    elif direct.any_alias:
+                        classification = direct.as_may_only()
+                    else:
+                        classification = AliasClassification()
+                    for name in as_names:
+                        request_aliases.apply_classification(name, classification)
+                        if not classification.any_alias:
+                            alias_state.poison(name)
             for child in statement.body:
                 _visit_statement(
                     child,
@@ -1121,76 +1646,140 @@ def _collect_writes_in_function(
             return
 
         if isinstance(statement, ast.Try):
-            assigned = _collect_assigned_names_in_statements(
-                list(statement.body)
-                + list(statement.orelse)
-                + list(statement.finalbody)
+            pre_identity = (
+                identity_session.fork() if identity_session is not None else None
             )
-            for handler in statement.handlers:
-                assigned.update(_collect_assigned_names_in_statements(handler.body))
-                if handler.name:
-                    assigned.add(handler.name)
-            pre = identity_session.fork() if identity_session is not None else None
+            pre_aliases = request_aliases.snapshot()
+            pre_alias_state = alias_state.snapshot()
             for child in statement.body:
                 _visit_statement(child, control_dependent=True)
-            body_state = (
+            body_identity = (
                 identity_session.snapshot() if identity_session is not None else None
             )
-            handler_states: list[RequestTimeIdentityState] = []
+            body_aliases = request_aliases.snapshot()
+            body_alias_state = alias_state.snapshot()
+            handler_identities: list[RequestTimeIdentityState] = []
+            handler_aliases: list[_RequestStateAliasEnv] = []
+            handler_alias_states: list[AliasState] = []
             for handler in statement.handlers:
-                if identity_session is not None and pre is not None:
-                    identity_session.restore(pre)
+                request_aliases.restore(pre_aliases)
+                alias_state.restore(pre_alias_state)
+                if identity_session is not None and pre_identity is not None:
+                    identity_session.restore(pre_identity)
+                if handler.name:
+                    request_aliases.poison_names({handler.name})
+                    alias_state.poison(handler.name)
                 for child in handler.body:
                     _visit_statement(child, control_dependent=True)
                 if identity_session is not None:
-                    handler_states.append(identity_session.snapshot())
-            if identity_session is not None and body_state is not None:
-                identity_session.restore(body_state)
+                    handler_identities.append(identity_session.snapshot())
+                handler_aliases.append(request_aliases.snapshot())
+                handler_alias_states.append(alias_state.snapshot())
+            request_aliases.restore(body_aliases)
+            alias_state.restore(body_alias_state)
+            if identity_session is not None and body_identity is not None:
+                identity_session.restore(body_identity)
             for child in statement.orelse:
                 _visit_statement(child, control_dependent=True)
+            normal_aliases = request_aliases.snapshot()
+            normal_alias_state = alias_state.snapshot()
             if identity_session is not None:
-                normal_state = identity_session.snapshot()
+                normal_identity = identity_session.snapshot()
                 # Join normal + exceptional, then run finally on that state.
-                predecessors = [normal_state, *handler_states]
+                predecessors = [normal_identity, *handler_identities]
                 identity_session.join(predecessors)
+            request_aliases.install_join([normal_aliases, *handler_aliases])
+            alias_state.install_join([normal_alias_state, *handler_alias_states])
             for child in statement.finalbody:
                 _visit_statement(child, control_dependent=True)
-            for name in assigned:
-                alias_state.poison(name)
-            request_aliases.poison_names(assigned)
             return
 
         if isinstance(statement, ast.Match):
             _mark_name_uses(statement.subject, alias_state)
-            assigned: set[str] = set()
+            # Walrus in the subject binds before case selection.
+            _note_named_expr_bindings(
+                statement.subject, control_dependent=control_dependent
+            )
+            if request_aliases.expression_escapes_state_identity(statement.subject):
+                _record_escape(
+                    statement,
+                    ast.unparse(statement),
+                    control_dependent=control_dependent,
+                )
+            pre_identity = (
+                identity_session.fork() if identity_session is not None else None
+            )
+            pre_aliases = request_aliases.snapshot()
+            pre_alias_state = alias_state.snapshot()
+            case_identities: list[RequestTimeIdentityState] = []
+            case_aliases: list[_RequestStateAliasEnv] = []
+            case_alias_states: list[AliasState] = []
             for case in statement.cases:
-                assigned.update(_collect_assigned_names_in_statements(list(case.body)))
-                assigned.update(_match_pattern_bound_names(case.pattern))
-            pre = identity_session.fork() if identity_session is not None else None
-            case_states: list[RequestTimeIdentityState] = []
-            for case in statement.cases:
-                if identity_session is not None and pre is not None:
-                    identity_session.restore(pre)
-                # Pattern bindings sever precise request/state aliasing.
-                pattern_names = _match_pattern_bound_names(case.pattern)
-                request_aliases.poison_names(pattern_names)
-                for name in pattern_names:
+                request_aliases.restore(pre_aliases)
+                alias_state.restore(pre_alias_state)
+                if identity_session is not None and pre_identity is not None:
+                    identity_session.restore(pre_identity)
+                # Bind pattern names from the subject (as-capture / peels);
+                # never silently poison subject-capturing aliases.
+                _apply_match_pattern_alias_bindings(
+                    request_aliases, case.pattern, statement.subject
+                )
+                for name in _match_pattern_bound_names(case.pattern):
+                    # Value-origin alias state has no request/state lattice;
+                    # sever precise origins for rebound names.
                     alias_state.poison(name)
+                if case.guard is not None:
+                    _mark_name_uses(case.guard, alias_state)
+                    _note_named_expr_bindings(
+                        case.guard, control_dependent=True
+                    )
+                    if request_aliases.expression_escapes_state_identity(case.guard):
+                        _record_escape(
+                            case.guard,
+                            ast.unparse(case.guard),
+                            control_dependent=True,
+                        )
+                # Starred / rest binders yield containers, not field bases —
+                # escape when the subject still flows governed identity.
+                if _match_pattern_has_star(case.pattern):
+                    star_flow = _uncertain_alias_flow_in_expr(
+                        request_aliases, statement.subject
+                    )
+                    if star_flow.any_alias or request_aliases.packs_request_or_state_identity(
+                        statement.subject
+                    ):
+                        _record_escape(
+                            statement,
+                            ast.unparse(statement),
+                            control_dependent=True,
+                        )
                 for child in case.body:
                     _visit_statement(child, control_dependent=True)
                 if identity_session is not None:
-                    case_states.append(identity_session.snapshot())
-            if identity_session is not None and pre is not None:
-                predecessors = list(case_states)
-                if not _match_statement_exhaustive(statement):
-                    predecessors.append(pre)
-                if predecessors:
-                    identity_session.join(predecessors)
+                    case_identities.append(identity_session.snapshot())
+                case_aliases.append(request_aliases.snapshot())
+                case_alias_states.append(alias_state.snapshot())
+            alias_predecessors = list(case_aliases)
+            alias_state_predecessors = list(case_alias_states)
+            identity_predecessors: list[RequestTimeIdentityState] = list(
+                case_identities
+            )
+            if not _match_statement_exhaustive(statement):
+                alias_predecessors.append(pre_aliases)
+                alias_state_predecessors.append(pre_alias_state)
+                if pre_identity is not None:
+                    identity_predecessors.append(pre_identity)
+            if identity_session is not None and pre_identity is not None:
+                if identity_predecessors:
+                    identity_session.join(identity_predecessors)
                 else:
-                    identity_session.restore(pre)
-            for name in assigned:
-                alias_state.poison(name)
-            request_aliases.poison_names(assigned)
+                    identity_session.restore(pre_identity)
+            if alias_predecessors:
+                request_aliases.install_join(alias_predecessors)
+                alias_state.install_join(alias_state_predecessors)
+            else:
+                request_aliases.restore(pre_aliases)
+                alias_state.restore(pre_alias_state)
             return
 
         if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):

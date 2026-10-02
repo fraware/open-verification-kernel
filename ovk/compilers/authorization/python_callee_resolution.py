@@ -47,7 +47,7 @@ from ovk.compilers.authorization.python_import_space import (
     normalize_path,
 )
 
-_IMPLEMENTATION_VERSION = "0.10.0"
+_IMPLEMENTATION_VERSION = "0.13.0"
 _MAX_IMPORT_FOLLOW_DEPTH = 8
 
 BindingKind = Literal["function", "import_name", "import_module", "rebound"]
@@ -978,9 +978,12 @@ def _match_pattern_irrefutable(pattern: ast.AST) -> bool:
 
 
 def _match_exhaustive(stmt: ast.Match) -> bool:
-    """Conservative exhaustiveness: only an irrefutable final case proves it."""
+    """Conservative exhaustiveness: final irrefutable case with no guard (#171)."""
 
-    return bool(stmt.cases) and _match_pattern_irrefutable(stmt.cases[-1].pattern)
+    if not stmt.cases:
+        return False
+    final = stmt.cases[-1]
+    return _match_pattern_irrefutable(final.pattern) and final.guard is None
 
 
 def _same_local_callable(
@@ -2948,8 +2951,10 @@ def _build_identity_scanner(
                 merged = branch_envs[0]
                 for other in branch_envs[1:]:
                     merged = _join_envs(merged, other)
-                # Match may not be exhaustive — join with pre-match env.
-                merged = _join_envs(env, merged)
+                # Retain no-match predecessor unless final case is an
+                # unguarded irrefutable pattern (#171).
+                if not _match_exhaustive(stmt):
+                    merged = _join_envs(env, merged)
                 env.clear()
                 env.update(merged)
                 continue
