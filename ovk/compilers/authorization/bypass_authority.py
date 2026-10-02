@@ -111,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.20.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.21.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -156,8 +156,8 @@ class AliasClassification:
     cross-kind CF join. Facts are transferred independently (not if/elif) so
     interprocedural formals and local rebinds preserve strength (#171 lattice).
 
-    Expression-level IfExp joins use the same lattice: union of may facts;
-    must only when every arm agrees on the same exact kind.
+    Expression-level IfExp / BoolOp joins use the same lattice: union of may
+    facts; must only when every arm agrees on the same exact kind.
     """
 
     must_request: bool = False
@@ -174,11 +174,21 @@ class AliasClassification:
             or self.may_state
         )
 
+    def as_may_only(self) -> "AliasClassification":
+        """Weaken must facts to may (uncertain binders / ``with`` enter results)."""
+
+        return AliasClassification(
+            must_request=False,
+            may_request=self.must_request or self.may_request,
+            must_state=False,
+            may_state=self.must_state or self.may_state,
+        )
+
     @staticmethod
     def join(
         left: "AliasClassification", right: "AliasClassification"
     ) -> "AliasClassification":
-        """Join two expression classifications (IfExp arms / nested conditionals).
+        """Join two expression classifications (IfExp / BoolOp arms).
 
         Mirrors ``join_request_state_alias_envs`` for a single binding: must is
         intersection; may is union of (must ∪ may) minus the resulting must.
@@ -205,6 +215,19 @@ class AliasClassification:
             must_state=must_state,
             may_state=may_state,
         )
+
+    @staticmethod
+    def join_all(
+        parts: Sequence["AliasClassification"],
+    ) -> "AliasClassification":
+        """Fold ``join`` across one or more classifications (empty → bottom)."""
+
+        if not parts:
+            return AliasClassification()
+        acc = parts[0]
+        for part in parts[1:]:
+            acc = AliasClassification.join(acc, part)
+        return acc
 
 
 @dataclass
@@ -265,9 +288,11 @@ class _RequestStateAliasEnv:
     def classify(self, value: ast.AST) -> AliasClassification:
         """Return independent must/may request and state facts for ``value``.
 
-        ``IfExp`` arms are classified independently and joined (nested IfExp
-        included). ``NamedExpr`` unwraps to its RHS so walrus forms share the
-        same lattice. Cross-kind arms become dual may — not poison.
+        ``IfExp`` arms and ``BoolOp`` operands are classified independently and
+        joined (nested forms included). Short-circuit ``and``/``or`` may yield
+        any operand, so the join never promotes may→must. ``NamedExpr`` unwraps
+        to its RHS so walrus forms share the same lattice. Cross-kind arms
+        become dual may — not poison.
         """
 
         if isinstance(value, ast.NamedExpr):
@@ -276,6 +301,11 @@ class _RequestStateAliasEnv:
             return AliasClassification.join(
                 self.classify(value.body),
                 self.classify(value.orelse),
+            )
+        if isinstance(value, ast.BoolOp):
+            # ``flag and request.state or request`` → dual may; never drop arms.
+            return AliasClassification.join_all(
+                [self.classify(operand) for operand in value.values]
             )
         return AliasClassification(
             must_request=self._is_must_request_expr(value),
@@ -595,12 +625,21 @@ class _RequestStateAliasEnv:
         ):
             return True
         for node in ast.walk(value):
-            if not isinstance(node, ast.NamedExpr):
-                continue
-            if self.is_state_dict_surface(node.value) or self.packs_request_or_state_identity(
-                node.value
+            if isinstance(node, ast.NamedExpr):
+                if self.is_state_dict_surface(
+                    node.value
+                ) or self.packs_request_or_state_identity(node.value):
+                    return True
+            # Comprehension / generator iters packing request.state escape the
+            # Name-alias theorem (``setattr(s, …) for s in [request.state]``).
+            if isinstance(
+                node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
             ):
-                return True
+                for gen in node.generators:
+                    if self.is_request_or_state_expr(
+                        gen.iter
+                    ) or self.packs_request_or_state_identity(gen.iter):
+                        return True
         return False
 
     def is_poison_state_store(self, target: ast.AST) -> bool:
@@ -828,7 +867,7 @@ def _bind_call_actuals(
 
 
 def _match_pattern_bound_names(pattern: ast.AST) -> set[str]:
-    """Names bound by a ``match`` pattern (request/state alias poisoning)."""
+    """Names bound by a ``match`` pattern (request/state alias tracking)."""
 
     names: set[str] = set()
     if isinstance(pattern, ast.MatchAs):
@@ -853,6 +892,222 @@ def _match_pattern_bound_names(pattern: ast.AST) -> set[str]:
         for item in pattern.kwd_patterns:
             names.update(_match_pattern_bound_names(item))
     return names
+
+
+def _match_pattern_has_star(pattern: ast.AST) -> bool:
+    """True when a pattern binds via ``MatchStar`` / mapping ``rest``."""
+
+    if isinstance(pattern, ast.MatchStar):
+        return True
+    if isinstance(pattern, ast.MatchAs) and pattern.pattern is not None:
+        return _match_pattern_has_star(pattern.pattern)
+    if isinstance(pattern, ast.MatchMapping):
+        if pattern.rest:
+            return True
+        return any(_match_pattern_has_star(item) for item in pattern.patterns)
+    if isinstance(pattern, (ast.MatchSequence, ast.MatchOr)):
+        return any(_match_pattern_has_star(item) for item in pattern.patterns)
+    if isinstance(pattern, ast.MatchClass):
+        return any(
+            _match_pattern_has_star(item)
+            for item in (*pattern.patterns, *pattern.kwd_patterns)
+        )
+    return False
+
+
+def _name_classification_from_env(
+    aliases: _RequestStateAliasEnv, name: str
+) -> AliasClassification:
+    return AliasClassification(
+        must_request=name in aliases.request_names,
+        may_request=name in aliases.may_request_names,
+        must_state=name in aliases.state_names,
+        may_state=name in aliases.may_state_names,
+    )
+
+
+def _uncertain_alias_flow_in_expr(
+    aliases: _RequestStateAliasEnv, value: ast.AST
+) -> AliasClassification:
+    """May-only join of request/state identities embedded in ``value``."""
+
+    parts: list[AliasClassification] = []
+    direct = aliases.classify(value)
+    if direct.any_alias:
+        parts.append(direct.as_may_only())
+    if isinstance(value, (ast.List, ast.Tuple, ast.Set)):
+        for elt in value.elts:
+            nested = elt.value if isinstance(elt, ast.Starred) else elt
+            part = aliases.classify(nested)
+            if part.any_alias:
+                parts.append(part.as_may_only())
+    elif isinstance(value, ast.Dict):
+        for key, val in zip(value.keys, value.values):
+            for item in (key, val):
+                if item is None:
+                    continue
+                part = aliases.classify(item)
+                if part.any_alias:
+                    parts.append(part.as_may_only())
+    elif isinstance(value, ast.Call):
+        for arg in value.args:
+            nested = arg.value if isinstance(arg, ast.Starred) else arg
+            part = aliases.classify(nested)
+            if part.any_alias:
+                parts.append(part.as_may_only())
+        for kw in value.keywords:
+            if kw.value is None:
+                continue
+            part = aliases.classify(kw.value)
+            if part.any_alias:
+                parts.append(part.as_may_only())
+    return AliasClassification.join_all(parts)
+
+
+def _apply_match_pattern_alias_bindings(
+    aliases: _RequestStateAliasEnv,
+    pattern: ast.AST,
+    matched: ast.AST,
+) -> None:
+    """Bind match pattern names from ``matched`` under the alias lattice.
+
+    Subject-capturing ``case object() as x`` / ``case x`` receive
+    ``classify(matched)`` instead of being poisoned (poison omitted client
+    writes through ``x`` → false PASS). Structural patterns peel literal
+    List/Tuple/Dict/Call subjects when shapes align. Unresolved nested
+    binders are cleared; when the matched value still flows request/state
+    identity, they receive a may-only join so governed writes stay visible.
+    """
+
+    def _bind_name(name: str | None, classification: AliasClassification) -> None:
+        if not name:
+            return
+        aliases.apply_classification(name, classification)
+
+    def _clear_or_flow(names: set[str], value: ast.AST) -> None:
+        local_flow = _uncertain_alias_flow_in_expr(aliases, value)
+        for name in names:
+            _bind_name(
+                name,
+                local_flow if local_flow.any_alias else AliasClassification(),
+            )
+
+    def _apply(pat: ast.AST, value: ast.AST) -> None:
+        if isinstance(pat, ast.MatchAs):
+            # ``case x`` / ``case P as x`` capture the matched value itself.
+            if pat.name:
+                _bind_name(pat.name, aliases.classify(value))
+            if pat.pattern is not None:
+                _apply(pat.pattern, value)
+            return
+        if isinstance(pat, ast.MatchOr):
+            arm_maps: list[dict[str, AliasClassification]] = []
+            for alt in pat.patterns:
+                snap = aliases.snapshot()
+                _apply(alt, value)
+                arm_maps.append(
+                    {
+                        name: _name_classification_from_env(aliases, name)
+                        for name in _match_pattern_bound_names(alt)
+                    }
+                )
+                aliases.restore(snap)
+            names = set().union(*(arm.keys() for arm in arm_maps)) if arm_maps else set()
+            for name in names:
+                parts = [arm[name] for arm in arm_maps if name in arm]
+                if not parts:
+                    continue
+                joined = AliasClassification.join_all(parts)
+                if len(parts) != len(arm_maps):
+                    joined = joined.as_may_only()
+                _bind_name(name, joined)
+            return
+        if isinstance(pat, ast.MatchSequence):
+            elts: list[ast.AST] | None = None
+            if isinstance(value, (ast.List, ast.Tuple)) and not any(
+                isinstance(elt, ast.Starred) for elt in value.elts
+            ):
+                elts = list(value.elts)
+            if (
+                elts is not None
+                and not any(isinstance(p, ast.MatchStar) for p in pat.patterns)
+                and len(pat.patterns) == len(elts)
+            ):
+                for sub, elt in zip(pat.patterns, elts):
+                    _apply(sub, elt)
+                return
+            _clear_or_flow(_match_pattern_bound_names(pat), value)
+            return
+        if isinstance(pat, ast.MatchMapping):
+            if (
+                isinstance(value, ast.Dict)
+                and pat.rest is None
+                and all(
+                    k is not None and isinstance(k, ast.Constant) for k in value.keys
+                )
+                and all(isinstance(k, ast.Constant) for k in pat.keys)
+            ):
+                value_by_key = {
+                    key.value: val
+                    for key, val in zip(value.keys, value.values)
+                    if isinstance(key, ast.Constant)
+                }
+                if all(
+                    isinstance(k, ast.Constant) and k.value in value_by_key
+                    for k in pat.keys
+                ):
+                    for key, sub in zip(pat.keys, pat.patterns):
+                        assert isinstance(key, ast.Constant)
+                        _apply(sub, value_by_key[key.value])
+                    return
+            _clear_or_flow(_match_pattern_bound_names(pat), value)
+            return
+        if isinstance(pat, ast.MatchClass):
+            if (
+                isinstance(value, ast.Call)
+                and not any(isinstance(arg, ast.Starred) for arg in value.args)
+                and all(kw.arg is not None for kw in value.keywords)
+            ):
+                kw_map = {kw.arg: kw.value for kw in value.keywords if kw.arg}
+                # Keyword-only patterns against keyword construction.
+                if (
+                    pat.kwd_attrs
+                    and not pat.patterns
+                    and all(key in kw_map for key in pat.kwd_attrs)
+                ):
+                    for key, sub in zip(pat.kwd_attrs, pat.kwd_patterns):
+                        _apply(sub, kw_map[key])
+                    return
+                # Positional-only patterns against positional construction.
+                if (
+                    pat.patterns
+                    and not pat.kwd_attrs
+                    and len(pat.patterns) <= len(value.args)
+                ):
+                    for sub, arg in zip(pat.patterns, value.args):
+                        _apply(sub, arg)
+                    return
+                # Mixed patterns with fully aligned Call keywords + positionals.
+                if (
+                    pat.patterns
+                    and pat.kwd_attrs
+                    and len(pat.patterns) <= len(value.args)
+                    and all(key in kw_map for key in pat.kwd_attrs)
+                ):
+                    for sub, arg in zip(pat.patterns, value.args):
+                        _apply(sub, arg)
+                    for key, sub in zip(pat.kwd_attrs, pat.kwd_patterns):
+                        _apply(sub, kw_map[key])
+                    return
+            # Keyword pattern vs positional Call (unknown __match_args__) etc.
+            _clear_or_flow(_match_pattern_bound_names(pat), value)
+            return
+        if isinstance(pat, ast.MatchStar):
+            _clear_or_flow({pat.name} if pat.name else set(), value)
+            return
+        _clear_or_flow(_match_pattern_bound_names(pat), value)
+
+    _apply(pattern, matched)
 
 
 def _match_pattern_irrefutable(pattern: ast.AST) -> bool:
@@ -1368,8 +1623,29 @@ def _collect_writes_in_function(
             assigned = _collect_assigned_names_in_statements(list(statement.body))
             for item in statement.items:
                 _mark_name_uses(item.context_expr, alias_state)
+                _note_named_expr_bindings(
+                    item.context_expr, control_dependent=control_dependent
+                )
                 if item.optional_vars is not None:
-                    assigned.update(_collect_assign_target_names(item.optional_vars))
+                    as_names = _collect_assign_target_names(item.optional_vars)
+                    assigned.update(as_names)
+                    # ``with nullcontext(request.state) as x`` / bare state CM:
+                    # ``__enter__`` may return the governed identity — bind may
+                    # before the body so client writes through ``x`` are counted.
+                    enter_flow = _uncertain_alias_flow_in_expr(
+                        request_aliases, item.context_expr
+                    )
+                    direct = request_aliases.classify(item.context_expr)
+                    if enter_flow.any_alias:
+                        classification = enter_flow
+                    elif direct.any_alias:
+                        classification = direct.as_may_only()
+                    else:
+                        classification = AliasClassification()
+                    for name in as_names:
+                        request_aliases.apply_classification(name, classification)
+                        if not classification.any_alias:
+                            alias_state.poison(name)
             for child in statement.body:
                 _visit_statement(
                     child,
@@ -1433,6 +1709,16 @@ def _collect_writes_in_function(
 
         if isinstance(statement, ast.Match):
             _mark_name_uses(statement.subject, alias_state)
+            # Walrus in the subject binds before case selection.
+            _note_named_expr_bindings(
+                statement.subject, control_dependent=control_dependent
+            )
+            if request_aliases.expression_escapes_state_identity(statement.subject):
+                _record_escape(
+                    statement,
+                    ast.unparse(statement),
+                    control_dependent=control_dependent,
+                )
             pre_identity = (
                 identity_session.fork() if identity_session is not None else None
             )
@@ -1446,11 +1732,40 @@ def _collect_writes_in_function(
                 alias_state.restore(pre_alias_state)
                 if identity_session is not None and pre_identity is not None:
                     identity_session.restore(pre_identity)
-                # Pattern bindings sever precise request/state aliasing.
-                pattern_names = _match_pattern_bound_names(case.pattern)
-                request_aliases.poison_names(pattern_names)
-                for name in pattern_names:
+                # Bind pattern names from the subject (as-capture / peels);
+                # never silently poison subject-capturing aliases.
+                _apply_match_pattern_alias_bindings(
+                    request_aliases, case.pattern, statement.subject
+                )
+                for name in _match_pattern_bound_names(case.pattern):
+                    # Value-origin alias state has no request/state lattice;
+                    # sever precise origins for rebound names.
                     alias_state.poison(name)
+                if case.guard is not None:
+                    _mark_name_uses(case.guard, alias_state)
+                    _note_named_expr_bindings(
+                        case.guard, control_dependent=True
+                    )
+                    if request_aliases.expression_escapes_state_identity(case.guard):
+                        _record_escape(
+                            case.guard,
+                            ast.unparse(case.guard),
+                            control_dependent=True,
+                        )
+                # Starred / rest binders yield containers, not field bases —
+                # escape when the subject still flows governed identity.
+                if _match_pattern_has_star(case.pattern):
+                    star_flow = _uncertain_alias_flow_in_expr(
+                        request_aliases, statement.subject
+                    )
+                    if star_flow.any_alias or request_aliases.packs_request_or_state_identity(
+                        statement.subject
+                    ):
+                        _record_escape(
+                            statement,
+                            ast.unparse(statement),
+                            control_dependent=True,
+                        )
                 for child in case.body:
                     _visit_statement(child, control_dependent=True)
                 if identity_session is not None:

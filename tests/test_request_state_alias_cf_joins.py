@@ -10,6 +10,10 @@ Closes false PASSes where:
 5. Expression-level ``IfExp`` cross-kind arms were unclassified (poisoned),
    so only a literal ``request.state.field = True`` remained and could
    yield ``source_proved_server_authority_write``.
+6. Expression-level ``BoolOp`` (``and``/``or``) operands were unclassified,
+   so ``x = flag and request.state or request`` omitted client writes through ``x``.
+7. Match subject-capturing ``as`` patterns poisoned binders, so
+   ``match request.state: case object() as x:`` omitted writes through ``x``.
 
 Unknown > false PASS. Held-out FormalPR partitions are not frozen.
 """
@@ -436,7 +440,7 @@ async def handler(request, bypass_filter: bool = False, user = Depends(get_curre
 def test_persistent_state_round_trip_and_version_invalidation(tmp_path) -> None:
     """13. Persistent-state round trip and version invalidation."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.38.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.39.0"
 
     trusted_helpers = """
 def write_state(state, value):
@@ -1301,4 +1305,297 @@ async def handler(request, bypass_filter: bool = False, user = Depends(get_curre
         item.status != "established" for item in ir.bypass_authority_evidence
     )
     for item in ir.bypass_authority_evidence:
+        assert item.reason != "source_proved_server_authority_write"
+
+
+def test_boolop_and_or_cross_kind_never_authorized() -> None:
+    """BoolOp ``flag and request.state or request`` joins to dual may — never PASS."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False, flag=True):
+    request.state.bypass_filter = True
+    x = flag and request.state or request
+    x.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_boolop_same_kind_and_or_never_authorized() -> None:
+    """Same-kind BoolOp still yields may (short-circuit) — never PASS."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False, flag=True):
+    request.state.bypass_filter = True
+    x = flag and request.state or request.state
+    x.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_boolop_classify_lattice_units() -> None:
+    """Unit: BoolOp classify joins operands; never promotes may→must."""
+
+    import ast
+
+    env = _RequestStateAliasEnv.seed(param_names=frozenset({"request", "flag"}))
+    cross = env.classify(ast.parse("flag and request.state or request").body[0].value)
+    assert cross == AliasClassification(
+        must_request=False,
+        may_request=True,
+        must_state=False,
+        may_state=True,
+    )
+    and_only = env.classify(ast.parse("flag and request.state").body[0].value)
+    assert and_only == AliasClassification(
+        must_request=False,
+        may_request=False,
+        must_state=False,
+        may_state=True,
+    )
+    state_or_none = env.classify(ast.parse("request.state or None").body[0].value)
+    assert state_or_none == AliasClassification(
+        must_request=False,
+        may_request=False,
+        must_state=False,
+        may_state=True,
+    )
+
+
+def test_match_as_pattern_captures_state_subject_never_authorized() -> None:
+    """``match request.state: case object() as x:`` binds x — never false PASS."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    match request.state:
+        case object() as x:
+            x.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_match_irrefutable_name_binds_state_subject() -> None:
+    """``case x:`` on a state subject captures state identity."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    match request.state:
+        case x:
+            x.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_match_sequence_peel_state_element_never_authorized() -> None:
+    """``match [request.state]: case [x]:`` peels the element alias."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    match [request.state]:
+        case [x]:
+            x.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_match_mapping_peel_state_value_never_authorized() -> None:
+    """``match {'s': request.state}: case {'s': x}:`` peels the value alias."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    match {"s": request.state}:
+        case {"s": x}:
+            x.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_match_guard_walrus_binds_state_never_authorized() -> None:
+    """Walrus in a match guard notes state identity before the body write."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    match bypass_filter:
+        case _ if (x := request.state):
+            x.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_walrus_boolop_in_if_test_never_authorized() -> None:
+    """Walrus + BoolOp in ``if`` test notes dual-may before the body write."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False, flag=True):
+    request.state.bypass_filter = True
+    if (x := (flag and request.state or request)):
+        x.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_interprocedural_boolop_dual_may_no_positive_authority() -> None:
+    """BoolOp dual-may into a helper literal write → no positive authority."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False, flag=True):
+    request.state.bypass_filter = True
+    x = flag and request.state or request
+    helpers.write_state(x, True)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_with_nullcontext_state_as_target_never_authorized() -> None:
+    """``with nullcontext(request.state) as x`` may-binds enter result."""
+
+    findings = _unit(
+        """
+import helpers
+from contextlib import nullcontext
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    with nullcontext(request.state) as x:
+        x.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_boolop_full_equals_incremental() -> None:
+    """full == incremental for the BoolOp cross-kind counterexample."""
+
+    trusted_helpers = """
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    boolop_routes = """
+from fastapi import Depends, FastAPI
+import helpers
+app = FastAPI()
+
+@app.post("/chat")
+async def handler(request, bypass_filter: bool = False, user = Depends(get_current_user)):
+    request.state.bypass_filter = True
+    x = bypass_filter and request.state or request
+    x.bypass_filter = bypass_filter
+    if request.state.bypass_filter:
+        return sink(user)
+    return sink(user)
+""".strip()
+
+    profile = FastApiDependencyEffectProfile(
+        sink_effects={"sink": "model.invoke"},
+        sink_static_resources={"sink": "chat"},
+        trusted_bypass_authorities={
+            "request.state.bypass_filter": ("model.invoke",),
+        },
+        principal_parameter="user",
+    )
+    repo = {
+        "app/helpers.py": trusted_helpers + "\n",
+        "app/routes.py": boolop_routes,
+    }
+    materials = AuthMaterials(
+        base_files=dict(repo),
+        head_files=dict(repo),
+        repo="example/alias-boolop-cross-kind-incremental",
+        base_revision="base",
+        head_revision="head-1",
+        repository_python_files=repo,
+        head_repository_python_files=repo,
+        base_repository_python_files=repo,
+    )
+    parsed = parse_head_python_materials(materials)
+    contracts = build_contract_summary_index(
+        materials,
+        parsed_trees=parsed.trees,
+        source_digests=parsed.source_digests,
+    )
+    routes = build_route_summary_index(
+        materials,
+        parsed_trees=parsed.trees,
+        source_digests=parsed.source_digests,
+    )
+    incremental = compile_incremental_fastapi_assurance(
+        materials,
+        profile,
+        parsed_index=parsed,
+        contract_summary_index=contracts,
+        route_summary_index=routes,
+    )
+    full = FastApiDependencyEffectExtractor().compile(
+        materials,
+        profile,
+        parsed_index=parsed,
+        contract_summary_index=contracts,
+        route_summary_index=routes,
+    )
+    assert incremental.ir.canonical_payload() == full.canonical_payload()
+    assert all(
+        item.status != "established"
+        for item in incremental.ir.bypass_authority_evidence
+    )
+    for item in incremental.ir.bypass_authority_evidence:
         assert item.reason != "source_proved_server_authority_write"
