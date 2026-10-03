@@ -1194,7 +1194,110 @@ def handler(request, bypass_filter=False):
     assert findings[0].status == "unknown"
     assert findings[0].reason != "source_proved_server_authority_write"
 
+
+def test_lambda_default_poison_never_authorized() -> None:
+    """Lambda defaults execute at definition: ``f = lambda x=poison(): x``."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return 0
+    f = lambda x=poison(): x
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_lambda_expr_stmt_default_poison_never_authorized() -> None:
+    """Bare ``(lambda x=poison(): x)`` still evaluates defaults."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return 0
+    (lambda x=poison(): x)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_lambda_default_in_if_test_poison_never_authorized() -> None:
+    """``if (lambda x=poison(): x):`` must observe default identity effects."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return 0
+    if (lambda x=poison(): x):
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_nested_lambda_default_poison_never_authorized() -> None:
+    """Outer default that is itself a lambda must evaluate inner defaults."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return 0
+    f = lambda x=(lambda y=poison(): y): x
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_setattr_in_lambda_default_never_authorized() -> None:
+    """setattr in a lambda default is a counted PE write at definition."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    f = lambda x=setattr(request.state, "bypass_filter", bypass_filter): x
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
 def test_persistent_version_bumped_for_executed_expr_closure() -> None:
     """Cache / semantic versions bump with PASS-semantics change."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.44.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.45.0"

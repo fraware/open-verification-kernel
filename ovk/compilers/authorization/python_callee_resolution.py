@@ -1173,8 +1173,9 @@ class RequestTimeIdentitySession:
 
         Reuses ``_eval_expr`` recursive semantics so nested forms
         (``flag and poison()``, ``poison() if flag else False``,
-        ``wrapper(poison())``, comprehensions, awaits) cannot diverge from
-        statement-position call scanning.
+        ``wrapper(poison())``, ``lambda x=poison(): x`` defaults,
+        comprehensions, awaits) cannot diverge from statement-position
+        call scanning.
         """
 
         self._observe_expr(  # type: ignore[operator]
@@ -1898,7 +1899,14 @@ def _build_identity_scanner(
             )
             return _IdentityPointsTo.unknown_only()
         if isinstance(expr, ast.Lambda):
-            # Lambda body is not executed at definition time.
+            # Defaults execute at definition; body does not. Omitting defaults
+            # false-PASSes ``f = lambda x=poison(): x`` beside a later trusted
+            # helper write (Unknown > false PASS, #173).
+            for default in expr.args.defaults:
+                _eval_expr(default, env, path=path)
+            for default in expr.args.kw_defaults:
+                if default is not None:
+                    _eval_expr(default, env, path=path)
             return _IdentityPointsTo.unknown_only()
         # Unmodeled expression forms still execute nested subexpressions
         # (UnaryOp ``not poison()``, Compare, JoinedStr / f-strings, Slice, …).
