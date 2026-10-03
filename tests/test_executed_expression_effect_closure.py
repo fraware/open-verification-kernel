@@ -1968,7 +1968,171 @@ def handler(request, bypass_filter=False):
     assert findings[0].reason == "source_proved_server_authority_write"
 
 
+def test_packed_mut_construction_shapes_never_authorized() -> None:
+    """Packed/Attribute/inherited/factory ``Mut()`` must observe ``__init__``."""
+
+    for snippet in (
+        "(Mut if True else int)()",
+        "(False or Mut)()",
+        "[Mut][0]()",
+        '{"M":Mut}["M"]()',
+        "(m:=Mut)()",
+        "Holder.Mut()",
+        "class Child(Mut):\n        pass\n    Child()",
+        "def factory():\n        return Mut\n    factory()()",
+    ):
+        findings = _unit(
+            f"""
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    class Holder:
+        Mut = Mut
+    {snippet}
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        )
+        assert findings[0].status != "authorized", snippet
+        assert findings[0].reason != "source_proved_server_authority_write", snippet
+
+
+def test_for_with_unpack_export_rebind_never_authorized() -> None:
+    """Tuple/List/Starred for/with-as export rebinds recurse like Assign."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    for (helpers.write_state,) in [(evil,)]:
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class CM:
+        def __enter__(self):
+            return (evil,)
+        def __exit__(self, *a):
+            return False
+    with CM() as (helpers.write_state,):
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_local_exec_new_class_and_type_protocols_never_authorized() -> None:
+    """Local exec/new_class rebinds, type(), match-as, __set_name__, projections."""
+
+    for routes in (
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    run = exec
+    run("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import types
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def body(ns):
+        helpers.write_state = evil
+    nc = types.new_class
+    nc("C", (), {}, body)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    type("C", (Base,), {})
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    match Base:
+        case x:
+            class C(x):
+                pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Desc:
+        def __set_name__(self, owner, name):
+            helpers.write_state = evil
+    class C:
+        x = Desc()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import builtins
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    vars(builtins)["exec"]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    list(map(exec, ["helpers.write_state = evil"]))
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
 def test_persistent_version_bumped_for_executed_expr_closure() -> None:
     """Cache / semantic versions bump with PASS-semantics change."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.53.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.54.0"

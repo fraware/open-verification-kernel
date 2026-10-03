@@ -442,7 +442,7 @@ async def handler(request, bypass_filter: bool = False, user = Depends(get_curre
 def test_persistent_state_round_trip_and_version_invalidation(tmp_path) -> None:
     """13. Persistent-state round trip and version invalidation."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.53.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.54.0"
 
     trusted_helpers = """
 def write_state(state, value):
@@ -2020,3 +2020,90 @@ def handler(request, bypass_filter=False):
     assert findings[0].status != "authorized"
     assert findings[0].reason != "source_proved_server_authority_write"
     assert findings[0].status in {"violated", "unknown"}
+
+
+def test_alias_lattice_projection_variants_never_authorized() -> None:
+    """Unbound/aliased dict/operator/MappingProxyType/| projections."""
+
+    for routes in (
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = dict.get({"s": request.state}, "s")
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from operator import itemgetter
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = itemgetter("s")({"s": request.state})
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator as op
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = op.itemgetter("s")({"s": request.state})
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = dict.__getitem__({"s": request.state}, "s")
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = getattr({"s": request.state}, "get")("s")
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    k, s = {"s": request.state}.popitem()
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = operator.methodcaller("get", "s")({"s": request.state})
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from types import MappingProxyType
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = MappingProxyType({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = ({} | {"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+        assert findings[0].status in {"violated", "unknown"}
