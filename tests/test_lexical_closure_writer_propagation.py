@@ -2075,5 +2075,91 @@ def handler(request, bypass_filter=False):
         _never_authorized(_unit(routes))
 
 
+def test_fourth_pass_lexical_inherited_property_and_packs_never_authorized() -> None:
+    """Inherited @property, Name-bound packs, nested walrus, itemgetter peel."""
+
+    for routes in (
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+    class Base:
+        @property
+        def fn(self):
+            return poison
+    class Child(Base):
+        pass
+    Child().fn()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+    class Box:
+        def __init__(self):
+            self.fn = poison
+    xs=[Box()]
+    xs[0].fn()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+    class Box:
+        def __init__(self):
+            self.fn = poison
+    c = True
+    x=Box() if c else Box()
+    x.fn()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+    class Box:
+        def __init__(self):
+            self.fn = poison
+    if (c:=(b:=Box())):
+        c.fn()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+    class Box:
+        def __init__(self):
+            self.fn = poison
+    operator.itemgetter(0)([Box()]).fn()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        _never_authorized(_unit(routes))
+
+
 def test_persistent_version_bumped_for_lexical_closure() -> None:
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.55.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.56.0"

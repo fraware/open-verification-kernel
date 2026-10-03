@@ -111,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.34.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.35.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -144,10 +144,10 @@ _CONTAINER_ADAPTER_NAMES = frozenset(
 )
 # operator.* / unbound projection names that yield packed request/state identity.
 _OPERATOR_PROJECTION_ATTRS = frozenset(
-    {"getitem", "itemgetter", "attrgetter", "methodcaller"}
+    {"getitem", "itemgetter", "attrgetter", "methodcaller", "call"}
 )
 _OPERATOR_PROJECTION_NAMES = frozenset(
-    {"getitem", "itemgetter", "attrgetter", "methodcaller"}
+    {"getitem", "itemgetter", "attrgetter", "methodcaller", "call"}
 )
 
 
@@ -398,6 +398,20 @@ class _RequestStateAliasEnv:
                 self.adapter_aliases.add(name)
             if value.attr in _OPERATOR_PROJECTION_NAMES:
                 self.operator_projection_aliases[name] = value.attr
+        elif isinstance(value, ast.Call):
+            # ``Proxy = getattr(types, "MappingProxyType")`` / operator getattr.
+            if (
+                isinstance(value.func, ast.Name)
+                and value.func.id == "getattr"
+                and len(value.args) >= 2
+                and isinstance(value.args[1], ast.Constant)
+                and isinstance(value.args[1].value, str)
+            ):
+                attr = value.args[1].value
+                if attr == "MappingProxyType":
+                    self.adapter_aliases.add(name)
+                if attr in _OPERATOR_PROJECTION_NAMES:
+                    self.operator_projection_aliases[name] = attr
 
     def snapshot(self) -> "_RequestStateAliasEnv":
         """Deep-copy alias sets for control-flow fork."""
@@ -2176,6 +2190,18 @@ def _collect_writes_in_function(
 
         _apply(pattern, matched)
 
+    def _instance_class_name_from_expr(value: ast.AST) -> str | None:
+        """Unique local class name packed/constructed in ``value``, if any.
+
+        Covers ``Box()``, ``Box() if c else Box()``, ``[Box()]``, nested walrus,
+        and Name instance aliases so ``xs=[Box()]; xs[0].fn()`` peels.
+        """
+
+        cls = _resolve_instance_or_class(value)
+        if cls is not None:
+            return cls.name
+        return None
+
     def _note_callable_name_alias(
         target: ast.AST,
         value: ast.AST,
@@ -2329,6 +2355,10 @@ def _collect_writes_in_function(
                     return
             instance_class_of.pop(target.id, None)
         if isinstance(value, (ast.IfExp, ast.BoolOp, ast.NamedExpr)):
+            # Instance pack: ``x = Box() if c else Box()`` / nested walrus.
+            packed_cls = _instance_class_name_from_expr(value)
+            if packed_cls is not None:
+                instance_class_of[target.id] = packed_cls
             # Dual-may precise join when both arms are known nested/returned
             # closures; unknown callable arm → fail closed on later call.
             closures, unknown = _callable_products_from_expr(value)
@@ -2341,10 +2371,13 @@ def _collect_writes_in_function(
                 # the may-set is still an unresolved callable (Unknown > PASS).
                 unknown = True
             if closures or unknown:
-                instance_class_of.pop(target.id, None)
+                if packed_cls is None:
+                    instance_class_of.pop(target.id, None)
                 _install_returned_closures(
                     target.id, closures, unknown=unknown
                 )
+                return
+            if packed_cls is not None:
                 return
         if isinstance(value, ast.Call):
             _clear_callable_name(target.id)
@@ -2354,11 +2387,20 @@ def _collect_writes_in_function(
             ) is not None:
                 instance_class_of[target.id] = value.func.id
             else:
-                instance_class_of.pop(target.id, None)
+                packed_cls = _instance_class_name_from_expr(value)
+                if packed_cls is not None:
+                    instance_class_of[target.id] = packed_cls
+                else:
+                    instance_class_of.pop(target.id, None)
             if _bind_call_product_to_name(target.id, value):
                 return
         else:
-            instance_class_of.pop(target.id, None)
+            # Container instance pack: ``xs = [Box()]`` for ``xs[0].fn()``.
+            packed_cls = _instance_class_name_from_expr(value)
+            if packed_cls is not None:
+                instance_class_of[target.id] = packed_cls
+            else:
+                instance_class_of.pop(target.id, None)
         # Container packing of governed closures into a Name carrier: the
         # Name is not itself callable under the theorem → residual escape so
         # later ``bucket[0]()`` cannot omit the writer (Unknown > false PASS).
@@ -2758,38 +2800,72 @@ def _collect_writes_in_function(
         cls = _resolve_instance_or_class(attr_expr.value)
         if cls is None:
             return None
-        for child in cls.body:
-            if (
-                isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
-                and child.name == attr_expr.attr
-            ):
-                return child
-        return None
+        visited: set[int] = set()
+
+        def _lookup(class_node: ast.ClassDef) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+            if id(class_node) in visited:
+                return None
+            visited.add(id(class_node))
+            for child in class_node.body:
+                if (
+                    isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and child.name == attr_expr.attr
+                ):
+                    return child
+            for base in class_node.bases:
+                if isinstance(base, ast.Name):
+                    base_cls = _lookup_local_class(base.id)
+                    if base_cls is not None:
+                        found = _lookup(base_cls)
+                        if found is not None:
+                            return found
+            return None
+
+        return _lookup(cls)
 
     def _class_property_getter(
         cls: ast.ClassDef,
         attr_name: str,
     ) -> ast.AST | None:
-        """Return getter expr for ``@property`` / ``fn = property(_fn)``."""
+        """Return getter expr for ``@property`` / ``fn = property(_fn)``.
 
-        for child in cls.body:
-            if (
-                isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
-                and child.name == attr_name
-                and _method_is_property(child)
-            ):
-                return child
-            if isinstance(child, ast.Assign) and any(
-                isinstance(t, ast.Name) and t.id == attr_name for t in child.targets
-            ):
+        Walks Name bases so ``Child(Base)`` inherits ``@property`` packs
+        (Unknown > false PASS on ``Child().fn()``).
+        """
+
+        visited: set[int] = set()
+
+        def _lookup(class_node: ast.ClassDef) -> ast.AST | None:
+            if id(class_node) in visited:
+                return None
+            visited.add(id(class_node))
+            for child in class_node.body:
                 if (
-                    isinstance(child.value, ast.Call)
-                    and isinstance(child.value.func, ast.Name)
-                    and child.value.func.id in {"property", "cached_property"}
-                    and child.value.args
+                    isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and child.name == attr_name
+                    and _method_is_property(child)
                 ):
-                    return child.value.args[0]
-        return None
+                    return child
+                if isinstance(child, ast.Assign) and any(
+                    isinstance(t, ast.Name) and t.id == attr_name for t in child.targets
+                ):
+                    if (
+                        isinstance(child.value, ast.Call)
+                        and isinstance(child.value.func, ast.Name)
+                        and child.value.func.id in {"property", "cached_property"}
+                        and child.value.args
+                    ):
+                        return child.value.args[0]
+            for base in class_node.bases:
+                if isinstance(base, ast.Name):
+                    base_cls = _lookup_local_class(base.id)
+                    if base_cls is not None:
+                        found = _lookup(base_cls)
+                        if found is not None:
+                            return found
+            return None
+
+        return _lookup(cls)
 
     def _method_is_property(
         method: ast.FunctionDef | ast.AsyncFunctionDef,
@@ -4202,12 +4278,9 @@ def _collect_writes_in_function(
             # Instance / getattr / projection aliases through walrus.
             if isinstance(child.value, ast.Name) and child.value.id in getattr_aliases:
                 getattr_aliases.add(child.target.id)
-            if (
-                isinstance(child.value, ast.Call)
-                and isinstance(child.value.func, ast.Name)
-                and _lookup_local_class(child.value.func.id) is not None
-            ):
-                instance_class_of[child.target.id] = child.value.func.id
+            packed_cls = _instance_class_name_from_expr(child.value)
+            if packed_cls is not None:
+                instance_class_of[child.target.id] = packed_cls
             request_aliases.note_projection_name_alias(child.target.id, child.value)
 
     def _visit_statement(
@@ -5085,12 +5158,89 @@ def _collect_writes_in_function(
     return writes, frame_returned_closures, frame_returned_unknown
 
 
+def _module_projection_export_map(
+    trees: Mapping[str, ast.AST],
+    *,
+    import_roots: tuple[str, ...] = (),
+) -> dict[str, dict[str, str]]:
+    """Per-module export → canonical adapter/operator projection name.
+
+    Seeds cross-module ``from helpers import Proxy`` after
+    ``Proxy = MappingProxyType`` (Unknown > false PASS).
+    """
+
+    available = set(trees)
+    # path -> local name -> canonical ("MappingProxyType" | operator proj)
+    exports: dict[str, dict[str, str]] = {path: {} for path in trees}
+
+    def _seed_local(path: str, tree: ast.AST) -> None:
+        env = _RequestStateAliasEnv.seed(param_names=frozenset())
+        for node in getattr(tree, "body", ()):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                env.note_projection_import(node)
+                # Direct re-exports: ``from types import MappingProxyType as Proxy``.
+                if isinstance(node, ast.ImportFrom):
+                    for alias in node.names:
+                        local = alias.asname or alias.name
+                        if alias.name == "MappingProxyType":
+                            exports[path][local] = "MappingProxyType"
+                        elif alias.name in _OPERATOR_PROJECTION_NAMES:
+                            exports[path][local] = alias.name
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        env.note_projection_name_alias(target.id, node.value)
+            elif isinstance(node, ast.AnnAssign):
+                if isinstance(node.target, ast.Name) and node.value is not None:
+                    env.note_projection_name_alias(node.target.id, node.value)
+            elif isinstance(node, ast.Expr) and isinstance(node.value, ast.NamedExpr):
+                if isinstance(node.value.target, ast.Name):
+                    env.note_projection_name_alias(
+                        node.value.target.id, node.value.value
+                    )
+        for name in env.adapter_aliases:
+            exports[path][name] = "MappingProxyType"
+        for name, canon in env.operator_projection_aliases.items():
+            exports[path][name] = canon
+
+    for path, tree in trees.items():
+        _seed_local(path, tree)
+
+    # One fixed-point pass for ``from helpers import Proxy`` re-exports.
+    for path, tree in trees.items():
+        for node in getattr(tree, "body", ()):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            module_name = import_module_name_from_importer(node, importer_path=path)
+            if module_name is None:
+                continue
+            target = _module_path_in_unit(
+                module_name,
+                available_paths=available,
+                import_roots=import_roots,
+            )
+            if target is None:
+                continue
+            foreign = exports.get(target, {})
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                local = alias.asname or alias.name
+                canon = foreign.get(alias.name)
+                if canon is not None:
+                    exports[path][local] = canon
+    return exports
+
+
 def _collect_state_writes(
     tree: ast.AST,
     *,
     path: str,
     externally_bound_function_name: str | None,
     callee_resolver: CalleeResolver | None = None,
+    trees: Mapping[str, ast.AST] | None = None,
+    import_roots: tuple[str, ...] = (),
+    projection_exports: Mapping[str, Mapping[str, str]] | None = None,
 ) -> tuple[StateAttributeWrite, ...]:
     writes: list[StateAttributeWrite] = []
     # Prefer per-function alias tracking so rebinding inside a writer is proved.
@@ -5110,17 +5260,58 @@ def _collect_state_writes(
                             functions.append(nested)
     if functions:
         # Module-level ``from types import MappingProxyType as MPT`` /
-        # ``from operator import itemgetter as ig`` seed projection aliases.
+        # ``from operator import itemgetter as ig`` / AnnAssign / walrus seed.
         module_projection_seed = _RequestStateAliasEnv.seed(param_names=frozenset())
+        available = set(trees) if trees is not None else set()
+        export_map = projection_exports or {}
         for node in getattr(tree, "body", ()):
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 module_projection_seed.note_projection_import(node)
+                # Cross-module adapter/operator re-exports.
+                if isinstance(node, ast.ImportFrom) and trees is not None:
+                    module_name = import_module_name_from_importer(
+                        node, importer_path=path
+                    )
+                    target = (
+                        _module_path_in_unit(
+                            module_name,
+                            available_paths=available,
+                            import_roots=import_roots,
+                        )
+                        if module_name is not None
+                        else None
+                    )
+                    foreign = export_map.get(target or "", {})
+                    for alias in node.names:
+                        if alias.name == "*":
+                            continue
+                        local = alias.asname or alias.name
+                        canon = foreign.get(alias.name)
+                        if canon == "MappingProxyType":
+                            module_projection_seed.adapter_aliases.add(local)
+                        elif canon in _OPERATOR_PROJECTION_NAMES:
+                            module_projection_seed.operator_projection_aliases[
+                                local
+                            ] = canon
             elif isinstance(node, ast.Assign):
                 for target in node.targets:
                     if isinstance(target, ast.Name):
                         module_projection_seed.note_projection_name_alias(
                             target.id, node.value
                         )
+            elif isinstance(node, ast.AnnAssign):
+                if (
+                    isinstance(node.target, ast.Name)
+                    and node.value is not None
+                ):
+                    module_projection_seed.note_projection_name_alias(
+                        node.target.id, node.value
+                    )
+            elif isinstance(node, ast.Expr) and isinstance(node.value, ast.NamedExpr):
+                if isinstance(node.value.target, ast.Name):
+                    module_projection_seed.note_projection_name_alias(
+                        node.value.target.id, node.value.value
+                    )
         for fn in functions:
             fn_param_names = frozenset(_function_param_names(fn))
             seeded = _RequestStateAliasEnv.seed(param_names=fn_param_names)
@@ -5655,6 +5846,9 @@ def analyze_bypass_authority_unit(
     # semantics. Parameters of helpers/middleware in other functions remain
     # unresolved until an interprocedural caller-provenance theorem establishes
     # their origin.
+    projection_exports = _module_projection_export_map(
+        trees, import_roots=import_roots
+    )
     all_writes: list[StateAttributeWrite] = []
     for path, tree in sorted(trees.items()):
         all_writes.extend(
@@ -5665,6 +5859,9 @@ def analyze_bypass_authority_unit(
                     handler.name if handler is not None and path == entry else None
                 ),
                 callee_resolver=callee_resolver,
+                trees=trees,
+                import_roots=import_roots,
+                projection_exports=projection_exports,
             )
         )
     reads = _collect_state_reads(handler if handler is not None else entry_tree)

@@ -2425,7 +2425,352 @@ def handler(request, bypass_filter=False):
         assert findings[0].reason != "source_proved_server_authority_write"
 
 
+def test_fourth_pass_shared_peel_exec_shapes_never_authorized() -> None:
+    """Shared Call peel: .get/.pop/next(iter)/getattr packs/operator.call/MPT."""
+
+    for routes in (
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {"e":exec}.get("e")("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    [exec].pop()("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {exec}.pop()("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    next(iter([exec]))("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import builtins
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    [getattr(builtins,"exec")][0]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import builtins
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    (getattr(builtins, "exec") if True else len)("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import builtins
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    (False or getattr(builtins, "exec"))("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    operator.call(exec, "helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    vars().get("exec")("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import builtins
+from types import MappingProxyType
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    MappingProxyType(vars(builtins))["exec"]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import builtins
+from operator import itemgetter as ig
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    ig("exec")(vars(builtins))("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    (x := {"e": exec}.get("e"))("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_fourth_pass_identity_construction_peels_never_authorized() -> None:
+    """attrgetter/getitem/methodcaller/partial/getattr(__call__)/type.__new__."""
+
+    for routes in (
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Holder:
+        class Mut:
+            def __init__(self):
+                helpers.write_state = evil
+    operator.attrgetter("Mut")(Holder)()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from operator import attrgetter as ag
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Holder:
+        class Mut:
+            def __init__(self):
+                helpers.write_state = evil
+    ag("Mut")(Holder)()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    {"Mut":Mut}.get("Mut")()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    d = {"Mut": Mut}
+    d.get("Mut")()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    {}.get("missing", Mut)()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    getattr(Mut,"__call__")()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    operator.attrgetter("__call__")(Mut)()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    operator.methodcaller("__call__")(Mut)()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    operator.getitem({"Mut": Mut}, "Mut")()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import functools
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    functools.partial(Mut)()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    type.__new__(type, "C", (Base,), {})
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    object.__class__.__new__(type, "C", (Base,), {})
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_fourth_pass_cross_module_proxy_adapter_never_authorized() -> None:
+    """``from helpers import Proxy`` after ``Proxy = MappingProxyType``."""
+
+    files = {
+        "app/helpers.py": """
+from types import MappingProxyType
+Proxy = MappingProxyType
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip(),
+        "app/routes.py": """
+from helpers import Proxy
+import helpers
+def handler(request, bypass_filter=False):
+    s = Proxy({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""".strip(),
+    }
+    findings = analyze_bypass_authority_unit(
+        files,
+        entry_path="app/routes.py",
+        function_name="handler",
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope(
+            "app/helpers.py",
+            "app/routes.py",
+            import_roots=("app",),
+        ),
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_fourth_pass_module_annassign_adapter_never_authorized() -> None:
+    """Module AnnAssign ``Proxy: object = MPT`` seeds adapter aliases."""
+
+    findings = _unit(
+        """
+import helpers
+from types import MappingProxyType as MPT
+Proxy: object = MPT
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    s = Proxy({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
 def test_persistent_version_bumped_for_executed_expr_closure() -> None:
     """Cache / semantic versions bump with PASS-semantics change."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.55.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.56.0"
