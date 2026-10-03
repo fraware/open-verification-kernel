@@ -1843,20 +1843,15 @@ def _collect_writes_in_function(
                     control_dependent=control_dependent,
                 )
                 return
+            # Only residual when a known callable product is packed into a
+            # non-Name store. Ordinary BoolOp value joins (``flag or cfg``)
+            # are not callable-product surfaces.
             closures, unknown = _callable_products_from_expr(value)
             if closures and (
                 unknown
                 or any(
                     _closure_is_residual_escape(item) for item in closures
                 )
-            ):
-                _record_escape(
-                    value,
-                    ast.unparse(value),
-                    control_dependent=control_dependent,
-                )
-            elif unknown and isinstance(
-                value, (ast.Call, ast.IfExp, ast.BoolOp, ast.NamedExpr)
             ):
                 _record_escape(
                     value,
@@ -2285,6 +2280,10 @@ def _collect_writes_in_function(
         found: list[_ReturnedClosure] = []
         seen: set[int] = set()
         unknown = False
+        # Unresolved choice arms only fail closed when another arm already
+        # produced a known callable (``mid() if c else unknown``). Plain
+        # ``flag or settings.ALLOW`` must not become a callable-product escape.
+        pending_unknown_arm = False
 
         def _add(closure: _ReturnedClosure) -> None:
             if id(closure.node) in seen:
@@ -2293,7 +2292,7 @@ def _collect_writes_in_function(
             found.append(closure)
 
         def _walk(node: ast.AST, *, in_choice: bool = False) -> None:
-            nonlocal unknown
+            nonlocal unknown, pending_unknown_arm
             if isinstance(node, ast.NamedExpr):
                 _walk(node.value, in_choice=in_choice)
                 return
@@ -2321,10 +2320,8 @@ def _collect_writes_in_function(
                 if node.id in name_unknown_callables:
                     unknown = True
                     return
-                # Unresolved Name is unknown only inside IfExp/BoolOp arms so
-                # ordinary ``return value`` does not blanket-escape.
                 if in_choice:
-                    unknown = True
+                    pending_unknown_arm = True
                 return
             if isinstance(node, ast.Call):
                 returned = call_returned_closures.get(id(node), [])
@@ -2346,7 +2343,7 @@ def _collect_writes_in_function(
                     if _local_callables_for_name(node.func.id):
                         return
                 if in_choice:
-                    unknown = True
+                    pending_unknown_arm = True
                 return
             if isinstance(
                 node,
@@ -2369,9 +2366,11 @@ def _collect_writes_in_function(
                 return
             # Attribute / Subscript / other dynamic surfaces in choice arms.
             if in_choice:
-                unknown = True
+                pending_unknown_arm = True
 
         _walk(expr)
+        if pending_unknown_arm and found:
+            unknown = True
         return found, unknown
 
     def _returned_closures_from_expr(
