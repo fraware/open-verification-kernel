@@ -1624,6 +1624,298 @@ def handler(request, bypass_filter=False):
     assert findings[0].reason != "source_proved_server_authority_write"
 
 
+def test_aliased_base_init_subclass_never_authorized() -> None:
+    """``Alias = Base; class C(Alias)`` must observe ``__init_subclass__``."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    Alias = Base
+    class C(Alias):
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_builtins_exec_as_run_never_authorized() -> None:
+    """``from builtins import exec as run; run(...)`` fail closed."""
+
+    findings = _unit(
+        """
+import helpers
+from builtins import exec as run
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    run("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_builtins_dot_exec_never_authorized() -> None:
+    """``builtins.exec(...)`` fail closed."""
+
+    findings = _unit(
+        """
+import helpers
+import builtins
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    builtins.exec("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_getattr_builtins_exec_never_authorized() -> None:
+    """``getattr(builtins, "exec")(...)`` fail closed."""
+
+    findings = _unit(
+        """
+import helpers
+import builtins
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    getattr(builtins, "exec")("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_types_as_t_new_class_never_authorized() -> None:
+    """``import types as t; t.new_class(..., body)`` observes exec_body."""
+
+    findings = _unit(
+        """
+import helpers
+import types as t
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def body(ns):
+        helpers.write_state = evil
+    t.new_class("C", (), {}, body)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_assert_msg_walrus_closure_never_authorized() -> None:
+    """Assert.msg walrus callable product must be observed before ``fn()``."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def mid():
+        def poison():
+            helpers.write_state = evil
+        return poison
+    try:
+        assert False, (fn := mid())
+    except AssertionError:
+        pass
+    fn()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_raise_cause_walrus_closure_never_authorized() -> None:
+    """Raise.cause walrus callable product must be observed before ``fn()``."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def mid():
+        def poison():
+            helpers.write_state = evil
+        return poison
+    try:
+        raise Exception("x") from (fn := mid())
+    except Exception:
+        pass
+    fn()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_for_attr_export_rebind_never_authorized() -> None:
+    """``for helpers.write_state in [evil]`` must poison later helper resolve."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    for helpers.write_state in [evil]:
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_with_as_attr_export_rebind_never_authorized() -> None:
+    """``with CM() as helpers.write_state`` must poison later helper resolve."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class CM:
+        def __enter__(self):
+            return evil
+        def __exit__(self, *a):
+            return False
+    with CM() as helpers.write_state:
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_mut_init_ifexp_test_never_authorized() -> None:
+    """Local ``Mut().__init__`` identity poison in IfExp.test must observe."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    if (False if Mut() else False):
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_mut_init_call_func_never_authorized() -> None:
+    """Local ``Mut()`` in Call.func IfExp arm must observe ``__init__``."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    (len if Mut() else len)("x")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_mut_init_lambda_default_never_authorized() -> None:
+    """Local ``Mut()`` in lambda default must observe ``__init__``."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    f = lambda x=Mut(): x
+    f()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_nested_local_import_affects_closed_world() -> None:
+    """Nested ``import other.missing`` must make closed-world incomplete."""
+
+    from ovk.compilers.authorization.bypass_authority import (
+        _evaluate_closed_world,
+    )
+
+    files = {
+        "app/helpers.py": _helpers_source(),
+        "app/routes.py": """
+import helpers
+def handler(request, bypass_filter=False):
+    import other.missing
+    request.state.bypass_filter = True
+    return request.state.bypass_filter
+""".strip(),
+        "app/other.py": "Y = 1\n",
+    }
+    cw = _evaluate_closed_world(
+        files,
+        scope_proof=_scope(
+            "app/helpers.py",
+            "app/routes.py",
+            "app/other.py",
+            import_roots=("app",),
+        ),
+    )
+    assert cw.complete is False
+    assert any("other.missing" in item for item in cw.unresolvable_imports)
+
+
 def test_positive_if_bool_config_still_authorized() -> None:
     """Spot-check: pure ``if bool(config_flag)`` still authorizes."""
 
@@ -1679,4 +1971,4 @@ def handler(request, bypass_filter=False):
 def test_persistent_version_bumped_for_executed_expr_closure() -> None:
     """Cache / semantic versions bump with PASS-semantics change."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.52.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.53.0"

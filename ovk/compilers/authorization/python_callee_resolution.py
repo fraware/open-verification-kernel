@@ -47,7 +47,7 @@ from ovk.compilers.authorization.python_import_space import (
     normalize_path,
 )
 
-_IMPLEMENTATION_VERSION = "0.18.0"
+_IMPLEMENTATION_VERSION = "0.19.0"
 _MAX_IMPORT_FOLLOW_DEPTH = 8
 
 BindingKind = Literal["function", "import_name", "import_module", "rebound"]
@@ -861,6 +861,10 @@ def _getattr_static_name(call: ast.Call) -> str | None:
     return _static_str(call.args[1])
 
 
+_EXEC_EVAL_COMPILE_NAMES = frozenset({"exec", "eval", "compile"})
+_TYPES_NEW_CLASS_NAME = "new_class"
+
+
 def _lambdas_packed_as_callee(expr: ast.AST) -> list[ast.Lambda]:
     """Lambdas reachable as a packed/projected callee expression.
 
@@ -1522,6 +1526,10 @@ def _build_identity_scanner(
     class_registry: dict[str, ast.ClassDef] = {}
     # Local name → class name for ``m = Mut()`` instance aliases.
     instance_class_of: dict[str, str] = {}
+    # Import aliases of exec/eval/compile (incl. ``from builtins import exec as run``).
+    exec_eval_compile_aliases: set[str] = set()
+    # Import aliases of types.new_class (``from types import new_class as nc``).
+    new_class_aliases: set[str] = set()
 
     def _note_export(module_path: str, name: str) -> None:
         accum.export_mutations.setdefault(module_path, set()).add(name)
@@ -2055,6 +2063,12 @@ def _build_identity_scanner(
             )
             for alias in node.names:
                 local = alias.asname or alias.name
+                if alias.name in _EXEC_EVAL_COMPILE_NAMES:
+                    # ``from builtins import exec as run``.
+                    exec_eval_compile_aliases.add(local)
+                elif alias.name == _TYPES_NEW_CLASS_NAME:
+                    # ``from types import new_class as nc``.
+                    new_class_aliases.add(local)
                 if module_path is None:
                     env[local] = _IdentityPointsTo.unknown_only()
                 else:
@@ -2703,6 +2717,25 @@ def _build_identity_scanner(
             ):
                 fn_node = binding.function_node
         if fn_node is None:
+            # Local class construction: ``Mut()`` runs ``__new__`` / ``__init__``
+            # (identity poison in those bodies must observe, #173).
+            cls_node = _lookup_class(func.id, local_classes)
+            if cls_node is not None:
+                for arg in call.args:
+                    _eval_expr(arg, env, path=path)
+                for kw in call.keywords:
+                    _eval_expr(kw.value, env, path=path)
+                _scan_named_methods_on_class(
+                    cls_node,
+                    frozenset({"__new__", "__init__"}),
+                    path=path,
+                    index=index,
+                    env=env,
+                    visited_fns=visited_fns,
+                    local_fns=local_fns,
+                    local_classes=local_classes,
+                )
+                return
             # Unresolved / imported callee: still evaluate *all* actuals so
             # keyword / **kwargs side effects cannot hide identity mutations
             # (``TypeVar('T', bound=poison())``, ``OrderedDict(a=poison())``).
@@ -2831,7 +2864,12 @@ def _build_identity_scanner(
                         local_classes=local_classes,
                     ):
                         observed_any = True
-            elif not isinstance(base, ast.Name):
+                elif base.id in env:
+                    # Locally bound alias (``Alias = Base`` / unknown) may still
+                    # run ``__init_subclass__`` — fail closed. Bare builtins
+                    # like ``object`` are not env-bound.
+                    accum.unsupported = True
+            else:
                 # Dynamic base may run ``__init_subclass__`` — fail closed.
                 accum.unsupported = True
         del observed_any
@@ -2848,25 +2886,70 @@ def _build_identity_scanner(
     ) -> None:
         if visited_fns is None:
             visited_fns = set()
+
+        def _call_targets_exec_eval_compile() -> bool:
+            func = call.func
+            if isinstance(func, ast.Name):
+                if func.id in _EXEC_EVAL_COMPILE_NAMES:
+                    return True
+                if func.id in exec_eval_compile_aliases:
+                    return True
+                # Module-level ``from builtins import exec as run``.
+                binding = bindings_by_path.get(path, {}).get(func.id)
+                if (
+                    binding is not None
+                    and binding.kind == "import_name"
+                    and binding.imported_name in _EXEC_EVAL_COMPILE_NAMES
+                ):
+                    return True
+                return any(
+                    isinstance(atom, CallableObject)
+                    and atom.export_name in _EXEC_EVAL_COMPILE_NAMES
+                    for atom in _lookup_name(func.id, env, path=path).known
+                )
+            if isinstance(func, ast.Attribute) and func.attr in _EXEC_EVAL_COMPILE_NAMES:
+                return True
+            if isinstance(func, ast.Call):
+                attr = _getattr_static_name(func)
+                if attr in _EXEC_EVAL_COMPILE_NAMES:
+                    return True
+            return False
+
+        def _call_targets_types_new_class() -> bool:
+            func = call.func
+            if isinstance(func, ast.Name):
+                if func.id == _TYPES_NEW_CLASS_NAME or func.id in new_class_aliases:
+                    return True
+                binding = bindings_by_path.get(path, {}).get(func.id)
+                if (
+                    binding is not None
+                    and binding.kind == "import_name"
+                    and binding.imported_name == _TYPES_NEW_CLASS_NAME
+                ):
+                    return True
+                return any(
+                    isinstance(atom, CallableObject)
+                    and atom.export_name == _TYPES_NEW_CLASS_NAME
+                    for atom in _lookup_name(func.id, env, path=path).known
+                )
+            if isinstance(func, ast.Attribute) and func.attr == _TYPES_NEW_CLASS_NAME:
+                return True
+            if isinstance(func, ast.Call):
+                attr = _getattr_static_name(func)
+                if attr == _TYPES_NEW_CLASS_NAME:
+                    return True
+            return False
+
         # Request-time exec/eval/compile of string/code can mutate helpers —
-        # fail closed (args already observed below via escape path).
-        if isinstance(call.func, ast.Name) and call.func.id in {
-            "exec",
-            "eval",
-            "compile",
-        }:
+        # fail closed (bare Name, builtins.exec, import alias, getattr).
+        if _call_targets_exec_eval_compile():
             for arg in call.args:
                 _eval_expr(arg, env, path=path)
             for kw in call.keywords:
                 _eval_expr(kw.value, env, path=path)
             accum.unsupported = True
             return
-        if (
-            isinstance(call.func, ast.Attribute)
-            and call.func.attr == "new_class"
-            and isinstance(call.func.value, ast.Name)
-            and call.func.value.id == "types"
-        ) or (isinstance(call.func, ast.Name) and call.func.id == "new_class"):
+        if _call_targets_types_new_class():
             # types.new_class(..., exec_body=body) — observe exec_body or fail closed.
             for arg in call.args:
                 _eval_expr(arg, env, path=path)
@@ -3182,6 +3265,16 @@ def _build_identity_scanner(
                             lambda_bindings.pop(target.id, None)
                             method_bindings.pop(target.id, None)
                             instance_class_of[target.id] = stmt.value.func.id
+                        elif isinstance(stmt.value, ast.Name):
+                            # ``Alias = Base`` so ``class C(Alias)`` observes
+                            # ``Base.__init_subclass__`` (Unknown > false PASS).
+                            lambda_bindings.pop(target.id, None)
+                            method_bindings.pop(target.id, None)
+                            instance_class_of.pop(target.id, None)
+                            src_cls = _lookup_class(stmt.value.id, active_classes)
+                            if src_cls is not None:
+                                active_classes[target.id] = src_cls
+                                class_registry[target.id] = src_cls
                         else:
                             lambda_bindings.pop(target.id, None)
                             method_bindings.pop(target.id, None)
@@ -3290,13 +3383,19 @@ def _build_identity_scanner(
                 continue
             if isinstance(stmt, (ast.For, ast.AsyncFor)):
                 # Evaluate iter for container escape / call effects; loop target
-                # is unmodeled. Iterable always executes before zero-iteration
-                # join (#173). For-else walks from the pre-loop env (like
-                # while/else) so body-mutated aliases cannot drop else effects.
+                # is unmodeled for Name binds, but Attribute/subscript targets
+                # mutate exports (``for helpers.write_state in [evil]``) (#173).
+                # Iterable always executes before zero-iteration join. For-else
+                # walks from the pre-loop env (like while/else) so body-mutated
+                # aliases cannot drop else effects.
                 _eval_expr(stmt.iter, env, path=path)
                 env_pre = _copy_env(env)
-                _bind_target_names(
-                    stmt.target, _IdentityPointsTo.unknown_only(), env
+                _scan_assign_target(
+                    stmt.target,
+                    path=path,
+                    index=index,
+                    env=env,
+                    value_points=_IdentityPointsTo.unknown_only(),
                 )
                 env_body = _copy_env(env)
                 _scan_stmts(
@@ -3358,14 +3457,18 @@ def _build_identity_scanner(
                     subject = _eval_expr(item.context_expr, env, path=path)
                     if item.optional_vars is not None:
                         # Unmodeled context-manager projection: escape subject
-                        # identity and bind the target as unknown.
+                        # identity and bind Name targets as unknown. Attribute
+                        # / subscript as-targets mutate exports
+                        # (``with CM() as helpers.write_state``) (#173).
                         _escape_if_tracked(subject)
                         names = _collect_store_names(item.optional_vars)
                         bound_as.update(names)
-                        _bind_target_names(
+                        _scan_assign_target(
                             item.optional_vars,
-                            _IdentityPointsTo.unknown_only(),
-                            env,
+                            path=path,
+                            index=index,
+                            env=env,
+                            value_points=_IdentityPointsTo.unknown_only(),
                         )
                 if bound_as and _with_as_targets_mutated(stmt.body, bound_as):
                     # Opaque with-as alias mutated — cannot prove export/callable

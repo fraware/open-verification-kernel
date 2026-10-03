@@ -442,7 +442,7 @@ async def handler(request, bypass_filter: bool = False, user = Depends(get_curre
 def test_persistent_state_round_trip_and_version_invalidation(tmp_path) -> None:
     """13. Persistent-state round trip and version invalidation."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.52.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.53.0"
 
     trusted_helpers = """
 def write_state(state, value):
@@ -1895,6 +1895,125 @@ def handler(request, bypass_filter=False):
     finally:
         pass
     helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_ifexp_subscript_store_after_trusted_never_authorized() -> None:
+    """Subscript store on IfExp state base must use classify() like attrs."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False, flag=True):
+    request.state.bypass_filter = True
+    (request.state if flag else request)["bypass_filter"] = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_boolop_subscript_store_after_trusted_never_authorized() -> None:
+    """Subscript store on BoolOp state base must not omit the client write."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False, flag=True):
+    request.state.bypass_filter = True
+    (flag and request.state)["bypass_filter"] = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_namedexpr_subscript_store_after_trusted_never_authorized() -> None:
+    """Subscript store on NamedExpr state base must not omit the client write."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    (s := request.state)["bypass_filter"] = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_dict_get_projection_write_never_authorized() -> None:
+    """``{\"s\": request.state}.get(\"s\").field = client`` must not authorize."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = {"s": request.state}.get("s")
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_dict_pop_projection_write_never_authorized() -> None:
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = {"s": request.state}.pop("s")
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_operator_getitem_projection_write_never_authorized() -> None:
+    findings = _unit(
+        """
+import helpers
+import operator
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = operator.getitem({"s": request.state}, "s")
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_itemgetter_projection_write_never_authorized() -> None:
+    findings = _unit(
+        """
+import helpers
+import operator
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = operator.itemgetter("s")({"s": request.state})
+    s.bypass_filter = bypass_filter
     return request.state.bypass_filter
 """
     )

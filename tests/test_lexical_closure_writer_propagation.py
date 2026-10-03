@@ -1733,5 +1733,98 @@ def handler(request, bypass_filter=False):
     _never_authorized(findings)
 
 
+def test_init_attr_pack_closure_call_never_authorized() -> None:
+    """``Box().__init__`` packs ``self.fn = poison`` then ``Box().fn()``."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+    class Box:
+        def __init__(self):
+            self.fn = poison
+    Box().fn()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_property_returned_closure_call_never_authorized() -> None:
+    """``@property`` returning a governed callable then call must not authorize."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+    class Box:
+        @property
+        def fn(self):
+            return poison
+    Box().fn()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_cached_property_returned_closure_call_never_authorized() -> None:
+    """``@cached_property`` returning a governed callable then call."""
+
+    findings = _unit(
+        """
+import helpers
+from functools import cached_property
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+    class Box:
+        @cached_property
+        def fn(self):
+            return poison
+    Box().fn()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_decorator_rebinds_name_to_poison_never_authorized() -> None:
+    """``@deco`` returning inline poison must rebind the def Name."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+    def deco(f):
+        return poison
+    @deco
+    def fn():
+        pass
+    fn()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
 def test_persistent_version_bumped_for_lexical_closure() -> None:
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.52.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.53.0"
