@@ -111,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.31.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.32.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -1402,6 +1402,15 @@ def _collect_writes_in_function(
     depth: int = 0,
     enclosing_alias_envs: tuple[_RequestStateAliasEnv, ...] = (),
     enclosing_origin_states: tuple[AliasState, ...] = (),
+    enclosing_local_classes: tuple[Mapping[str, ast.ClassDef], ...] = (),
+    enclosing_callable_maps: tuple[
+        tuple[
+            Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef],
+            Mapping[str, ast.Lambda],
+            Mapping[str, Sequence[_ReturnedClosure]],
+        ],
+        ...,
+    ] = (),
 ) -> tuple[list[StateAttributeWrite], list[_ReturnedClosure], bool]:
     """Collect state writes under statement-order alias tracking.
 
@@ -1726,14 +1735,56 @@ def _collect_writes_in_function(
                 closure.free_classifications
             )
 
+    def _lookup_local_class(name: str) -> ast.ClassDef | None:
+        """Resolve a local class in this frame or an enclosing lexical frame."""
+
+        cls = local_classes.get(name)
+        if cls is not None:
+            return cls
+        for env in reversed(enclosing_local_classes):
+            cls = env.get(name)
+            if cls is not None:
+                return cls
+        return None
+
+    def _ensure_call_callable_products(
+        call: ast.Call,
+    ) -> tuple[list[_ReturnedClosure], bool]:
+        """Return/cache callable products for ``call``, including ``Cls()``.
+
+        Nested ``return Cls()`` / ``obj = Cls(); obj()`` / ``Cls()()`` must see
+        governed ``__call__`` even when the constructor is not a followed
+        function frame (Unknown > false PASS).
+        """
+
+        returned = list(call_returned_closures.get(id(call), []))
+        unknown = id(call) in call_returned_unknown
+        if returned or unknown:
+            return returned, unknown
+        if isinstance(call.func, ast.Name):
+            cls = _lookup_local_class(call.func.id)
+            if cls is not None:
+                method = _governed_class_method(cls, "__call__")
+                if method is not None:
+                    closure = _snapshot_returned_closure(method)
+                    call_returned_closures[id(call)] = [closure]
+                    nested_free_vars[id(closure.node)] = closure.free_vars
+                    nested_default_captures[id(closure.node)] = dict(
+                        closure.default_captures
+                    )
+                    returned_closure_captures[id(closure.node)] = dict(
+                        closure.free_classifications
+                    )
+                    return [closure], False
+        return [], False
+
     def _bind_call_product_to_name(name: str, call: ast.Call) -> bool:
         """Bind Name to returned closures or async awaitables from ``call``."""
 
-        returned = call_returned_closures.get(id(call))
-        unknown = id(call) in call_returned_unknown
+        returned, unknown = _ensure_call_callable_products(call)
         if returned or unknown:
             _install_returned_closures(
-                name, returned or [], unknown=unknown
+                name, returned, unknown=unknown
             )
             return True
         awaitable = call_awaitable_callees.get(id(call))
@@ -1759,7 +1810,18 @@ def _collect_writes_in_function(
         if returned:
             return [item.node for item in returned]
         single = _local_callable_for_name(name)
-        return [single] if single is not None else []
+        if single is not None:
+            return [single]
+        # Methods / nested frames may call outer nested defs (``return mid()``
+        # from ``__enter__``) — resolve through the lexical callable stack.
+        for nested, lambdas, returned_map in reversed(enclosing_callable_maps):
+            if name in returned_map:
+                return [item.node for item in returned_map[name]]
+            if name in nested:
+                return [nested[name]]
+            if name in lambdas:
+                return [lambdas[name]]
+        return []
 
     def _governed_local_callables_from_expr(
         expr: ast.AST,
@@ -1796,7 +1858,7 @@ def _collect_writes_in_function(
                     _add(callee)
                 return
             if isinstance(node, ast.Call):
-                for item in call_returned_closures.get(id(node), []):
+                for item in _ensure_call_callable_products(node)[0]:
                     _add(item.node)
                 return
             if isinstance(node, ast.IfExp):
@@ -1826,6 +1888,67 @@ def _collect_writes_in_function(
 
     def _expr_packs_governed_local_callable(expr: ast.AST) -> bool:
         return bool(_governed_local_callables_from_expr(expr))
+
+    def _bind_callable_products_to_name(name: str, value: ast.AST) -> None:
+        """Install callable products from ``value`` onto ``name`` when known."""
+
+        if isinstance(value, ast.Name):
+            if value.id in name_unknown_callables:
+                name_unknown_callables.add(name)
+            if value.id in name_returned_closures:
+                _install_returned_closures(
+                    name,
+                    name_returned_closures[value.id],
+                    unknown=value.id in name_unknown_callables,
+                )
+                return
+            if value.id in local_nested:
+                local_nested[name] = local_nested[value.id]
+                local_lambdas.pop(name, None)
+                return
+            if value.id in local_lambdas:
+                local_lambdas[name] = local_lambdas[value.id]
+                local_nested.pop(name, None)
+                return
+            return
+        closures, unknown = _callable_products_from_expr(value)
+        if closures or unknown:
+            _install_returned_closures(name, closures, unknown=unknown)
+            return
+        if isinstance(value, ast.Call):
+            _bind_call_product_to_name(name, value)
+
+    def _apply_match_pattern_callable_bindings(
+        pattern: ast.AST,
+        matched: ast.AST,
+    ) -> None:
+        """Bind MatchAs / sequence peels to callable products from ``matched``."""
+
+        def _apply(pat: ast.AST, value: ast.AST) -> None:
+            if isinstance(pat, ast.MatchAs):
+                if pat.name:
+                    _bind_callable_products_to_name(pat.name, value)
+                if pat.pattern is not None:
+                    _apply(pat.pattern, value)
+                return
+            if isinstance(pat, ast.MatchSequence) and isinstance(
+                value, (ast.List, ast.Tuple)
+            ):
+                # Literal sequence subjects peel element-wise when lengths
+                # align; starred rest stays residual (container packing).
+                if any(isinstance(item, ast.MatchStar) for item in pat.patterns):
+                    return
+                if len(pat.patterns) != len(value.elts):
+                    return
+                for sub_pat, elt in zip(pat.patterns, value.elts):
+                    nested = elt.value if isinstance(elt, ast.Starred) else elt
+                    _apply(sub_pat, nested)
+                return
+            if isinstance(pat, ast.MatchOr):
+                for alt in pat.patterns:
+                    _apply(alt, value)
+
+        _apply(pattern, matched)
 
     def _note_callable_name_alias(
         target: ast.AST,
@@ -2138,6 +2261,16 @@ def _collect_writes_in_function(
             depth=depth + 1,
             enclosing_alias_envs=enclosing_alias_envs + (request_aliases.snapshot(),),
             enclosing_origin_states=enclosing_origin_states + (alias_state.snapshot(),),
+            enclosing_local_classes=enclosing_local_classes
+            + (dict(local_classes),),
+            enclosing_callable_maps=enclosing_callable_maps
+            + (
+                (
+                    dict(local_nested),
+                    dict(local_lambdas),
+                    {key: list(value) for key, value in name_returned_closures.items()},
+                ),
+            ),
         )
         if control_dependent:
             collected = [
@@ -2259,6 +2392,28 @@ def _collect_writes_in_function(
                 return callees[0]
         return _local_callable_for_name(attr_name)
 
+    def _local_class_method_for_attr(
+        attr_expr: ast.Attribute,
+    ) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+        """Resolve ``Cls.method`` / ``Cls().method`` against local classes."""
+
+        cls: ast.ClassDef | None = None
+        if isinstance(attr_expr.value, ast.Name):
+            cls = _lookup_local_class(attr_expr.value.id)
+        elif isinstance(attr_expr.value, ast.Call) and isinstance(
+            attr_expr.value.func, ast.Name
+        ):
+            cls = _lookup_local_class(attr_expr.value.func.id)
+        if cls is None:
+            return None
+        for child in cls.body:
+            if (
+                isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and child.name == attr_expr.attr
+            ):
+                return child
+        return None
+
     def _governed_class_method(
         cls: ast.ClassDef,
         method_name: str,
@@ -2268,10 +2423,31 @@ def _collect_writes_in_function(
                 isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
                 and child.name == method_name
             ):
+                # Protocol / callable entry points may return nested governed
+                # closures without free vars of their own (``def __enter__`` /
+                # ``def __call__`` factories). Always follow these methods on
+                # local classes; empty bodies remain no-ops.
+                if method_name in {"__call__", "__enter__", "__aenter__"}:
+                    return child
                 if _closure_carries_governed_identity(child) or bool(
                     nested_free_vars.get(id(child), _free_var_names(child))
                 ):
                     return child
+                # Nested governed defs inside the method still force follow.
+                for nested in ast.walk(child):
+                    if nested is child:
+                        continue
+                    if isinstance(
+                        nested, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+                    ) and (
+                        _closure_carries_governed_identity(nested)
+                        or bool(
+                            nested_free_vars.get(
+                                id(nested), _free_var_names(nested)
+                            )
+                        )
+                    ):
+                        return child
                 return None
         return None
 
@@ -2379,21 +2555,15 @@ def _collect_writes_in_function(
                     pending_unknown_arm = True
                 return
             if isinstance(node, ast.Call):
-                returned = call_returned_closures.get(id(node), [])
+                returned, call_unknown = _ensure_call_callable_products(node)
                 for item in returned:
                     _add(item)
-                if id(node) in call_returned_unknown:
+                if call_unknown or id(node) in call_returned_unknown:
                     unknown = True
                     return
                 if returned:
                     return
                 if isinstance(node.func, ast.Name):
-                    cls = local_classes.get(node.func.id)
-                    if cls is not None:
-                        method = _governed_class_method(cls, "__call__")
-                        if method is not None:
-                            _add(_snapshot_returned_closure(method))
-                            return
                     # Followed local with no callable product (e.g. returns int).
                     if _local_callables_for_name(node.func.id):
                         return
@@ -2442,15 +2612,22 @@ def _collect_writes_in_function(
         method_names: Sequence[str],
         control_dependent: bool,
         execute_async_body: bool,
-    ) -> bool:
-        """Follow governed local class methods invoked by protocol entry."""
+    ) -> tuple[list[_ReturnedClosure], bool]:
+        """Follow governed local class protocol methods; return enter products.
+
+        ``with CM() as fn`` / ``async with CM() as fn`` bind ``__enter__`` /
+        ``__aenter__`` return values. Returned governed closures must install
+        on the ``as`` name (Unknown > false PASS).
+        """
 
         if not isinstance(expr, ast.Call) or not isinstance(expr.func, ast.Name):
-            return False
-        cls = local_classes.get(expr.func.id)
+            return [], False
+        cls = _lookup_local_class(expr.func.id)
         if cls is None:
-            return False
-        followed = False
+            return [], False
+        products: list[_ReturnedClosure] = []
+        unknown = False
+        seen: set[int] = set()
         for method_name in method_names:
             method = _governed_class_method(cls, method_name)
             if method is None:
@@ -2470,8 +2647,14 @@ def _collect_writes_in_function(
                 control_dependent=control_dependent,
                 execute_async_body=execute_async_body,
             ):
-                followed = True
-        return followed
+                for item in call_returned_closures.get(id(synthetic), []):
+                    if id(item.node) in seen:
+                        continue
+                    seen.add(id(item.node))
+                    products.append(item)
+                if id(synthetic) in call_returned_unknown:
+                    unknown = True
+        return products, unknown
 
     def _try_interprocedural(
         call: ast.Call,
@@ -2520,10 +2703,10 @@ def _collect_writes_in_function(
                             followed_any = True
                     return followed_any
 
-        # Chained call products: ``outer()()`` where ``outer`` returned a
-        # nested callable (precise follow; Unknown > omit).
+        # Chained call products: ``outer()()`` / ``Cls()()`` where the inner
+        # Call yielded a nested callable or governed ``__call__``.
         if isinstance(call.func, ast.Call):
-            returned = call_returned_closures.get(id(call.func), [])
+            returned, _chained_unknown = _ensure_call_callable_products(call.func)
             if returned:
                 followed_any = False
                 for item in returned:
@@ -2540,6 +2723,9 @@ def _collect_writes_in_function(
         # closed over outer governed cells and was registered at class body.
         # Also ``fn.__call__()`` when ``fn`` is a represented local / returned
         # closure Name (direct ``fn()`` theorem parity).
+        # Local class factories (``Cls.make()`` / ``Cls().run()``) always
+        # follow — methods may return nested governed closures with no free
+        # vars of their own (classmethod/staticmethod factories).
         if isinstance(call.func, ast.Attribute):
             if (
                 call.func.attr == "__call__"
@@ -2557,6 +2743,14 @@ def _collect_writes_in_function(
                         ):
                             followed_any = True
                     return followed_any
+            class_method = _local_class_method_for_attr(call.func)
+            if class_method is not None:
+                return _follow_local_callable_node(
+                    class_method,
+                    call=call,
+                    control_dependent=control_dependent,
+                    execute_async_body=execute_async_body,
+                )
             callee = _local_callable_for_name(call.func.attr)
             if callee is not None and _closure_carries_governed_identity(callee):
                 return _follow_local_callable_node(
@@ -2809,7 +3003,7 @@ def _collect_writes_in_function(
                 else _governed_local_callables_from_expr(node.func)
             )
             chained_func_callees = (
-                call_returned_closures.get(id(node.func), [])
+                _ensure_call_callable_products(node.func)[0]
                 if isinstance(node.func, ast.Call)
                 else []
             )
@@ -2820,6 +3014,8 @@ def _collect_writes_in_function(
                     and isinstance(node.func.value, ast.Name)
                     and bool(_local_callables_for_name(node.func.value.id))
                 ):
+                    attr_governed = True
+                elif _local_class_method_for_attr(node.func) is not None:
                     attr_governed = True
                 else:
                     attr_callee = _local_callable_for_name(node.func.attr)
@@ -2863,7 +3059,7 @@ def _collect_writes_in_function(
             ) or any(
                 any(
                     _closure_is_residual_escape(item)
-                    for item in call_returned_closures.get(id(arg), [])
+                    for item in _ensure_call_callable_products(arg)[0]
                 )
                 for arg in node.args
                 if isinstance(arg, ast.Call)
@@ -3321,7 +3517,7 @@ def _collect_writes_in_function(
                 )
                 # Local class context managers: protocol entry runs
                 # ``__aenter__`` / ``__enter__`` bodies (Unknown > false PASS).
-                _follow_local_class_protocol_methods(
+                enter_products, enter_unknown = _follow_local_class_protocol_methods(
                     item.context_expr,
                     method_names=(
                         ("__aenter__",)
@@ -3355,6 +3551,14 @@ def _collect_writes_in_function(
                         # Opaque with-as projection for callable identity.
                         if identity_session is not None:
                             identity_session.bind_name_unknown(name)
+                        # ``with CM() as fn``: bind ``__enter__`` return products
+                        # so later ``fn()`` follows the governed closure.
+                        if enter_products or enter_unknown:
+                            _install_returned_closures(
+                                name,
+                                enter_products,
+                                unknown=enter_unknown,
+                            )
             if (
                 identity_session is not None
                 and bound_as
@@ -3497,6 +3701,12 @@ def _collect_writes_in_function(
                 # never silently poison subject-capturing aliases.
                 _apply_match_pattern_alias_bindings(
                     request_aliases, case.pattern, statement.subject
+                )
+                # Subject-capturing MatchAs must also carry callable products
+                # (``match mid(): case fn: fn()``) — alias peel alone omits
+                # the writer theorem (Unknown > false PASS).
+                _apply_match_pattern_callable_bindings(
+                    case.pattern, statement.subject
                 )
                 for name in _match_pattern_bound_names(case.pattern):
                     # Value-origin alias state has no request/state lattice;

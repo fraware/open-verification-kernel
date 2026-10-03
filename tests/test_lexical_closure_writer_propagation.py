@@ -1492,5 +1492,246 @@ def handler(request, bypass_filter=False):
     assert findings[0].reason == "source_proved_server_authority_write"
 
 
+def test_match_case_as_binds_returned_closure_never_authorized() -> None:
+    """``match mid(): case fn: fn()`` must follow the subject product."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    def mid():
+        def poison():
+            state.bypass_filter = bypass_filter
+        return poison
+    match mid():
+        case fn:
+            fn()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_with_enter_returns_closure_never_authorized() -> None:
+    """``with CM() as fn`` when ``__enter__`` returns a governed closure."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    class CM:
+        def __enter__(self):
+            def poison():
+                state.bypass_filter = bypass_filter
+            return poison
+        def __exit__(self, *a):
+            return False
+    with CM() as fn:
+        fn()
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "violated"
+    assert findings[0].reason == "client_controlled_bypass_write"
+
+
+def test_with_enter_returns_mid_product_never_authorized() -> None:
+    """``__enter__`` returning ``mid()`` must resolve outer nested callables."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    def mid():
+        def poison():
+            state.bypass_filter = bypass_filter
+        return poison
+    class CM:
+        def __enter__(self):
+            return mid()
+        def __exit__(self, *a):
+            return False
+    with CM() as fn:
+        fn()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_async_with_aenter_returns_closure_never_authorized() -> None:
+    findings = _unit(
+        """
+import helpers
+async def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    class CM:
+        async def __aenter__(self):
+            def poison():
+                state.bypass_filter = bypass_filter
+            return poison
+        async def __aexit__(self, *a):
+            return False
+    async with CM() as fn:
+        fn()
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "violated"
+    assert findings[0].reason == "client_controlled_bypass_write"
+
+
+def test_outer_frame_cls_call_instance_never_authorized() -> None:
+    """Handler-local ``Cls(); obj()`` must follow governed ``__call__``."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    class Cls:
+        def __call__(self):
+            state.bypass_filter = bypass_filter
+    obj = Cls()
+    obj()
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "violated"
+    assert findings[0].reason == "client_controlled_bypass_write"
+
+
+def test_outer_frame_cls_via_mid_return_never_authorized() -> None:
+    """``return Cls()`` from mid must see enclosing local classes."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    class Cls:
+        def __call__(self):
+            state.bypass_filter = bypass_filter
+    def mid():
+        return Cls()
+    fn = mid()
+    fn()
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "violated"
+    assert findings[0].reason == "client_controlled_bypass_write"
+
+
+def test_chained_cls_call_never_authorized() -> None:
+    """``Cls()()`` must follow the constructor's governed ``__call__``."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    class Cls:
+        def __call__(self):
+            state.bypass_filter = bypass_filter
+    Cls()()
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "violated"
+    assert findings[0].reason == "client_controlled_bypass_write"
+
+
+def test_classmethod_factory_returned_closure_never_authorized() -> None:
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    class Cls:
+        @classmethod
+        def make(cls):
+            def poison():
+                state.bypass_filter = bypass_filter
+            return poison
+    fn = Cls.make()
+    fn()
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "violated"
+    assert findings[0].reason == "client_controlled_bypass_write"
+
+
+def test_staticmethod_factory_returned_closure_never_authorized() -> None:
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    class Cls:
+        @staticmethod
+        def make():
+            def poison():
+                state.bypass_filter = bypass_filter
+            return poison
+    fn = Cls.make()
+    fn()
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "violated"
+    assert findings[0].reason == "client_controlled_bypass_write"
+
+
+def test_operator_call_cls_instance_never_authorized() -> None:
+    findings = _unit(
+        """
+import helpers
+import operator
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    class Cls:
+        def __call__(self):
+            state.bypass_filter = bypass_filter
+    operator.call(Cls())
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_typing_cast_cls_instance_never_authorized() -> None:
+    findings = _unit(
+        """
+import helpers
+import typing
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    class Cls:
+        def __call__(self):
+            state.bypass_filter = bypass_filter
+    fn = typing.cast(object, Cls())
+    fn()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
 def test_persistent_version_bumped_for_lexical_closure() -> None:
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.51.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.52.0"
