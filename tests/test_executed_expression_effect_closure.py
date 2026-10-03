@@ -15,6 +15,10 @@ Unknown > false PASS. Held-out FormalPR partitions are not frozen.
 
 from __future__ import annotations
 
+import sys
+
+import pytest
+
 from ovk.compilers.authorization.bypass_authority import (
     ClosedWorldScopeProof,
     analyze_bypass_authority_unit,
@@ -1080,6 +1084,7 @@ def handler(request, bypass_filter=False):
     assert findings[0].reason != "source_proved_server_authority_write"
 
 
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="PEP 695 type aliases require 3.12+")
 def test_type_alias_poison_never_authorized() -> None:
     """``type X = poison()`` evaluates the value at definition."""
 
@@ -1167,6 +1172,7 @@ def handler(request, bypass_filter=False):
     assert findings[0].reason != "source_proved_server_authority_write"
 
 
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="PEP 695 type params require 3.12+")
 def test_pep695_type_param_bound_poison_never_authorized() -> None:
     """PEP 695 ``def nested[T: poison()]`` evaluates the bound."""
 
@@ -1187,7 +1193,6 @@ def handler(request, bypass_filter=False):
     )
     assert findings[0].status == "unknown"
     assert findings[0].reason != "source_proved_server_authority_write"
-
 
 def test_persistent_version_bumped_for_executed_expr_closure() -> None:
     """Cache / semantic versions bump with PASS-semantics change."""

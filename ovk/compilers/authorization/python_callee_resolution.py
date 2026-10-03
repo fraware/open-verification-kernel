@@ -2906,7 +2906,9 @@ def _build_identity_scanner(
                             value_points=None,
                         )
                 continue
-            if isinstance(stmt, ast.TypeAlias):
+            # ast.TypeAlias is 3.12+; gate so 3.10 import-time walk stays valid.
+            type_alias_cls = getattr(ast, "TypeAlias", None)
+            if type_alias_cls is not None and isinstance(stmt, type_alias_cls):
                 # ``type X = poison()`` / ``type X[T: poison()] = ...`` execute
                 # type_params and the value at definition (#173).
                 _eval_type_params(getattr(stmt, "type_params", ()) or (), env, path=path)

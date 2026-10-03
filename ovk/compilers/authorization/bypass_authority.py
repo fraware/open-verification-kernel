@@ -2000,7 +2000,8 @@ def _collect_writes_in_function(
                 identity_session.observe_statement(statement)
             return
 
-        if isinstance(statement, ast.TypeAlias):
+        type_alias_cls = getattr(ast, "TypeAlias", None)
+        if type_alias_cls is not None and isinstance(statement, type_alias_cls):
             # ``type X = expr`` evaluates type_params and value at runtime.
             for param in getattr(statement, "type_params", ()) or ():
                 bound = getattr(param, "bound", None)
