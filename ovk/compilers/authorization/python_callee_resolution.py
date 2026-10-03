@@ -47,7 +47,7 @@ from ovk.compilers.authorization.python_import_space import (
     normalize_path,
 )
 
-_IMPLEMENTATION_VERSION = "0.15.0"
+_IMPLEMENTATION_VERSION = "0.16.0"
 _MAX_IMPORT_FOLLOW_DEPTH = 8
 
 BindingKind = Literal["function", "import_name", "import_module", "rebound"]
@@ -2654,6 +2654,21 @@ def _build_identity_scanner(
                 for default in stmt.args.kw_defaults:
                     if default is not None:
                         _eval_expr(default, env, path=path)
+                # Parameter / return annotations evaluate at definition unless
+                # postponed; omitting them false-PASSes identity (#173).
+                for arg in (
+                    *stmt.args.posonlyargs,
+                    *stmt.args.args,
+                    *stmt.args.kwonlyargs,
+                ):
+                    if arg.annotation is not None:
+                        _eval_expr(arg.annotation, env, path=path)
+                if stmt.args.vararg is not None and stmt.args.vararg.annotation is not None:
+                    _eval_expr(stmt.args.vararg.annotation, env, path=path)
+                if stmt.args.kwarg is not None and stmt.args.kwarg.annotation is not None:
+                    _eval_expr(stmt.args.kwarg.annotation, env, path=path)
+                if stmt.returns is not None:
+                    _eval_expr(stmt.returns, env, path=path)
                 # Decorators execute at definition: @deco / @deco(...) may mutate.
                 for deco in stmt.decorator_list:
                     if isinstance(deco, ast.Call):
@@ -2687,6 +2702,9 @@ def _build_identity_scanner(
                 active_classes[stmt.name] = stmt
                 class_registry[stmt.name] = stmt
                 for deco in stmt.decorator_list:
+                    # Decorator application executes at class definition
+                    # (``@poison`` / ``@poison()``). Name-only form must be
+                    # followed as a call, matching FunctionDef (#173).
                     if isinstance(deco, ast.Call):
                         _scan_call(
                             deco,
@@ -2698,7 +2716,26 @@ def _build_identity_scanner(
                             local_classes=active_classes,
                         )
                     else:
-                        _escape_if_tracked(_eval_expr(deco, env, path=path))
+                        synthetic = ast.Call(
+                            func=deco,
+                            args=[ast.Name(id=stmt.name, ctx=ast.Load())],
+                            keywords=[],
+                        )
+                        _scan_call(
+                            synthetic,
+                            path=path,
+                            index=index,
+                            env=env,
+                            visited_fns=visited_fns,
+                            local_fns=active_fns,
+                            local_classes=active_classes,
+                        )
+                # Bases and keywords execute at definition (``class C(poison())``,
+                # ``metaclass=poison()``, starred bases). Unknown > false PASS.
+                for base in stmt.bases:
+                    _eval_expr(base, env, path=path)
+                for kw in stmt.keywords:
+                    _eval_expr(kw.value, env, path=path)
                 # Class body executes at definition time.
                 class_env = _copy_env(env)
                 _scan_stmts(
@@ -2758,6 +2795,7 @@ def _build_identity_scanner(
                 # Walrus bindings inside RHS are applied by _eval_expr (#173).
                 continue
             if isinstance(stmt, ast.AnnAssign):
+                _eval_expr(stmt.annotation, env, path=path)
                 value_points = (
                     _eval_expr(stmt.value, env, path=path)
                     if stmt.value is not None

@@ -111,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.24.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.25.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -1539,7 +1539,14 @@ def _collect_writes_in_function(
             )
             return
 
-        if isinstance(statement, ast.AnnAssign) and statement.value is not None:
+        if isinstance(statement, ast.AnnAssign):
+            _observe_executed_expression(
+                statement.annotation, control_dependent=control_dependent
+            )
+            if statement.value is None:
+                if identity_session is not None:
+                    identity_session.observe_statement(statement)
+                return
             if identity_session is not None:
                 identity_session.observe_statement(statement)
             _record_assign_target(
@@ -1866,6 +1873,59 @@ def _collect_writes_in_function(
         if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
             # Nested writers must be accounted; omission beside a trusted
             # literal would otherwise false-PASS closed-world authority.
+            # Defaults and decorators execute at definition in this frame.
+            for default in statement.args.defaults:
+                _observe_executed_expression(
+                    default, control_dependent=control_dependent
+                )
+            for default in statement.args.kw_defaults:
+                if default is not None:
+                    _observe_executed_expression(
+                        default, control_dependent=control_dependent
+                    )
+            for arg in (
+                *statement.args.posonlyargs,
+                *statement.args.args,
+                *statement.args.kwonlyargs,
+            ):
+                if arg.annotation is not None:
+                    _observe_executed_expression(
+                        arg.annotation, control_dependent=control_dependent
+                    )
+            if (
+                statement.args.vararg is not None
+                and statement.args.vararg.annotation is not None
+            ):
+                _observe_executed_expression(
+                    statement.args.vararg.annotation,
+                    control_dependent=control_dependent,
+                )
+            if (
+                statement.args.kwarg is not None
+                and statement.args.kwarg.annotation is not None
+            ):
+                _observe_executed_expression(
+                    statement.args.kwarg.annotation,
+                    control_dependent=control_dependent,
+                )
+            if statement.returns is not None:
+                _observe_executed_expression(
+                    statement.returns, control_dependent=control_dependent
+                )
+            for deco in statement.decorator_list:
+                if isinstance(deco, ast.Call):
+                    _observe_executed_expression(
+                        deco, control_dependent=control_dependent
+                    )
+                else:
+                    _observe_executed_expression(
+                        ast.Call(
+                            func=deco,
+                            args=[ast.Name(id=statement.name, ctx=ast.Load())],
+                            keywords=[],
+                        ),
+                        control_dependent=control_dependent,
+                    )
             nested_identity = None
             if callee_resolver is not None:
                 nested_identity = begin_request_time_identity_session(
@@ -1887,6 +1947,29 @@ def _collect_writes_in_function(
             return
 
         if isinstance(statement, ast.ClassDef):
+            # Header executes at definition: bases, keywords, decorators (#173).
+            for deco in statement.decorator_list:
+                if isinstance(deco, ast.Call):
+                    _observe_executed_expression(
+                        deco, control_dependent=control_dependent
+                    )
+                else:
+                    _observe_executed_expression(
+                        ast.Call(
+                            func=deco,
+                            args=[ast.Name(id=statement.name, ctx=ast.Load())],
+                            keywords=[],
+                        ),
+                        control_dependent=control_dependent,
+                    )
+            for base in statement.bases:
+                _observe_executed_expression(
+                    base, control_dependent=control_dependent
+                )
+            for kw in statement.keywords:
+                _observe_executed_expression(
+                    kw.value, control_dependent=control_dependent
+                )
             for child in statement.body:
                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     nested_identity = None

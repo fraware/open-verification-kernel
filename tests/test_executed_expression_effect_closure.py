@@ -861,7 +861,153 @@ def handler(request, bypass_filter=False):
     assert findings[0].reason != "source_proved_server_authority_write"
 
 
+def test_class_base_poison_never_authorized() -> None:
+    """Class bases execute at definition: ``class C(poison())``."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return object
+    class C(poison()):
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_class_metaclass_poison_never_authorized() -> None:
+    """Class keywords execute: ``class C(metaclass=poison())``."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return type
+    class C(metaclass=poison()):
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_class_name_decorator_poison_never_authorized() -> None:
+    """``@poison`` on a nested class must follow the decorator call."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison(cls):
+        helpers.write_state = evil
+        return cls
+    @poison
+    class C:
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_setattr_in_nested_def_default_never_authorized() -> None:
+    """Nested function defaults execute in the enclosing frame."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    def nested(x=setattr(request.state, "bypass_filter", bypass_filter)):
+        return x
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_setattr_in_class_base_never_authorized() -> None:
+    """setattr in a class base must be a counted PE write."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    class C(setattr(request.state, "bypass_filter", bypass_filter) or object):
+        pass
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_nested_param_annotation_poison_never_authorized() -> None:
+    """Parameter annotations evaluate at definition (no postponed eval)."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return bool
+    def nested(x: poison() = True):
+        return x
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_annotation_only_annassign_poison_never_authorized() -> None:
+    """``x: poison()`` evaluates the annotation at runtime."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return bool
+    x: poison()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
 def test_persistent_version_bumped_for_executed_expr_closure() -> None:
     """Cache / semantic versions bump with PASS-semantics change."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.42.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.43.0"
