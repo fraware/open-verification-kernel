@@ -1297,7 +1297,386 @@ def handler(request, bypass_filter=False):
     assert findings[0].reason != "source_proved_server_authority_write"
 
 
+def test_ifexp_test_poison_never_authorized() -> None:
+    """IfExp.test executes: ``if (False if poison() else False):``."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return False
+    if (False if poison() else False):
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_boolop_packed_callee_poison_never_authorized() -> None:
+    """``(poison() or len)("x")`` evaluates Call.func packing."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return len
+    (poison() or len)("x")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_walrus_lambda_callee_poison_never_authorized() -> None:
+    """``(f := (lambda: poison()))()`` follows NamedExpr-packed callee."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+    (f := (lambda: poison()))()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_list_subscript_lambda_callee_poison_never_authorized() -> None:
+    """``[lambda: poison()][0]()`` follows packed lambda callee."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+    [lambda: poison()][0]()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_lambda_starargs_body_poison_never_authorized() -> None:
+    """``lambda *a: poison(); f()`` follows vararg lambda bodies."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+    f = lambda *a: poison()
+    f()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_lambda_default_to_call_poison_never_authorized() -> None:
+    """Default-to-call: ``lambda x=(lambda: poison()): x(); f()``."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+    f = lambda x=(lambda: poison()): x()
+    f()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_nested_def_export_rebind_evil_never_authorized() -> None:
+    """Nested FunctionDef assigned to helpers.write_state must not use original."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    def evil(state, value):
+        state.bypass_filter = value
+    helpers.write_state = evil
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_nested_def_export_rebind_annassign_never_authorized() -> None:
+    """AnnAssign rebind of helpers.write_state to nested evil."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    def evil(state, value):
+        state.bypass_filter = value
+    helpers.write_state: object = evil
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_nested_def_export_rebind_tuple_unpack_never_authorized() -> None:
+    """Tuple-unpack rebind of helpers.write_state to nested evil."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    def evil(state, value):
+        state.bypass_filter = value
+    (helpers.write_state,) = (evil,)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_del_request_state_field_never_authorized() -> None:
+    """``del request.state.bypass_filter`` after literal server write."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    del request.state.bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_del_request_state_field_in_if_never_authorized() -> None:
+    """``del`` in if body after literal server write."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    if True:
+        del request.state.bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_local_metaclass_prepare_never_authorized() -> None:
+    """Local metaclass ``__prepare__``/``__new__`` fail closed / observed."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Meta:
+        @classmethod
+        def __prepare__(cls, name, bases):
+            helpers.write_state = evil
+            return {}
+        def __new__(cls, name, bases, ns):
+            helpers.write_state = evil
+            return type.__new__(cls, name, bases, ns)
+    class C(metaclass=Meta):
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_init_subclass_poison_never_authorized() -> None:
+    """Base ``__init_subclass__`` runs on subclassing — fail closed / observed."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    class C(Base):
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_types_new_class_exec_body_never_authorized() -> None:
+    """``types.new_class(..., exec_body=body)`` observes exec_body."""
+
+    findings = _unit(
+        """
+import helpers
+import types
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def body(ns):
+        helpers.write_state = evil
+    types.new_class("C", (), {}, body)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_exec_string_poison_never_authorized() -> None:
+    """Request-time ``exec`` of helper-mutating code fail closed."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    exec("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_matchclass_local_metaclass_never_authorized() -> None:
+    """MatchClass against local metaclass ``__instancecheck__`` fail closed."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Meta(type):
+        def __instancecheck__(self, obj):
+            helpers.write_state = evil
+            return True
+    class Box(metaclass=Meta):
+        pass
+    match object():
+        case Box():
+            pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_positive_if_bool_config_still_authorized() -> None:
+    """Spot-check: pure ``if bool(config_flag)`` still authorizes."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False, config_flag=True):
+    request.state.bypass_filter = True
+    if bool(config_flag):
+        pass
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "authorized"
+    assert findings[0].reason == "source_proved_server_authority_write"
+
+
+def test_positive_len_hasattr_still_authorized() -> None:
+    """Spot-check: ``len`` / ``hasattr`` observers still authorize."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    len("x")
+    hasattr(request, "state")
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "authorized"
+    assert findings[0].reason == "source_proved_server_authority_write"
+
+
+def test_positive_unused_lambda_body_still_authorized() -> None:
+    """Spot-check: unused lambda body does not poison authority."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    def poison():
+        pass
+    f = lambda: poison()
+    request.state.bypass_filter = True
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "authorized"
+    assert findings[0].reason == "source_proved_server_authority_write"
+
+
 def test_persistent_version_bumped_for_executed_expr_closure() -> None:
     """Cache / semantic versions bump with PASS-semantics change."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.45.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.46.0"

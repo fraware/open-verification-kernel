@@ -47,7 +47,7 @@ from ovk.compilers.authorization.python_import_space import (
     normalize_path,
 )
 
-_IMPLEMENTATION_VERSION = "0.17.0"
+_IMPLEMENTATION_VERSION = "0.18.0"
 _MAX_IMPORT_FOLLOW_DEPTH = 8
 
 BindingKind = Literal["function", "import_name", "import_module", "rebound"]
@@ -861,6 +861,45 @@ def _getattr_static_name(call: ast.Call) -> str | None:
     return _static_str(call.args[1])
 
 
+def _lambdas_packed_as_callee(expr: ast.AST) -> list[ast.Lambda]:
+    """Lambdas reachable as a packed/projected callee expression.
+
+    Covers ``[lambda: poison()][0]``, ``(lambda: poison() if f else lambda: 0)``,
+    BoolOp/Dict packing, and walrus-bound lambdas' RHS. Does not descend into
+    Call/Lambda defaults (those execute via ``_eval_expr`` / default-to-call).
+    """
+
+    expr = _unwrap_await(expr)
+    if isinstance(expr, ast.NamedExpr):
+        return _lambdas_packed_as_callee(expr.value)
+    if isinstance(expr, ast.Lambda):
+        return [expr]
+    if isinstance(expr, (ast.List, ast.Tuple, ast.Set)):
+        found: list[ast.Lambda] = []
+        for elt in expr.elts:
+            nested = elt.value if isinstance(elt, ast.Starred) else elt
+            found.extend(_lambdas_packed_as_callee(nested))
+        return found
+    if isinstance(expr, ast.Dict):
+        found = []
+        for value in expr.values:
+            if value is not None:
+                found.extend(_lambdas_packed_as_callee(value))
+        return found
+    if isinstance(expr, ast.IfExp):
+        return _lambdas_packed_as_callee(expr.body) + _lambdas_packed_as_callee(
+            expr.orelse
+        )
+    if isinstance(expr, ast.BoolOp):
+        found = []
+        for value in expr.values:
+            found.extend(_lambdas_packed_as_callee(value))
+        return found
+    if isinstance(expr, ast.Subscript):
+        return _lambdas_packed_as_callee(expr.value)
+    return []
+
+
 _BENIGN_BUILTINS = frozenset(
     {
         "print",
@@ -1318,6 +1357,9 @@ class RequestTimeIdentitySession:
     def blocks_resolved_callee(self, callee: ResolvedCallee) -> bool:
         """True when request-time mutations make ``callee`` identity UNKNOWN."""
 
+        if self.accum.unsupported:
+            # exec/eval/compile / opaque class-creation protocols (#173).
+            return True
         identity = callee.identity
         if (
             identity in self.accum.behavior_mutations
@@ -1366,6 +1408,28 @@ class RequestTimeIdentitySession:
             caller_path=self.path,
             shadowed_names=shadowed_names,
         )
+        # Nested ``helpers.write_state = evil_local`` reestablish must win over
+        # the module resolver's original export (Unknown > false PASS, #173).
+        if (
+            result.callee is not None
+            and isinstance(func, ast.Attribute)
+            and isinstance(func.value, ast.Name)
+        ):
+            base = self.env.get(func.value.id)
+            if base is not None:
+                for atom in base.known:
+                    if not isinstance(atom, ModuleObject):
+                        continue
+                    restored = self._reestablished_exports.get((atom.path, func.attr))
+                    if (
+                        restored is not None
+                        and restored != result.callee.identity
+                    ):
+                        result = CalleeResolveResult(
+                            callee=None,
+                            reason="request_time_callable_identity_unknown",
+                        )
+                        break
         if result.callee is not None and self.blocks_resolved_callee(result.callee):
             return CalleeResolveResult(
                 callee=None,
@@ -1389,6 +1453,10 @@ class RequestTimeIdentitySession:
                     )
                 restored = self._reestablished_exports.get((atom.path, func.attr))
                 if restored is not None:
+                    # Restored overlay must resolve to the rebound callable.
+                    # Falling through to the original module export after a
+                    # nested ``def`` assign false-PASSes client writers that
+                    # rebound ``helpers.write_state`` (#173).
                     rpath, rname = restored
                     binding = self._resolver.bindings_by_path.get(rpath, {}).get(
                         rname
@@ -1404,6 +1472,20 @@ class RequestTimeIdentitySession:
                                 path=rpath, node=binding.function_node
                             )
                         )
+                    if rpath == self.path and rname in self.local_fns:
+                        nested = ResolvedCallee(
+                            path=rpath, node=self.local_fns[rname]
+                        )
+                        if self.blocks_resolved_callee(nested):
+                            return CalleeResolveResult(
+                                callee=None,
+                                reason="request_time_callable_identity_unknown",
+                            )
+                        return CalleeResolveResult(callee=nested)
+                    return CalleeResolveResult(
+                        callee=None,
+                        reason="request_time_callable_identity_unknown",
+                    )
                 binding = self._resolver.bindings_by_path.get(atom.path, {}).get(
                     func.attr
                 )
@@ -1750,6 +1832,9 @@ def _build_identity_scanner(
                     lambda_bindings.pop(expr.target.id, None)
             return points
         if isinstance(expr, ast.IfExp):
+            # Test executes before arm selection; omitting it false-PASSes
+            # ``if (False if poison() else False):`` (#173).
+            _eval_expr(expr.test, env, path=path)
             # Conditional value: may-point-to join (Unknown > false PASS).
             return _eval_expr(expr.body, env, path=path).join(
                 _eval_expr(expr.orelse, env, path=path)
@@ -2078,6 +2163,17 @@ def _build_identity_scanner(
                 _bind_target_names(target, value_points, env)
             else:
                 _bind_target_names(target, _IdentityPointsTo.unknown_only(), env)
+            # Attribute/subscript unpack targets mutate (``(helpers.write_state,) = (evil,)``).
+            for elt in target.elts:
+                nested = elt.value if isinstance(elt, ast.Starred) else elt
+                if isinstance(nested, (ast.Attribute, ast.Subscript, ast.Tuple, ast.List)):
+                    _scan_assign_target(
+                        nested,
+                        path=path,
+                        index=index,
+                        env=env,
+                        value_points=value_points,
+                    )
             return
         if isinstance(target, ast.Attribute):
             # Bind walrus names appearing in the attribute base.
@@ -2304,28 +2400,81 @@ def _build_identity_scanner(
     ) -> None:
         func = call.func
         if isinstance(func, ast.Lambda):
-            # Bind lambda formals from actuals for the single expression body.
-            params = [a.arg for a in func.args.args]
-            if (
-                func.args.vararg is None
-                and func.args.kwarg is None
-                and not func.args.posonlyargs
-                and not func.args.kwonlyargs
-                and len(call.args) <= len(params)
-                and all(kw.arg is not None for kw in call.keywords)
-            ):
-                call_env = _copy_env(env)
-                for i, arg in enumerate(call.args):
-                    if i < len(params):
-                        call_env[params[i]] = _eval_expr(arg, env, path=path)
-                    else:
-                        _escape_if_tracked(_eval_expr(arg, env, path=path))
-                for kw in call.keywords:
-                    assert kw.arg is not None
-                    if kw.arg in params:
-                        call_env[kw.arg] = _eval_expr(kw.value, env, path=path)
-                    else:
-                        _escape_if_tracked(_eval_expr(kw.value, env, path=path))
+            # Follow lambda bodies for *args/**kwargs/pos-only/kw-only, and
+            # apply defaults at the call site (default-to-call). Skipping the
+            # body for vararg shapes false-PASSes ``lambda *a: poison(); f()``
+            # and ``lambda x=(lambda: poison()): x(); f()`` (#173).
+            call_env = _copy_env(env)
+            pos_params = [a.arg for a in func.args.posonlyargs] + [
+                a.arg for a in func.args.args
+            ]
+            kwonly_params = [a.arg for a in func.args.kwonlyargs]
+            defaults = list(func.args.defaults)
+            num_no_default = len(pos_params) - len(defaults)
+            bound_pos: set[int] = set()
+            # Defaults that are lambdas must be followable when the body calls
+            # the formal (``lambda x=(lambda: poison()): x(); f()``).
+            saved_lambda_bindings: dict[str, ast.Lambda | None] = {}
+            for i, arg in enumerate(call.args):
+                if isinstance(arg, ast.Starred):
+                    _escape_if_tracked(_eval_expr(arg.value, env, path=path))
+                    continue
+                if i < len(pos_params):
+                    call_env[pos_params[i]] = _eval_expr(arg, env, path=path)
+                    bound_pos.add(i)
+                    if isinstance(arg, ast.Lambda):
+                        saved_lambda_bindings.setdefault(
+                            pos_params[i], lambda_bindings.get(pos_params[i])
+                        )
+                        lambda_bindings[pos_params[i]] = arg
+                else:
+                    _escape_if_tracked(_eval_expr(arg, env, path=path))
+            for i, name in enumerate(pos_params):
+                if i in bound_pos:
+                    continue
+                default_idx = i - num_no_default
+                if 0 <= default_idx < len(defaults):
+                    default_expr = defaults[default_idx]
+                    call_env[name] = _eval_expr(default_expr, env, path=path)
+                    if isinstance(default_expr, ast.Lambda):
+                        saved_lambda_bindings.setdefault(
+                            name, lambda_bindings.get(name)
+                        )
+                        lambda_bindings[name] = default_expr
+                else:
+                    call_env[name] = _IdentityPointsTo.unknown_only()
+            provided_kw: set[str] = set()
+            for kw in call.keywords:
+                if kw.arg is None:
+                    _escape_if_tracked(_eval_expr(kw.value, env, path=path))
+                    continue
+                provided_kw.add(kw.arg)
+                if kw.arg in pos_params or kw.arg in kwonly_params:
+                    call_env[kw.arg] = _eval_expr(kw.value, env, path=path)
+                    if isinstance(kw.value, ast.Lambda):
+                        saved_lambda_bindings.setdefault(
+                            kw.arg, lambda_bindings.get(kw.arg)
+                        )
+                        lambda_bindings[kw.arg] = kw.value
+                else:
+                    _escape_if_tracked(_eval_expr(kw.value, env, path=path))
+            for name, default in zip(kwonly_params, func.args.kw_defaults):
+                if name in provided_kw:
+                    continue
+                if default is not None:
+                    call_env[name] = _eval_expr(default, env, path=path)
+                    if isinstance(default, ast.Lambda):
+                        saved_lambda_bindings.setdefault(
+                            name, lambda_bindings.get(name)
+                        )
+                        lambda_bindings[name] = default
+                else:
+                    call_env[name] = _IdentityPointsTo.unknown_only()
+            if func.args.vararg is not None:
+                call_env[func.args.vararg.arg] = _IdentityPointsTo.unknown_only()
+            if func.args.kwarg is not None:
+                call_env[func.args.kwarg.arg] = _IdentityPointsTo.unknown_only()
+            try:
                 if isinstance(func.body, ast.Call):
                     _scan_call(
                         func.body,
@@ -2338,11 +2487,12 @@ def _build_identity_scanner(
                     )
                 else:
                     _escape_if_tracked(_eval_expr(func.body, call_env, path=path))
-            else:
-                for arg in call.args:
-                    _escape_if_tracked(_eval_expr(arg, env, path=path))
-                for kw in call.keywords:
-                    _escape_if_tracked(_eval_expr(kw.value, env, path=path))
+            finally:
+                for name, previous in saved_lambda_bindings.items():
+                    if previous is None:
+                        lambda_bindings.pop(name, None)
+                    else:
+                        lambda_bindings[name] = previous
             return
         # Name-bound lambda: ``poison = lambda: setattr(...); poison()``.
         if isinstance(func, ast.Name) and func.id in lambda_bindings:
@@ -2475,6 +2625,29 @@ def _build_identity_scanner(
                     _escape_identity(points)
             return
         if not isinstance(func, ast.Name):
+            # BoolOp/IfExp/NamedExpr/Subscript/List/Dict packing as callee must
+            # still execute (``(poison() or len)("x")``, ``[lambda: poison()][0]()``).
+            _eval_expr(func, env, path=path)
+            packed_lambdas = list(_lambdas_packed_as_callee(func))
+            if isinstance(func, ast.NamedExpr) and isinstance(func.target, ast.Name):
+                bound = lambda_bindings.get(func.target.id)
+                if bound is not None and bound not in packed_lambdas:
+                    packed_lambdas.append(bound)
+            for packed in packed_lambdas:
+                synthetic = ast.Call(
+                    func=packed,
+                    args=list(call.args),
+                    keywords=list(call.keywords),
+                )
+                _follow_local_callee(
+                    synthetic,
+                    path=path,
+                    index=index,
+                    env=env,
+                    visited_fns=visited_fns,
+                    local_fns=local_fns,
+                    local_classes=local_classes,
+                )
             # Unmodeled callee receiving identity-bearing actuals → escape.
             for arg in call.args:
                 points = _eval_expr(arg, env, path=path)
@@ -2567,6 +2740,102 @@ def _build_identity_scanner(
             formals=_formal_bindings_for_call(call, fn_node, env, path=path),
         )
 
+    def _scan_named_methods_on_class(
+        class_node: ast.ClassDef,
+        method_names: frozenset[str],
+        *,
+        path: str,
+        index: int,
+        env: dict[str, _IdentityPointsTo],
+        visited_fns: set[int],
+        local_fns: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None,
+        local_classes: Mapping[str, ast.ClassDef] | None,
+    ) -> bool:
+        """Scan matching method bodies on ``class_node``. Return True if any ran."""
+
+        observed = False
+        for item in class_node.body:
+            if (
+                isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and item.name in method_names
+            ):
+                _scan_fn_body(
+                    item,
+                    path=path,
+                    index=index,
+                    env=env,
+                    visited_fns=visited_fns,
+                    local_fns=local_fns,
+                    local_classes=local_classes,
+                )
+                observed = True
+        return observed
+
+    def _observe_class_creation_protocols(
+        stmt: ast.ClassDef,
+        *,
+        path: str,
+        index: int,
+        env: dict[str, _IdentityPointsTo],
+        visited_fns: set[int],
+        local_fns: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None,
+        local_classes: Mapping[str, ast.ClassDef] | None,
+    ) -> None:
+        """Observe metaclass ``__prepare__``/``__new__`` and base ``__init_subclass__``.
+
+        Prefer compact fail-closed treatment over full class-creation semantics.
+        Unknown local metaclasses / dynamic bases poison identity (#173).
+        """
+
+        observed_any = False
+        for kw in stmt.keywords:
+            if kw.arg != "metaclass":
+                continue
+            if isinstance(kw.value, ast.Name):
+                meta = _lookup_class(kw.value.id, local_classes)
+                if meta is not None:
+                    if _scan_named_methods_on_class(
+                        meta,
+                        frozenset({"__prepare__", "__new__", "__call__"}),
+                        path=path,
+                        index=index,
+                        env=env,
+                        visited_fns=visited_fns,
+                        local_fns=local_fns,
+                        local_classes=local_classes,
+                    ):
+                        observed_any = True
+                    else:
+                        accum.unsupported = True
+                else:
+                    # Session-local Name that is not a registered class, or
+                    # unresolved metaclass — fail closed.
+                    points = _eval_expr(kw.value, env, path=path)
+                    if points.unknown or points.known:
+                        accum.unsupported = True
+            else:
+                # Dynamic metaclass expression already evaluated; fail closed.
+                accum.unsupported = True
+        for base in stmt.bases:
+            if isinstance(base, ast.Name):
+                base_cls = _lookup_class(base.id, local_classes)
+                if base_cls is not None:
+                    if _scan_named_methods_on_class(
+                        base_cls,
+                        frozenset({"__init_subclass__"}),
+                        path=path,
+                        index=index,
+                        env=env,
+                        visited_fns=visited_fns,
+                        local_fns=local_fns,
+                        local_classes=local_classes,
+                    ):
+                        observed_any = True
+            elif not isinstance(base, ast.Name):
+                # Dynamic base may run ``__init_subclass__`` — fail closed.
+                accum.unsupported = True
+        del observed_any
+
     def _scan_call(
         call: ast.Call,
         *,
@@ -2579,6 +2848,53 @@ def _build_identity_scanner(
     ) -> None:
         if visited_fns is None:
             visited_fns = set()
+        # Request-time exec/eval/compile of string/code can mutate helpers —
+        # fail closed (args already observed below via escape path).
+        if isinstance(call.func, ast.Name) and call.func.id in {
+            "exec",
+            "eval",
+            "compile",
+        }:
+            for arg in call.args:
+                _eval_expr(arg, env, path=path)
+            for kw in call.keywords:
+                _eval_expr(kw.value, env, path=path)
+            accum.unsupported = True
+            return
+        if (
+            isinstance(call.func, ast.Attribute)
+            and call.func.attr == "new_class"
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "types"
+        ) or (isinstance(call.func, ast.Name) and call.func.id == "new_class"):
+            # types.new_class(..., exec_body=body) — observe exec_body or fail closed.
+            for arg in call.args:
+                _eval_expr(arg, env, path=path)
+            exec_body = None
+            if len(call.args) >= 4:
+                exec_body = call.args[3]
+            for kw in call.keywords:
+                _eval_expr(kw.value, env, path=path)
+                if kw.arg == "exec_body":
+                    exec_body = kw.value
+            if exec_body is not None:
+                synthetic = ast.Call(
+                    func=exec_body,
+                    args=[ast.Dict(keys=[], values=[])],
+                    keywords=[],
+                )
+                _follow_local_callee(
+                    synthetic,
+                    path=path,
+                    index=index,
+                    env=env,
+                    visited_fns=visited_fns,
+                    local_fns=local_fns,
+                    local_classes=local_classes,
+                )
+            else:
+                accum.unsupported = True
+            return
         setattr_parts = _setattr_target_and_name(call)
         if setattr_parts is not None:
             obj, name_expr = setattr_parts
@@ -2803,6 +3119,17 @@ def _build_identity_scanner(
                     _eval_expr(base, env, path=path)
                 for kw in stmt.keywords:
                     _eval_expr(kw.value, env, path=path)
+                # Local metaclass / base __init_subclass__: observe protocol
+                # bodies or fail closed (no full metaclass simulation) (#173).
+                _observe_class_creation_protocols(
+                    stmt,
+                    path=path,
+                    index=index,
+                    env=env,
+                    visited_fns=visited_fns,
+                    local_fns=active_fns,
+                    local_classes=active_classes,
+                )
                 # Class body executes at definition time.
                 class_env = _copy_env(env)
                 _scan_stmts(
@@ -2964,14 +3291,16 @@ def _build_identity_scanner(
             if isinstance(stmt, (ast.For, ast.AsyncFor)):
                 # Evaluate iter for container escape / call effects; loop target
                 # is unmodeled. Iterable always executes before zero-iteration
-                # join (#173).
+                # join (#173). For-else walks from the pre-loop env (like
+                # while/else) so body-mutated aliases cannot drop else effects.
                 _eval_expr(stmt.iter, env, path=path)
+                env_pre = _copy_env(env)
                 _bind_target_names(
                     stmt.target, _IdentityPointsTo.unknown_only(), env
                 )
                 env_body = _copy_env(env)
                 _scan_stmts(
-                    list(stmt.body) + list(stmt.orelse),
+                    stmt.body,
                     path=path,
                     index=index,
                     env=env_body,
@@ -2979,18 +3308,29 @@ def _build_identity_scanner(
                     local_fns=active_fns,
                     local_classes=active_classes,
                 )
-                joined = _join_envs(env, env_body)
+                env_else = _copy_env(env_pre)
+                _scan_stmts(
+                    stmt.orelse,
+                    path=path,
+                    index=index,
+                    env=env_else,
+                    visited_fns=visited_fns,
+                    local_fns=active_fns,
+                    local_classes=active_classes,
+                )
+                joined = _join_envs(env_pre, _join_envs(env_body, env_else))
                 env.clear()
                 env.update(joined)
                 continue
             if isinstance(stmt, ast.While):
                 # Test executes (at least once) before body / zero-iteration
                 # join; nested short-circuit may-effects are conservative via
-                # _eval_expr BoolOp / IfExp joins (#173).
+                # _eval_expr BoolOp / IfExp joins (#173). Else from pre-test env.
                 _eval_expr(stmt.test, env, path=path)
+                env_pre = _copy_env(env)
                 env_body = _copy_env(env)
                 _scan_stmts(
-                    list(stmt.body) + list(stmt.orelse),
+                    stmt.body,
                     path=path,
                     index=index,
                     env=env_body,
@@ -2998,7 +3338,17 @@ def _build_identity_scanner(
                     local_fns=active_fns,
                     local_classes=active_classes,
                 )
-                joined = _join_envs(env, env_body)
+                env_else = _copy_env(env_pre)
+                _scan_stmts(
+                    stmt.orelse,
+                    path=path,
+                    index=index,
+                    env=env_else,
+                    visited_fns=visited_fns,
+                    local_fns=active_fns,
+                    local_classes=active_classes,
+                )
+                joined = _join_envs(env_pre, _join_envs(env_body, env_else))
                 env.clear()
                 env.update(joined)
                 continue
@@ -3036,6 +3386,7 @@ def _build_identity_scanner(
                 env.update(joined)
                 continue
             if isinstance(stmt, ast.Try):
+                env_pre = _copy_env(env)
                 env_body = _copy_env(env)
                 _scan_stmts(
                     stmt.body,
@@ -3047,6 +3398,11 @@ def _build_identity_scanner(
                     local_classes=active_classes,
                 )
                 branch_envs = [env_body]
+                if not stmt.handlers:
+                    # No handler: exceptional exit still reaches finally —
+                    # join the pre-body predecessor so finally effects are not
+                    # dropped under a body-only join (#173).
+                    branch_envs.append(env_pre)
                 for handler in stmt.handlers:
                     env_h = _copy_env(env)
                     # except TYPE executes before the handler body
@@ -3097,6 +3453,56 @@ def _build_identity_scanner(
                 branch_envs: list[dict[str, _IdentityPointsTo]] = []
                 for case in stmt.cases:
                     env_c = _copy_env(env)
+                    # MatchClass against local metaclasses / dynamic match
+                    # protocols: fail closed rather than authorize (#173).
+                    if isinstance(case.pattern, ast.MatchClass):
+                        cls_expr = case.pattern.cls
+                        if isinstance(cls_expr, ast.Name):
+                            cls_node = _lookup_class(cls_expr.id, active_classes)
+                            if cls_node is not None:
+                                has_meta = any(
+                                    kw.arg == "metaclass" for kw in cls_node.keywords
+                                )
+                                has_protocol = any(
+                                    isinstance(
+                                        item, (ast.FunctionDef, ast.AsyncFunctionDef)
+                                    )
+                                    and item.name
+                                    in {
+                                        "__instancecheck__",
+                                        "__subclasscheck__",
+                                        "__match_args__",
+                                    }
+                                    for item in cls_node.body
+                                ) or any(
+                                    isinstance(item, ast.Assign)
+                                    and any(
+                                        isinstance(t, ast.Name)
+                                        and t.id == "__match_args__"
+                                        for t in item.targets
+                                    )
+                                    for item in cls_node.body
+                                )
+                                if has_meta or has_protocol:
+                                    accum.unsupported = True
+                                    if has_meta or has_protocol:
+                                        _scan_named_methods_on_class(
+                                            cls_node,
+                                            frozenset(
+                                                {
+                                                    "__instancecheck__",
+                                                    "__subclasscheck__",
+                                                }
+                                            ),
+                                            path=path,
+                                            index=index,
+                                            env=env_c,
+                                            visited_fns=visited_fns,
+                                            local_fns=active_fns,
+                                            local_classes=active_classes,
+                                        )
+                        else:
+                            accum.unsupported = True
                     pattern_names = _collect_match_pattern_names(case.pattern)
                     if pattern_names:
                         # Pattern bind is an unmodeled projection of subject.

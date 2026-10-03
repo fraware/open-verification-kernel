@@ -111,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.26.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.27.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -369,48 +369,62 @@ class _RequestStateAliasEnv:
     def _is_must_state_expr(self, value: ast.AST) -> bool:
         if isinstance(value, ast.Name) and value.id in self.state_names:
             return True
-        if (
-            isinstance(value, ast.Attribute)
-            and value.attr == "state"
-            and isinstance(value.value, ast.Name)
-            and value.value.id in self.request_names
-        ):
-            return True
-        # getattr(request, "state") / getattr(req, "state") — otherwise a later
-        # ``state.field = client`` write is omitted from closed-world accounting.
+        if isinstance(value, ast.Attribute) and value.attr == "state":
+            # ``request.state`` and ``(request if f else request).state``.
+            base = self.classify(value.value)
+            if base.must_request:
+                return True
+            if (
+                isinstance(value.value, ast.Name)
+                and value.value.id in self.request_names
+            ):
+                return True
+        # getattr(request, "state") / getattr(req if f else req, "state").
         if (
             isinstance(value, ast.Call)
             and isinstance(value.func, ast.Name)
             and value.func.id == "getattr"
             and len(value.args) >= 2
-            and self._is_must_request_expr(value.args[0])
             and isinstance(value.args[1], ast.Constant)
             and value.args[1].value == "state"
         ):
-            return True
+            base = self.classify(value.args[0])
+            if base.must_request or self._is_must_request_expr(value.args[0]):
+                return True
         return False
 
     def _is_may_only_state_expr(self, value: ast.AST) -> bool:
         if isinstance(value, ast.Name) and value.id in self.may_state_names:
             return True
-        if (
-            isinstance(value, ast.Attribute)
-            and value.attr == "state"
-            and isinstance(value.value, ast.Name)
-            and value.value.id in self.may_request_names
-            and value.value.id not in self.request_names
-        ):
-            return True
+        if isinstance(value, ast.Attribute) and value.attr == "state":
+            base = self.classify(value.value)
+            if base.may_request and not base.must_request:
+                return True
+            if (
+                isinstance(value.value, ast.Name)
+                and value.value.id in self.may_request_names
+                and value.value.id not in self.request_names
+            ):
+                return True
         if (
             isinstance(value, ast.Call)
             and isinstance(value.func, ast.Name)
             and value.func.id == "getattr"
             and len(value.args) >= 2
-            and self._is_may_only_request_expr(value.args[0])
             and isinstance(value.args[1], ast.Constant)
             and value.args[1].value == "state"
         ):
-            return True
+            base = self.classify(value.args[0])
+            if (base.may_request and not base.must_request) or (
+                self._is_may_only_request_expr(value.args[0])
+            ):
+                return True
+        # Subscript projection of packed state: ``[request.state][0]``.
+        if isinstance(value, ast.Subscript):
+            if self.packs_request_or_state_identity(value.value) or self._is_state_expr(
+                value.value
+            ):
+                return True
         return False
 
     def _is_state_expr(self, value: ast.AST) -> bool:
@@ -574,6 +588,20 @@ class _RequestStateAliasEnv:
 
         if isinstance(value, ast.NamedExpr):
             return self.packs_request_or_state_identity(value.value)
+        if isinstance(value, ast.IfExp):
+            # ``request.state if f else request.state`` / list packing in arms.
+            return (
+                self.is_request_or_state_expr(value.body)
+                or self.is_request_or_state_expr(value.orelse)
+                or self.packs_request_or_state_identity(value.body)
+                or self.packs_request_or_state_identity(value.orelse)
+            )
+        if isinstance(value, ast.BoolOp):
+            return any(
+                self.is_request_or_state_expr(operand)
+                or self.packs_request_or_state_identity(operand)
+                for operand in value.values
+            )
         if isinstance(value, (ast.Tuple, ast.List, ast.Set)):
             for elt in value.elts:
                 if isinstance(elt, ast.Starred):
@@ -1613,6 +1641,53 @@ def _collect_writes_in_function(
             )
             return
 
+        if isinstance(statement, ast.Delete):
+            # ``del request.state.bypass_filter`` (and del in if body) after a
+            # literal server write must not yield source_proved authorize —
+            # record as state mutation/dynamic (#173).
+            if identity_session is not None:
+                identity_session.observe_statement(statement)
+            for target in statement.targets:
+                field, exact = request_aliases.field_from_assign_target(target)
+                if field is not None:
+                    writes.append(
+                        StateAttributeWrite(
+                            field_name=field,
+                            value_expression=ast.unparse(statement),
+                            origin=_classify(ast.Constant(value=None)),
+                            dynamic=True,
+                            source_range=_origin(path, statement).source_range,
+                            path=path,
+                            control_dependent=control_dependent or (not exact),
+                        )
+                    )
+                    continue
+                if request_aliases.is_poison_state_store(target):
+                    _record_escape(
+                        statement,
+                        ast.unparse(statement),
+                        control_dependent=control_dependent,
+                    )
+                    continue
+                # Plausible ``*.state.<field>`` delete outside proved alias.
+                if (
+                    isinstance(target, ast.Attribute)
+                    and isinstance(target.value, ast.Attribute)
+                    and target.value.attr == "state"
+                ):
+                    _record_escape(
+                        statement,
+                        ast.unparse(statement),
+                        control_dependent=control_dependent,
+                    )
+            apply_statement_bindings(
+                statement,
+                path=path,
+                handler_param_names=handler_param_names,
+                alias_state=alias_state,
+            )
+            return
+
         if isinstance(statement, (ast.If, ast.While)):
             # Test executes before branch / loop body selection (#173).
             # While: test runs at least once; nested short-circuit may-effects
@@ -1655,6 +1730,7 @@ def _collect_writes_in_function(
                 statement.iter, control_dependent=control_dependent
             )
             # ``for s in [request.state]: s.field = client`` must not authorize.
+            # IfExp/BoolOp packing is included via packs_request_or_state_identity.
             if (
                 request_aliases.is_request_or_state_expr(statement.iter)
                 or request_aliases.packs_request_or_state_identity(statement.iter)
@@ -1666,7 +1742,8 @@ def _collect_writes_in_function(
                     control_dependent=True,
                 )
             # Loop target severs precise aliasing for the iterated path only;
-            # zero-iteration join preserves may-alias (#171).
+            # zero-iteration join preserves may-alias (#171). For-else walks
+            # from the pre-loop env (like while/else), not after body-only.
             pre_identity = (
                 identity_session.fork() if identity_session is not None else None
             )
@@ -1676,16 +1753,31 @@ def _collect_writes_in_function(
             request_aliases.poison_names(target_names)
             for name in target_names:
                 alias_state.poison(name)
-            for child in list(statement.body) + list(statement.orelse):
+            for child in statement.body:
                 _visit_statement(child, control_dependent=True)
+            body_identity = (
+                identity_session.snapshot() if identity_session is not None else None
+            )
             body_aliases = request_aliases.snapshot()
             body_alias_state = alias_state.snapshot()
+            request_aliases.restore(pre_aliases)
+            alias_state.restore(pre_alias_state)
             if identity_session is not None and pre_identity is not None:
-                # Loop may not execute — join with zero-iteration predecessor.
-                body_identity = identity_session.snapshot()
-                identity_session.join([pre_identity, body_identity])
-            request_aliases.install_join([pre_aliases, body_aliases])
-            alias_state.install_join([pre_alias_state, body_alias_state])
+                identity_session.restore(pre_identity)
+            for child in statement.orelse:
+                _visit_statement(child, control_dependent=True)
+            else_aliases = request_aliases.snapshot()
+            else_alias_state = alias_state.snapshot()
+            if identity_session is not None and pre_identity is not None:
+                else_identity = identity_session.snapshot()
+                predecessors = [pre_identity, else_identity]
+                if body_identity is not None:
+                    predecessors.insert(1, body_identity)
+                identity_session.join(predecessors)
+            request_aliases.install_join([pre_aliases, body_aliases, else_aliases])
+            alias_state.install_join(
+                [pre_alias_state, body_alias_state, else_alias_state]
+            )
             return
 
         if isinstance(statement, (ast.With, ast.AsyncWith)):
@@ -1785,10 +1877,22 @@ def _collect_writes_in_function(
             if identity_session is not None:
                 normal_identity = identity_session.snapshot()
                 # Join normal + exceptional, then run finally on that state.
-                predecessors = [normal_identity, *handler_identities]
+                # With no handlers, exceptional exit still reaches finally —
+                # include the pre-try predecessor so finally alias / identity
+                # writes are not dropped (#173).
+                if statement.handlers:
+                    predecessors = [normal_identity, *handler_identities]
+                else:
+                    predecessors = [normal_identity]
+                    if pre_identity is not None:
+                        predecessors.append(pre_identity)
                 identity_session.join(predecessors)
-            request_aliases.install_join([normal_aliases, *handler_aliases])
-            alias_state.install_join([normal_alias_state, *handler_alias_states])
+            if statement.handlers:
+                request_aliases.install_join([normal_aliases, *handler_aliases])
+                alias_state.install_join([normal_alias_state, *handler_alias_states])
+            else:
+                request_aliases.install_join([normal_aliases, pre_aliases])
+                alias_state.install_join([normal_alias_state, pre_alias_state])
             for child in statement.finalbody:
                 _visit_statement(child, control_dependent=True)
             return
@@ -1811,6 +1915,29 @@ def _collect_writes_in_function(
                 alias_state.restore(pre_alias_state)
                 if identity_session is not None and pre_identity is not None:
                     identity_session.restore(pre_identity)
+                # MatchClass ``__instancecheck__`` / ``__match_args__`` side
+                # effects against local / dynamic match protocols: fail closed
+                # rather than authorize (#173). Builtin type names stay peelable.
+                if isinstance(case.pattern, ast.MatchClass):
+                    cls_expr = case.pattern.cls
+                    if not isinstance(cls_expr, ast.Name) or cls_expr.id not in {
+                        "bool",
+                        "int",
+                        "str",
+                        "list",
+                        "dict",
+                        "tuple",
+                        "set",
+                        "bytes",
+                        "type",
+                        "object",
+                        "float",
+                        "complex",
+                        "range",
+                        "enumerate",
+                    }:
+                        if identity_session is not None:
+                            identity_session.mark_unsupported()
                 # Bind pattern names from the subject (as-capture / peels);
                 # never silently poison subject-capturing aliases.
                 _apply_match_pattern_alias_bindings(
@@ -1958,6 +2085,11 @@ def _collect_writes_in_function(
             return
 
         if isinstance(statement, ast.ClassDef):
+            # Local metaclass / dynamic bases: fail closed on class creation
+            # protocols when identity observation cannot fully simulate them.
+            if any(kw.arg == "metaclass" for kw in statement.keywords):
+                if identity_session is not None:
+                    identity_session.mark_unsupported()
             # Header executes at definition: bases, keywords, decorators (#173).
             for deco in statement.decorator_list:
                 if isinstance(deco, ast.Call):

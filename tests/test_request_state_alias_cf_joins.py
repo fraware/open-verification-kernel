@@ -442,7 +442,7 @@ async def handler(request, bypass_filter: bool = False, user = Depends(get_curre
 def test_persistent_state_round_trip_and_version_invalidation(tmp_path) -> None:
     """13. Persistent-state round trip and version invalidation."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.45.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.46.0"
 
     trusted_helpers = """
 def write_state(state, value):
@@ -1677,3 +1677,116 @@ async def handler(request, bypass_filter: bool = False, user = Depends(get_curre
     )
     for item in incremental.ir.bypass_authority_evidence:
         assert item.reason != "source_proved_server_authority_write"
+
+
+def test_for_else_from_pre_loop_env_never_authorized() -> None:
+    """for-else walks from pre-loop env so body-mutated aliases cannot drop writes."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = request.state
+    for _ in [1]:
+        s = object()
+    else:
+        s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_for_iter_boolop_packing_never_authorized() -> None:
+    """For-iter BoolOp packing of ``[request.state]`` counts body writes."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False, flag=True):
+    request.state.bypass_filter = True
+    for s in (flag and [request.state] or [request.state]):
+        s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_ifexp_request_dot_state_write_never_authorized() -> None:
+    """``(request if f else request).state.field = client`` is counted."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False, flag=True):
+    request.state.bypass_filter = True
+    (request if flag else request).state.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_getattr_boolop_request_state_write_never_authorized() -> None:
+    """``getattr(flag and request or request, "state").field = client``."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False, flag=True):
+    request.state.bypass_filter = True
+    getattr(flag and request or request, "state").bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_subscript_projection_state_write_never_authorized() -> None:
+    """``[request.state][0].field = client`` is may-alias / dynamic, not omitted."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    [request.state][0].bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_try_finally_no_handler_joins_exceptional_predecessor() -> None:
+    """try/finally with no handler joins exceptional pred before finally."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    try:
+        helpers.write_state = evil
+        raise ValueError()
+    finally:
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
