@@ -1898,6 +1898,14 @@ def _collect_writes_in_function(
             # Dual-may precise join when both arms are known nested/returned
             # closures; unknown callable arm → fail closed on later call.
             closures, unknown = _callable_products_from_expr(value)
+            if (
+                not closures
+                and not unknown
+                and _choice_expr_has_dynamic_callable_arm(value)
+            ):
+                # ``fn = unknown if c else other; fn()`` — no known arm, but
+                # the may-set is still an unresolved callable (Unknown > PASS).
+                unknown = True
             if closures or unknown:
                 _install_returned_closures(
                     target.id, closures, unknown=unknown
@@ -2266,6 +2274,53 @@ def _collect_writes_in_function(
                     return child
                 return None
         return None
+
+    def _choice_expr_has_dynamic_callable_arm(expr: ast.AST) -> bool:
+        """True when an IfExp/BoolOp arm may evaluate to an unresolved callable."""
+
+        def _arm_dynamic(node: ast.AST) -> bool:
+            if isinstance(node, ast.NamedExpr):
+                return _arm_dynamic(node.value)
+            if isinstance(node, ast.IfExp):
+                return _arm_dynamic(node.body) or _arm_dynamic(node.orelse)
+            if isinstance(node, ast.BoolOp):
+                return any(_arm_dynamic(operand) for operand in node.values)
+            if isinstance(node, (ast.Lambda,)):
+                return False
+            if isinstance(node, ast.Name):
+                if _local_callables_for_name(node.id):
+                    return False
+                if node.id in name_unknown_callables:
+                    return True
+                return True
+            if isinstance(node, ast.Call):
+                if call_returned_closures.get(id(node)) or id(node) in call_returned_unknown:
+                    return id(node) in call_returned_unknown
+                if isinstance(node.func, ast.Name) and _local_callables_for_name(
+                    node.func.id
+                ):
+                    return False
+                return True
+            if isinstance(
+                node,
+                (
+                    ast.Constant,
+                    ast.FormattedValue,
+                    ast.JoinedStr,
+                    ast.List,
+                    ast.Tuple,
+                    ast.Set,
+                    ast.Dict,
+                ),
+            ):
+                return False
+            return True
+
+        if isinstance(expr, ast.NamedExpr):
+            return _choice_expr_has_dynamic_callable_arm(expr.value)
+        if isinstance(expr, (ast.IfExp, ast.BoolOp)):
+            return _arm_dynamic(expr)
+        return False
 
     def _callable_products_from_expr(
         expr: ast.AST,

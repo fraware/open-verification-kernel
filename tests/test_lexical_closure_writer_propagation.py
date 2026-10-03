@@ -1102,6 +1102,22 @@ def handler(request, bypass_filter=False, c=False):
     _never_authorized(findings)
 
 
+def test_ifexp_both_unknown_arms_call_never_authorized() -> None:
+    """``fn = unknown if c else other; fn()`` must not authorize."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False, c=False):
+    request.state.bypass_filter = True
+    fn = unknown if c else other
+    fn()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
 def test_stmt_if_join_returned_closure_never_authorized() -> None:
     """Statement ``if`` join of ``fn = mid()`` / ``fn = noop`` keeps poison arm."""
 
