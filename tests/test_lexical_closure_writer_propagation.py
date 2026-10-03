@@ -491,5 +491,268 @@ def handler(request, bypass_filter=False):
     assert "source_proved" not in findings[0].reason
 
 
+def test_class_nested_method_closes_over_state_never_authorized() -> None:
+    """Class-nested method closing over outer state and called → never authorized."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    class Box:
+        def poison(self):
+            state.bypass_filter = bypass_filter
+    Box().poison()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_list_subscript_closure_call_never_authorized() -> None:
+    """Closure assigned to list and called via subscript → never authorized."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    def poison():
+        state.bypass_filter = bypass_filter
+    bucket = [poison]
+    bucket[0]()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_dict_subscript_closure_call_never_authorized() -> None:
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    def poison():
+        state.bypass_filter = bypass_filter
+    m = {"p": poison}
+    m["p"]()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_getattr_class_method_closure_never_authorized() -> None:
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    class Box:
+        def poison(self):
+            state.bypass_filter = bypass_filter
+    getattr(Box(), "poison")()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_ifexp_packed_closure_callee_never_authorized() -> None:
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    def poison():
+        state.bypass_filter = bypass_filter
+    def noop():
+        pass
+    (poison if True else noop)()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_attr_store_closure_then_call_never_authorized() -> None:
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    def poison():
+        state.bypass_filter = bypass_filter
+    class Holder:
+        pass
+    h = Holder()
+    h.fn = poison
+    h.fn()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_list_append_closure_then_call_never_authorized() -> None:
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    def poison():
+        state.bypass_filter = bypass_filter
+    bucket = []
+    bucket.append(poison)
+    bucket[0]()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_returned_closure_name_call_never_authorized() -> None:
+    """``fn = mid(); fn()`` where mid returns a free-var closure → never authorized."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    def mid():
+        def poison():
+            state.bypass_filter = bypass_filter
+        return poison
+    fn = mid()
+    fn()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_cell_rebind_between_mid_return_and_call_never_authorized() -> None:
+    """Late-bound cell becomes governed after mid returns poison → never authorized."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False, flag=False):
+    state = object()
+    request.state.bypass_filter = True
+    def mid():
+        def poison():
+            state.bypass_filter = bypass_filter
+        return poison
+    fn = mid()
+    if flag:
+        state = request.state
+    else:
+        state = request.state
+    fn()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_walrus_bound_returned_closure_never_authorized() -> None:
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    def _make():
+        def poison():
+            state.bypass_filter = bypass_filter
+        return poison
+    if (fn := _make()):
+        fn()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_map_higher_order_closure_never_authorized() -> None:
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    def poison(_):
+        state.bypass_filter = bypass_filter
+    list(map(poison, [0]))
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_methodcaller_higher_order_closure_never_authorized() -> None:
+    findings = _unit(
+        """
+import helpers
+import operator
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    def poison():
+        state.bypass_filter = bypass_filter
+    mc = operator.methodcaller("__call__")
+    mc(poison)
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_nonlocal_rebind_then_nested_write_never_authorized() -> None:
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = object()
+    request.state.bypass_filter = True
+    def mid():
+        nonlocal state
+        state = request.state
+        def poison():
+            state.bypass_filter = bypass_filter
+        poison()
+    mid()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_inline_list_packed_closure_call_never_authorized() -> None:
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    def poison():
+        state.bypass_filter = bypass_filter
+    [poison][0]()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
 def test_persistent_version_bumped_for_lexical_closure() -> None:
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.48.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.49.0"

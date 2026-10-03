@@ -111,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.28.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.29.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -1465,14 +1465,108 @@ def _collect_writes_in_function(
     def _closure_carries_governed_identity(
         node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
     ) -> bool:
+        """True when free vars / defaults carry request/state via the lexical stack.
+
+        Nested mid-frames often do not bind the cell themselves; late-bound
+        lookup must walk ``enclosing_alias_envs`` (same as call-time seeding)
+        or ``return poison`` from ``mid`` omits the escape and false-PASSes.
+        """
+
         free = nested_free_vars.get(id(node), _free_var_names(node))
-        if any(_name_carries_governed_identity(name, request_aliases) for name in free):
+        if any(
+            _lookup_enclosing_name_classification(name).any_alias for name in free
+        ):
             return True
         captures = nested_default_captures.get(id(node), {})
         return any(capture.classification.any_alias for capture in captures.values())
 
-    def _note_callable_name_alias(target: ast.AST, value: ast.AST) -> None:
+    def _local_callable_for_name(
+        name: str,
+    ) -> ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | None:
+        if name in local_nested:
+            return local_nested[name]
+        if name in local_lambdas:
+            return local_lambdas[name]
+        return None
+
+    def _governed_local_callables_from_expr(
+        expr: ast.AST,
+    ) -> list[ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda]:
+        """Local nested/lambda callables with governed identity packed in ``expr``.
+
+        Mirrors the identity-session packed-callee surface (IfExp/BoolOp/
+        NamedExpr/containers/Subscript) and also resolves Names bound to
+        nested defs — ``[poison][0]()`` / ``(poison if f else noop)()``.
+        """
+
+        found: list[ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda] = []
+        seen: set[int] = set()
+
+        def _add(
+            node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
+        ) -> None:
+            if id(node) in seen:
+                return
+            if not _closure_carries_governed_identity(node):
+                return
+            seen.add(id(node))
+            found.append(node)
+
+        def _walk(node: ast.AST) -> None:
+            if isinstance(node, ast.NamedExpr):
+                _walk(node.value)
+                return
+            if isinstance(node, ast.Lambda):
+                _add(node)
+                return
+            if isinstance(node, ast.Name):
+                callee = _local_callable_for_name(node.id)
+                if callee is not None:
+                    _add(callee)
+                return
+            if isinstance(node, ast.IfExp):
+                _walk(node.body)
+                _walk(node.orelse)
+                return
+            if isinstance(node, ast.BoolOp):
+                for operand in node.values:
+                    _walk(operand)
+                return
+            if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+                for elt in node.elts:
+                    nested = elt.value if isinstance(elt, ast.Starred) else elt
+                    _walk(nested)
+                return
+            if isinstance(node, ast.Dict):
+                for value in node.values:
+                    if value is not None:
+                        _walk(value)
+                return
+            if isinstance(node, ast.Subscript):
+                _walk(node.value)
+                return
+
+        _walk(expr)
+        return found
+
+    def _expr_packs_governed_local_callable(expr: ast.AST) -> bool:
+        return bool(_governed_local_callables_from_expr(expr))
+
+    def _note_callable_name_alias(
+        target: ast.AST,
+        value: ast.AST,
+        *,
+        control_dependent: bool = False,
+    ) -> None:
         if not isinstance(target, ast.Name):
+            # Attribute / subscript store of a governed local callable escapes
+            # the Name-resolution theorem (``h.fn = poison``; Unknown > PASS).
+            if _expr_packs_governed_local_callable(value):
+                _record_escape(
+                    value,
+                    ast.unparse(value),
+                    control_dependent=control_dependent,
+                )
             return
         if isinstance(value, ast.Name):
             if value.id in local_nested:
@@ -1481,8 +1575,19 @@ def _collect_writes_in_function(
             elif value.id in local_lambdas:
                 local_lambdas[target.id] = local_lambdas[value.id]
                 local_nested.pop(target.id, None)
-        elif isinstance(value, ast.Lambda):
+            return
+        if isinstance(value, ast.Lambda):
             _register_nested_callable(value, name=target.id)
+            return
+        # Container packing of governed closures into a Name carrier: the
+        # Name is not itself callable under the theorem → residual escape so
+        # later ``bucket[0]()`` cannot omit the writer (Unknown > false PASS).
+        if _expr_packs_governed_local_callable(value):
+            _record_escape(
+                value,
+                ast.unparse(value),
+                control_dependent=control_dependent,
+            )
 
     def _record_escape(
         node: ast.AST,
@@ -1736,6 +1841,40 @@ def _collect_writes_in_function(
             alias_state.restore(saved_origins)
         return True
 
+    def _follow_local_callable_node(
+        callee: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
+        *,
+        call: ast.Call,
+        control_dependent: bool,
+    ) -> bool:
+        if isinstance(callee, ast.Lambda):
+            return _follow_lambda_callee(
+                callee, call=call, control_dependent=control_dependent
+            )
+        return _follow_function_callee(
+            callee,
+            callee_path=path,
+            call=call,
+            control_dependent=control_dependent,
+            is_local_nested=True,
+        )
+
+    def _getattr_local_callable(
+        call_func: ast.AST,
+    ) -> ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | None:
+        """``getattr(obj, \"poison\")`` → local nested callable when bindable."""
+
+        if not isinstance(call_func, ast.Call):
+            return None
+        if not isinstance(call_func.func, ast.Name) or call_func.func.id != "getattr":
+            return None
+        if len(call_func.args) < 2:
+            return None
+        name_arg = call_func.args[1]
+        if not isinstance(name_arg, ast.Constant) or not isinstance(name_arg.value, str):
+            return None
+        return _local_callable_for_name(name_arg.value)
+
     def _try_interprocedural(
         call: ast.Call,
         *,
@@ -1762,6 +1901,58 @@ def _collect_writes_in_function(
                     call=call,
                     control_dependent=control_dependent,
                 )
+            # Higher-order builtins: ``map(poison, …)`` / ``filter(poison, …)``
+            # invoke the first argument as a callee (identity session parity).
+            if call.func.id in {"map", "filter"} and call.args:
+                first = call.args[0]
+                packed = _governed_local_callables_from_expr(first)
+                if packed:
+                    synthetic = ast.Call(
+                        func=first,
+                        args=list(call.args[1:]),
+                        keywords=list(call.keywords),
+                    )
+                    followed_any = False
+                    for callee in packed:
+                        if _follow_local_callable_node(
+                            callee,
+                            call=synthetic,
+                            control_dependent=control_dependent,
+                        ):
+                            followed_any = True
+                    return followed_any
+
+        # Attribute method: class-nested ``Box().poison()`` where ``poison``
+        # closed over outer governed cells and was registered at class body.
+        if isinstance(call.func, ast.Attribute):
+            callee = _local_callable_for_name(call.func.attr)
+            if callee is not None and _closure_carries_governed_identity(callee):
+                return _follow_local_callable_node(
+                    callee, call=call, control_dependent=control_dependent
+                )
+
+        # ``getattr(box, \"poison\")()`` when the attribute name is constant.
+        getattr_callee = _getattr_local_callable(call.func)
+        if getattr_callee is not None and _closure_carries_governed_identity(
+            getattr_callee
+        ):
+            return _follow_local_callable_node(
+                getattr_callee, call=call, control_dependent=control_dependent
+            )
+
+        # Packed Call.func: IfExp/BoolOp/NamedExpr/containers/Subscript of
+        # local governed closures (``(poison if f else noop)()``, ``[poison][0]()``).
+        if not isinstance(call.func, ast.Name):
+            packed = _governed_local_callables_from_expr(call.func)
+            if packed:
+                followed_any = False
+                for callee in packed:
+                    if _follow_local_callable_node(
+                        callee, call=call, control_dependent=control_dependent
+                    ):
+                        followed_any = True
+                if followed_any:
+                    return True
 
         if callee_resolver is None:
             return False
@@ -1865,10 +2056,52 @@ def _collect_writes_in_function(
             # under the bounded interprocedural theorem; otherwise UNKNOWN.
             # Also follow zero-arg nested closures / default-capture callees
             # that carry governed identity via free vars (no syntactic actual).
-            local_closure_call = isinstance(node.func, ast.Name) and (
-                node.func.id in local_nested or node.func.id in local_lambdas
+            # Packed/Attribute/getattr Call.func shapes that resolve to governed
+            # local callables participate in the same theorem (#173 closure).
+            packed_func_callees = (
+                []
+                if isinstance(node.func, ast.Name)
+                else _governed_local_callables_from_expr(node.func)
             )
-            if _call_receives_request_or_state(node) or local_closure_call:
+            attr_governed = False
+            if isinstance(node.func, ast.Attribute):
+                attr_callee = _local_callable_for_name(node.func.attr)
+                attr_governed = (
+                    attr_callee is not None
+                    and _closure_carries_governed_identity(attr_callee)
+                )
+            getattr_callee = _getattr_local_callable(node.func)
+            getattr_governed = (
+                getattr_callee is not None
+                and _closure_carries_governed_identity(getattr_callee)
+            )
+            local_closure_call = (
+                (
+                    isinstance(node.func, ast.Name)
+                    and (
+                        node.func.id in local_nested or node.func.id in local_lambdas
+                    )
+                )
+                or bool(packed_func_callees)
+                or attr_governed
+                or getattr_governed
+            )
+            # Higher-order: governed local callable flows as an actual into an
+            # unresolved callee (``bucket.append(poison)``, ``mc(poison)``).
+            higher_order_governed = any(
+                _expr_packs_governed_local_callable(arg)
+                for arg in node.args
+                if not isinstance(arg, ast.Starred)
+            ) or any(
+                kw.value is not None and _expr_packs_governed_local_callable(kw.value)
+                for kw in node.keywords
+                if kw.arg is not None
+            )
+            if (
+                _call_receives_request_or_state(node)
+                or local_closure_call
+                or higher_order_governed
+            ):
                 if (
                     isinstance(node.func, ast.Name)
                     and node.func.id in _NON_MUTATING_STATE_OBSERVERS
@@ -1876,8 +2109,9 @@ def _collect_writes_in_function(
                     continue
                 if _try_interprocedural(node, control_dependent=control_dependent):
                     continue
-                if local_closure_call:
-                    # Represented local closure call failed to follow → UNKNOWN.
+                if local_closure_call or higher_order_governed:
+                    # Represented local closure call / higher-order escape →
+                    # UNKNOWN (Unknown > false PASS).
                     _record_escape(
                         node,
                         rendered,
@@ -1890,14 +2124,22 @@ def _collect_writes_in_function(
                     control_dependent=control_dependent,
                 )
 
-    def _note_alias_bindings(statement: ast.stmt) -> None:
+    def _note_alias_bindings(
+        statement: ast.stmt, *, control_dependent: bool = False
+    ) -> None:
         if isinstance(statement, ast.Assign):
             for target in statement.targets:
                 request_aliases.note_binding(target, statement.value)
-                _note_callable_name_alias(target, statement.value)
+                _note_callable_name_alias(
+                    target, statement.value, control_dependent=control_dependent
+                )
         elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
             request_aliases.note_binding(statement.target, statement.value)
-            _note_callable_name_alias(statement.target, statement.value)
+            _note_callable_name_alias(
+                statement.target,
+                statement.value,
+                control_dependent=control_dependent,
+            )
 
     def _note_named_expr_bindings(
         node: ast.AST, *, control_dependent: bool
@@ -1906,6 +2148,9 @@ def _collect_writes_in_function(
             if not isinstance(child, ast.NamedExpr):
                 continue
             request_aliases.note_binding(child.target, child.value)
+            _note_callable_name_alias(
+                child.target, child.value, control_dependent=control_dependent
+            )
             if request_aliases.assignment_escapes_state_identity(
                 child.target, child.value
             ):
@@ -1988,7 +2233,7 @@ def _collect_writes_in_function(
             _note_named_expr_bindings(
                 statement.value, control_dependent=control_dependent
             )
-            _note_alias_bindings(statement)
+            _note_alias_bindings(statement, control_dependent=control_dependent)
             apply_statement_bindings(
                 statement,
                 path=path,
@@ -2030,7 +2275,7 @@ def _collect_writes_in_function(
             _note_named_expr_bindings(
                 statement.value, control_dependent=control_dependent
             )
-            _note_alias_bindings(statement)
+            _note_alias_bindings(statement, control_dependent=control_dependent)
             apply_statement_bindings(
                 statement,
                 path=path,
@@ -2596,13 +2841,26 @@ def _collect_writes_in_function(
                     control_dependent=control_dependent,
                 )
             # Escaped closure carrying governed identity → UNKNOWN.
+            # Also: nested callables with nonempty free-var cells escape on
+            # return even when cells are not yet governed — late binding may
+            # make them request/state before a residual ``fn()`` call
+            # (``state = object(); fn = mid(); state = request.state; fn()``).
             if isinstance(statement.value, ast.Name):
-                escaped: ast.AST | None = None
+                escaped_callable: (
+                    ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | None
+                ) = None
                 if statement.value.id in local_nested:
-                    escaped = local_nested[statement.value.id]
+                    escaped_callable = local_nested[statement.value.id]
                 elif statement.value.id in local_lambdas:
-                    escaped = local_lambdas[statement.value.id]
-                if escaped is not None and _closure_carries_governed_identity(escaped):
+                    escaped_callable = local_lambdas[statement.value.id]
+                if escaped_callable is not None and (
+                    _closure_carries_governed_identity(escaped_callable)
+                    or bool(
+                        nested_free_vars.get(
+                            id(escaped_callable), _free_var_names(escaped_callable)
+                        )
+                    )
+                ):
                     _record_escape(
                         statement,
                         ast.unparse(statement),
@@ -2610,7 +2868,11 @@ def _collect_writes_in_function(
                     )
             elif isinstance(statement.value, ast.Lambda):
                 _register_nested_callable(statement.value, name=None)
-                if _closure_carries_governed_identity(statement.value):
+                if _closure_carries_governed_identity(statement.value) or bool(
+                    nested_free_vars.get(
+                        id(statement.value), _free_var_names(statement.value)
+                    )
+                ):
                     _record_escape(
                         statement,
                         ast.unparse(statement),
