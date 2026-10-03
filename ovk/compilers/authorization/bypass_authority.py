@@ -115,6 +115,22 @@ _BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.27.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
+# Container view / adapter surfaces that project packed request/state identity
+# without a Name-alias bind (Unknown > false PASS on omitted client writes).
+_CONTAINER_VIEW_ATTRS = frozenset({"values", "keys", "items"})
+_CONTAINER_ADAPTER_NAMES = frozenset(
+    {
+        "list",
+        "tuple",
+        "set",
+        "frozenset",
+        "sorted",
+        "reversed",
+        "iter",
+        "next",
+    }
+)
+
 # Builtins that observe request/state without a mutation channel under the
 # bounded escape theorem. ``setattr`` is handled separately as a write.
 _NON_MUTATING_STATE_OBSERVERS = frozenset(
@@ -425,6 +441,10 @@ class _RequestStateAliasEnv:
                 value.value
             ):
                 return True
+        # Adapter/view Calls that project packed identity, e.g.
+        # ``next(iter({\"a\": request.state}.values()))`` used as a write base.
+        if isinstance(value, ast.Call) and self.packs_request_or_state_identity(value):
+            return True
         return False
 
     def _is_state_expr(self, value: ast.AST) -> bool:
@@ -584,7 +604,14 @@ class _RequestStateAliasEnv:
         return False
 
     def packs_request_or_state_identity(self, value: ast.AST) -> bool:
-        """True when request/state identity is packed into a container literal."""
+        """True when request/state identity is packed or projected via containers.
+
+        Covers literal packing (``[request.state]``, ``{k: request.state}``) and
+        sound adapter/view projections that would otherwise drop identity before
+        a subscript or for-iter bind (``list({request.state})``,
+        ``{\"k\": request.state}.values()``, ``next(iter(...))``).
+        Unknown > false PASS.
+        """
 
         if isinstance(value, ast.NamedExpr):
             return self.packs_request_or_state_identity(value.value)
@@ -623,6 +650,58 @@ class _RequestStateAliasEnv:
                     if self.packs_request_or_state_identity(item):
                         return True
             return False
+        if isinstance(value, ast.Call):
+            # Dict/set view projections: ``{\"k\": request.state}.values()``.
+            if (
+                isinstance(value.func, ast.Attribute)
+                and value.func.attr in _CONTAINER_VIEW_ATTRS
+            ):
+                recv = value.func.value
+                if self.is_request_or_state_expr(
+                    recv
+                ) or self.packs_request_or_state_identity(recv):
+                    return True
+            # Builtin adapters: ``list({request.state})``, ``next(iter(...))``.
+            func_name: str | None = None
+            if isinstance(value.func, ast.Name):
+                func_name = value.func.id
+            if func_name in _CONTAINER_ADAPTER_NAMES:
+                for arg in value.args:
+                    nested = arg.value if isinstance(arg, ast.Starred) else arg
+                    if self.is_request_or_state_expr(
+                        nested
+                    ) or self.packs_request_or_state_identity(nested):
+                        return True
+                for kw in value.keywords:
+                    if kw.value is None:
+                        continue
+                    if self.is_request_or_state_expr(
+                        kw.value
+                    ) or self.packs_request_or_state_identity(kw.value):
+                        return True
+            return False
+        return False
+
+    def call_iter_carries_request_or_state_identity(self, call: ast.Call) -> bool:
+        """True when a for/async-for Call iter may yield request/state identity.
+
+        Covers generators and adapters: ``gen([request.state])``,
+        ``gen(request.state)``, ``map(f, [request.state])``. Broader than
+        :meth:`packs_request_or_state_identity` because any Call receiving
+        identity as an iter is residual (Unknown > false PASS).
+        """
+
+        if self.call_receives_request_or_state(call):
+            return True
+        if self.packs_request_or_state_identity(call):
+            return True
+        for arg in call.args:
+            nested = arg.value if isinstance(arg, ast.Starred) else arg
+            if self.packs_request_or_state_identity(nested):
+                return True
+        for kw in call.keywords:
+            if kw.value is not None and self.packs_request_or_state_identity(kw.value):
+                return True
         return False
 
     def assignment_escapes_state_identity(
@@ -1730,12 +1809,20 @@ def _collect_writes_in_function(
                 statement.iter, control_dependent=control_dependent
             )
             # ``for s in [request.state]: s.field = client`` must not authorize.
-            # IfExp/BoolOp packing is included via packs_request_or_state_identity.
-            if (
+            # IfExp/BoolOp packing, container adapters/views, and Call iters that
+            # receive identity (module-level generators) are residual escapes.
+            iter_escapes = (
                 request_aliases.is_request_or_state_expr(statement.iter)
                 or request_aliases.packs_request_or_state_identity(statement.iter)
                 or request_aliases.is_state_dict_surface(statement.iter)
+            )
+            if isinstance(statement.iter, ast.Call) and (
+                request_aliases.call_iter_carries_request_or_state_identity(
+                    statement.iter
+                )
             ):
+                iter_escapes = True
+            if iter_escapes:
                 _record_escape(
                     statement,
                     ast.unparse(statement),

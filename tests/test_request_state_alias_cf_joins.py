@@ -442,7 +442,7 @@ async def handler(request, bypass_filter: bool = False, user = Depends(get_curre
 def test_persistent_state_round_trip_and_version_invalidation(tmp_path) -> None:
     """13. Persistent-state round trip and version invalidation."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.46.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.47.0"
 
     trusted_helpers = """
 def write_state(state, value):
@@ -1761,6 +1761,117 @@ import helpers
 def handler(request, bypass_filter=False):
     request.state.bypass_filter = True
     [request.state][0].bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_list_set_projection_state_write_never_authorized() -> None:
+    """``list({request.state})[0].field = client`` must not omit the write."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    list({request.state})[0].bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_dict_values_projection_state_write_never_authorized() -> None:
+    """``list({\"k\": request.state}.values())[0].field = client`` residual."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    list({"k": request.state}.values())[0].bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_next_iter_dict_values_write_never_authorized() -> None:
+    """``next(iter({\"a\": request.state}.values())).field = client`` residual."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    next(iter({"a": request.state}.values())).bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_for_dict_values_inline_never_authorized() -> None:
+    """``for s in {\"k\": request.state}.values():`` must escape / count writes."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    for s in {"k": request.state}.values():
+        s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_for_module_generator_packing_never_authorized() -> None:
+    """Module-level generator yielding packed request.state must not authorize."""
+
+    findings = _unit(
+        """
+import helpers
+def gen(items):
+    for x in items:
+        yield x
+def handler(request, bypass_filter=False, flag=True):
+    request.state.bypass_filter = True
+    for s in gen([request.state] if flag else [request.state]):
+        s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_async_for_module_generator_packing_never_authorized() -> None:
+    """Async module-level generator packing request.state must not authorize."""
+
+    findings = _unit(
+        """
+import helpers
+async def agen(items):
+    for x in items:
+        yield x
+async def handler(request, bypass_filter=False, flag=True):
+    request.state.bypass_filter = True
+    async for s in agen(flag and [request.state] or [request.state]):
+        s.bypass_filter = bypass_filter
     return request.state.bypass_filter
 """
     )
