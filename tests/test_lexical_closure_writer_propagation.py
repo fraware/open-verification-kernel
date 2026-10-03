@@ -1,0 +1,495 @@
+"""Bounded lexical-environment propagation for state-writer callees (#173).
+
+Nested closures / default captures of request/state aliases must enter the
+writer theorem at call time. Definition-time body scans under an empty alias
+seed omit zero-argument closure writes and false-PASS beside a trusted literal.
+
+Unknown > false PASS. Held-out FormalPR partitions are not frozen.
+"""
+
+from __future__ import annotations
+
+from ovk.compilers.authorization.bypass_authority import (
+    ClosedWorldScopeProof,
+    analyze_bypass_authority_unit,
+)
+from ovk.compilers.authorization.incremental_fastapi_compiler import (
+    compile_incremental_fastapi_assurance,
+)
+from ovk.compilers.authorization.material_loader import AuthMaterials
+from ovk.compilers.authorization.persistent_fastapi_state import (
+    PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION,
+)
+from ovk.compilers.authorization.protected_effect_fastapi_dependency import (
+    FastApiDependencyEffectExtractor,
+    FastApiDependencyEffectProfile,
+)
+from ovk.compilers.authorization.python_ast_index import parse_head_python_materials
+from ovk.compilers.authorization.fastapi_route_summary import build_route_summary_index
+from ovk.compilers.authorization.resource_return_contracts import (
+    build_contract_summary_index,
+)
+
+
+def _scope(*paths: str, import_roots: tuple[str, ...] = ()) -> ClosedWorldScopeProof:
+    return ClosedWorldScopeProof(
+        accounted_paths=tuple(paths),
+        source_roots=(".",),
+        python_import_roots=import_roots,
+    )
+
+
+def _helpers_source(*, body: str = "True") -> str:
+    return f"""
+def write_state(state, value):
+    state.bypass_filter = {body}
+""".strip()
+
+
+def _unit(routes: str, *, helpers: str | None = None) -> object:
+    files = {
+        "app/helpers.py": helpers or _helpers_source(),
+        "app/routes.py": routes.strip(),
+    }
+    return analyze_bypass_authority_unit(
+        files,
+        entry_path="app/routes.py",
+        function_name="handler",
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope(
+            "app/helpers.py",
+            "app/routes.py",
+            import_roots=("app",),
+        ),
+    )
+
+
+def _never_authorized(findings: object) -> None:
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_zero_arg_closure_captures_state_alias_never_authorized() -> None:
+    """1. Zero-arg nested closure captures state = request.state → never authorized."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+
+    def poison():
+        state.bypass_filter = bypass_filter
+
+    poison()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_closure_captures_request_alias_writes_state_field() -> None:
+    """2. Closure captures req = request and writes req.state.field → never authorized."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    req = request
+    request.state.bypass_filter = True
+
+    def poison():
+        req.state.bypass_filter = bypass_filter
+
+    poison()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_closure_captures_outer_request_and_client_input() -> None:
+    """3. Closure directly captures outer request and client input."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+
+    def poison():
+        request.state.bypass_filter = bypass_filter
+
+    poison()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_closure_may_state_alias_from_branch_join_dynamic() -> None:
+    """4. Closure captures may-state alias from branch join → dynamic/UNKNOWN."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False, flag=False):
+    request.state.bypass_filter = True
+    if flag:
+        state = request.state
+    else:
+        state = object()
+
+    def poison():
+        state.bypass_filter = bypass_filter
+
+    poison()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_closure_alias_rebound_before_call_uses_call_time_env() -> None:
+    """5. Closure alias rebound before call; call-time env determines identity."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = object()
+    request.state.bypass_filter = True
+
+    def poison():
+        state.bypass_filter = bypass_filter
+
+    state = request.state
+    poison()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_closure_late_binding_after_definition() -> None:
+    """6. Alias becomes governed only after def; late binding sees it at call."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+
+    def poison():
+        state.bypass_filter = bypass_filter
+
+    state = request.state
+    poison()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_default_param_state_omitted_at_call_counted() -> None:
+    """7. Default parameter state=request.state, omitted at call → writer counted."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+
+    def poison(state=request.state):
+        state.bypass_filter = bypass_filter
+
+    poison()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_default_param_explicitly_overridden_unrelated_object() -> None:
+    """8. Default overridden with unrelated object → default identity does not apply.
+
+    With an unrelated explicit actual, the nested write is not a governed-state
+    write. Authority may still fail closed for other reasons; the trusted
+    literal alone must not authorize when a client write remains elsewhere —
+    here the only client write target is non-state, so a pure trusted path
+    may authorize. Guard: overridden default must not be treated as state.
+    """
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    other = object()
+
+    def poison(state=request.state):
+        state.bypass_filter = bypass_filter
+
+    poison(other)
+    return request.state.bypass_filter
+"""
+    )
+    # No governed client write remains; trusted literal may authorize.
+    assert findings[0].status == "authorized"
+    assert findings[0].reason == "source_proved_server_authority_write"
+
+
+def test_default_captured_before_outer_alias_rebind() -> None:
+    """9. Default captured before outer alias rebind → definition-time identity."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+
+    def poison(target=state):
+        target.bypass_filter = bypass_filter
+
+    state = object()
+    poison()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_two_nested_call_levels_preserve_closure_alias() -> None:
+    """10. Two nested call levels preserve closure alias/provenance."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+
+    def mid():
+        def poison():
+            state.bypass_filter = bypass_filter
+        poison()
+
+    mid()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_keyword_default_combination_preserves_must_may() -> None:
+    """11. Keyword/default combinations preserve must/may strength."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False, flag=False):
+    request.state.bypass_filter = True
+    if flag:
+        x = request.state
+    else:
+        x = object()
+
+    def poison(target=x):
+        target.bypass_filter = bypass_filter
+
+    poison()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_nested_async_function_closure() -> None:
+    """12. Nested async function closure."""
+
+    findings = _unit(
+        """
+import helpers
+async def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+
+    async def poison():
+        state.bypass_filter = bypass_filter
+
+    await poison()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_nested_lambda_closure_mutates_governed_state() -> None:
+    """13. Nested lambda closure that mutates governed state."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    poison = lambda: setattr(state, "bypass_filter", bypass_filter)
+    poison()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_escaped_closure_carrying_governed_state_unknown() -> None:
+    """14. Escaped closure carrying governed state identity → UNKNOWN."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+
+    def poison():
+        state.bypass_filter = bypass_filter
+
+    return poison
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_full_equals_incremental_closure_counterexample() -> None:
+    """15. Full compilation == incremental compilation for closure case."""
+
+    trusted_helpers = _helpers_source()
+    clean_routes = """
+from fastapi import Depends, FastAPI
+import helpers
+app = FastAPI()
+
+@app.post("/chat")
+async def handler(request, user = Depends(get_current_user)):
+    helpers.write_state(request.state, True)
+    if request.state.bypass_filter:
+        return sink(user)
+    return sink(user)
+""".strip()
+    poisoned_routes = """
+from fastapi import Depends, FastAPI
+import helpers
+app = FastAPI()
+
+@app.post("/chat")
+async def handler(request, bypass_filter: bool = False, user = Depends(get_current_user)):
+    state = request.state
+    request.state.bypass_filter = True
+    def poison():
+        state.bypass_filter = bypass_filter
+    poison()
+    if request.state.bypass_filter:
+        return sink(user)
+    return sink(user)
+""".strip()
+
+    profile = FastApiDependencyEffectProfile(
+        sink_effects={"sink": "model.invoke"},
+        sink_static_resources={"sink": "chat"},
+        trusted_bypass_authorities={
+            "request.state.bypass_filter": ("model.invoke",),
+        },
+        principal_parameter="user",
+    )
+
+    def _materials(routes: str, revision: str) -> AuthMaterials:
+        repo = {
+            "app/helpers.py": trusted_helpers + "\n",
+            "app/routes.py": routes,
+        }
+        return AuthMaterials(
+            base_files=dict(repo),
+            head_files=dict(repo),
+            repo="example/lexical-closure-writer-propagation",
+            base_revision="base",
+            head_revision=revision,
+            repository_python_files=repo,
+            head_repository_python_files=repo,
+            base_repository_python_files=repo,
+        )
+
+    def _indexes(materials: AuthMaterials):
+        parsed = parse_head_python_materials(materials)
+        contracts = build_contract_summary_index(
+            materials,
+            parsed_trees=parsed.trees,
+            source_digests=parsed.source_digests,
+        )
+        routes = build_route_summary_index(
+            materials,
+            parsed_trees=parsed.trees,
+            source_digests=parsed.source_digests,
+        )
+        return parsed, contracts, routes
+
+    first_materials = _materials(clean_routes, "head-1")
+    parsed, contracts, routes = _indexes(first_materials)
+    first = compile_incremental_fastapi_assurance(
+        first_materials,
+        profile,
+        parsed_index=parsed,
+        contract_summary_index=contracts,
+        route_summary_index=routes,
+    )
+    first_payload = first.ir.canonical_payload()
+
+    second_materials = _materials(poisoned_routes, "head-2")
+    parsed2, contracts2, routes2 = _indexes(second_materials)
+    second = compile_incremental_fastapi_assurance(
+        second_materials,
+        profile,
+        parsed_index=parsed2,
+        contract_summary_index=contracts2,
+        route_summary_index=routes2,
+        previous_state=first.state,
+    )
+    full = FastApiDependencyEffectExtractor().compile(
+        second_materials,
+        profile,
+        parsed_index=parsed2,
+        contract_summary_index=contracts2,
+        route_summary_index=routes2,
+    )
+    assert second.ir.canonical_payload() == full.canonical_payload()
+    assert second.ir.canonical_payload() != first_payload
+    assert all(
+        item.status != "established" for item in second.ir.bypass_authority_evidence
+    )
+
+
+def test_e2e_pe_no_established_bypass_for_closure_counterexample() -> None:
+    """16. End-to-end PE: first counterexample never yields established bypass."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+
+    def poison():
+        state.bypass_filter = bypass_filter
+
+    poison()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+    assert "source_proved" not in findings[0].reason
+
+
+def test_persistent_version_bumped_for_lexical_closure() -> None:
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.48.0"

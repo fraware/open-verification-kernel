@@ -111,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.27.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.28.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -277,6 +277,22 @@ class _RequestStateAliasEnv:
         if not param_names:
             request_names.add("request")
         return cls(request_names=set(request_names), state_names=set())
+
+    @classmethod
+    def empty(cls) -> "_RequestStateAliasEnv":
+        """Empty alias env for nested/interprocedural seeding (no bare request)."""
+
+        return cls(request_names=set(), state_names=set())
+
+    def classification_for_name(self, name: str) -> AliasClassification:
+        """Must/may request/state facts currently recorded for ``name``."""
+
+        return AliasClassification(
+            must_request=name in self.request_names,
+            may_request=name in self.may_request_names,
+            must_state=name in self.state_names,
+            may_state=name in self.may_state_names,
+        )
 
     def snapshot(self) -> "_RequestStateAliasEnv":
         """Deep-copy alias sets for control-flow fork."""
@@ -939,6 +955,105 @@ def _function_param_names(
     return tuple(names)
 
 
+def _all_function_param_names(
+    fn: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
+) -> tuple[str, ...]:
+    """All parameter names including ``self``/``cls``/vararg/kwarg."""
+
+    names: list[str] = []
+    for arg in list(fn.args.posonlyargs) + list(fn.args.args):
+        names.append(arg.arg)
+    if fn.args.vararg is not None:
+        names.append(fn.args.vararg.arg)
+    for arg in fn.args.kwonlyargs:
+        names.append(arg.arg)
+    if fn.args.kwarg is not None:
+        names.append(fn.args.kwarg.arg)
+    return tuple(names)
+
+
+def _free_var_names(
+    fn: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
+) -> frozenset[str]:
+    """Names loaded from an enclosing scope (late-bound closure cells)."""
+
+    bound: set[str] = set(_all_function_param_names(fn))
+    loaded: set[str] = set()
+
+    class _Visitor(ast.NodeVisitor):
+        def visit_Name(self, node: ast.Name) -> None:
+            if isinstance(node.ctx, ast.Load):
+                loaded.add(node.id)
+            elif isinstance(node.ctx, (ast.Store, ast.Del)):
+                bound.add(node.id)
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            bound.add(node.name)
+            # Nested bodies have their own scope; do not collect here.
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+            bound.add(node.name)
+
+        def visit_ClassDef(self, node: ast.ClassDef) -> None:
+            bound.add(node.name)
+
+        def visit_Lambda(self, node: ast.Lambda) -> None:
+            # Nested lambda scope is independent.
+            return
+
+    if isinstance(fn, ast.Lambda):
+        _Visitor().visit(fn.body)
+    else:
+        for stmt in fn.body:
+            _Visitor().visit(stmt)
+    return frozenset(name for name in loaded if name not in bound)
+
+
+@dataclass(frozen=True)
+class _DefaultCapture:
+    """Definition-time alias + provenance summary for one omitted formal."""
+
+    classification: AliasClassification
+    origin: ValueOriginEvidence
+
+
+def _capture_default_summaries(
+    fn: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
+    *,
+    request_aliases: _RequestStateAliasEnv,
+    classify_origin,
+) -> dict[str, _DefaultCapture]:
+    """Snapshot default expressions under the definition-time environment.
+
+    Defaults evaluate once at function definition. Call sites that omit the
+    formal must reuse this capture — never re-evaluate under call-time env.
+    """
+
+    captures: dict[str, _DefaultCapture] = {}
+    positional = list(fn.args.posonlyargs) + list(fn.args.args)
+    defaults = list(fn.args.defaults)
+    if defaults:
+        for arg, default_expr in zip(positional[-len(defaults) :], defaults):
+            captures[arg.arg] = _DefaultCapture(
+                classification=request_aliases.classify(default_expr),
+                origin=classify_origin(default_expr),
+            )
+    for arg, default_expr in zip(fn.args.kwonlyargs, fn.args.kw_defaults):
+        if default_expr is None:
+            continue
+        captures[arg.arg] = _DefaultCapture(
+            classification=request_aliases.classify(default_expr),
+            origin=classify_origin(default_expr),
+        )
+    return captures
+
+
+def _name_carries_governed_identity(
+    name: str, aliases: _RequestStateAliasEnv
+) -> bool:
+    return name in aliases.all_request_names() or name in aliases.all_state_names()
+
+
 def _bind_call_actuals(
     fn: ast.FunctionDef | ast.AsyncFunctionDef,
     call: ast.Call,
@@ -946,7 +1061,8 @@ def _bind_call_actuals(
     """Map callee formals to call actuals under the ordinary-argument theorem.
 
     Returns None when *args/**kwargs, unexpected keywords, or arity mismatch
-    make the binding unresolvable (escape → UNKNOWN).
+    make the binding unresolvable (escape → UNKNOWN). Omitted formals with
+    defaults are left absent so callers can fill definition-time captures.
     """
 
     if any(isinstance(arg, ast.Starred) for arg in call.args):
@@ -1267,6 +1383,8 @@ def _collect_writes_in_function(
     seed_identity_session: RequestTimeIdentitySession | None = None,
     call_stack: frozenset[tuple[str, str]] | None = None,
     depth: int = 0,
+    enclosing_alias_envs: tuple[_RequestStateAliasEnv, ...] = (),
+    enclosing_origin_states: tuple[AliasState, ...] = (),
 ) -> list[StateAttributeWrite]:
     """Collect state writes under statement-order alias tracking.
 
@@ -1309,6 +1427,13 @@ def _collect_writes_in_function(
     else:
         identity_session = None
 
+    # Nested callables: bodies execute at call time under lexical env, not at
+    # definition under an impoverished empty alias seed (#173 closure theorem).
+    local_nested: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+    local_lambdas: dict[str, ast.Lambda] = {}
+    nested_default_captures: dict[int, dict[str, _DefaultCapture]] = {}
+    nested_free_vars: dict[int, frozenset[str]] = {}
+
     def _classify(node: ast.AST) -> ValueOriginEvidence:
         return classify_expression_origin(
             node,
@@ -1316,6 +1441,48 @@ def _collect_writes_in_function(
             handler_param_names=handler_param_names,
             alias_state=alias_state,
         )
+
+    def _register_nested_callable(
+        node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
+        *,
+        name: str | None,
+    ) -> None:
+        captures = _capture_default_summaries(
+            node, request_aliases=request_aliases, classify_origin=_classify
+        )
+        free = _free_var_names(node)
+        nested_default_captures[id(node)] = captures
+        nested_free_vars[id(node)] = free
+        if name is None:
+            return
+        if isinstance(node, ast.Lambda):
+            local_lambdas[name] = node
+            local_nested.pop(name, None)
+        else:
+            local_nested[name] = node
+            local_lambdas.pop(name, None)
+
+    def _closure_carries_governed_identity(
+        node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
+    ) -> bool:
+        free = nested_free_vars.get(id(node), _free_var_names(node))
+        if any(_name_carries_governed_identity(name, request_aliases) for name in free):
+            return True
+        captures = nested_default_captures.get(id(node), {})
+        return any(capture.classification.any_alias for capture in captures.values())
+
+    def _note_callable_name_alias(target: ast.AST, value: ast.AST) -> None:
+        if not isinstance(target, ast.Name):
+            return
+        if isinstance(value, ast.Name):
+            if value.id in local_nested:
+                local_nested[target.id] = local_nested[value.id]
+                local_lambdas.pop(target.id, None)
+            elif value.id in local_lambdas:
+                local_lambdas[target.id] = local_lambdas[value.id]
+                local_nested.pop(target.id, None)
+        elif isinstance(value, ast.Lambda):
+            _register_nested_callable(value, name=target.id)
 
     def _record_escape(
         node: ast.AST,
@@ -1372,16 +1539,231 @@ def _collect_writes_in_function(
             )
         )
 
+    def _lookup_enclosing_name_classification(name: str) -> AliasClassification:
+        """Late-bound free-var lookup across the active lexical frame stack.
+
+        Intermediate frames that do not bind ``name`` are skipped, matching
+        Python closure cell resolution (``mid`` → nested ``poison`` still sees
+        the handler's ``state`` cell).
+        """
+
+        classification = request_aliases.classification_for_name(name)
+        if classification.any_alias:
+            return classification
+        for env in reversed(enclosing_alias_envs):
+            classification = env.classification_for_name(name)
+            if classification.any_alias:
+                return classification
+        return AliasClassification()
+
+    def _lookup_enclosing_origin(name: str) -> ValueOriginEvidence | None:
+        origin = alias_state.lookup(name)
+        if isinstance(origin, ValueOriginEvidence):
+            return origin
+        for state in reversed(enclosing_origin_states):
+            origin = state.lookup(name)
+            if isinstance(origin, ValueOriginEvidence):
+                return origin
+        return None
+
+    def _seed_callee_lexical_env(
+        callee: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
+        *,
+        binding: Mapping[str, ast.AST],
+    ) -> tuple[_RequestStateAliasEnv, AliasState]:
+        """Build call-time alias + origin env: actuals, free vars, defaults."""
+
+        callee_aliases = _RequestStateAliasEnv.empty()
+        callee_alias_state = AliasState()
+        for formal, actual in binding.items():
+            # Preserve must/may strength independently (no may→must).
+            classification = request_aliases.classify(actual)
+            callee_aliases.apply_classification(formal, classification)
+            callee_alias_state.bind(formal, _classify(actual))
+
+        captures = nested_default_captures.get(id(callee))
+        if captures is None:
+            captures = _capture_default_summaries(
+                callee, request_aliases=request_aliases, classify_origin=_classify
+            )
+        for formal, capture in captures.items():
+            if formal in binding:
+                continue
+            # Omitted formal → definition-time default capture (not call-time).
+            callee_aliases.apply_classification(formal, capture.classification)
+            callee_alias_state.bind(formal, capture.origin)
+
+        free = nested_free_vars.get(id(callee), _free_var_names(callee))
+        for name in free:
+            # Late-bound free vars use call-time cells from the enclosing stack.
+            classification = _lookup_enclosing_name_classification(name)
+            if classification.any_alias:
+                callee_aliases.apply_classification(name, classification)
+            origin = _lookup_enclosing_origin(name)
+            if origin is not None:
+                callee_alias_state.bind(name, origin)
+        return callee_aliases, callee_alias_state
+
+    def _follow_function_callee(
+        callee_node: ast.FunctionDef | ast.AsyncFunctionDef,
+        *,
+        callee_path: str,
+        call: ast.Call,
+        control_dependent: bool,
+        is_local_nested: bool,
+    ) -> bool:
+        callee_frame = (_normalize_unit_path(callee_path), callee_node.name)
+        if callee_frame in stack or callee_frame == frame:
+            return False
+        binding = _bind_call_actuals(callee_node, call)
+        if binding is None:
+            return False
+
+        captures = nested_default_captures.get(id(callee_node), {})
+        free = nested_free_vars.get(id(callee_node), _free_var_names(callee_node))
+        explicit_identity = any(
+            request_aliases.is_request_or_state_expr(actual)
+            for actual in binding.values()
+        )
+        free_identity = any(
+            _lookup_enclosing_name_classification(name).any_alias for name in free
+        )
+        default_identity = any(
+            captures[formal].classification.any_alias
+            for formal in captures
+            if formal not in binding
+        )
+        # Local nested helpers: follow within depth even without an explicit
+        # governed actual (False UNKNOWN > omitted closure writers).
+        if not (
+            explicit_identity or free_identity or default_identity or is_local_nested
+        ):
+            return False
+
+        callee_aliases, callee_alias_state = _seed_callee_lexical_env(
+            callee_node, binding=binding
+        )
+        callee_identity = None
+        if callee_resolver is not None:
+            # Same-path nested: thread the live request-time session so local
+            # resolve continues to see sibling nested defs.
+            if (
+                is_local_nested
+                and identity_session is not None
+                and _normalize_unit_path(callee_path) == _normalize_unit_path(path)
+            ):
+                callee_identity = identity_session
+            else:
+                callee_identity = begin_request_time_identity_session(
+                    callee_resolver, path=callee_path, fn=callee_node
+                )
+
+        collected = _collect_writes_in_function(
+            callee_node,
+            path=callee_path,
+            handler_param_names=handler_param_names,
+            callee_resolver=callee_resolver,
+            seed_request_aliases=callee_aliases,
+            seed_alias_state=callee_alias_state,
+            seed_identity_session=callee_identity,
+            call_stack=stack | {frame},
+            depth=depth + 1,
+            enclosing_alias_envs=enclosing_alias_envs + (request_aliases.snapshot(),),
+            enclosing_origin_states=enclosing_origin_states + (alias_state.snapshot(),),
+        )
+        if control_dependent:
+            collected = [
+                StateAttributeWrite(
+                    field_name=item.field_name,
+                    value_expression=item.value_expression,
+                    origin=item.origin,
+                    dynamic=item.dynamic,
+                    source_range=item.source_range,
+                    path=item.path,
+                    control_dependent=True,
+                )
+                for item in collected
+            ]
+        writes.extend(collected)
+        return True
+
+    def _follow_lambda_callee(
+        lambda_node: ast.Lambda,
+        *,
+        call: ast.Call,
+        control_dependent: bool,
+    ) -> bool:
+        """Account setattr / dynamic calls in a lambda body under lexical env."""
+
+        if call.args or call.keywords:
+            # Only the zero-arg / fully-defaulted ordinary theorem is modeled.
+            if any(isinstance(arg, ast.Starred) for arg in call.args):
+                return False
+            if any(kw.arg is None for kw in call.keywords):
+                return False
+        # Lambdas have expression bodies: seed env then observe the body.
+        binding: dict[str, ast.AST] = {}
+        formals = [
+            arg.arg
+            for arg in list(lambda_node.args.posonlyargs) + list(lambda_node.args.args)
+        ] + [arg.arg for arg in lambda_node.args.kwonlyargs]
+        if len(call.args) > len(
+            [a for a in list(lambda_node.args.posonlyargs) + list(lambda_node.args.args)]
+        ):
+            return False
+        positional = list(lambda_node.args.posonlyargs) + list(lambda_node.args.args)
+        for index, actual in enumerate(call.args):
+            binding[positional[index].arg] = actual
+        for kw in call.keywords:
+            if kw.arg is None or kw.arg in binding or kw.arg not in formals:
+                return False
+            binding[kw.arg] = kw.value
+
+        # Temporarily install lexical env for body observation.
+        saved_aliases = request_aliases.snapshot()
+        saved_origins = alias_state.snapshot()
+        seeded_aliases, seeded_origins = _seed_callee_lexical_env(
+            lambda_node, binding=binding
+        )
+        request_aliases.restore(seeded_aliases)
+        alias_state.restore(seeded_origins)
+        try:
+            _observe_executed_expression(
+                lambda_node.body, control_dependent=control_dependent
+            )
+        finally:
+            request_aliases.restore(saved_aliases)
+            alias_state.restore(saved_origins)
+        return True
+
     def _try_interprocedural(
         call: ast.Call,
         *,
         control_dependent: bool,
     ) -> bool:
-        """Resolve a caller-relative callee that receives request/state."""
+        """Resolve a callee under bounded lexical + actual identity theorems."""
+
+        if depth >= _MAX_INTERPROCEDURAL_WRITER_DEPTH:
+            return False
+
+        # Local nested / lambda Name callees (closure theorem).
+        if isinstance(call.func, ast.Name):
+            if call.func.id in local_nested:
+                return _follow_function_callee(
+                    local_nested[call.func.id],
+                    callee_path=path,
+                    call=call,
+                    control_dependent=control_dependent,
+                    is_local_nested=True,
+                )
+            if call.func.id in local_lambdas:
+                return _follow_lambda_callee(
+                    local_lambdas[call.func.id],
+                    call=call,
+                    control_dependent=control_dependent,
+                )
 
         if callee_resolver is None:
-            return False
-        if depth >= _MAX_INTERPROCEDURAL_WRITER_DEPTH:
             return False
         # Nested defs/params/stores shadow module bindings for Name callees.
         shadowed: set[str] = set(fn_params)
@@ -1411,66 +1793,20 @@ def _collect_writes_in_function(
         if result.callee is None:
             return False
         resolved = result.callee
-        callee_frame = (_normalize_unit_path(resolved.path), resolved.node.name)
-        if callee_frame in stack or callee_frame == frame:
-            return False
-        binding = _bind_call_actuals(resolved.node, call)
-        if binding is None:
-            return False
-        carries_identity = any(
-            request_aliases.is_request_or_state_expr(actual)
-            for actual in binding.values()
-        )
-        if not carries_identity:
-            return False
-
-        callee_aliases = _RequestStateAliasEnv.seed(param_names=frozenset())
-        callee_alias_state = AliasState()
-        for formal, actual in binding.items():
-            # Preserve must/may strength independently. A cross-kind may-alias
-            # actual can be both may-request and may-state; if/elif promotion
-            # of may→must would false-PASS helper literal writes.
-            classification = request_aliases.classify(actual)
-            callee_aliases.apply_classification(formal, classification)
-            # Propagate value-origin evidence through formals.
-            origin = _classify(actual)
-            callee_alias_state.bind(formal, origin)
-
-        # Bounded request-time identity follows into the callee with a fresh
-        # session seeded from the callee module (caller overlay already made
-        # resolve succeed only when identity is established at this point).
-        callee_identity = None
-        if callee_resolver is not None:
-            callee_identity = begin_request_time_identity_session(
-                callee_resolver, path=resolved.path, fn=resolved.node
+        is_local_nested = (
+            _normalize_unit_path(resolved.path) == _normalize_unit_path(path)
+            and (
+                resolved.node.name in local_nested
+                or id(resolved.node) in nested_free_vars
             )
-
-        collected = _collect_writes_in_function(
-            resolved.node,
-            path=resolved.path,
-            handler_param_names=handler_param_names,
-            callee_resolver=callee_resolver,
-            seed_request_aliases=callee_aliases,
-            seed_alias_state=callee_alias_state,
-            seed_identity_session=callee_identity,
-            call_stack=stack | {frame},
-            depth=depth + 1,
         )
-        if control_dependent:
-            collected = [
-                StateAttributeWrite(
-                    field_name=item.field_name,
-                    value_expression=item.value_expression,
-                    origin=item.origin,
-                    dynamic=item.dynamic,
-                    source_range=item.source_range,
-                    path=item.path,
-                    control_dependent=True,
-                )
-                for item in collected
-            ]
-        writes.extend(collected)
-        return True
+        return _follow_function_callee(
+            resolved.node,
+            callee_path=resolved.path,
+            call=call,
+            control_dependent=control_dependent,
+            is_local_nested=is_local_nested,
+        )
 
     def _call_receives_request_or_state(call: ast.Call) -> bool:
         return request_aliases.call_receives_request_or_state(call)
@@ -1527,13 +1863,26 @@ def _collect_writes_in_function(
                 continue
             # Escape: request/state flows into a call. Resolve local callees
             # under the bounded interprocedural theorem; otherwise UNKNOWN.
-            if _call_receives_request_or_state(node):
+            # Also follow zero-arg nested closures / default-capture callees
+            # that carry governed identity via free vars (no syntactic actual).
+            local_closure_call = isinstance(node.func, ast.Name) and (
+                node.func.id in local_nested or node.func.id in local_lambdas
+            )
+            if _call_receives_request_or_state(node) or local_closure_call:
                 if (
                     isinstance(node.func, ast.Name)
                     and node.func.id in _NON_MUTATING_STATE_OBSERVERS
                 ):
                     continue
                 if _try_interprocedural(node, control_dependent=control_dependent):
+                    continue
+                if local_closure_call:
+                    # Represented local closure call failed to follow → UNKNOWN.
+                    _record_escape(
+                        node,
+                        rendered,
+                        control_dependent=control_dependent,
+                    )
                     continue
                 _record_escape(
                     node,
@@ -1545,8 +1894,10 @@ def _collect_writes_in_function(
         if isinstance(statement, ast.Assign):
             for target in statement.targets:
                 request_aliases.note_binding(target, statement.value)
+                _note_callable_name_alias(target, statement.value)
         elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
             request_aliases.note_binding(statement.target, statement.value)
+            _note_callable_name_alias(statement.target, statement.value)
 
     def _note_named_expr_bindings(
         node: ast.AST, *, control_dependent: bool
@@ -2085,9 +2436,9 @@ def _collect_writes_in_function(
             return
 
         if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            # Nested writers must be accounted; omission beside a trusted
-            # literal would otherwise false-PASS closed-world authority.
-            # Defaults and decorators execute at definition in this frame.
+            # Definition-time execution only: defaults, annotations, type
+            # params, decorators. Nested *bodies* execute at call time under
+            # the bounded lexical-environment theorem (Unknown > false PASS).
             for default in statement.args.defaults:
                 _observe_executed_expression(
                     default, control_dependent=control_dependent
@@ -2097,6 +2448,8 @@ def _collect_writes_in_function(
                     _observe_executed_expression(
                         default, control_dependent=control_dependent
                     )
+            # Capture defaults under the definition-time env before registering.
+            _register_nested_callable(statement, name=statement.name)
             for param in getattr(statement, "type_params", ()) or ():
                 bound = getattr(param, "bound", None)
                 if bound is not None:
@@ -2151,22 +2504,6 @@ def _collect_writes_in_function(
                         ),
                         control_dependent=control_dependent,
                     )
-            nested_identity = None
-            if callee_resolver is not None:
-                nested_identity = begin_request_time_identity_session(
-                    callee_resolver, path=path, fn=statement
-                )
-            writes.extend(
-                _collect_writes_in_function(
-                    statement,
-                    path=path,
-                    handler_param_names=frozenset(),
-                    callee_resolver=callee_resolver,
-                    seed_identity_session=nested_identity,
-                    call_stack=stack | {frame},
-                    depth=depth,
-                )
-            )
             if identity_session is not None:
                 identity_session.observe_statement(statement)
             return
@@ -2258,6 +2595,27 @@ def _collect_writes_in_function(
                     ast.unparse(statement),
                     control_dependent=control_dependent,
                 )
+            # Escaped closure carrying governed identity → UNKNOWN.
+            if isinstance(statement.value, ast.Name):
+                escaped: ast.AST | None = None
+                if statement.value.id in local_nested:
+                    escaped = local_nested[statement.value.id]
+                elif statement.value.id in local_lambdas:
+                    escaped = local_lambdas[statement.value.id]
+                if escaped is not None and _closure_carries_governed_identity(escaped):
+                    _record_escape(
+                        statement,
+                        ast.unparse(statement),
+                        control_dependent=control_dependent,
+                    )
+            elif isinstance(statement.value, ast.Lambda):
+                _register_nested_callable(statement.value, name=None)
+                if _closure_carries_governed_identity(statement.value):
+                    _record_escape(
+                        statement,
+                        ast.unparse(statement),
+                        control_dependent=control_dependent,
+                    )
             _note_named_expr_bindings(
                 statement.value, control_dependent=control_dependent
             )
