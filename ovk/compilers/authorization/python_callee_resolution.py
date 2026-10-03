@@ -47,7 +47,7 @@ from ovk.compilers.authorization.python_import_space import (
     normalize_path,
 )
 
-_IMPLEMENTATION_VERSION = "0.20.0"
+_IMPLEMENTATION_VERSION = "0.21.0"
 _MAX_IMPORT_FOLLOW_DEPTH = 8
 
 BindingKind = Literal["function", "import_name", "import_module", "rebound"]
@@ -814,46 +814,88 @@ def _class_method_by_name(
     return None
 
 
-def _attrsetter_static_name(call: ast.Call) -> str | None:
+def _method_has_decorator(
+    method: ast.FunctionDef | ast.AsyncFunctionDef,
+    names: frozenset[str],
+) -> bool:
+    for deco in method.decorator_list:
+        if isinstance(deco, ast.Name) and deco.id in names:
+            return True
+        if isinstance(deco, ast.Attribute) and deco.attr in names:
+            return True
+    return False
+
+
+def _attrsetter_static_name(
+    call: ast.Call,
+    *,
+    projection_aliases: Mapping[str, str] | None = None,
+) -> str | None:
     """Return the static attribute name for ``operator.attrsetter("x")``."""
 
+    aliases = projection_aliases or {}
     func = call.func
-    if isinstance(func, ast.Name) and func.id == "attrsetter" and call.args:
-        return _static_str(call.args[0])
+    if isinstance(func, ast.Name) and call.args:
+        if func.id == "attrsetter" or aliases.get(func.id) == "attrsetter":
+            return _static_str(call.args[0])
     if (
         isinstance(func, ast.Attribute)
         and func.attr == "attrsetter"
-        and isinstance(func.value, ast.Name)
-        and func.value.id == "operator"
         and call.args
     ):
         return _static_str(call.args[0])
     return None
 
 
-def _methodcaller_static_name(call: ast.Call) -> str | None:
+def _methodcaller_static_name(
+    call: ast.Call,
+    *,
+    projection_aliases: Mapping[str, str] | None = None,
+) -> str | None:
     """Return the static method name for ``operator.methodcaller("x")``."""
 
+    aliases = projection_aliases or {}
     func = call.func
-    if isinstance(func, ast.Name) and func.id == "methodcaller" and call.args:
-        return _static_str(call.args[0])
+    if isinstance(func, ast.Name) and call.args:
+        if func.id == "methodcaller" or aliases.get(func.id) == "methodcaller":
+            return _static_str(call.args[0])
     if (
         isinstance(func, ast.Attribute)
         and func.attr == "methodcaller"
-        and isinstance(func.value, ast.Name)
-        and func.value.id == "operator"
         and call.args
     ):
         return _static_str(call.args[0])
     return None
 
 
-def _getattr_static_name(call: ast.Call) -> str | None:
-    """Return the static attribute name for ``getattr(obj, "x")``."""
+def _itemgetter_static_key(
+    call: ast.Call,
+    *,
+    projection_aliases: Mapping[str, str] | None = None,
+) -> str | None:
+    """Return the static key for ``operator.itemgetter("x")`` / aliases."""
 
+    aliases = projection_aliases or {}
+    func = call.func
+    if isinstance(func, ast.Name) and call.args:
+        if func.id == "itemgetter" or aliases.get(func.id) == "itemgetter":
+            return _static_str(call.args[0])
+    if isinstance(func, ast.Attribute) and func.attr == "itemgetter" and call.args:
+        return _static_str(call.args[0])
+    return None
+
+
+def _getattr_static_name(
+    call: ast.Call,
+    *,
+    getattr_aliases: frozenset[str] | None = None,
+) -> str | None:
+    """Return the static attribute name for ``getattr(obj, "x")`` / aliases."""
+
+    aliases = getattr_aliases or frozenset({"getattr"})
     if not (
         isinstance(call.func, ast.Name)
-        and call.func.id == "getattr"
+        and call.func.id in aliases
         and len(call.args) >= 2
         and not call.keywords
     ):
@@ -861,8 +903,59 @@ def _getattr_static_name(call: ast.Call) -> str | None:
     return _static_str(call.args[1])
 
 
+def _assign_target_has_attr_or_subscript(target: ast.AST) -> bool:
+    """True when a for/comp/assign target stores through Attribute or Subscript."""
+
+    if isinstance(target, (ast.Attribute, ast.Subscript)):
+        return True
+    if isinstance(target, ast.Starred):
+        return _assign_target_has_attr_or_subscript(target.value)
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return any(_assign_target_has_attr_or_subscript(elt) for elt in target.elts)
+    return False
+
+
+def _match_pattern_attribute_targets(pattern: ast.AST) -> list[ast.Attribute]:
+    """Attribute MatchValue nodes that may store export identity (fail-closed)."""
+
+    found: list[ast.Attribute] = []
+
+    def _walk(pat: ast.AST) -> None:
+        if isinstance(pat, ast.MatchValue) and isinstance(pat.value, ast.Attribute):
+            found.append(pat.value)
+            return
+        if isinstance(pat, ast.MatchAs):
+            if pat.pattern is not None:
+                _walk(pat.pattern)
+            return
+        if isinstance(pat, ast.MatchOr):
+            for alt in pat.patterns:
+                _walk(alt)
+            return
+        if isinstance(pat, ast.MatchSequence):
+            for sub in pat.patterns:
+                _walk(sub)
+            return
+        if isinstance(pat, ast.MatchMapping):
+            for sub in pat.patterns:
+                _walk(sub)
+            return
+        if isinstance(pat, ast.MatchClass):
+            for sub in pat.patterns:
+                _walk(sub)
+            for sub in pat.kwd_patterns:
+                _walk(sub)
+
+    _walk(pattern)
+    return found
+
+
 _EXEC_EVAL_COMPILE_NAMES = frozenset({"exec", "eval", "compile"})
 _TYPES_NEW_CLASS_NAME = "new_class"
+_TYPE_BUILTIN_NAME = "type"
+_OPERATOR_PROJECTION_NAMES = frozenset(
+    {"getitem", "itemgetter", "attrgetter", "methodcaller", "attrsetter"}
+)
 
 
 def _lambdas_packed_as_callee(expr: ast.AST) -> list[ast.Lambda]:
@@ -1575,6 +1668,50 @@ def _build_identity_scanner(
     exec_eval_compile_aliases: set[str] = set()
     # Import aliases of types.new_class (``from types import new_class as nc``).
     new_class_aliases: set[str] = set()
+    # Local / import aliases of builtin ``type`` (``T = type`` / ``builtins.type``).
+    type_aliases: set[str] = set()
+    # Local aliases of ``getattr`` (``g = getattr``) for protocol projections.
+    getattr_aliases: set[str] = {"getattr"}
+    # ``from operator import itemgetter as ig`` → local name → canonical projection.
+    operator_projection_aliases: dict[str, str] = {}
+
+    def _note_protocol_alias_from_value(name: str, value: ast.AST) -> None:
+        """Install exec/new_class/type/getattr aliases from an Assign/walrus RHS."""
+
+        if isinstance(value, ast.Name):
+            if value.id in _EXEC_EVAL_COMPILE_NAMES or value.id in exec_eval_compile_aliases:
+                exec_eval_compile_aliases.add(name)
+            if value.id == _TYPES_NEW_CLASS_NAME or value.id in new_class_aliases:
+                new_class_aliases.add(name)
+            if value.id == _TYPE_BUILTIN_NAME or value.id in type_aliases:
+                type_aliases.add(name)
+            if value.id in getattr_aliases:
+                getattr_aliases.add(name)
+            if value.id in _OPERATOR_PROJECTION_NAMES:
+                operator_projection_aliases[name] = value.id
+            elif value.id in operator_projection_aliases:
+                operator_projection_aliases[name] = operator_projection_aliases[value.id]
+            return
+        if isinstance(value, ast.Attribute):
+            if value.attr in _EXEC_EVAL_COMPILE_NAMES:
+                exec_eval_compile_aliases.add(name)
+            if value.attr == _TYPES_NEW_CLASS_NAME:
+                new_class_aliases.add(name)
+            if value.attr == _TYPE_BUILTIN_NAME:
+                type_aliases.add(name)
+            if value.attr in _OPERATOR_PROJECTION_NAMES:
+                operator_projection_aliases[name] = value.attr
+            return
+        if isinstance(value, ast.Call):
+            attr = _getattr_static_name(
+                value, getattr_aliases=frozenset(getattr_aliases)
+            )
+            if attr in _EXEC_EVAL_COMPILE_NAMES:
+                exec_eval_compile_aliases.add(name)
+            if attr == _TYPES_NEW_CLASS_NAME:
+                new_class_aliases.add(name)
+            if attr == _TYPE_BUILTIN_NAME:
+                type_aliases.add(name)
 
     def _note_export(module_path: str, name: str) -> None:
         accum.export_mutations.setdefault(module_path, set()).add(name)
@@ -1751,6 +1888,14 @@ def _build_identity_scanner(
         if not methods:
             return False
         for method in methods:
+            scan_classes = dict(local_classes or {})
+            # ``@classmethod`` ``return cls()`` constructs the owning class.
+            if _method_has_decorator(method, frozenset({"classmethod"})):
+                for class_node in (local_classes or class_registry).values():
+                    if _class_method_by_name(class_node, method.name) is method:
+                        if method.args.args:
+                            scan_classes[method.args.args[0].arg] = class_node
+                        break
             _scan_fn_body(
                 method,
                 path=path,
@@ -1758,7 +1903,7 @@ def _build_identity_scanner(
                 env=env,
                 visited_fns=visited_fns,
                 local_fns=local_fns,
-                local_classes=local_classes,
+                local_classes=scan_classes,
                 formals=_formal_bindings_for_call(call, method, env, path=path),
             )
         return True
@@ -1887,6 +2032,18 @@ def _build_identity_scanner(
                     lambda_bindings[expr.target.id] = expr.value
                 else:
                     lambda_bindings.pop(expr.target.id, None)
+                # ``(run := exec)(...)`` / ``(nc := types.new_class)(...)``.
+                _note_protocol_alias_from_value(expr.target.id, expr.value)
+                if (
+                    isinstance(expr.value, ast.Call)
+                    and isinstance(expr.value.func, ast.Name)
+                    and _lookup_class(
+                        expr.value.func.id,
+                        _scan_ctx["local_classes"],  # type: ignore[arg-type]
+                    )
+                    is not None
+                ):
+                    instance_class_of[expr.target.id] = expr.value.func.id
             return points
         if isinstance(expr, ast.IfExp):
             # Test executes before arm selection; omitting it false-PASSes
@@ -1943,13 +2100,18 @@ def _build_identity_scanner(
         if (
             isinstance(expr, ast.Call)
             and isinstance(expr.func, ast.Name)
-            and expr.func.id == "getattr"
+            and expr.func.id in getattr_aliases
             and len(expr.args) >= 2
             and not expr.keywords
         ):
             # getattr(module, "export") may alias a callable; model when attr is
             # static, otherwise escape the receiver (Unknown > false PASS).
+            # Default arg executes when the attribute is missing
+            # (``getattr(obj, "missing", poison)``).
             owner = _eval_expr(expr.args[0], env, path=path)
+            _eval_expr(expr.args[1], env, path=path)
+            if len(expr.args) >= 3:
+                _eval_expr(expr.args[2], env, path=path)
             attr = _static_str(expr.args[1])
             if attr == "__dict__":
                 known_ns: set[_ObjectAtom] = set()
@@ -1987,9 +2149,20 @@ def _build_identity_scanner(
             return _IdentityPointsTo.unknown_only()
         if isinstance(expr, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
             # Comprehension packing is an unmodeled container escape.
+            # Attribute/subscript for-targets rebind exports
+            # (``[0 for helpers.write_state in [evil]]``).
             _escape_if_tracked(_eval_expr(expr.elt, env, path=path))
             for gen in expr.generators:
-                _escape_if_tracked(_eval_expr(gen.iter, env, path=path))
+                iter_points = _eval_expr(gen.iter, env, path=path)
+                _escape_if_tracked(iter_points)
+                if _assign_target_has_attr_or_subscript(gen.target):
+                    _scan_assign_target(
+                        gen.target,
+                        path=path,
+                        index=int(_scan_ctx["index"]),  # type: ignore[arg-type]
+                        env=env if isinstance(env, dict) else dict(env),
+                        value_points=iter_points,
+                    )
                 for if_clause in gen.ifs:
                     _escape_if_tracked(_eval_expr(if_clause, env, path=path))
             return _IdentityPointsTo.unknown_only()
@@ -1997,7 +2170,16 @@ def _build_identity_scanner(
             _escape_if_tracked(_eval_expr(expr.key, env, path=path))
             _escape_if_tracked(_eval_expr(expr.value, env, path=path))
             for gen in expr.generators:
-                _escape_if_tracked(_eval_expr(gen.iter, env, path=path))
+                iter_points = _eval_expr(gen.iter, env, path=path)
+                _escape_if_tracked(iter_points)
+                if _assign_target_has_attr_or_subscript(gen.target):
+                    _scan_assign_target(
+                        gen.target,
+                        path=path,
+                        index=int(_scan_ctx["index"]),  # type: ignore[arg-type]
+                        env=env if isinstance(env, dict) else dict(env),
+                        value_points=iter_points,
+                    )
                 for if_clause in gen.ifs:
                     _escape_if_tracked(_eval_expr(if_clause, env, path=path))
             return _IdentityPointsTo.unknown_only()
@@ -2118,6 +2300,11 @@ def _build_identity_scanner(
                 elif alias.name == _TYPES_NEW_CLASS_NAME:
                     # ``from types import new_class as nc``.
                     new_class_aliases.add(local)
+                elif alias.name == _TYPE_BUILTIN_NAME:
+                    type_aliases.add(local)
+                elif alias.name in _OPERATOR_PROJECTION_NAMES:
+                    # ``from operator import itemgetter as ig``.
+                    operator_projection_aliases[local] = alias.name
                 if module_path is None:
                     env[local] = _IdentityPointsTo.unknown_only()
                 else:
@@ -2590,10 +2777,58 @@ def _build_identity_scanner(
                 ),
             )
             return
+        def _resolve_nested_or_local_class(name: str, holder: ast.ClassDef | None) -> ast.ClassDef | None:
+            if holder is not None:
+                for item in holder.body:
+                    if isinstance(item, ast.ClassDef) and item.name == name:
+                        return item
+                    if isinstance(item, ast.Assign) and any(
+                        isinstance(t, ast.Name) and t.id == name for t in item.targets
+                    ):
+                        for packed in _names_packed_as_callee(item.value):
+                            nested = _lookup_class(packed, local_classes)
+                            if nested is not None:
+                                return nested
+            return _lookup_class(name, local_classes)
+
         if isinstance(func, ast.Call):
             # getattr(obj, "poison")() — follow the named method when static.
-            getattr_name = _getattr_static_name(func)
+            getattr_name = _getattr_static_name(
+                func, getattr_aliases=frozenset(getattr_aliases)
+            )
             if getattr_name is not None:
+                # ``getattr(Holder, "Mut")()`` nested / local class construction.
+                holder_cls: ast.ClassDef | None = None
+                if func.args:
+                    recv = func.args[0]
+                    if isinstance(recv, ast.Name):
+                        holder_cls = _lookup_class(recv.id, local_classes)
+                nested_via_getattr = _resolve_nested_or_local_class(
+                    getattr_name, holder_cls
+                )
+                if nested_via_getattr is not None and (
+                    holder_cls is not None
+                    or _lookup_class(getattr_name, local_classes) is not None
+                ):
+                    # Prefer construction when the name denotes a class.
+                    if _lookup_class(getattr_name, local_classes) is not None or (
+                        holder_cls is not None
+                        and any(
+                            isinstance(item, ast.ClassDef) and item.name == getattr_name
+                            for item in holder_cls.body
+                        )
+                    ):
+                        _observe_class_construction(
+                            nested_via_getattr,
+                            call,
+                            path=path,
+                            index=index,
+                            env=env,
+                            visited_fns=visited_fns,
+                            local_fns=local_fns,
+                            local_classes=local_classes,
+                        )
+                        return
                 if _follow_methods_named(
                     getattr_name,
                     call,
@@ -2605,8 +2840,10 @@ def _build_identity_scanner(
                     local_classes=local_classes,
                 ):
                     return
-            # operator.methodcaller("poison")(obj)
-            methodcaller_name = _methodcaller_static_name(func)
+            # operator.methodcaller("poison")(obj) / itemgetter class projection.
+            methodcaller_name = _methodcaller_static_name(
+                func, projection_aliases=operator_projection_aliases
+            )
             if methodcaller_name is not None:
                 if _follow_methods_named(
                     methodcaller_name,
@@ -2619,6 +2856,28 @@ def _build_identity_scanner(
                     local_classes=local_classes,
                 ):
                     return
+            itemgetter_key = _itemgetter_static_key(
+                func, projection_aliases=operator_projection_aliases
+            )
+            if itemgetter_key is not None:
+                projected = _lookup_class(itemgetter_key, local_classes)
+                if projected is not None:
+                    _observe_class_construction(
+                        projected,
+                        call,
+                        path=path,
+                        index=index,
+                        env=env,
+                        visited_fns=visited_fns,
+                        local_fns=local_fns,
+                        local_classes=local_classes,
+                    )
+                    return
+                # Dynamic itemgetter projection of a class — fail closed.
+                accum.unsupported = True
+                for arg in call.args:
+                    _escape_if_tracked(_eval_expr(arg, env, path=path))
+                return
             # Chained call ``make()()`` / ``factory()()`` returning a class:
             # evaluate the outer call, then observe construction when the
             # outer local helper returns a class Name (Unknown > false PASS).
@@ -2670,25 +2929,49 @@ def _build_identity_scanner(
             # Nested class construction: ``Holder.Mut()``.
             if isinstance(func.value, ast.Name):
                 holder = _lookup_class(func.value.id, local_classes)
-                if holder is not None:
-                    nested_cls = None
-                    for item in holder.body:
-                        if isinstance(item, ast.ClassDef) and item.name == func.attr:
-                            nested_cls = item
-                            break
-                        if isinstance(item, ast.Assign) and any(
-                            isinstance(t, ast.Name) and t.id == func.attr
-                            for t in item.targets
-                        ):
-                            for name in _names_packed_as_callee(item.value):
-                                nested_cls = _lookup_class(name, local_classes)
-                                if nested_cls is not None:
-                                    break
-                    if nested_cls is None:
-                        nested_cls = _lookup_class(func.attr, local_classes)
-                    if nested_cls is not None:
+                nested_cls = _resolve_nested_or_local_class(func.attr, holder)
+                if nested_cls is not None and holder is not None:
+                    # Only treat as construction when attr names a nested/local class.
+                    if any(
+                        isinstance(item, ast.ClassDef) and item.name == func.attr
+                        for item in holder.body
+                    ) or _lookup_class(func.attr, local_classes) is not None:
                         _observe_class_construction(
                             nested_cls,
+                            call,
+                            path=path,
+                            index=index,
+                            env=env,
+                            visited_fns=visited_fns,
+                            local_fns=local_fns,
+                            local_classes=local_classes,
+                        )
+                        return
+            # ``Mut.__call__()`` / ``type.__call__(Mut)`` construct instances.
+            if func.attr == "__call__":
+                if isinstance(func.value, ast.Name):
+                    if func.value.id == _TYPE_BUILTIN_NAME or func.value.id in type_aliases:
+                        # ``type.__call__(Mut)`` / ``type.__call__(Mut, ...)``.
+                        for arg in call.args:
+                            for name in _names_packed_as_callee(arg):
+                                cls_node = _lookup_class(name, local_classes)
+                                if cls_node is not None:
+                                    _observe_class_construction(
+                                        cls_node,
+                                        call,
+                                        path=path,
+                                        index=index,
+                                        env=env,
+                                        visited_fns=visited_fns,
+                                        local_fns=local_fns,
+                                        local_classes=local_classes,
+                                    )
+                        if call.args:
+                            return
+                    cls_node = _lookup_class(func.value.id, local_classes)
+                    if cls_node is not None:
+                        _observe_class_construction(
+                            cls_node,
                             call,
                             path=path,
                             index=index,
@@ -2703,6 +2986,13 @@ def _build_identity_scanner(
                 func, local_classes=local_classes
             )
             if method is not None:
+                scan_classes = dict(local_classes or {})
+                if _method_has_decorator(method, frozenset({"classmethod"})):
+                    owner = _resolve_receiver_class(
+                        func.value, local_classes=local_classes
+                    )
+                    if owner is not None and method.args.args:
+                        scan_classes[method.args.args[0].arg] = owner
                 _scan_fn_body(
                     method,
                     path=path,
@@ -2710,7 +3000,7 @@ def _build_identity_scanner(
                     env=env,
                     visited_fns=visited_fns,
                     local_fns=local_fns,
-                    local_classes=local_classes,
+                    local_classes=scan_classes,
                     formals=_formal_bindings_for_call(
                         call, method, env, path=path
                     ),
@@ -2788,6 +3078,33 @@ def _build_identity_scanner(
                         local_fns=local_fns,
                         local_classes=local_classes,
                     )
+            # ``vars(Holder)["Mut"]()`` / ``globals()["Mut"]()`` key projection.
+            if isinstance(func, ast.Subscript):
+                key = _static_str(func.slice)
+                if key is not None:
+                    cls_node = _lookup_class(key, local_classes)
+                    if cls_node is not None:
+                        _observe_class_construction(
+                            cls_node,
+                            call,
+                            path=path,
+                            index=index,
+                            env=env,
+                            visited_fns=visited_fns,
+                            local_fns=local_fns,
+                            local_classes=local_classes,
+                        )
+                    else:
+                        base = func.value
+                        if (
+                            isinstance(base, ast.Call)
+                            and isinstance(base.func, ast.Name)
+                            and base.func.id in {"vars", "globals", "locals"}
+                        ) or (
+                            isinstance(base, ast.Attribute) and base.attr == "__dict__"
+                        ):
+                            # Dynamic namespace class projection — fail closed.
+                            accum.unsupported = True
             # Unmodeled callee receiving identity-bearing actuals → escape.
             for arg in call.args:
                 points = _eval_expr(arg, env, path=path)
@@ -2809,12 +3126,14 @@ def _build_identity_scanner(
             # ``list(genexp)``, ``map(fn, …)`` cannot hide request-time mutations.
             if func.id in {"map", "filter"} and call.args:
                 first = call.args[0]
-                # ``map(exec, [...])`` — fail closed on dynamic code exec.
-                if isinstance(first, ast.Name) and (
-                    first.id in _EXEC_EVAL_COMPILE_NAMES
-                    or first.id in exec_eval_compile_aliases
-                ):
-                    accum.unsupported = True
+                # ``map(exec, [...])`` / packed exec — fail closed.
+                for name in _names_packed_as_callee(first):
+                    if (
+                        name in _EXEC_EVAL_COMPILE_NAMES
+                        or name in exec_eval_compile_aliases
+                    ):
+                        accum.unsupported = True
+                        break
                 synthetic = ast.Call(
                     func=first,
                     args=list(call.args[1:]),
@@ -2829,43 +3148,26 @@ def _build_identity_scanner(
                     local_fns=local_fns,
                     local_classes=local_classes,
                 )
+                # ``map(lambda c: c(), [Mut])`` — observe per-element class
+                # construction from iterable packing (Unknown > false PASS).
                 for arg in call.args[1:]:
                     _eval_expr(arg, env, path=path)
+                    for name in _names_packed_as_callee(arg):
+                        cls_node = _lookup_class(name, local_classes)
+                        if cls_node is not None:
+                            _observe_class_construction(
+                                cls_node,
+                                call,
+                                path=path,
+                                index=index,
+                                env=env,
+                                visited_fns=visited_fns,
+                                local_fns=local_fns,
+                                local_classes=local_classes,
+                            )
                 return
-            # ``type("C", (Base,), {})`` runs base ``__init_subclass__``.
-            if func.id == "type" and len(call.args) >= 2:
-                for arg in call.args:
-                    _eval_expr(arg, env, path=path)
-                for kw in call.keywords:
-                    _eval_expr(kw.value, env, path=path)
-                bases_expr = call.args[1]
-                base_names = _names_packed_as_callee(bases_expr)
-                if isinstance(bases_expr, (ast.Tuple, ast.List)):
-                    base_names = []
-                    for elt in bases_expr.elts:
-                        nested = elt.value if isinstance(elt, ast.Starred) else elt
-                        base_names.extend(_names_packed_as_callee(nested))
-                observed = False
-                for name in base_names:
-                    base_cls = _lookup_class(name, local_classes)
-                    if base_cls is not None:
-                        if _scan_named_methods_on_class(
-                            base_cls,
-                            frozenset({"__init_subclass__"}),
-                            path=path,
-                            index=index,
-                            env=env,
-                            visited_fns=visited_fns,
-                            local_fns=local_fns,
-                            local_classes=local_classes,
-                        ):
-                            observed = True
-                    elif name in env:
-                        accum.unsupported = True
-                if not observed and base_names:
-                    # Dynamic bases without a local ClassDef — fail closed.
-                    accum.unsupported = True
-                return
+            # ``type(...)`` construction is handled in ``_scan_call`` via
+            # ``_call_targets_type_constructor`` (aliases / keywords / packing).
             for arg in call.args:
                 _eval_expr(arg, env, path=path)
             for kw in call.keywords:
@@ -3106,48 +3408,81 @@ def _build_identity_scanner(
         if visited_fns is None:
             visited_fns = set()
 
+        def _name_is_exec_eval_compile(name: str) -> bool:
+            if name in _EXEC_EVAL_COMPILE_NAMES or name in exec_eval_compile_aliases:
+                return True
+            binding = bindings_by_path.get(path, {}).get(name)
+            if (
+                binding is not None
+                and binding.kind == "import_name"
+                and binding.imported_name in _EXEC_EVAL_COMPILE_NAMES
+            ):
+                return True
+            return any(
+                isinstance(atom, CallableObject)
+                and atom.export_name in _EXEC_EVAL_COMPILE_NAMES
+                for atom in _lookup_name(name, env, path=path).known
+            )
+
+        def _name_is_types_new_class(name: str) -> bool:
+            if name == _TYPES_NEW_CLASS_NAME or name in new_class_aliases:
+                return True
+            binding = bindings_by_path.get(path, {}).get(name)
+            if (
+                binding is not None
+                and binding.kind == "import_name"
+                and binding.imported_name == _TYPES_NEW_CLASS_NAME
+            ):
+                return True
+            return any(
+                isinstance(atom, CallableObject)
+                and atom.export_name == _TYPES_NEW_CLASS_NAME
+                for atom in _lookup_name(name, env, path=path).known
+            )
+
+        def _name_is_type_builtin(name: str) -> bool:
+            if name == _TYPE_BUILTIN_NAME or name in type_aliases:
+                return True
+            binding = bindings_by_path.get(path, {}).get(name)
+            return (
+                binding is not None
+                and binding.kind == "import_name"
+                and binding.imported_name == _TYPE_BUILTIN_NAME
+            )
+
         def _call_targets_exec_eval_compile() -> bool:
             func = call.func
+            # Packed / walrus / container peel: ``(exec if c else len)(...)``,
+            # ``[exec][0](...)``, ``{"e": exec}["e"](...)``, ``(run := exec)(...)``.
+            for name in _names_packed_as_callee(func):
+                if _name_is_exec_eval_compile(name):
+                    return True
             if isinstance(func, ast.Name):
-                if func.id in _EXEC_EVAL_COMPILE_NAMES:
-                    return True
-                if func.id in exec_eval_compile_aliases:
-                    return True
-                # Module-level ``from builtins import exec as run``.
-                binding = bindings_by_path.get(path, {}).get(func.id)
-                if (
-                    binding is not None
-                    and binding.kind == "import_name"
-                    and binding.imported_name in _EXEC_EVAL_COMPILE_NAMES
-                ):
-                    return True
-                return any(
-                    isinstance(atom, CallableObject)
-                    and atom.export_name in _EXEC_EVAL_COMPILE_NAMES
-                    for atom in _lookup_name(func.id, env, path=path).known
-                )
+                return _name_is_exec_eval_compile(func.id)
             if isinstance(func, ast.Attribute) and func.attr in _EXEC_EVAL_COMPILE_NAMES:
                 return True
             if isinstance(func, ast.Call):
-                attr = _getattr_static_name(func)
+                attr = _getattr_static_name(
+                    func, getattr_aliases=frozenset(getattr_aliases)
+                )
                 if attr in _EXEC_EVAL_COMPILE_NAMES:
                     return True
-                # ``operator.attrgetter("exec")(builtins)(...)``.
-                if (
-                    isinstance(func.func, ast.Attribute)
-                    and func.func.attr == "attrgetter"
-                    and func.args
-                    and isinstance(func.args[0], ast.Constant)
-                    and func.args[0].value in _EXEC_EVAL_COMPILE_NAMES
+                # ``operator.attrgetter("exec")(builtins)(...)`` / renamed import.
+                ag: str | None = None
+                if isinstance(func.func, ast.Attribute) and func.func.attr == "attrgetter":
+                    ag = _static_str(func.args[0]) if func.args else None
+                elif isinstance(func.func, ast.Name) and (
+                    func.func.id == "attrgetter"
+                    or operator_projection_aliases.get(func.func.id) == "attrgetter"
                 ):
+                    ag = _static_str(func.args[0]) if func.args else None
+                if ag in _EXEC_EVAL_COMPILE_NAMES:
                     return True
-                if (
-                    isinstance(func.func, ast.Name)
-                    and func.func.id == "attrgetter"
-                    and func.args
-                    and isinstance(func.args[0], ast.Constant)
-                    and func.args[0].value in _EXEC_EVAL_COMPILE_NAMES
-                ):
+                # ``operator.itemgetter("exec")(vars(builtins))(...)``.
+                ig = _itemgetter_static_key(
+                    func, projection_aliases=operator_projection_aliases
+                )
+                if ig in _EXEC_EVAL_COMPILE_NAMES:
                     return True
             # Fail-closed projections: ``vars(builtins)["exec"]``,
             # ``builtins.__dict__["exec"]``, ``globals()["exec"]``.
@@ -3169,31 +3504,88 @@ def _build_identity_scanner(
 
         def _call_targets_types_new_class() -> bool:
             func = call.func
+            for name in _names_packed_as_callee(func):
+                if _name_is_types_new_class(name):
+                    return True
             if isinstance(func, ast.Name):
-                if func.id == _TYPES_NEW_CLASS_NAME or func.id in new_class_aliases:
-                    return True
-                binding = bindings_by_path.get(path, {}).get(func.id)
-                if (
-                    binding is not None
-                    and binding.kind == "import_name"
-                    and binding.imported_name == _TYPES_NEW_CLASS_NAME
-                ):
-                    return True
-                return any(
-                    isinstance(atom, CallableObject)
-                    and atom.export_name == _TYPES_NEW_CLASS_NAME
-                    for atom in _lookup_name(func.id, env, path=path).known
-                )
+                return _name_is_types_new_class(func.id)
             if isinstance(func, ast.Attribute) and func.attr == _TYPES_NEW_CLASS_NAME:
                 return True
             if isinstance(func, ast.Call):
-                attr = _getattr_static_name(func)
+                attr = _getattr_static_name(
+                    func, getattr_aliases=frozenset(getattr_aliases)
+                )
                 if attr == _TYPES_NEW_CLASS_NAME:
                     return True
             return False
 
+        def _call_targets_type_constructor() -> bool:
+            """``type(...)`` / ``T=type; T(...)`` / ``builtins.type(...)`` / packed."""
+
+            func = call.func
+            for name in _names_packed_as_callee(func):
+                if _name_is_type_builtin(name):
+                    return True
+            if isinstance(func, ast.Name):
+                return _name_is_type_builtin(func.id)
+            if isinstance(func, ast.Attribute) and func.attr == _TYPE_BUILTIN_NAME:
+                return True
+            if isinstance(func, ast.Call):
+                attr = _getattr_static_name(
+                    func, getattr_aliases=frozenset(getattr_aliases)
+                )
+                if attr == _TYPE_BUILTIN_NAME:
+                    return True
+            return False
+
+        def _observe_type_constructor_call() -> None:
+            """Observe ``type(name, bases, dict)`` incl. keyword-only bases."""
+
+            for arg in call.args:
+                _eval_expr(arg, env, path=path)
+            for kw in call.keywords:
+                _eval_expr(kw.value, env, path=path)
+            bases_expr: ast.AST | None = None
+            if len(call.args) >= 2:
+                bases_expr = call.args[1]
+            for kw in call.keywords:
+                if kw.arg == "bases":
+                    bases_expr = kw.value
+            if bases_expr is None:
+                # Dynamic / incomplete type() form — fail closed.
+                if len(call.args) >= 1 or call.keywords:
+                    accum.unsupported = True
+                return
+            base_names = _names_packed_as_callee(bases_expr)
+            if isinstance(bases_expr, (ast.Tuple, ast.List)):
+                base_names = []
+                for elt in bases_expr.elts:
+                    nested = elt.value if isinstance(elt, ast.Starred) else elt
+                    base_names.extend(_names_packed_as_callee(nested))
+            observed = False
+            for name in base_names:
+                base_cls = _lookup_class(name, local_classes)
+                if base_cls is not None:
+                    if _scan_named_methods_on_class(
+                        base_cls,
+                        frozenset({"__init_subclass__"}),
+                        path=path,
+                        index=index,
+                        env=env,
+                        visited_fns=visited_fns,
+                        local_fns=local_fns,
+                        local_classes=local_classes,
+                    ):
+                        observed = True
+                elif name in env:
+                    accum.unsupported = True
+            if not observed and base_names:
+                accum.unsupported = True
+            if not base_names:
+                accum.unsupported = True
+
         # Request-time exec/eval/compile of string/code can mutate helpers —
-        # fail closed (bare Name, builtins.exec, import alias, getattr).
+        # fail closed (bare Name, builtins.exec, import alias, getattr, packing).
         if _call_targets_exec_eval_compile():
             for arg in call.args:
                 _eval_expr(arg, env, path=path)
@@ -3229,6 +3621,12 @@ def _build_identity_scanner(
                 )
             else:
                 accum.unsupported = True
+            return
+        if _call_targets_type_constructor() and (
+            len(call.args) >= 2
+            or any(kw.arg in {"bases", "dict", "name"} for kw in call.keywords)
+        ):
+            _observe_type_constructor_call()
             return
         setattr_parts = _setattr_target_and_name(call)
         if setattr_parts is not None:
@@ -3477,18 +3875,33 @@ def _build_identity_scanner(
                     local_classes=active_classes,
                 )
                 # Descriptor ``__set_name__`` runs after class body for each
-                # attribute assignment (``x = Desc()``) — observe or fail closed.
+                # attribute assignment (``x = Desc()`` / deferred ``x = d``)
+                # — observe or fail closed.
                 for item in stmt.body:
                     if not isinstance(item, (ast.Assign, ast.AnnAssign)):
                         continue
                     value = item.value if isinstance(item, ast.AnnAssign) else item.value
                     if value is None:
                         continue
-                    # ``Desc()`` construction may define ``__set_name__``.
+                    # ``Desc()`` construction / ``d = Desc(); x = d`` may define
+                    # ``__set_name__``. Packed Names resolve via instance_class_of.
                     desc_cls: ast.ClassDef | None = None
+                    for name in _names_packed_as_callee(value):
+                        desc_cls = _lookup_class(name, active_classes)
+                        if desc_cls is None and name in instance_class_of:
+                            desc_cls = _lookup_class(
+                                instance_class_of[name], active_classes
+                            )
+                        if desc_cls is not None:
+                            break
                     if isinstance(value, ast.Call) and isinstance(value.func, ast.Name):
-                        desc_cls = _lookup_class(value.func.id, active_classes)
+                        desc_cls = desc_cls or _lookup_class(
+                            value.func.id, active_classes
+                        )
                     if desc_cls is None:
+                        # Unknown descriptor value in class body — fail closed.
+                        if isinstance(value, (ast.Name, ast.Call, ast.Attribute)):
+                            accum.unsupported = True
                         continue
                     if not _scan_named_methods_on_class(
                         desc_cls,
@@ -3521,6 +3934,7 @@ def _build_identity_scanner(
                     )
                     # Name-bound lambdas / bound methods followed on later calls.
                     if isinstance(target, ast.Name):
+                        _note_protocol_alias_from_value(target.id, stmt.value)
                         if isinstance(stmt.value, ast.Lambda):
                             lambda_bindings[target.id] = stmt.value
                             method_bindings.pop(target.id, None)
@@ -3535,11 +3949,6 @@ def _build_identity_scanner(
                                 method_bindings[target.id] = method
                             else:
                                 method_bindings.pop(target.id, None)
-                            # ``nc = types.new_class`` / ``run = builtins.exec``.
-                            if stmt.value.attr in _EXEC_EVAL_COMPILE_NAMES:
-                                exec_eval_compile_aliases.add(target.id)
-                            if stmt.value.attr == _TYPES_NEW_CLASS_NAME:
-                                new_class_aliases.add(target.id)
                         elif (
                             isinstance(stmt.value, ast.Call)
                             and isinstance(stmt.value.func, ast.Name)
@@ -3552,19 +3961,15 @@ def _build_identity_scanner(
                         elif isinstance(stmt.value, ast.Name):
                             # ``Alias = Base`` so ``class C(Alias)`` observes
                             # ``Base.__init_subclass__`` (Unknown > false PASS).
-                            # Local ``run = exec`` / ``nc = new_class`` aliases.
+                            # Double instance alias: ``b = Box(); c = b``.
                             lambda_bindings.pop(target.id, None)
                             method_bindings.pop(target.id, None)
-                            instance_class_of.pop(target.id, None)
-                            if stmt.value.id in _EXEC_EVAL_COMPILE_NAMES or (
-                                stmt.value.id in exec_eval_compile_aliases
-                            ):
-                                exec_eval_compile_aliases.add(target.id)
-                            if (
-                                stmt.value.id == _TYPES_NEW_CLASS_NAME
-                                or stmt.value.id in new_class_aliases
-                            ):
-                                new_class_aliases.add(target.id)
+                            if stmt.value.id in instance_class_of:
+                                instance_class_of[target.id] = instance_class_of[
+                                    stmt.value.id
+                                ]
+                            else:
+                                instance_class_of.pop(target.id, None)
                             src_cls = _lookup_class(stmt.value.id, active_classes)
                             if src_cls is not None:
                                 active_classes[target.id] = src_cls
@@ -3919,6 +4324,16 @@ def _build_identity_scanner(
                             active_classes[case.pattern.name] = src_cls
                             class_registry[case.pattern.name] = src_cls
                             env_c[case.pattern.name] = subject
+                    # MatchValue Attribute patterns: fail-closed export rebind
+                    # (``match (evil,): case (helpers.write_state,):``).
+                    for attr_target in _match_pattern_attribute_targets(case.pattern):
+                        _scan_assign_target(
+                            attr_target,
+                            path=path,
+                            index=index,
+                            env=env_c,
+                            value_points=subject,
+                        )
                     if case.guard is not None:
                         # Guard executes on paths reaching this case (#173).
                         _eval_expr(case.guard, env_c, path=path)

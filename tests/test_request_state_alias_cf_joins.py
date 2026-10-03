@@ -442,7 +442,7 @@ async def handler(request, bypass_filter: bool = False, user = Depends(get_curre
 def test_persistent_state_round_trip_and_version_invalidation(tmp_path) -> None:
     """13. Persistent-state round trip and version invalidation."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.54.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.55.0"
 
     trusted_helpers = """
 def write_state(state, value):
@@ -2099,6 +2099,60 @@ import helpers
 def handler(request, bypass_filter=False):
     request.state.bypass_filter = True
     s = ({} | {"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import types
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = types.MappingProxyType({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import types as t
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = t.MappingProxyType({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from types import MappingProxyType as MPT
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = MPT({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from operator import getitem as gi
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = gi({"s": request.state}, "s")
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from operator import itemgetter as ig
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = ig("s")({"s": request.state})
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from operator import methodcaller as mc
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = mc("get", "s")({"s": request.state})
     s.bypass_filter = bypass_filter
     return request.state.bypass_filter
 """,

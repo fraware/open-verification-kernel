@@ -111,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.33.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.34.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -149,6 +149,41 @@ _OPERATOR_PROJECTION_ATTRS = frozenset(
 _OPERATOR_PROJECTION_NAMES = frozenset(
     {"getitem", "itemgetter", "attrgetter", "methodcaller"}
 )
+
+
+def _match_pattern_attribute_targets(pattern: ast.AST) -> list[ast.Attribute]:
+    """Attribute MatchValue nodes treated as fail-closed export stores."""
+
+    found: list[ast.Attribute] = []
+
+    def _walk(pat: ast.AST) -> None:
+        if isinstance(pat, ast.MatchValue) and isinstance(pat.value, ast.Attribute):
+            found.append(pat.value)
+            return
+        if isinstance(pat, ast.MatchAs):
+            if pat.pattern is not None:
+                _walk(pat.pattern)
+            return
+        if isinstance(pat, ast.MatchOr):
+            for alt in pat.patterns:
+                _walk(alt)
+            return
+        if isinstance(pat, ast.MatchSequence):
+            for sub in pat.patterns:
+                _walk(sub)
+            return
+        if isinstance(pat, ast.MatchMapping):
+            for sub in pat.patterns:
+                _walk(sub)
+            return
+        if isinstance(pat, ast.MatchClass):
+            for sub in pat.patterns:
+                _walk(sub)
+            for sub in pat.kwd_patterns:
+                _walk(sub)
+
+    _walk(pattern)
+    return found
 
 
 def _assign_target_has_attr_or_subscript(target: ast.AST) -> bool:
@@ -304,6 +339,9 @@ class _RequestStateAliasEnv:
     state_names: set[str]
     may_request_names: set[str] = dc_field(default_factory=set)
     may_state_names: set[str] = dc_field(default_factory=set)
+    # ``from types import MappingProxyType as MPT`` / ``from operator import getitem as gi``.
+    adapter_aliases: set[str] = dc_field(default_factory=set)
+    operator_projection_aliases: dict[str, str] = dc_field(default_factory=dict)
 
     @classmethod
     def seed(cls, *, param_names: frozenset[str]) -> "_RequestStateAliasEnv":
@@ -329,6 +367,38 @@ class _RequestStateAliasEnv:
             may_state=name in self.may_state_names,
         )
 
+    def note_projection_import(self, node: ast.Import | ast.ImportFrom) -> None:
+        """Track renamed MappingProxyType / operator projection imports."""
+
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                local = alias.asname or alias.name
+                if alias.name == "MappingProxyType":
+                    self.adapter_aliases.add(local)
+                elif alias.name in _OPERATOR_PROJECTION_NAMES:
+                    self.operator_projection_aliases[local] = alias.name
+        elif isinstance(node, ast.Import):
+            return
+
+    def note_projection_name_alias(self, name: str, value: ast.AST) -> None:
+        """``MPT = MappingProxyType`` / ``gi = getitem`` local aliases."""
+
+        if isinstance(value, ast.Name):
+            if value.id in _CONTAINER_ADAPTER_NAMES or value.id in self.adapter_aliases:
+                if value.id == "MappingProxyType" or value.id in self.adapter_aliases:
+                    self.adapter_aliases.add(name)
+            if value.id in _OPERATOR_PROJECTION_NAMES:
+                self.operator_projection_aliases[name] = value.id
+            elif value.id in self.operator_projection_aliases:
+                self.operator_projection_aliases[name] = (
+                    self.operator_projection_aliases[value.id]
+                )
+        elif isinstance(value, ast.Attribute):
+            if value.attr == "MappingProxyType":
+                self.adapter_aliases.add(name)
+            if value.attr in _OPERATOR_PROJECTION_NAMES:
+                self.operator_projection_aliases[name] = value.attr
+
     def snapshot(self) -> "_RequestStateAliasEnv":
         """Deep-copy alias sets for control-flow fork."""
 
@@ -337,6 +407,8 @@ class _RequestStateAliasEnv:
             state_names=set(self.state_names),
             may_request_names=set(self.may_request_names),
             may_state_names=set(self.may_state_names),
+            adapter_aliases=set(self.adapter_aliases),
+            operator_projection_aliases=dict(self.operator_projection_aliases),
         )
 
     def restore(self, other: "_RequestStateAliasEnv") -> None:
@@ -346,6 +418,8 @@ class _RequestStateAliasEnv:
         self.state_names = set(other.state_names)
         self.may_request_names = set(other.may_request_names)
         self.may_state_names = set(other.may_state_names)
+        self.adapter_aliases = set(other.adapter_aliases)
+        self.operator_projection_aliases = dict(other.operator_projection_aliases)
 
     def install_join(self, states: Sequence["_RequestStateAliasEnv"]) -> None:
         """Install the sound must/may join of feasible predecessor alias envs."""
@@ -743,11 +817,21 @@ class _RequestStateAliasEnv:
                     ) or self.packs_request_or_state_identity(nested):
                         return True
             # Builtin / types adapters: ``list({request.state})``,
-            # ``MappingProxyType({…})``, ``next(iter(...))``.
+            # ``MappingProxyType({…})``, ``types.MappingProxyType``,
+            # ``MPT = MappingProxyType`` / ``next(iter(...))``.
             func_name: str | None = None
             if isinstance(value.func, ast.Name):
                 func_name = value.func.id
-            if func_name in _CONTAINER_ADAPTER_NAMES:
+            elif (
+                isinstance(value.func, ast.Attribute)
+                and value.func.attr in _CONTAINER_ADAPTER_NAMES
+            ):
+                func_name = value.func.attr
+            is_adapter = (
+                func_name in _CONTAINER_ADAPTER_NAMES
+                or (func_name is not None and func_name in self.adapter_aliases)
+            )
+            if is_adapter:
                 for arg in value.args:
                     nested = arg.value if isinstance(arg, ast.Starred) else arg
                     if self.is_request_or_state_expr(
@@ -761,10 +845,10 @@ class _RequestStateAliasEnv:
                         kw.value
                     ) or self.packs_request_or_state_identity(kw.value):
                         return True
-            # ``from operator import itemgetter`` / bare Name projections.
-            if (
-                isinstance(value.func, ast.Name)
-                and value.func.id in _OPERATOR_PROJECTION_NAMES
+            # ``from operator import itemgetter as ig`` / bare Name projections.
+            if isinstance(value.func, ast.Name) and (
+                value.func.id in _OPERATOR_PROJECTION_NAMES
+                or value.func.id in self.operator_projection_aliases
             ):
                 for arg in value.args:
                     nested = arg.value if isinstance(arg, ast.Starred) else arg
@@ -785,7 +869,7 @@ class _RequestStateAliasEnv:
                     ) or self.packs_request_or_state_identity(nested):
                         return True
             # ``operator.itemgetter("s")(packed)`` / ``itemgetter("s")(packed)`` /
-            # ``operator.methodcaller("get", "s")(packed)`` /
+            # ``ig("s")(packed)`` / ``operator.methodcaller("get", "s")(packed)`` /
             # ``getattr(packed, "get")("s")``.
             if isinstance(value.func, ast.Call):
                 inner = value.func
@@ -793,7 +877,9 @@ class _RequestStateAliasEnv:
                 if isinstance(inner.func, ast.Attribute):
                     inner_attr = inner.func.attr
                 elif isinstance(inner.func, ast.Name):
-                    inner_attr = inner.func.id
+                    inner_attr = self.operator_projection_aliases.get(
+                        inner.func.id, inner.func.id
+                    )
                 if inner_attr in {"itemgetter", "attrgetter", "methodcaller"}:
                     for arg in value.args:
                         nested = arg.value if isinstance(arg, ast.Starred) else arg
@@ -958,11 +1044,18 @@ def join_request_state_alias_envs(
         may_state |= state.state_names | state.may_state_names
     may_request -= must_request
     may_state -= must_state
+    adapter_aliases: set[str] = set()
+    operator_projection_aliases: dict[str, str] = {}
+    for state in states:
+        adapter_aliases |= state.adapter_aliases
+        operator_projection_aliases.update(state.operator_projection_aliases)
     return _RequestStateAliasEnv(
         request_names=must_request,
         state_names=must_state,
         may_request_names=may_request,
         may_state_names=may_state,
+        adapter_aliases=adapter_aliases,
+        operator_projection_aliases=operator_projection_aliases,
     )
 
 
@@ -1589,6 +1682,8 @@ def _collect_writes_in_function(
     local_classes: dict[str, ast.ClassDef] = {}
     # Name → class name for ``b = Box()`` instance aliases (closure packing).
     instance_class_of: dict[str, str] = {}
+    # Local aliases of ``getattr`` (``g = getattr``) for packed attr peel.
+    getattr_aliases: set[str] = {"getattr"}
     nested_default_captures: dict[int, dict[str, _DefaultCapture]] = {}
     nested_free_vars: dict[int, frozenset[str]] = {}
     # Returned / assigned closures: Call id → closures yielded by a followed
@@ -2117,7 +2212,14 @@ def _collect_writes_in_function(
             # Always clear prior returned/awaitable product bindings on rebind
             # so ``fn = mid(); fn = noop; fn()`` cannot keep following poison.
             _clear_callable_name(target.id)
-            instance_class_of.pop(target.id, None)
+            # Double instance alias: ``b = Box(); c = b`` transfers class peel.
+            if value.id in instance_class_of:
+                instance_class_of[target.id] = instance_class_of[value.id]
+            else:
+                instance_class_of.pop(target.id, None)
+            if value.id in getattr_aliases:
+                getattr_aliases.add(target.id)
+            request_aliases.note_projection_name_alias(target.id, value)
             if value.id in name_unknown_callables:
                 name_unknown_callables.add(target.id)
             if value.id in name_returned_closures:
@@ -2151,6 +2253,7 @@ def _collect_writes_in_function(
             _register_nested_callable(value, name=target.id)
             return
         if isinstance(value, ast.Attribute):
+            request_aliases.note_projection_name_alias(target.id, value)
             # Property Name-bind: ``f = Box().fn; f()`` installs getter product.
             cls = _resolve_instance_or_class(value.value)
             if cls is not None:
@@ -2590,11 +2693,14 @@ def _collect_writes_in_function(
     def _getattr_packed_attr_callables(
         call_func: ast.AST,
     ) -> list[ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda]:
-        """``getattr(Box(), \"fn\")`` / ``getattr(b, \"fn\")`` init-pack peel."""
+        """``getattr(Box(), \"fn\")`` / ``g(Box(), \"fn\")`` init/property peel."""
 
         if not isinstance(call_func, ast.Call):
             return []
-        if not isinstance(call_func.func, ast.Name) or call_func.func.id != "getattr":
+        if (
+            not isinstance(call_func.func, ast.Name)
+            or call_func.func.id not in getattr_aliases
+        ):
             return []
         if len(call_func.args) < 2:
             return []
@@ -2604,7 +2710,16 @@ def _collect_writes_in_function(
         cls = _resolve_instance_or_class(call_func.args[0])
         if cls is None:
             return []
-        return _init_packed_attr_callables(cls, name_arg.value)
+        packed = _init_packed_attr_callables(cls, name_arg.value)
+        if packed:
+            return packed
+        # Property + getattr: ``getattr(Box(), \"fn\")`` where ``fn`` is @property.
+        prop_getter = _class_property_getter(cls, name_arg.value)
+        if prop_getter is None:
+            return []
+        if isinstance(prop_getter, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            return [prop_getter]
+        return _governed_local_callables_from_expr(prop_getter)
 
     def _getattr_local_callable(
         call_func: ast.AST,
@@ -2613,7 +2728,10 @@ def _collect_writes_in_function(
 
         if not isinstance(call_func, ast.Call):
             return None
-        if not isinstance(call_func.func, ast.Name) or call_func.func.id != "getattr":
+        if (
+            not isinstance(call_func.func, ast.Name)
+            or call_func.func.id not in getattr_aliases
+        ):
             return None
         if len(call_func.args) < 2:
             return None
@@ -2848,12 +2966,14 @@ def _collect_writes_in_function(
         """Callables packed onto ``self.<attr>`` / class ``<attr>``.
 
         Covers ``__init__`` / ``__new__`` / class-body packing including CF,
-        setattr / object.__setattr__, and ``__dict__`` stores (#173).
+        setattr / object.__setattr__, ``__dict__`` stores, and inherited
+        ``__init__`` / ``__new__`` on Name bases (``Child(Base).fn()``) (#173).
         """
 
         found: list[ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda] = []
         seen: set[int] = set()
         dynamic = False
+        visited_classes: set[int] = set()
 
         def _merge(
             items: list[ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda],
@@ -2864,56 +2984,72 @@ def _collect_writes_in_function(
                 seen.add(id(item))
                 found.append(item)
 
-        # Class-body ``fn = poison`` / ``fn = property(_fn)`` packing.
-        _merge(
-            _collect_packed_attr_callables_from_stmts(
-                cls.body, attr_name, allow_class_body=True
-            )
-        )
-        dynamic = dynamic or bool(
-            getattr(_collect_packed_attr_callables_from_stmts, "dynamic", False)
-        )
-        for child in cls.body:
-            if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            if child.name not in {"__init__", "__new__"}:
-                continue
+        def _collect_on_class(class_node: ast.ClassDef) -> None:
+            nonlocal dynamic
+            if id(class_node) in visited_classes:
+                return
+            visited_classes.add(id(class_node))
+            # Class-body ``fn = poison`` / ``fn = property(_fn)`` packing.
             _merge(
                 _collect_packed_attr_callables_from_stmts(
-                    child.body, attr_name, allow_class_body=False
+                    class_node.body, attr_name, allow_class_body=True
                 )
             )
             dynamic = dynamic or bool(
                 getattr(_collect_packed_attr_callables_from_stmts, "dynamic", False)
             )
-            # Nested def pack: ``def __init__(self): def poison(): …; self.fn = poison``.
-            for nested in child.body:
-                if isinstance(nested, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    local_nested.setdefault(nested.name, nested)
-        # Property descriptor assigned in class body: ``fn = property(_fn)``.
-        for child in cls.body:
-            if not isinstance(child, ast.Assign):
-                continue
-            if not any(
-                isinstance(t, ast.Name) and t.id == attr_name for t in child.targets
-            ):
-                continue
-            if (
-                isinstance(child.value, ast.Call)
-                and isinstance(child.value.func, ast.Name)
-                and child.value.func.id in {"property", "cached_property"}
-                and child.value.args
-            ):
-                getter = child.value.args[0]
-                for callee in _governed_local_callables_from_expr(getter):
-                    if id(callee) not in seen:
-                        seen.add(id(callee))
-                        found.append(callee)
-                if isinstance(getter, ast.Name):
-                    for callee in _local_callables_for_name(getter.id):
+            for child in class_node.body:
+                if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                if child.name not in {"__init__", "__new__"}:
+                    continue
+                _merge(
+                    _collect_packed_attr_callables_from_stmts(
+                        child.body, attr_name, allow_class_body=False
+                    )
+                )
+                dynamic = dynamic or bool(
+                    getattr(_collect_packed_attr_callables_from_stmts, "dynamic", False)
+                )
+                for nested in child.body:
+                    if isinstance(nested, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        local_nested.setdefault(nested.name, nested)
+            # Property descriptor assigned in class body: ``fn = property(_fn)``.
+            for child in class_node.body:
+                if not isinstance(child, ast.Assign):
+                    continue
+                if not any(
+                    isinstance(t, ast.Name) and t.id == attr_name for t in child.targets
+                ):
+                    continue
+                if (
+                    isinstance(child.value, ast.Call)
+                    and isinstance(child.value.func, ast.Name)
+                    and child.value.func.id in {"property", "cached_property"}
+                    and child.value.args
+                ):
+                    getter = child.value.args[0]
+                    for callee in _governed_local_callables_from_expr(getter):
                         if id(callee) not in seen:
                             seen.add(id(callee))
                             found.append(callee)
+                    if isinstance(getter, ast.Name):
+                        for callee in _local_callables_for_name(getter.id):
+                            if id(callee) not in seen:
+                                seen.add(id(callee))
+                                found.append(callee)
+            # Inherited ``__init__`` / ``__new__`` packing on Name bases.
+            for base in class_node.bases:
+                if isinstance(base, ast.Name):
+                    base_cls = _lookup_local_class(base.id)
+                    if base_cls is not None:
+                        _collect_on_class(base_cls)
+                    else:
+                        dynamic = True
+                else:
+                    dynamic = True
+
+        _collect_on_class(cls)
         if dynamic and not found:
             # Fail closed: unpeeled dynamic pack on this attr.
             _init_packed_attr_callables.dynamic_escape = True  # type: ignore[attr-defined]
@@ -2924,7 +3060,7 @@ def _collect_writes_in_function(
     def _resolve_instance_or_class(
         receiver: ast.AST,
     ) -> ast.ClassDef | None:
-        """Resolve ``Box`` / ``Box()`` / ``b`` / ``(b:=Box())`` to a ClassDef."""
+        """Resolve ``Box`` / ``Box()`` / ``b`` / ``[Box()][0]`` / IfExp packs."""
 
         if isinstance(receiver, ast.NamedExpr):
             return _resolve_instance_or_class(receiver.value)
@@ -2941,6 +3077,56 @@ def _collect_writes_in_function(
                 return _lookup_local_class(receiver.func.id)
             # Packed / Attribute class construction receivers stay unresolved
             # here; construction observation is handled in identity scanning.
+            return None
+        if isinstance(receiver, ast.IfExp):
+            left = _resolve_instance_or_class(receiver.body)
+            right = _resolve_instance_or_class(receiver.orelse)
+            if left is not None and (right is None or left is right):
+                return left
+            if right is not None and left is None:
+                return right
+            if left is not None and right is not None and left is not right:
+                # Divergent instance packs — fail closed via dynamic escape.
+                _init_packed_attr_callables.dynamic_escape = True  # type: ignore[attr-defined]
+            return left or right
+        if isinstance(receiver, ast.BoolOp):
+            resolved: ast.ClassDef | None = None
+            for operand in receiver.values:
+                cls = _resolve_instance_or_class(operand)
+                if cls is None:
+                    continue
+                if resolved is None:
+                    resolved = cls
+                elif resolved is not cls:
+                    _init_packed_attr_callables.dynamic_escape = True  # type: ignore[attr-defined]
+            return resolved
+        if isinstance(receiver, (ast.List, ast.Tuple, ast.Set)):
+            resolved = None
+            for elt in receiver.elts:
+                nested = elt.value if isinstance(elt, ast.Starred) else elt
+                cls = _resolve_instance_or_class(nested)
+                if cls is None:
+                    continue
+                if resolved is None:
+                    resolved = cls
+                elif resolved is not cls:
+                    _init_packed_attr_callables.dynamic_escape = True  # type: ignore[attr-defined]
+            return resolved
+        if isinstance(receiver, ast.Subscript):
+            return _resolve_instance_or_class(receiver.value)
+        if isinstance(receiver, ast.Dict):
+            resolved = None
+            for value in receiver.values:
+                if value is None:
+                    continue
+                cls = _resolve_instance_or_class(value)
+                if cls is None:
+                    continue
+                if resolved is None:
+                    resolved = cls
+                elif resolved is not cls:
+                    _init_packed_attr_callables.dynamic_escape = True  # type: ignore[attr-defined]
+            return resolved
         return None
 
     def _governed_class_method(
@@ -3410,7 +3596,65 @@ def _collect_writes_in_function(
                     execute_async_body=execute_async_body,
                 )
 
-        # ``getattr(box, \"poison\")()`` / ``getattr(Box(), \"fn\")()``.
+        # ``getattr(box, \"poison\")()`` / ``getattr(Box(), \"fn\")()`` /
+        # property + getattr (``getattr(Box(), \"fn\")()`` where ``fn`` is
+        # ``@property`` returning a governed closure).
+        if (
+            isinstance(call.func, ast.Call)
+            and isinstance(call.func.func, ast.Name)
+            and call.func.func.id in getattr_aliases
+            and len(call.func.args) >= 2
+            and isinstance(call.func.args[1], ast.Constant)
+            and isinstance(call.func.args[1].value, str)
+        ):
+            getattr_cls = _resolve_instance_or_class(call.func.args[0])
+            attr_name = call.func.args[1].value
+            if getattr_cls is not None:
+                prop_getter = _class_property_getter(getattr_cls, attr_name)
+                if prop_getter is not None:
+                    getters: list[
+                        ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda
+                    ] = []
+                    if isinstance(
+                        prop_getter,
+                        (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda),
+                    ):
+                        getters.append(prop_getter)
+                    elif isinstance(prop_getter, ast.Name):
+                        getters.extend(_local_callables_for_name(prop_getter.id))
+                    else:
+                        getters.extend(
+                            _governed_local_callables_from_expr(prop_getter)
+                        )
+                    followed_getter = False
+                    for getter in getters:
+                        if _follow_local_callable_node(
+                            getter,
+                            call=call,
+                            control_dependent=control_dependent,
+                            execute_async_body=execute_async_body,
+                        ):
+                            followed_getter = True
+                    returned = list(call_returned_closures.get(id(call), []))
+                    unknown = id(call) in call_returned_unknown
+                    followed_any = False
+                    for item in returned:
+                        if _follow_local_callable_node(
+                            item.node,
+                            call=call,
+                            control_dependent=control_dependent,
+                            execute_async_body=execute_async_body,
+                        ):
+                            followed_any = True
+                    if followed_any:
+                        return True
+                    if followed_getter or unknown or returned or getters:
+                        _record_escape(
+                            call,
+                            ast.unparse(call),
+                            control_dependent=control_dependent,
+                        )
+                        return True
         getattr_packed = _getattr_packed_attr_callables(call.func)
         if getattr_packed:
             followed_any = False
@@ -3422,7 +3666,22 @@ def _collect_writes_in_function(
                     execute_async_body=execute_async_body,
                 ):
                     followed_any = True
-            if followed_any:
+            returned = list(call_returned_closures.get(id(call), []))
+            for item in returned:
+                if _follow_local_callable_node(
+                    item.node,
+                    call=call,
+                    control_dependent=control_dependent,
+                    execute_async_body=execute_async_body,
+                ):
+                    followed_any = True
+            if followed_any or returned or id(call) in call_returned_unknown:
+                if not followed_any:
+                    _record_escape(
+                        call,
+                        ast.unparse(call),
+                        control_dependent=control_dependent,
+                    )
                 return True
             if getattr(_init_packed_attr_callables, "dynamic_escape", False):
                 _record_escape(
@@ -3707,9 +3966,30 @@ def _collect_writes_in_function(
                         )
             getattr_packed = _getattr_packed_attr_callables(node.func)
             getattr_callee = _getattr_local_callable(node.func)
-            getattr_governed = bool(getattr_packed) or (
-                getattr_callee is not None
-                and _closure_carries_governed_identity(getattr_callee)
+            # ``getattr(obj, "missing", poison)()`` — default may be the callee.
+            getattr_default_governed = False
+            if (
+                isinstance(node.func, ast.Call)
+                and isinstance(node.func.func, ast.Name)
+                and node.func.func.id in getattr_aliases
+                and len(node.func.args) >= 3
+            ):
+                default_expr = node.func.args[2]
+                if _expr_packs_governed_local_callable(default_expr) or (
+                    isinstance(default_expr, ast.Name)
+                    and bool(_local_callables_for_name(default_expr.id))
+                ):
+                    getattr_default_governed = True
+                else:
+                    # Unresolved default callable product — fail closed.
+                    getattr_default_governed = True
+            getattr_governed = (
+                bool(getattr_packed)
+                or (
+                    getattr_callee is not None
+                    and _closure_carries_governed_identity(getattr_callee)
+                )
+                or getattr_default_governed
             )
             unknown_name_callable = (
                 isinstance(node.func, ast.Name)
@@ -3879,6 +4159,20 @@ def _collect_writes_in_function(
                 ast.unparse(expr),
                 control_dependent=control_dependent,
             )
+        # Comprehension Attribute/subscript for-targets rebind exports
+        # (``[0 for helpers.write_state in [evil]]``) — observe as Assign.
+        for child in ast.walk(expr):
+            if not isinstance(
+                child, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
+            ):
+                continue
+            for gen in child.generators:
+                if identity_session is not None and _assign_target_has_attr_or_subscript(
+                    gen.target
+                ):
+                    identity_session.observe_statement(
+                        ast.Assign(targets=[gen.target], value=gen.iter)
+                    )
         # Identity first: arg-order mutators (``write_state(..., poison())``)
         # must poison resolve before interprocedural write inlining.
         if identity_session is not None:
@@ -3905,6 +4199,16 @@ def _collect_writes_in_function(
                 )
             elif isinstance(child.value, ast.Call):
                 _bind_call_product_to_name(child.target.id, child.value)
+            # Instance / getattr / projection aliases through walrus.
+            if isinstance(child.value, ast.Name) and child.value.id in getattr_aliases:
+                getattr_aliases.add(child.target.id)
+            if (
+                isinstance(child.value, ast.Call)
+                and isinstance(child.value.func, ast.Name)
+                and _lookup_local_class(child.value.func.id) is not None
+            ):
+                instance_class_of[child.target.id] = child.value.func.id
+            request_aliases.note_projection_name_alias(child.target.id, child.value)
 
     def _visit_statement(
         statement: ast.stmt,
@@ -4434,6 +4738,16 @@ def _collect_writes_in_function(
                     src_cls = _lookup_local_class(statement.subject.id)
                     if src_cls is not None:
                         local_classes[case.pattern.name] = src_cls
+                # MatchValue Attribute: fail-closed export rebind
+                # (``match (evil,): case (helpers.write_state,):``).
+                for attr_target in _match_pattern_attribute_targets(case.pattern):
+                    if identity_session is not None:
+                        identity_session.observe_statement(
+                            ast.Assign(
+                                targets=[attr_target],
+                                value=statement.subject,
+                            )
+                        )
                 if case.guard is not None:
                     # Guard effects are path-dependent: possible on paths that
                     # reach this guard; never omit; keep control_dependent so
@@ -4795,8 +5109,29 @@ def _collect_state_writes(
                         if isinstance(nested, (ast.FunctionDef, ast.AsyncFunctionDef)):
                             functions.append(nested)
     if functions:
+        # Module-level ``from types import MappingProxyType as MPT`` /
+        # ``from operator import itemgetter as ig`` seed projection aliases.
+        module_projection_seed = _RequestStateAliasEnv.seed(param_names=frozenset())
+        for node in getattr(tree, "body", ()):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                module_projection_seed.note_projection_import(node)
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        module_projection_seed.note_projection_name_alias(
+                            target.id, node.value
+                        )
         for fn in functions:
             fn_param_names = frozenset(_function_param_names(fn))
+            seeded = _RequestStateAliasEnv.seed(param_names=fn_param_names)
+            seeded.adapter_aliases |= module_projection_seed.adapter_aliases
+            seeded.operator_projection_aliases.update(
+                module_projection_seed.operator_projection_aliases
+            )
+            # Also seed imports nested in the function body.
+            for node in ast.walk(fn):
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    seeded.note_projection_import(node)
             collected, _returned, _returned_unknown = _collect_writes_in_function(
                 fn,
                 path=path,
@@ -4806,6 +5141,7 @@ def _collect_state_writes(
                     else frozenset()
                 ),
                 callee_resolver=callee_resolver,
+                seed_request_aliases=seeded,
             )
             writes.extend(collected)
         # Module-level writes (outside functions) still matter.
