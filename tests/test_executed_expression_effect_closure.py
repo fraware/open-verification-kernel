@@ -1007,7 +1007,189 @@ def handler(request, bypass_filter=False):
     assert findings[0].reason != "source_proved_server_authority_write"
 
 
+def test_class_body_setattr_assign_never_authorized() -> None:
+    """Class-body Assign executes: ``class C: x = setattr(state, ...)``."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    class C:
+        x = setattr(request.state, "bypass_filter", bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_class_body_expr_setattr_never_authorized() -> None:
+    """Class-body Expr executes setattr at definition."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    class C:
+        setattr(request.state, "bypass_filter", bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_class_body_annassign_setattr_never_authorized() -> None:
+    """Class-body AnnAssign value executes at definition."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    class C:
+        x: object = setattr(request.state, "bypass_filter", bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_method_default_setattr_never_authorized() -> None:
+    """Method defaults execute during class-body definition."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    class C:
+        def m(self, x=setattr(request.state, "bypass_filter", bypass_filter)):
+            return x
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_type_alias_poison_never_authorized() -> None:
+    """``type X = poison()`` evaluates the value at definition."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return int
+    type X = poison()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_unresolved_callee_kwarg_poison_never_authorized() -> None:
+    """Imported callee kwargs execute: ``TypeVar('T', bound=poison())``."""
+
+    findings = _unit(
+        """
+import helpers
+from typing import TypeVar
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return int
+    T = TypeVar('T', bound=poison())
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_imported_ctor_kwarg_poison_never_authorized() -> None:
+    """``OrderedDict(a=poison())`` must observe keyword actuals."""
+
+    findings = _unit(
+        """
+import helpers
+from collections import OrderedDict
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return 1
+    OrderedDict(a=poison())
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_starred_kwarg_poison_never_authorized() -> None:
+    """``OrderedDict(**poison())`` must observe **kwargs actuals."""
+
+    findings = _unit(
+        """
+import helpers
+from collections import OrderedDict
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return {'a': 1}
+    OrderedDict(**poison())
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_pep695_type_param_bound_poison_never_authorized() -> None:
+    """PEP 695 ``def nested[T: poison()]`` evaluates the bound."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return int
+    def nested[T: poison()](x: T = True):
+        return x
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
 def test_persistent_version_bumped_for_executed_expr_closure() -> None:
     """Cache / semantic versions bump with PASS-semantics change."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.43.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.44.0"

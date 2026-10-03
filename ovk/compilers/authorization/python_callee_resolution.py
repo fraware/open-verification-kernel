@@ -47,7 +47,7 @@ from ovk.compilers.authorization.python_import_space import (
     normalize_path,
 )
 
-_IMPLEMENTATION_VERSION = "0.16.0"
+_IMPLEMENTATION_VERSION = "0.17.0"
 _MAX_IMPORT_FOLLOW_DEPTH = 8
 
 BindingKind = Literal["function", "import_name", "import_module", "rebound"]
@@ -1712,6 +1712,22 @@ def _build_identity_scanner(
         for mod_path in available_paths:
             _note_export(mod_path, export_name)
 
+    def _eval_type_params(
+        type_params: Sequence[ast.AST],
+        env: Mapping[str, _IdentityPointsTo],
+        *,
+        path: str,
+    ) -> None:
+        """PEP 695 type parameters evaluate bounds/defaults at definition."""
+
+        for param in type_params:
+            bound = getattr(param, "bound", None)
+            if bound is not None:
+                _eval_expr(bound, env, path=path)
+            default = getattr(param, "default_value", None)
+            if default is not None:
+                _eval_expr(default, env, path=path)
+
     def _eval_expr(
         expr: ast.AST,
         env: Mapping[str, _IdentityPointsTo],
@@ -2506,10 +2522,23 @@ def _build_identity_scanner(
             ):
                 fn_node = binding.function_node
         if fn_node is None:
-            # Unresolved / imported callee receiving module/callable actual.
+            # Unresolved / imported callee: still evaluate *all* actuals so
+            # keyword / **kwargs side effects cannot hide identity mutations
+            # (``TypeVar('T', bound=poison())``, ``OrderedDict(a=poison())``).
             for arg in call.args:
                 arg_points = _eval_expr(arg, env, path=path)
                 for atom in arg_points.known:
+                    if isinstance(atom, ModuleObject):
+                        _note_export(atom.path, "*")
+                    elif isinstance(atom, ModuleNamespace):
+                        _note_export(atom.module_path, "*")
+                    elif isinstance(atom, CallableObject):
+                        accum.behavior_mutations.add(
+                            (atom.defining_path, atom.export_name)
+                        )
+            for kw in call.keywords:
+                kw_points = _eval_expr(kw.value, env, path=path)
+                for atom in kw_points.known:
                     if isinstance(atom, ModuleObject):
                         _note_export(atom.path, "*")
                     elif isinstance(atom, ModuleNamespace):
@@ -2546,6 +2575,8 @@ def _build_identity_scanner(
         if setattr_parts is not None:
             obj, name_expr = setattr_parts
             attr = _static_str(name_expr)
+            # Name expression may itself execute (``setattr(o, poison(), v)``).
+            _eval_expr(name_expr, env, path=path)
             _mutate_through_expr(
                 obj,
                 export_name=attr,
@@ -2554,11 +2585,26 @@ def _build_identity_scanner(
                 path=path,
                 index=index,
             )
+            # Value executes after name resolution; identity mutators in the
+            # value must still poison before a later trusted helper write.
+            if isinstance(call.func, ast.Name) and call.func.id == "setattr":
+                if len(call.args) >= 3:
+                    _eval_expr(call.args[2], env, path=path)
+            elif isinstance(call.func, ast.Attribute) and call.func.attr == "__setattr__":
+                if (
+                    isinstance(call.func.value, ast.Name)
+                    and call.func.value.id == "object"
+                ):
+                    if len(call.args) >= 3:
+                        _eval_expr(call.args[2], env, path=path)
+                elif len(call.args) >= 2:
+                    _eval_expr(call.args[1], env, path=path)
             return
         delattr_parts = _delattr_target_and_name(call)
         if delattr_parts is not None:
             obj, name_expr = delattr_parts
             attr = _static_str(name_expr)
+            _eval_expr(name_expr, env, path=path)
             _mutate_through_expr(
                 obj,
                 export_name=attr,
@@ -2583,6 +2629,11 @@ def _build_identity_scanner(
                     path=path,
                     index=index,
                 )
+                # Remaining actuals still execute.
+                for arg in call.args[1:]:
+                    _eval_expr(arg, env, path=path)
+                for kw in call.keywords:
+                    _eval_expr(kw.value, env, path=path)
                 return
 
         func = call.func
@@ -2614,6 +2665,11 @@ def _build_identity_scanner(
                     mutation_path=path,
                     mutation_index=index,
                 )
+            # Method actuals still execute (``d.update(a=poison())``).
+            for arg in call.args:
+                _eval_expr(arg, env, path=path)
+            for kw in call.keywords:
+                _eval_expr(kw.value, env, path=path)
             return
 
         _follow_local_callee(
@@ -2654,6 +2710,8 @@ def _build_identity_scanner(
                 for default in stmt.args.kw_defaults:
                     if default is not None:
                         _eval_expr(default, env, path=path)
+                # PEP 695 type parameter bounds/defaults execute at definition.
+                _eval_type_params(getattr(stmt, "type_params", ()) or (), env, path=path)
                 # Parameter / return annotations evaluate at definition unless
                 # postponed; omitting them false-PASSes identity (#173).
                 for arg in (
@@ -2732,6 +2790,7 @@ def _build_identity_scanner(
                         )
                 # Bases and keywords execute at definition (``class C(poison())``,
                 # ``metaclass=poison()``, starred bases). Unknown > false PASS.
+                _eval_type_params(getattr(stmt, "type_params", ()) or (), env, path=path)
                 for base in stmt.bases:
                     _eval_expr(base, env, path=path)
                 for kw in stmt.keywords:
@@ -2835,6 +2894,10 @@ def _build_identity_scanner(
                     if isinstance(target, ast.Name):
                         env[target.id] = _IdentityPointsTo.unknown_only()
                     else:
+                        # Subscript/attribute deletes still execute index/name
+                        # expressions (``del d[poison()]``).
+                        if isinstance(target, ast.Subscript):
+                            _eval_expr(target.slice, env, path=path)
                         _scan_assign_target(
                             target,
                             path=path,
@@ -2842,6 +2905,14 @@ def _build_identity_scanner(
                             env=env,
                             value_points=None,
                         )
+                continue
+            if isinstance(stmt, ast.TypeAlias):
+                # ``type X = poison()`` / ``type X[T: poison()] = ...`` execute
+                # type_params and the value at definition (#173).
+                _eval_type_params(getattr(stmt, "type_params", ()) or (), env, path=path)
+                _eval_expr(stmt.value, env, path=path)
+                if isinstance(stmt.name, ast.Name):
+                    env[stmt.name.id] = _IdentityPointsTo.unknown_only()
                 continue
             if isinstance(stmt, ast.Expr):
                 # Any executed expression position — not only bare Call (#173).

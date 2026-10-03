@@ -111,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.25.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.26.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -1883,6 +1883,17 @@ def _collect_writes_in_function(
                     _observe_executed_expression(
                         default, control_dependent=control_dependent
                     )
+            for param in getattr(statement, "type_params", ()) or ():
+                bound = getattr(param, "bound", None)
+                if bound is not None:
+                    _observe_executed_expression(
+                        bound, control_dependent=control_dependent
+                    )
+                default_value = getattr(param, "default_value", None)
+                if default_value is not None:
+                    _observe_executed_expression(
+                        default_value, control_dependent=control_dependent
+                    )
             for arg in (
                 *statement.args.posonlyargs,
                 *statement.args.args,
@@ -1962,6 +1973,17 @@ def _collect_writes_in_function(
                         ),
                         control_dependent=control_dependent,
                     )
+            for param in getattr(statement, "type_params", ()) or ():
+                bound = getattr(param, "bound", None)
+                if bound is not None:
+                    _observe_executed_expression(
+                        bound, control_dependent=control_dependent
+                    )
+                default_value = getattr(param, "default_value", None)
+                if default_value is not None:
+                    _observe_executed_expression(
+                        default_value, control_dependent=control_dependent
+                    )
             for base in statement.bases:
                 _observe_executed_expression(
                     base, control_dependent=control_dependent
@@ -1970,24 +1992,30 @@ def _collect_writes_in_function(
                 _observe_executed_expression(
                     kw.value, control_dependent=control_dependent
                 )
+            # Class body executes at definition: Assign/AnnAssign/Expr/nested
+            # defs must observe writer + identity effects (Unknown > false PASS).
             for child in statement.body:
-                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    nested_identity = None
-                    if callee_resolver is not None:
-                        nested_identity = begin_request_time_identity_session(
-                            callee_resolver, path=path, fn=child
-                        )
-                    writes.extend(
-                        _collect_writes_in_function(
-                            child,
-                            path=path,
-                            handler_param_names=frozenset(),
-                            callee_resolver=callee_resolver,
-                            seed_identity_session=nested_identity,
-                            call_stack=stack | {frame},
-                            depth=depth,
-                        )
+                _visit_statement(child, control_dependent=control_dependent)
+            if identity_session is not None:
+                identity_session.observe_statement(statement)
+            return
+
+        if isinstance(statement, ast.TypeAlias):
+            # ``type X = expr`` evaluates type_params and value at runtime.
+            for param in getattr(statement, "type_params", ()) or ():
+                bound = getattr(param, "bound", None)
+                if bound is not None:
+                    _observe_executed_expression(
+                        bound, control_dependent=control_dependent
                     )
+                default_value = getattr(param, "default_value", None)
+                if default_value is not None:
+                    _observe_executed_expression(
+                        default_value, control_dependent=control_dependent
+                    )
+            _observe_executed_expression(
+                statement.value, control_dependent=control_dependent
+            )
             if identity_session is not None:
                 identity_session.observe_statement(statement)
             return
