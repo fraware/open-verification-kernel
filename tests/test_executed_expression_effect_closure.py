@@ -2770,6 +2770,25 @@ def handler(request, bypass_filter=False):
     assert findings[0].reason != "source_proved_server_authority_write"
 
 
+def test_fourth_pass_getattr_mappingproxy_alias_never_authorized() -> None:
+    """``Proxy = getattr(types, \"MappingProxyType\")`` seeds adapter alias."""
+
+    findings = _unit(
+        """
+import helpers
+import types
+def handler(request, bypass_filter=False):
+    Proxy = getattr(types, "MappingProxyType")
+    s = Proxy({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
 def test_persistent_version_bumped_for_executed_expr_closure() -> None:
     """Cache / semantic versions bump with PASS-semantics change."""
 

@@ -2381,6 +2381,8 @@ def _collect_writes_in_function(
                 return
         if isinstance(value, ast.Call):
             _clear_callable_name(target.id)
+            # ``Proxy = getattr(types, "MappingProxyType")`` / operator peels.
+            request_aliases.note_projection_name_alias(target.id, value)
             # Instance alias: ``b = Box()`` for later ``b.fn()`` packing peel.
             if isinstance(value.func, ast.Name) and _lookup_local_class(
                 value.func.id
@@ -2762,6 +2764,24 @@ def _collect_writes_in_function(
         if isinstance(prop_getter, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
             return [prop_getter]
         return _governed_local_callables_from_expr(prop_getter)
+
+    def _getattr_dynamic_escape(call_func: ast.AST) -> bool:
+        """True when ``getattr(obj, dynamic)`` may select a packed governed attr."""
+
+        if not isinstance(call_func, ast.Call):
+            return False
+        if (
+            not isinstance(call_func.func, ast.Name)
+            or call_func.func.id not in getattr_aliases
+        ):
+            return False
+        if len(call_func.args) < 2:
+            return False
+        name_arg = call_func.args[1]
+        if isinstance(name_arg, ast.Constant) and isinstance(name_arg.value, str):
+            return False
+        # Dynamic attr name on a resolved instance/class — fail closed.
+        return _resolve_instance_or_class(call_func.args[0]) is not None
 
     def _getattr_local_callable(
         call_func: ast.AST,
@@ -3776,6 +3796,14 @@ def _collect_writes_in_function(
                 control_dependent=control_dependent,
                 execute_async_body=execute_async_body,
             )
+        # ``getattr(Box(), n)()`` with dynamic attr name — fail closed.
+        if _getattr_dynamic_escape(call.func):
+            _record_escape(
+                call,
+                ast.unparse(call),
+                control_dependent=control_dependent,
+            )
+            return True
 
         # Packed Call.func: IfExp/BoolOp/NamedExpr/containers/Subscript of
         # local governed closures (``(poison if f else noop)()``, ``[poison][0]()``).
@@ -4066,6 +4094,7 @@ def _collect_writes_in_function(
                     and _closure_carries_governed_identity(getattr_callee)
                 )
                 or getattr_default_governed
+                or _getattr_dynamic_escape(node.func)
             )
             unknown_name_callable = (
                 isinstance(node.func, ast.Name)
@@ -4237,6 +4266,7 @@ def _collect_writes_in_function(
             )
         # Comprehension Attribute/subscript for-targets rebind exports
         # (``[0 for helpers.write_state in [evil]]``) — observe as Assign.
+        # Also seed instance aliases for ``[x.fn() for x in [Box()]]``.
         for child in ast.walk(expr):
             if not isinstance(
                 child, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
@@ -4249,6 +4279,10 @@ def _collect_writes_in_function(
                     identity_session.observe_statement(
                         ast.Assign(targets=[gen.target], value=gen.iter)
                     )
+                if isinstance(gen.target, ast.Name):
+                    packed_cls = _instance_class_name_from_expr(gen.iter)
+                    if packed_cls is not None:
+                        instance_class_of[gen.target.id] = packed_cls
         # Identity first: arg-order mutators (``write_state(..., poison())``)
         # must poison resolve before interprocedural write inlining.
         if identity_session is not None:
@@ -4811,6 +4845,15 @@ def _collect_writes_in_function(
                     src_cls = _lookup_local_class(statement.subject.id)
                     if src_cls is not None:
                         local_classes[case.pattern.name] = src_cls
+                # Instance alias: ``match Box(): case b: b.fn()``.
+                if (
+                    isinstance(case.pattern, ast.MatchAs)
+                    and case.pattern.name
+                    and case.pattern.pattern is None
+                ):
+                    packed_cls = _instance_class_name_from_expr(statement.subject)
+                    if packed_cls is not None:
+                        instance_class_of[case.pattern.name] = packed_cls
                 # MatchValue Attribute: fail-closed export rebind
                 # (``match (evil,): case (helpers.write_state,):``).
                 for attr_target in _match_pattern_attribute_targets(case.pattern):
@@ -5137,6 +5180,19 @@ def _collect_writes_in_function(
             _note_named_expr_bindings(
                 statement.value, control_dependent=control_dependent
             )
+            # ``[x.fn() for x in [Box()]]`` — bind for-target instance before
+            # Call peel of the element expression (Unknown > false PASS).
+            for child in ast.walk(statement.value):
+                if not isinstance(
+                    child,
+                    (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp),
+                ):
+                    continue
+                for gen in child.generators:
+                    if isinstance(gen.target, ast.Name):
+                        packed_cls = _instance_class_name_from_expr(gen.iter)
+                        if packed_cls is not None:
+                            instance_class_of[gen.target.id] = packed_cls
 
         # Identity before write inlining (same-statement arg-order mutators).
         if identity_session is not None:
