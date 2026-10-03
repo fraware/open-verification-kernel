@@ -754,5 +754,284 @@ def handler(request, bypass_filter=False):
     _never_authorized(findings)
 
 
+def test_bare_async_closure_call_does_not_execute_body() -> None:
+    """Bare Call of async def builds a coroutine; body writers must not fire."""
+
+    findings = _unit(
+        """
+import helpers
+async def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+
+    async def poison():
+        state.bypass_filter = bypass_filter
+
+    poison()
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "authorized"
+    assert findings[0].reason == "source_proved_server_authority_write"
+
+
+def test_await_async_closure_still_counts_body_writers() -> None:
+    """``await poison()`` must still observe async closure body writers."""
+
+    findings = _unit(
+        """
+import helpers
+async def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+
+    async def poison():
+        state.bypass_filter = bypass_filter
+
+    await poison()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_await_name_bound_async_coro_still_counts() -> None:
+    """``coro = poison(); await coro`` follows the async body via Name capture."""
+
+    findings = _unit(
+        """
+import helpers
+async def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+
+    async def poison():
+        state.bypass_filter = bypass_filter
+
+    coro = poison()
+    await coro
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_unused_async_def_trusted_path_still_authorizes() -> None:
+    """Trusted path with an unused async def (never called) still authorizes."""
+
+    findings = _unit(
+        """
+import helpers
+async def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+
+    async def poison():
+        state.bypass_filter = bypass_filter
+
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "authorized"
+    assert findings[0].reason == "source_proved_server_authority_write"
+
+
+def test_returned_closure_unused_binding_still_authorizes() -> None:
+    """``fn = mid()`` without ``fn()`` must not blanket-escape the return."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    def mid():
+        def poison():
+            state.bypass_filter = bypass_filter
+        return poison
+    fn = mid()
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "authorized"
+    assert findings[0].reason == "source_proved_server_authority_write"
+
+
+def test_returned_closure_name_call_precise_follow_never_authorized() -> None:
+    """Precise ``fn = mid(); fn()`` follow (not escape-only) never authorizes."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    def mid():
+        def poison():
+            state.bypass_filter = bypass_filter
+        return poison
+    fn = mid()
+    fn()
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "violated"
+    assert findings[0].reason == "client_controlled_bypass_write"
+
+
+def test_returned_closure_mid_local_cell_never_authorized() -> None:
+    """Capture mid-frame locals at return; follow at ``fn()`` with that env."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    def mid():
+        local_state = request.state
+        def poison():
+            local_state.bypass_filter = bypass_filter
+        return poison
+    fn = mid()
+    fn()
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "violated"
+    assert findings[0].reason == "client_controlled_bypass_write"
+
+
+def test_returned_closure_dunder_call_never_authorized() -> None:
+    """``fn.__call__()`` after ``fn = mid()`` must follow the returned closure."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    def mid():
+        def poison():
+            state.bypass_filter = bypass_filter
+        return poison
+    fn = mid()
+    fn.__call__()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_returned_closure_rebind_to_noop_still_authorizes() -> None:
+    """Rebinding ``fn`` away from a returned closure must drop the capture."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    def mid():
+        def poison():
+            state.bypass_filter = bypass_filter
+        return poison
+    def noop():
+        pass
+    fn = mid()
+    fn = noop
+    fn()
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "authorized"
+    assert findings[0].reason == "source_proved_server_authority_write"
+
+
+def test_async_for_async_gen_body_never_authorized() -> None:
+    """AsyncFor entry executes async generator bodies (not bare Call)."""
+
+    findings = _unit(
+        """
+import helpers
+async def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    async def agen():
+        state.bypass_filter = bypass_filter
+        yield 1
+    async for x in agen():
+        pass
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_getattr_call_on_returned_closure_never_authorized() -> None:
+    """``getattr(fn, \"__call__\")()`` after ``fn = mid()`` never authorizes."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    def mid():
+        def poison():
+            state.bypass_filter = bypass_filter
+        return poison
+    fn = mid()
+    getattr(fn, "__call__")()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_returned_callable_class_instance_never_authorized() -> None:
+    """``fn = mid(); fn()`` when mid returns governed ``Cls()`` never authorizes."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    def mid():
+        class Box:
+            def __call__(self):
+                state.bypass_filter = bypass_filter
+        return Box()
+    fn = mid()
+    fn()
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
+def test_async_with_local_aenter_never_authorized() -> None:
+    """AsyncWith entry follows local class ``__aenter__`` body writers."""
+
+    findings = _unit(
+        """
+import helpers
+async def handler(request, bypass_filter=False):
+    state = request.state
+    request.state.bypass_filter = True
+    class CM:
+        async def __aenter__(self):
+            state.bypass_filter = bypass_filter
+            return self
+        async def __aexit__(self, *a):
+            return False
+    async with CM():
+        pass
+    return request.state.bypass_filter
+"""
+    )
+    _never_authorized(findings)
+
+
 def test_persistent_version_bumped_for_lexical_closure() -> None:
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.49.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.50.0"
