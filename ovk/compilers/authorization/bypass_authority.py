@@ -111,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.30.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.31.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -1402,7 +1402,7 @@ def _collect_writes_in_function(
     depth: int = 0,
     enclosing_alias_envs: tuple[_RequestStateAliasEnv, ...] = (),
     enclosing_origin_states: tuple[AliasState, ...] = (),
-) -> tuple[list[StateAttributeWrite], list[_ReturnedClosure]]:
+) -> tuple[list[StateAttributeWrite], list[_ReturnedClosure], bool]:
     """Collect state writes under statement-order alias tracking.
 
     Provenance for ``request.state.f = x`` survives when ``x`` is a simple
@@ -1454,9 +1454,12 @@ def _collect_writes_in_function(
     # Returned / assigned closures: Call id → closures yielded by a followed
     # callee; Name → capture summary for precise ``fn = mid(); fn()`` follow.
     call_returned_closures: dict[int, list[_ReturnedClosure]] = {}
+    call_returned_unknown: set[int] = set()
     name_returned_closures: dict[str, list[_ReturnedClosure]] = {}
+    name_unknown_callables: set[str] = set()
     returned_closure_captures: dict[int, Mapping[str, AliasClassification]] = {}
     frame_returned_closures: list[_ReturnedClosure] = []
+    frame_returned_unknown = False
     # Async: bare Call builds a coroutine; body runs under Await / async entry.
     call_awaitable_callees: dict[
         int, ast.FunctionDef | ast.AsyncFunctionDef
@@ -1465,6 +1468,133 @@ def _collect_writes_in_function(
     # Entry frame returns escape to the unresolved FastAPI caller; nested
     # frames propagate returned closures to the call site instead.
     is_entry_frame = depth == 0 and not stack
+
+    # Callable-Name environment forked/joined across CF (If/While/For/Try/Match)
+    # so ``if c: fn = mid() else: fn = noop; fn()`` cannot drop the poison arm.
+    _CallableEnv = tuple[
+        dict[str, list[_ReturnedClosure]],
+        dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+        dict[str, ast.Lambda],
+        dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+        set[str],
+    ]
+
+    def _snapshot_callable_env() -> _CallableEnv:
+        return (
+            {key: list(value) for key, value in name_returned_closures.items()},
+            dict(local_nested),
+            dict(local_lambdas),
+            dict(name_awaitable_callees),
+            set(name_unknown_callables),
+        )
+
+    def _restore_callable_env(snap: _CallableEnv) -> None:
+        returned, nested, lambdas, awaitables, unknown = snap
+        name_returned_closures.clear()
+        name_returned_closures.update(
+            {key: list(value) for key, value in returned.items()}
+        )
+        local_nested.clear()
+        local_nested.update(nested)
+        local_lambdas.clear()
+        local_lambdas.update(lambdas)
+        name_awaitable_callees.clear()
+        name_awaitable_callees.update(awaitables)
+        name_unknown_callables.clear()
+        name_unknown_callables.update(unknown)
+
+    def _clear_callable_name(name: str) -> None:
+        name_returned_closures.pop(name, None)
+        name_awaitable_callees.pop(name, None)
+        name_unknown_callables.discard(name)
+        local_nested.pop(name, None)
+        local_lambdas.pop(name, None)
+
+    def _join_callable_envs(snaps: Sequence[_CallableEnv]) -> None:
+        if not snaps:
+            return
+        if len(snaps) == 1:
+            _restore_callable_env(snaps[0])
+            return
+        names: set[str] = set()
+        for returned, nested, lambdas, awaitables, unknown in snaps:
+            names |= (
+                set(returned)
+                | set(nested)
+                | set(lambdas)
+                | set(awaitables)
+                | set(unknown)
+            )
+        joined_returned: dict[str, list[_ReturnedClosure]] = {}
+        joined_nested: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+        joined_lambdas: dict[str, ast.Lambda] = {}
+        joined_awaitables: dict[
+            str, ast.FunctionDef | ast.AsyncFunctionDef
+        ] = {}
+        joined_unknown: set[str] = set()
+        for name in names:
+            closures: list[_ReturnedClosure] = []
+            seen: set[int] = set()
+            unknown = False
+            awaitable_nodes: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
+            for returned, nested, lambdas, awaitables, unknowns in snaps:
+                if name in unknowns:
+                    unknown = True
+                if name in returned:
+                    for item in returned[name]:
+                        if id(item.node) in seen:
+                            continue
+                        seen.add(id(item.node))
+                        closures.append(item)
+                elif name in nested:
+                    node = nested[name]
+                    if id(node) not in seen:
+                        seen.add(id(node))
+                        closures.append(_snapshot_returned_closure(node))
+                elif name in lambdas:
+                    node = lambdas[name]
+                    if id(node) not in seen:
+                        seen.add(id(node))
+                        closures.append(_snapshot_returned_closure(node))
+                if name in awaitables:
+                    awaitable_nodes.append(awaitables[name])
+            if unknown:
+                joined_unknown.add(name)
+            if awaitable_nodes:
+                first = awaitable_nodes[0]
+                if any(node is not first for node in awaitable_nodes[1:]):
+                    joined_unknown.add(name)
+                else:
+                    joined_awaitables[name] = first
+            if not closures:
+                continue
+            if len(closures) == 1 and name not in joined_unknown:
+                node = closures[0].node
+                if isinstance(node, ast.Lambda):
+                    joined_lambdas[name] = node
+                else:
+                    joined_nested[name] = node
+                joined_returned[name] = list(closures)
+            else:
+                joined_returned[name] = list(closures)
+        _restore_callable_env(
+            (
+                joined_returned,
+                joined_nested,
+                joined_lambdas,
+                joined_awaitables,
+                joined_unknown,
+            )
+        )
+        for name, closures in joined_returned.items():
+            for closure in closures:
+                nested_free_vars[id(closure.node)] = closure.free_vars
+                nested_default_captures[id(closure.node)] = dict(
+                    closure.default_captures
+                )
+                returned_closure_captures[id(closure.node)] = dict(
+                    closure.free_classifications
+                )
 
     def _classify(node: ast.AST) -> ValueOriginEvidence:
         return classify_expression_origin(
@@ -1487,8 +1617,7 @@ def _collect_writes_in_function(
         nested_free_vars[id(node)] = free
         if name is None:
             return
-        name_returned_closures.pop(name, None)
-        name_awaitable_callees.pop(name, None)
+        _clear_callable_name(name)
         if isinstance(node, ast.Lambda):
             local_lambdas[name] = node
             local_nested.pop(name, None)
@@ -1559,11 +1688,23 @@ def _collect_writes_in_function(
     def _install_returned_closures(
         name: str,
         closures: Sequence[_ReturnedClosure],
+        *,
+        unknown: bool = False,
     ) -> None:
+        if not closures and not unknown:
+            return
+        name_awaitable_callees.pop(name, None)
+        if unknown:
+            name_unknown_callables.add(name)
+        else:
+            name_unknown_callables.discard(name)
         if not closures:
+            local_nested.pop(name, None)
+            local_lambdas.pop(name, None)
+            name_returned_closures.pop(name, None)
             return
         name_returned_closures[name] = list(closures)
-        if len(closures) == 1:
+        if len(closures) == 1 and not unknown:
             node = closures[0].node
             if isinstance(node, ast.Lambda):
                 local_lambdas[name] = node
@@ -1589,11 +1730,15 @@ def _collect_writes_in_function(
         """Bind Name to returned closures or async awaitables from ``call``."""
 
         returned = call_returned_closures.get(id(call))
-        if returned:
-            _install_returned_closures(name, returned)
+        unknown = id(call) in call_returned_unknown
+        if returned or unknown:
+            _install_returned_closures(
+                name, returned or [], unknown=unknown
+            )
             return True
         awaitable = call_awaitable_callees.get(id(call))
         if awaitable is not None:
+            name_unknown_callables.discard(name)
             name_awaitable_callees[name] = awaitable
             return True
         return False
@@ -1650,6 +1795,10 @@ def _collect_writes_in_function(
                 for callee in _local_callables_for_name(node.id):
                     _add(callee)
                 return
+            if isinstance(node, ast.Call):
+                for item in call_returned_closures.get(id(node), []):
+                    _add(item.node)
+                return
             if isinstance(node, ast.IfExp):
                 _walk(node.body)
                 _walk(node.orelse)
@@ -1694,9 +1843,20 @@ def _collect_writes_in_function(
                     control_dependent=control_dependent,
                 )
                 return
-            if isinstance(value, ast.Call) and any(
-                _closure_is_residual_escape(item)
-                for item in call_returned_closures.get(id(value), [])
+            closures, unknown = _callable_products_from_expr(value)
+            if closures and (
+                unknown
+                or any(
+                    _closure_is_residual_escape(item) for item in closures
+                )
+            ):
+                _record_escape(
+                    value,
+                    ast.unparse(value),
+                    control_dependent=control_dependent,
+                )
+            elif unknown and isinstance(
+                value, (ast.Call, ast.IfExp, ast.BoolOp, ast.NamedExpr)
             ):
                 _record_escape(
                     value,
@@ -1707,11 +1867,14 @@ def _collect_writes_in_function(
         if isinstance(value, ast.Name):
             # Always clear prior returned/awaitable product bindings on rebind
             # so ``fn = mid(); fn = noop; fn()`` cannot keep following poison.
-            name_returned_closures.pop(target.id, None)
-            name_awaitable_callees.pop(target.id, None)
+            _clear_callable_name(target.id)
+            if value.id in name_unknown_callables:
+                name_unknown_callables.add(target.id)
             if value.id in name_returned_closures:
                 _install_returned_closures(
-                    target.id, name_returned_closures[value.id]
+                    target.id,
+                    name_returned_closures[value.id],
+                    unknown=value.id in name_unknown_callables,
                 )
                 return
             if value.id in local_nested:
@@ -1732,17 +1895,21 @@ def _collect_writes_in_function(
                 local_lambdas.pop(target.id, None)
                 return
             # Ordinary Name rebind away from a nested callable.
-            local_nested.pop(target.id, None)
-            local_lambdas.pop(target.id, None)
             return
         if isinstance(value, ast.Lambda):
-            name_returned_closures.pop(target.id, None)
-            name_awaitable_callees.pop(target.id, None)
             _register_nested_callable(value, name=target.id)
             return
+        if isinstance(value, (ast.IfExp, ast.BoolOp, ast.NamedExpr)):
+            # Dual-may precise join when both arms are known nested/returned
+            # closures; unknown callable arm → fail closed on later call.
+            closures, unknown = _callable_products_from_expr(value)
+            if closures or unknown:
+                _install_returned_closures(
+                    target.id, closures, unknown=unknown
+                )
+                return
         if isinstance(value, ast.Call):
-            name_returned_closures.pop(target.id, None)
-            name_awaitable_callees.pop(target.id, None)
+            _clear_callable_name(target.id)
             if _bind_call_product_to_name(target.id, value):
                 return
         # Container packing of governed closures into a Name carrier: the
@@ -1754,6 +1921,9 @@ def _collect_writes_in_function(
                 ast.unparse(value),
                 control_dependent=control_dependent,
             )
+            return
+        # Call/container products already handled; residual Call products that
+        # were not Name-captured escape via ``_record_dynamic_calls``.
 
     def _record_escape(
         node: ast.AST,
@@ -1953,7 +2123,7 @@ def _collect_writes_in_function(
                     callee_resolver, path=callee_path, fn=callee_node
                 )
 
-        collected, returned = _collect_writes_in_function(
+        collected, returned, returned_unknown = _collect_writes_in_function(
             callee_node,
             path=callee_path,
             handler_param_names=handler_param_names,
@@ -1990,6 +2160,8 @@ def _collect_writes_in_function(
                 returned_closure_captures[id(closure.node)] = dict(
                     closure.free_classifications
                 )
+        if returned_unknown:
+            call_returned_unknown.add(id(call))
         return True
 
     def _follow_lambda_callee(
@@ -2100,27 +2272,115 @@ def _collect_writes_in_function(
                 return None
         return None
 
+    def _callable_products_from_expr(
+        expr: ast.AST,
+    ) -> tuple[list[_ReturnedClosure], bool]:
+        """Collect known nested/returned callable products from ``expr``.
+
+        Returns ``(closures, unknown_callable_arm)``. IfExp/BoolOp arms are
+        dual-may joined. An unresolved callable arm sets the unknown flag so
+        later ``fn()`` fails closed (Unknown > false PASS) and is never omitted.
+        """
+
+        found: list[_ReturnedClosure] = []
+        seen: set[int] = set()
+        unknown = False
+
+        def _add(closure: _ReturnedClosure) -> None:
+            if id(closure.node) in seen:
+                return
+            seen.add(id(closure.node))
+            found.append(closure)
+
+        def _walk(node: ast.AST, *, in_choice: bool = False) -> None:
+            nonlocal unknown
+            if isinstance(node, ast.NamedExpr):
+                _walk(node.value, in_choice=in_choice)
+                return
+            if isinstance(node, ast.IfExp):
+                # Choice arms are callable-product positions for dual-may join.
+                _walk(node.body, in_choice=True)
+                _walk(node.orelse, in_choice=True)
+                return
+            if isinstance(node, ast.BoolOp):
+                for operand in node.values:
+                    _walk(operand, in_choice=True)
+                return
+            if isinstance(node, ast.Lambda):
+                _register_nested_callable(node, name=None)
+                _add(_snapshot_returned_closure(node))
+                return
+            if isinstance(node, ast.Name):
+                callees = _local_callables_for_name(node.id)
+                if callees:
+                    for callee in callees:
+                        _add(_snapshot_returned_closure(callee))
+                    if node.id in name_unknown_callables:
+                        unknown = True
+                    return
+                if node.id in name_unknown_callables:
+                    unknown = True
+                    return
+                # Unresolved Name is unknown only inside IfExp/BoolOp arms so
+                # ordinary ``return value`` does not blanket-escape.
+                if in_choice:
+                    unknown = True
+                return
+            if isinstance(node, ast.Call):
+                returned = call_returned_closures.get(id(node), [])
+                for item in returned:
+                    _add(item)
+                if id(node) in call_returned_unknown:
+                    unknown = True
+                    return
+                if returned:
+                    return
+                if isinstance(node.func, ast.Name):
+                    cls = local_classes.get(node.func.id)
+                    if cls is not None:
+                        method = _governed_class_method(cls, "__call__")
+                        if method is not None:
+                            _add(_snapshot_returned_closure(method))
+                            return
+                    # Followed local with no callable product (e.g. returns int).
+                    if _local_callables_for_name(node.func.id):
+                        return
+                if in_choice:
+                    unknown = True
+                return
+            if isinstance(
+                node,
+                (
+                    ast.Constant,
+                    ast.FormattedValue,
+                    ast.JoinedStr,
+                    ast.List,
+                    ast.Tuple,
+                    ast.Set,
+                    ast.Dict,
+                    ast.ListComp,
+                    ast.SetComp,
+                    ast.DictComp,
+                    ast.GeneratorExp,
+                ),
+            ):
+                # Non-callable literals / containers are not unknown arms;
+                # packing escapes are handled separately.
+                return
+            # Attribute / Subscript / other dynamic surfaces in choice arms.
+            if in_choice:
+                unknown = True
+
+        _walk(expr)
+        return found, unknown
+
     def _returned_closures_from_expr(
         expr: ast.AST,
     ) -> list[_ReturnedClosure]:
         """Name/Lambda nested callables and governed ``Cls().__call__`` products."""
 
-        found: list[_ReturnedClosure] = []
-        if isinstance(expr, ast.Name):
-            for callee in _local_callables_for_name(expr.id):
-                found.append(_snapshot_returned_closure(callee))
-            return found
-        if isinstance(expr, ast.Lambda):
-            _register_nested_callable(expr, name=None)
-            found.append(_snapshot_returned_closure(expr))
-            return found
-        if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name):
-            cls = local_classes.get(expr.func.id)
-            if cls is not None:
-                method = _governed_class_method(cls, "__call__")
-                if method is not None:
-                    found.append(_snapshot_returned_closure(method))
-        return found
+        closures, _unknown = _callable_products_from_expr(expr)
+        return closures
 
     def _follow_local_class_protocol_methods(
         expr: ast.AST,
@@ -2205,6 +2465,22 @@ def _collect_writes_in_function(
                         ):
                             followed_any = True
                     return followed_any
+
+        # Chained call products: ``outer()()`` where ``outer`` returned a
+        # nested callable (precise follow; Unknown > omit).
+        if isinstance(call.func, ast.Call):
+            returned = call_returned_closures.get(id(call.func), [])
+            if returned:
+                followed_any = False
+                for item in returned:
+                    if _follow_local_callable_node(
+                        item.node,
+                        call=call,
+                        control_dependent=control_dependent,
+                        execute_async_body=execute_async_body,
+                    ):
+                        followed_any = True
+                return followed_any
 
         # Attribute method: class-nested ``Box().poison()`` where ``poison``
         # closed over outer governed cells and was registered at class body.
@@ -2328,17 +2604,44 @@ def _collect_writes_in_function(
                 executing.add(id(value))
         return executing
 
+    def _expr_name_captures_call_product(expr: ast.AST, call: ast.Call) -> bool:
+        """True when ``call`` is a Name-bound callable product inside ``expr``.
+
+        Covers direct ``fn = mid()`` and dual-may ``fn = mid() if c else noop`` /
+        BoolOp joins. Container packing (``box = [mid()]``) is intentionally
+        excluded so packing stays residual escape.
+        """
+
+        if expr is call:
+            return True
+        if isinstance(expr, ast.NamedExpr):
+            return _expr_name_captures_call_product(expr.value, call)
+        if isinstance(expr, ast.IfExp):
+            return _expr_name_captures_call_product(
+                expr.body, call
+            ) or _expr_name_captures_call_product(expr.orelse, call)
+        if isinstance(expr, ast.BoolOp):
+            return any(
+                _expr_name_captures_call_product(operand, call)
+                for operand in expr.values
+            )
+        return False
+
     def _call_has_name_or_discard_capture(
         statement: ast.stmt, call: ast.Call
     ) -> bool:
         """True when Call product is Name-bound or discarded as a bare Expr."""
 
-        if isinstance(statement, ast.Assign) and statement.value is call:
-            return any(isinstance(target, ast.Name) for target in statement.targets)
+        if isinstance(statement, ast.Assign) and any(
+            isinstance(target, ast.Name) for target in statement.targets
+        ):
+            if _expr_name_captures_call_product(statement.value, call):
+                return True
         if (
             isinstance(statement, ast.AnnAssign)
-            and statement.value is call
+            and statement.value is not None
             and isinstance(statement.target, ast.Name)
+            and _expr_name_captures_call_product(statement.value, call)
         ):
             return True
         if isinstance(statement, ast.Expr) and statement.value is call:
@@ -2346,8 +2649,8 @@ def _collect_writes_in_function(
         for node in ast.walk(statement):
             if (
                 isinstance(node, ast.NamedExpr)
-                and node.value is call
                 and isinstance(node.target, ast.Name)
+                and _expr_name_captures_call_product(node.value, call)
             ):
                 return True
         return False
@@ -2451,6 +2754,11 @@ def _collect_writes_in_function(
                 if isinstance(node.func, ast.Name)
                 else _governed_local_callables_from_expr(node.func)
             )
+            chained_func_callees = (
+                call_returned_closures.get(id(node.func), [])
+                if isinstance(node.func, ast.Call)
+                else []
+            )
             attr_governed = False
             if isinstance(node.func, ast.Attribute):
                 if (
@@ -2470,15 +2778,21 @@ def _collect_writes_in_function(
                 getattr_callee is not None
                 and _closure_carries_governed_identity(getattr_callee)
             )
+            unknown_name_callable = (
+                isinstance(node.func, ast.Name)
+                and node.func.id in name_unknown_callables
+            )
             local_closure_call = (
                 (
                     isinstance(node.func, ast.Name)
                     and (
                         bool(_local_callables_for_name(node.func.id))
                         or node.func.id in name_awaitable_callees
+                        or unknown_name_callable
                     )
                 )
                 or bool(packed_func_callees)
+                or bool(chained_func_callees)
                 or attr_governed
                 or getattr_governed
             )
@@ -2519,10 +2833,13 @@ def _collect_writes_in_function(
                     # Returned free-var closures must Name-bind or discard;
                     # attribute/arg/container surfaces stay residual escapes.
                     returned = call_returned_closures.get(id(node), [])
-                    if returned and not _call_has_name_or_discard_capture(
-                        statement, node
+                    if (
+                        (returned or id(node) in call_returned_unknown)
+                        and not _call_has_name_or_discard_capture(statement, node)
                     ):
-                        if any(_closure_is_residual_escape(item) for item in returned):
+                        if id(node) in call_returned_unknown or any(
+                            _closure_is_residual_escape(item) for item in returned
+                        ):
                             _record_escape(
                                 node,
                                 rendered,
@@ -2535,6 +2852,16 @@ def _collect_writes_in_function(
                     ):
                         # Async coro product escapes outside Name awaitable
                         # capture (``bucket.append(poison())``).
+                        _record_escape(
+                            node,
+                            rendered,
+                            control_dependent=control_dependent,
+                        )
+                    # Unknown callable arm bound to Name: fail closed on call.
+                    if unknown_name_callable or (
+                        isinstance(node.func, ast.Call)
+                        and id(node.func) in call_returned_unknown
+                    ):
                         _record_escape(
                             node,
                             rendered,
@@ -2630,14 +2957,20 @@ def _collect_writes_in_function(
             control_dependent=control_dependent,
             async_entry=async_entry,
         )
-        # Walrus Call products (``fn := mid()``) bind only after the Call is
-        # followed and returned closures / awaitables are recorded.
+        # Walrus callable products (``fn := mid()`` / ``fn := mid() if c else
+        # noop``) bind only after Calls are followed and returned closures /
+        # awaitables are recorded.
         for child in ast.walk(expr):
-            if (
-                isinstance(child, ast.NamedExpr)
-                and isinstance(child.target, ast.Name)
-                and isinstance(child.value, ast.Call)
-            ):
+            if not isinstance(child, ast.NamedExpr):
+                continue
+            if not isinstance(child.target, ast.Name):
+                continue
+            closures, unknown = _callable_products_from_expr(child.value)
+            if closures or unknown:
+                _install_returned_closures(
+                    child.target.id, closures, unknown=unknown
+                )
+            elif isinstance(child.value, ast.Call):
                 _bind_call_product_to_name(child.target.id, child.value)
 
     def _visit_statement(
@@ -2645,6 +2978,7 @@ def _collect_writes_in_function(
         *,
         control_dependent: bool = False,
     ) -> None:
+        nonlocal frame_returned_unknown
         if isinstance(statement, ast.Assign):
             # Observe identity before write inlining so RHS arg-order mutators
             # invalidate authorizing resolve in the same statement.
@@ -2818,6 +3152,7 @@ def _collect_writes_in_function(
             )
             pre_aliases = request_aliases.snapshot()
             pre_alias_state = alias_state.snapshot()
+            pre_callable = _snapshot_callable_env()
             for child in statement.body:
                 _visit_statement(child, control_dependent=True)
             body_identity = (
@@ -2825,14 +3160,17 @@ def _collect_writes_in_function(
             )
             body_aliases = request_aliases.snapshot()
             body_alias_state = alias_state.snapshot()
+            body_callable = _snapshot_callable_env()
             request_aliases.restore(pre_aliases)
             alias_state.restore(pre_alias_state)
+            _restore_callable_env(pre_callable)
             if identity_session is not None and pre_identity is not None:
                 identity_session.restore(pre_identity)
             for child in statement.orelse:
                 _visit_statement(child, control_dependent=True)
             else_aliases = request_aliases.snapshot()
             else_alias_state = alias_state.snapshot()
+            else_callable = _snapshot_callable_env()
             if identity_session is not None and body_identity is not None:
                 else_identity = identity_session.snapshot()
                 # If: both branches. While with empty orelse: else_identity is
@@ -2840,6 +3178,7 @@ def _collect_writes_in_function(
                 identity_session.join([body_identity, else_identity])
             request_aliases.install_join([body_aliases, else_aliases])
             alias_state.install_join([body_alias_state, else_alias_state])
+            _join_callable_envs([body_callable, else_callable])
             return
 
         if isinstance(statement, (ast.For, ast.AsyncFor)):
@@ -2878,6 +3217,7 @@ def _collect_writes_in_function(
             )
             pre_aliases = request_aliases.snapshot()
             pre_alias_state = alias_state.snapshot()
+            pre_callable = _snapshot_callable_env()
             target_names = _collect_assign_target_names(statement.target)
             request_aliases.poison_names(target_names)
             for name in target_names:
@@ -2889,14 +3229,17 @@ def _collect_writes_in_function(
             )
             body_aliases = request_aliases.snapshot()
             body_alias_state = alias_state.snapshot()
+            body_callable = _snapshot_callable_env()
             request_aliases.restore(pre_aliases)
             alias_state.restore(pre_alias_state)
+            _restore_callable_env(pre_callable)
             if identity_session is not None and pre_identity is not None:
                 identity_session.restore(pre_identity)
             for child in statement.orelse:
                 _visit_statement(child, control_dependent=True)
             else_aliases = request_aliases.snapshot()
             else_alias_state = alias_state.snapshot()
+            else_callable = _snapshot_callable_env()
             if identity_session is not None and pre_identity is not None:
                 else_identity = identity_session.snapshot()
                 predecessors = [pre_identity, else_identity]
@@ -2907,6 +3250,7 @@ def _collect_writes_in_function(
             alias_state.install_join(
                 [pre_alias_state, body_alias_state, else_alias_state]
             )
+            _join_callable_envs([pre_callable, body_callable, else_callable])
             return
 
         if isinstance(statement, (ast.With, ast.AsyncWith)):
@@ -2982,6 +3326,7 @@ def _collect_writes_in_function(
             )
             pre_aliases = request_aliases.snapshot()
             pre_alias_state = alias_state.snapshot()
+            pre_callable = _snapshot_callable_env()
             for child in statement.body:
                 _visit_statement(child, control_dependent=True)
             body_identity = (
@@ -2989,12 +3334,15 @@ def _collect_writes_in_function(
             )
             body_aliases = request_aliases.snapshot()
             body_alias_state = alias_state.snapshot()
+            body_callable = _snapshot_callable_env()
             handler_identities: list[RequestTimeIdentityState] = []
             handler_aliases: list[_RequestStateAliasEnv] = []
             handler_alias_states: list[AliasState] = []
+            handler_callables: list[_CallableEnv] = []
             for handler in statement.handlers:
                 request_aliases.restore(pre_aliases)
                 alias_state.restore(pre_alias_state)
+                _restore_callable_env(pre_callable)
                 if identity_session is not None and pre_identity is not None:
                     identity_session.restore(pre_identity)
                 # except TYPE executes when matching is considered (#173).
@@ -3011,14 +3359,17 @@ def _collect_writes_in_function(
                     handler_identities.append(identity_session.snapshot())
                 handler_aliases.append(request_aliases.snapshot())
                 handler_alias_states.append(alias_state.snapshot())
+                handler_callables.append(_snapshot_callable_env())
             request_aliases.restore(body_aliases)
             alias_state.restore(body_alias_state)
+            _restore_callable_env(body_callable)
             if identity_session is not None and body_identity is not None:
                 identity_session.restore(body_identity)
             for child in statement.orelse:
                 _visit_statement(child, control_dependent=True)
             normal_aliases = request_aliases.snapshot()
             normal_alias_state = alias_state.snapshot()
+            normal_callable = _snapshot_callable_env()
             if identity_session is not None:
                 normal_identity = identity_session.snapshot()
                 # Join normal + exceptional, then run finally on that state.
@@ -3035,9 +3386,11 @@ def _collect_writes_in_function(
             if statement.handlers:
                 request_aliases.install_join([normal_aliases, *handler_aliases])
                 alias_state.install_join([normal_alias_state, *handler_alias_states])
+                _join_callable_envs([normal_callable, *handler_callables])
             else:
                 request_aliases.install_join([normal_aliases, pre_aliases])
                 alias_state.install_join([normal_alias_state, pre_alias_state])
+                _join_callable_envs([normal_callable, pre_callable])
             for child in statement.finalbody:
                 _visit_statement(child, control_dependent=True)
             return
@@ -3052,12 +3405,15 @@ def _collect_writes_in_function(
             )
             pre_aliases = request_aliases.snapshot()
             pre_alias_state = alias_state.snapshot()
+            pre_callable = _snapshot_callable_env()
             case_identities: list[RequestTimeIdentityState] = []
             case_aliases: list[_RequestStateAliasEnv] = []
             case_alias_states: list[AliasState] = []
+            case_callables: list[_CallableEnv] = []
             for case in statement.cases:
                 request_aliases.restore(pre_aliases)
                 alias_state.restore(pre_alias_state)
+                _restore_callable_env(pre_callable)
                 if identity_session is not None and pre_identity is not None:
                     identity_session.restore(pre_identity)
                 # MatchClass ``__instancecheck__`` / ``__match_args__`` side
@@ -3119,14 +3475,17 @@ def _collect_writes_in_function(
                     case_identities.append(identity_session.snapshot())
                 case_aliases.append(request_aliases.snapshot())
                 case_alias_states.append(alias_state.snapshot())
+                case_callables.append(_snapshot_callable_env())
             alias_predecessors = list(case_aliases)
             alias_state_predecessors = list(case_alias_states)
+            callable_predecessors = list(case_callables)
             identity_predecessors: list[RequestTimeIdentityState] = list(
                 case_identities
             )
             if not _match_statement_exhaustive(statement):
                 alias_predecessors.append(pre_aliases)
                 alias_state_predecessors.append(pre_alias_state)
+                callable_predecessors.append(pre_callable)
                 if pre_identity is not None:
                     identity_predecessors.append(pre_identity)
             if identity_session is not None and pre_identity is not None:
@@ -3137,9 +3496,11 @@ def _collect_writes_in_function(
             if alias_predecessors:
                 request_aliases.install_join(alias_predecessors)
                 alias_state.install_join(alias_state_predecessors)
+                _join_callable_envs(callable_predecessors)
             else:
                 request_aliases.restore(pre_aliases)
                 alias_state.restore(pre_alias_state)
+                _restore_callable_env(pre_callable)
             return
 
         if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -3304,15 +3665,12 @@ def _collect_writes_in_function(
                     control_dependent=control_dependent,
                 )
             # Nested frames: propagate returned closures to the call site for
-            # precise ``fn = mid(); fn()`` follow. Entry frame: residual escape
-            # to the unresolved FastAPI caller (Unknown > false PASS).
-            # Free-var cells escape even when not yet governed — late binding
-            # may govern them before a residual call outside Name capture.
-            # Also governed ``Cls().__call__`` instance products from local
-            # classes (``return Box()``) participate in the same channel.
-            returned_here: list[_ReturnedClosure] = list(
-                _returned_closures_from_expr(statement.value)
-            )
+            # precise ``fn = mid(); fn()`` follow — including nested factories
+            # (``return mid``) whose free-var set is empty but whose body can
+            # still yield governed closures. Entry frame: residual escape to
+            # the unresolved FastAPI caller (Unknown > false PASS).
+            # IfExp/BoolOp returns dual-may join known arms; unknown arms set
+            # ``frame_returned_unknown`` so callers fail closed on later call.
             _note_named_expr_bindings(
                 statement.value, control_dependent=control_dependent
             )
@@ -3320,20 +3678,28 @@ def _collect_writes_in_function(
                 statement,
                 control_dependent=control_dependent,
             )
+            returned_here, returned_unknown = _callable_products_from_expr(
+                statement.value
+            )
             if isinstance(statement.value, ast.Call):
-                returned_here.extend(
-                    call_returned_closures.get(id(statement.value), [])
-                )
+                for item in call_returned_closures.get(id(statement.value), []):
+                    if id(item.node) not in {id(c.node) for c in returned_here}:
+                        returned_here.append(item)
+                if id(statement.value) in call_returned_unknown:
+                    returned_unknown = True
+            if returned_unknown:
+                frame_returned_unknown = True
             for closure in returned_here:
-                if not _closure_is_residual_escape(closure):
-                    continue
                 if is_entry_frame:
-                    _record_escape(
-                        statement,
-                        ast.unparse(statement),
-                        control_dependent=control_dependent,
-                    )
+                    if _closure_is_residual_escape(closure) or returned_unknown:
+                        _record_escape(
+                            statement,
+                            ast.unparse(statement),
+                            control_dependent=control_dependent,
+                        )
                 else:
+                    # Always propagate nested-frame callable products so
+                    # ``mid_fn = outer(); fn = mid_fn(); fn()`` stays precise.
                     frame_returned_closures.append(closure)
             apply_statement_bindings(
                 statement,
@@ -3371,7 +3737,7 @@ def _collect_writes_in_function(
 
     for statement in fn.body:
         _visit_statement(statement)
-    return writes, frame_returned_closures
+    return writes, frame_returned_closures, frame_returned_unknown
 
 
 def _collect_state_writes(
@@ -3400,7 +3766,7 @@ def _collect_state_writes(
     if functions:
         for fn in functions:
             fn_param_names = frozenset(_function_param_names(fn))
-            collected, _returned = _collect_writes_in_function(
+            collected, _returned, _returned_unknown = _collect_writes_in_function(
                 fn,
                 path=path,
                 handler_param_names=(
