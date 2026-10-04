@@ -1213,6 +1213,12 @@ def _shallow_packed_callee_exprs(expr: ast.AST, *, depth: int = 0) -> list[ast.A
         # ``[p].__add__([])[0]`` / ``{0: p}.values()`` carriers.
         out.extend(_shallow_packed_callee_exprs(expr.value, depth=nxt))
     elif isinstance(expr, ast.Call):
+        # ``X.__call__(*args)`` / star packs share bare ``X(*args)`` peels
+        # (Unknown > false PASS).
+        rewritten = _rewrite_applied_dunder_call(expr)
+        if rewritten is not None and rewritten is not expr:
+            out.extend(_shallow_packed_callee_exprs(rewritten, depth=nxt))
+            return out
         gname = _getattr_static_name(expr)
         if gname is not None:
             out.append(expr)
@@ -1263,8 +1269,19 @@ def _shallow_packed_callee_exprs(expr: ast.AST, *, depth: int = 0) -> list[ast.A
                 if n == 1:
                     iterable = expr.args[1]
             if iterable is not None:
-                for elt in _shallow_packed_callee_exprs(iterable, depth=nxt):
-                    out.extend(_shallow_packed_callee_exprs(elt, depth=nxt))
+                # Empty ``reduce(f, [], seed)`` → seed (Unknown > false PASS).
+                if (
+                    f_name == "reduce"
+                    and len(expr.args) >= 3
+                    and isinstance(iterable, (ast.List, ast.Tuple))
+                    and not iterable.elts
+                ):
+                    out.extend(
+                        _shallow_packed_callee_exprs(expr.args[2], depth=nxt)
+                    )
+                else:
+                    for elt in _shallow_packed_callee_exprs(iterable, depth=nxt):
+                        out.extend(_shallow_packed_callee_exprs(elt, depth=nxt))
         elif isinstance(expr.func, ast.Attribute) and expr.func.attr in {
             "next",
             "iter",
@@ -6177,6 +6194,22 @@ def _build_identity_scanner(
             return None
         if not isinstance(expr, ast.Call):
             return None
+        # ``X.__call__(*args)(mapping)`` / star packs share bare ``X(*args)``
+        # mapping peels (Unknown > false PASS).
+        rewritten_map = _rewrite_applied_dunder_call(expr)
+        if rewritten_map is not None and rewritten_map is not expr:
+            return _mapping_items(rewritten_map, nxt)
+        if isinstance(expr.func, ast.Call):
+            rewritten_fn = _rewrite_applied_dunder_call(expr.func)
+            if rewritten_fn is not None:
+                return _mapping_items(
+                    ast.Call(
+                        func=rewritten_fn,
+                        args=list(expr.args),
+                        keywords=list(expr.keywords),
+                    ),
+                    nxt,
+                )
         func = _peel_call_func(expr.func)
         if _is_dict_constructor(
             func,
@@ -6587,6 +6620,15 @@ def _build_identity_scanner(
             ident = func.attr
         if ident == "reduce" and len(expr.args) >= 2:
             elems = _iter_elements(expr.args[1], nxt)
+            # Empty iterable + initializer: ``reduce(f, [], seed)`` → seed
+            # (``reduce(lambda a,b: b, [], partial(...))()`` — Unknown >
+            # false PASS).
+            if (
+                elems is not None
+                and len(elems) == 0
+                and len(expr.args) >= 3
+            ):
+                return [expr.args[2]]
             if elems is not None and len(elems) == 1:
                 return elems
         if ident in {"max", "min"} and expr.args:
@@ -6613,7 +6655,11 @@ def _build_identity_scanner(
             if len(gi_flat) >= 2:
                 key = _resolve_static_key_value(gi_flat[1])
                 if key is None:
-                    key = _static_sequence_index(gi_flat[1])
+                    key = _static_sequence_index(
+                        gi_flat[1],
+                        sequence_aliases=sequence_view_aliases,
+                        slice_aliases=frozenset(slice_aliases),
+                    )
                 elem = _carrier_element_at(gi_flat[0], key)
                 if elem is not None:
                     return [elem]
@@ -7754,7 +7800,11 @@ def _build_identity_scanner(
                 if unbound_list and pop_flat:
                     pop_carrier = pop_flat[0]
                     pop_idx = (
-                        _static_sequence_index(pop_flat[1])
+                        _static_sequence_index(
+                            pop_flat[1],
+                            sequence_aliases=sequence_view_aliases,
+                            slice_aliases=frozenset(slice_aliases),
+                        )
                         if len(pop_flat) >= 2
                         else -1
                     )
@@ -7765,7 +7815,11 @@ def _build_identity_scanner(
                     pop_carrier = recv
                     pop_idx = -1
                 elif len(pop_flat) == 1:
-                    pop_idx = _static_sequence_index(pop_flat[0])
+                    pop_idx = _static_sequence_index(
+                        pop_flat[0],
+                        sequence_aliases=sequence_view_aliases,
+                        slice_aliases=frozenset(slice_aliases),
+                    )
                     if pop_idx is None:
                         key = _resolve_static_key_value(pop_flat[0])
                         pop_idx = key if isinstance(key, int) else None
@@ -7817,14 +7871,22 @@ def _build_identity_scanner(
                         return _iter_elements(gi_flat[0], nxt)
                     key = _resolve_static_key_value(gi_flat[1])
                     if key is None:
-                        key = _static_sequence_index(gi_flat[1])
+                        key = _static_sequence_index(
+                            gi_flat[1],
+                            sequence_aliases=sequence_view_aliases,
+                            slice_aliases=frozenset(slice_aliases),
+                        )
                     elem = _carrier_element_at(gi_flat[0], key)
                     if elem is not None:
                         return [elem]
                 if gi_flat:
                     key = _resolve_static_key_value(gi_flat[0])
                     if key is None:
-                        key = _static_sequence_index(gi_flat[0])
+                        key = _static_sequence_index(
+                            gi_flat[0],
+                            sequence_aliases=sequence_view_aliases,
+                            slice_aliases=frozenset(slice_aliases),
+                        )
                     elem = _carrier_element_at(recv, key)
                     if elem is not None:
                         return [elem]
@@ -8396,6 +8458,14 @@ def _build_identity_scanner(
         if depth > 6:
             return out
         nxt = depth + 1
+        # ``X.__call__(*args)`` / star packs share bare ``X(*args)`` candidate
+        # peels so Assign mapping packs see ``partial(copy.copy)`` (Unknown >
+        # false PASS).
+        if isinstance(callee, ast.Call):
+            rewritten = _rewrite_applied_dunder_call(callee)
+            if rewritten is not None and rewritten is not callee:
+                out.extend(_callee_candidate_exprs(rewritten, nxt))
+                return out
         # Name-bound Attribute / packed callees from For/Match/Assign seeds.
         if isinstance(callee, ast.Name) and callee.id in bound_callee_exprs:
             out.extend(
@@ -8692,7 +8762,15 @@ def _build_identity_scanner(
                 if iterable is not None:
                     elems = _iter_elements(iterable) or []
                     if ident_name == "reduce":
-                        if len(elems) == 1:
+                        if (
+                            len(elems) == 0
+                            and len(callee.args) >= 3
+                        ):
+                            out.extend(
+                                _callee_candidate_exprs(callee.args[2], nxt)
+                            )
+                            peeled_identity = True
+                        elif len(elems) == 1:
                             out.extend(_callee_candidate_exprs(elems[0], nxt))
                             peeled_identity = True
                     elif elems:
@@ -9583,6 +9661,24 @@ def _build_identity_scanner(
                         )
                     )
         for cand in partial_cands:
+            # ``partial(partial(si, "e"), exec)()`` / list0 / BoolOp outer-wrap
+            # — idle-unwrap nested partials onto one head+args peel
+            # (Unknown > false PASS).
+            idle_outer = _peel_idle_partial_layers(
+                cand,
+                partial_aliases=frozenset(partial_aliases),
+                getattr_aliases=frozenset(getattr_aliases),
+                sequence_aliases=sequence_view_aliases,
+                slice_aliases=frozenset(slice_aliases),
+                bound_partials=bound_callee_exprs,
+            )
+            if idle_outer is not None:
+                idle_head, idle_rest, idle_kw = idle_outer
+                cand = ast.Call(
+                    func=cand.func,
+                    args=[idle_head, *idle_rest],
+                    keywords=list(idle_kw),
+                )
             # ``args=(dict.update, vars(ns)); partial(*args)(payload)`` /
             # ``partial(*(args if True else ()))`` / ``partial(*(args or ()))`` /
             # ``partial(*(0 or args))`` / nested ``partial(*(*(args,),))`` —
@@ -11456,6 +11552,10 @@ def _build_identity_scanner(
             else:
                 string_constant_names.pop(name, None)
             static_constant_names[name] = value.value
+            # ``i = 0`` seeds sequence peels for ``xs.__getitem__(i)`` /
+            # star indexes (Unknown > false PASS).
+            if isinstance(value.value, int):
+                sequence_view_aliases[name] = value
         else:
             string_constant_names.pop(name, None)
             # Preserve Name-bound int/str aliases: ``idx2 = idx``.
@@ -11463,6 +11563,10 @@ def _build_identity_scanner(
                 static_constant_names[name] = static_constant_names[value.id]
                 if value.id in string_constant_names:
                     string_constant_names[name] = string_constant_names[value.id]
+                if value.id in sequence_view_aliases and isinstance(
+                    static_constant_names[value.id], int
+                ):
+                    sequence_view_aliases[name] = sequence_view_aliases[value.id]
             else:
                 static_constant_names.pop(name, None)
         # Type protocol products first (``tn = type.__new__`` / getattr /
@@ -12784,6 +12888,29 @@ def _build_identity_scanner(
                             break
             if get_attr == "__get__" and get_recv is not None:
                 sort_recv = _peel_call_func(get_recv)
+                # ``u=dict.update.__get__(vars(ns))`` /
+                # ``si=dict.__setitem__.__get__(vars(ns))`` — bind mutator
+                # onto the instance (Unknown > false PASS).
+                if (
+                    isinstance(sort_recv, ast.Attribute)
+                    and sort_recv.attr
+                    in _DICT_MUTATOR_ATTRS | {"update", "__setitem__", "setdefault"}
+                    and value.args
+                ):
+                    inst = _peel_call_func(value.args[0])
+                    dict_view_products[name] = sort_recv.attr
+                    if isinstance(inst, ast.Name):
+                        bound_view_receivers[name] = inst.id
+                        bound_view_expr_receivers.pop(name, None)
+                    else:
+                        bound_view_receivers.pop(name, None)
+                        bound_view_expr_receivers[name] = inst
+                    bound_callee_exprs[name] = ast.Attribute(
+                        value=inst, attr=sort_recv.attr, ctx=ast.Load()
+                    )
+                    _note_class_product_from_value(name, value)
+                    _note_container_pack_from_value(name, value)
+                    return
                 if isinstance(sort_recv, ast.Attribute) and sort_recv.attr == "sort":
                     if _is_unbound_list_recv(sort_recv.value):
                         dict_view_products[name] = "list.sort"
@@ -14153,6 +14280,20 @@ def _build_identity_scanner(
         local_classes: Mapping[str, ast.ClassDef] | None = None,
     ) -> None:
         func = call.func
+        # ``X.__call__(*args)`` / star packs share bare ``X(*args)`` follows
+        # before any deeper peel (Unknown > false PASS).
+        rewritten_call = _rewrite_applied_dunder_call(call)
+        if rewritten_call is not None and rewritten_call is not call:
+            _follow_local_callee(
+                rewritten_call,
+                path=path,
+                index=index,
+                env=env,
+                visited_fns=visited_fns,
+                local_fns=local_fns,
+                local_classes=local_classes,
+            )
+            return
         if isinstance(call.func, ast.Call):
             inner_applied = _rewrite_applied_dunder_call(call.func)
             if inner_applied is not None:

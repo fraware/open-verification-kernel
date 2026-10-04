@@ -12802,12 +12802,12 @@ def test_twenty_seventh_pass_alias_star_call_never_authorized() -> None:
 
 
 def test_twenty_seventh_pass_class_max_ior_chainmap_never_authorized() -> None:
-    """Class max/min/nlargest identity, Name-seeded __ior__, ChainMap write-through."""
+    """Class max/min/nlargest, __ior__/ChainMap, outer-wrap/reduce/__get__ digs."""
 
     ex = _NINTH_EXEC
     class_imp = (
         "import types\nimport operator\nimport heapq\n"
-        "from functools import partial\nfrom collections import ChainMap"
+        "from functools import partial, reduce\nfrom collections import ChainMap"
     )
     _assert_ninth_not_authorized(
         tuple(
@@ -12838,9 +12838,48 @@ def test_twenty_seventh_pass_class_max_ior_chainmap_never_authorized() -> None:
                 f'ns=types.SimpleNamespace()\n'
                 f'operator.setitem(ChainMap(vars(ns)), "e", exec)\n'
                 f"ns.e({ex})",
+                # Outer-wrap halfbind / list0 / BoolOp.
+                f'ns=types.SimpleNamespace()\nsi=vars(ns).__setitem__\n'
+                f'partial(partial(si, "e"), exec)()\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\nu=vars(ns).setdefault\n'
+                f'partial(partial(u, "e"), exec)()\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\nsi=vars(ns).__setitem__\n'
+                f'partial(partial(si, "e"), (exec if True else None))()\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nsi=vars(ns).__setitem__\n'
+                f'[partial(partial(si, "e"), exec)][0]()\nns.e({ex})',
+                # Reduce empty-iterable initializer seed.
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"reduce(lambda a,b: b, [], partial(vars(ns).update, **kw))()\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'reduce(lambda a,b: b, [], '
+                f'partial(vars(ns).__setitem__, "e"))(exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f"reduce(lambda a,b: b, [], "
+                f'partial(operator.setitem, vars(ns)))("e", exec)\n'
+                f"ns.e({ex})",
+                # Descriptor __get__ Name-seed.
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"u=dict.update.__get__(vars(ns))\n"
+                f"partial(u, **kw)()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"si=dict.__setitem__.__get__(vars(ns))\n"
+                f'partial(si)("e", exec)\nns.e({ex})',
+                # Outer-wrap midbound setitem + Name/getattr unbound midbind.
+                f'ns=types.SimpleNamespace()\n'
+                f'partial(partial(operator.setitem, vars(ns), "e"))(exec)\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'partial(partial(dict.__setitem__, vars(ns), "e"))(exec)\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'si=getattr(dict,"__setitem__")\n'
+                f'partial(si, vars(ns))("e", exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\nsi=dict.__setitem__\n'
+                f'partial(si, vars(ns))("e", exec)\nns.e({ex})',
                 # Keep-closed anchors.
                 f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
-                f"from functools import reduce\n"
                 f"reduce(lambda a,b: a, [partial(vars(ns).update, **kw)])()\n"
                 f"ns.e({ex})",
                 f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
@@ -12957,4 +12996,4 @@ def test_twenty_seventh_pass_positive_authorized_smoke() -> None:
 def test_persistent_version_bumped_for_executed_expr_closure() -> None:
     """Cache / semantic versions bump with PASS-semantics change."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.83.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.84.0"

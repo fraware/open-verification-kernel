@@ -402,6 +402,8 @@ class _RequestStateAliasEnv:
     # Bound ns/dict views: ``g = getattr(ns, "get")`` / ``g = ns.get``.
     dict_view_products: dict[str, str] = dc_field(default_factory=dict)
     bound_view_receivers: dict[str, str] = dc_field(default_factory=dict)
+    # Non-Name receivers: ``g = getattr([partial(copy.copy)], "pop")``.
+    bound_view_expr_receivers: dict[str, ast.AST] = dc_field(default_factory=dict)
     nullcontext_aliases: set[str] = dc_field(
         default_factory=lambda: {"nullcontext"}
     )
@@ -528,6 +530,10 @@ class _RequestStateAliasEnv:
             else:
                 self.string_constant_names.pop(name, None)
             self.static_constant_names[name] = value.value
+            # ``i = 0`` must seed sequence peels so ``xs.__getitem__(i)`` /
+            # star indexes share bare ``0`` (Unknown > false PASS).
+            if isinstance(value.value, int):
+                self.sequence_literal_aliases[name] = value
         elif isinstance(value, ast.Name) and value.id in self.static_constant_names:
             self.static_constant_names[name] = self.static_constant_names[value.id]
             if value.id in self.string_constant_names:
@@ -536,6 +542,12 @@ class _RequestStateAliasEnv:
                 ]
             else:
                 self.string_constant_names.pop(name, None)
+            if value.id in self.sequence_literal_aliases and isinstance(
+                self.static_constant_names[value.id], int
+            ):
+                self.sequence_literal_aliases[name] = self.sequence_literal_aliases[
+                    value.id
+                ]
         else:
             # Defer Subscript / Call / container peels until helpers exist.
             self.string_constant_names.pop(name, None)
@@ -590,8 +602,11 @@ class _RequestStateAliasEnv:
                 ]
         else:
             # Defer Call / projection peels until helpers exist; clear for now.
+            # Keep ``i = 0`` int Constant seeds installed above.
             self.sequence_string_lists.pop(name, None)
-            if not isinstance(value, (ast.Name, ast.Call, ast.Subscript)):
+            if not isinstance(value, (ast.Name, ast.Call, ast.Subscript)) and not (
+                isinstance(value, ast.Constant) and isinstance(value.value, int)
+            ):
                 self.sequence_literal_aliases.pop(name, None)
         # ``ns = types.__dict__`` / ``ns = vars(types)`` / ``ns2 = ns``: later
         # ``ns.get(...)`` / ``getattr(ns, "get")(...)`` project like the literal.
@@ -1070,6 +1085,10 @@ class _RequestStateAliasEnv:
                 recv_name = self.bound_view_receivers.get(func.id)
                 if recv_name is not None:
                     recv = ast.Name(id=recv_name, ctx=ast.Load())
+                else:
+                    expr_recv = self.bound_view_expr_receivers.get(func.id)
+                    if expr_recv is not None:
+                        recv = expr_recv
             # ``attrgetter("pop")(xs)`` selects the method — return Attribute
             # so the next Call ``(…)(0)`` peels via Attribute.pop / list0.
             if (
@@ -1196,6 +1215,10 @@ class _RequestStateAliasEnv:
                     recv_name = self.bound_view_receivers.get(func.id)
                     if recv_name is not None:
                         recv = ast.Name(id=recv_name, ctx=ast.Load())
+                    else:
+                        expr_recv = self.bound_view_expr_receivers.get(func.id)
+                        if expr_recv is not None:
+                            recv = expr_recv
                 if (
                     view_attr in {"get", "pop", "__getitem__", "setdefault"}
                     and recv is not None
@@ -1246,12 +1269,28 @@ class _RequestStateAliasEnv:
                     self.bound_view_receivers[name] = self.bound_view_receivers[
                         value.id
                     ]
+                    self.bound_view_expr_receivers.pop(name, None)
+                elif value.id in self.bound_view_expr_receivers:
+                    self.bound_view_receivers.pop(name, None)
+                    self.bound_view_expr_receivers[name] = (
+                        self.bound_view_expr_receivers[value.id]
+                    )
                 else:
                     self.bound_view_receivers.pop(name, None)
+                    self.bound_view_expr_receivers.pop(name, None)
             else:
                 self.dict_view_products.pop(name, None)
                 self.bound_view_receivers.pop(name, None)
+                self.bound_view_expr_receivers.pop(name, None)
         elif isinstance(value, ast.Attribute):
+            # ``g = getattr([partial(copy.copy)], "pop").__call__`` — peel
+            # transparent ``__call__`` so Name apply shares bare getattr seed
+            # (Unknown > false PASS).
+            if value.attr == "__call__":
+                self.note_projection_name_alias(
+                    name, value.value, getattr_aliases=getattr_aliases
+                )
+                return
             if value.attr == "MappingProxyType":
                 self.adapter_aliases.add(name)
             if value.attr == "nullcontext":
@@ -1283,15 +1322,19 @@ class _RequestStateAliasEnv:
                 ):
                     self.dict_view_products[name] = "dict.fromkeys"
                     self.bound_view_receivers.pop(name, None)
+                    self.bound_view_expr_receivers.pop(name, None)
                 elif value.attr == "fromkeys" and isinstance(recv, ast.Name):
                     self.dict_view_products[name] = "dict.fromkeys"
                     self.bound_view_receivers.pop(name, None)
+                    self.bound_view_expr_receivers.pop(name, None)
                 else:
                     self.dict_view_products[name] = value.attr
                     if isinstance(recv, ast.Name):
                         self.bound_view_receivers[name] = recv.id
+                        self.bound_view_expr_receivers.pop(name, None)
                     else:
                         self.bound_view_receivers.pop(name, None)
+                        self.bound_view_expr_receivers[name] = recv
         elif isinstance(value, ast.Subscript):
             # ``k = keys[0]`` / ``k = keys["x"]`` — seed string constants from
             # the whole Subscript before ns-key projection on the slice.
@@ -1493,7 +1536,8 @@ class _RequestStateAliasEnv:
                     if canon is not None and canon in _OPERATOR_PROJECTION_NAMES:
                         self.operator_projection_aliases[name] = canon
                 # ``g = getattr(ns, "get")`` / ``si = getattr(keys, "__setitem__")``
-                # — bound ns view / mutator products.
+                # / ``g = getattr([partial(copy.copy)], "pop")`` — bound view /
+                # mutator products (Unknown > false PASS).
                 if attr in _NS_DICT_VIEW_ATTRS | _NS_DICT_MUTATOR_ATTRS and value.args:
                     self.dict_view_products[name] = attr
                     recv = value.args[0]
@@ -1501,8 +1545,10 @@ class _RequestStateAliasEnv:
                         recv = recv.value
                     if isinstance(recv, ast.Name):
                         self.bound_view_receivers[name] = recv.id
+                        self.bound_view_expr_receivers.pop(name, None)
                     else:
                         self.bound_view_receivers.pop(name, None)
+                        self.bound_view_expr_receivers[name] = recv
             # ``Proxy = types.__dict__.get("MappingProxyType")`` /
             # ``v(types).get("MappingProxyType")`` /
             # ``getattr(types.__dict__, "get"|"__getitem__"|"pop")("MappingProxyType")`` /
@@ -1756,12 +1802,41 @@ class _RequestStateAliasEnv:
                             f = f.value
                         progressed = True
                 # ``operator.call(partial(copy.copy), keys)`` /
+                # ``operator.call(getattr(...), 0)(keys)`` /
                 # ``operator.call(*(args if True else ()))`` packed call.
-                if _resolve_call_proj(f) == "call":
-                    from ovk.compilers.authorization.python_callee_resolution import (
-                        _flatten_starred_args as _flat_call_args,
-                    )
+                from ovk.compilers.authorization.python_callee_resolution import (
+                    _flatten_starred_args as _flat_call_args,
+                    _is_operator_call_factory as _is_op_call_proj,
+                )
 
+                # Nested ``operator.call(fn, *bound)( *outer )`` — rewrite the
+                # inner factory Call first so ``(…)(keys)`` shares bare apply
+                # (Unknown > false PASS).
+                if isinstance(f, ast.Call) and _is_op_call_proj(
+                    f,
+                    projection_aliases=self.operator_projection_aliases,
+                    getattr_aliases=frozenset(g_aliases),
+                ):
+                    flat_inner = _flat_call_args(
+                        f.args,
+                        sequence_aliases=self.sequence_literal_aliases,
+                    )
+                    if flat_inner:
+                        inner_fn = flat_inner[0]
+                        while isinstance(inner_fn, ast.NamedExpr):
+                            inner_fn = inner_fn.value
+                        f = ast.Call(
+                            func=inner_fn,
+                            args=list(flat_inner[1:]),
+                            keywords=list(f.keywords),
+                        )
+                        peeled = ast.Call(
+                            func=f,
+                            args=list(peeled.args),
+                            keywords=list(peeled.keywords),
+                        )
+                        progressed = True
+                elif _resolve_call_proj(f) == "call":
                     flat_call_args = _flat_call_args(
                         peeled.args,
                         sequence_aliases=self.sequence_literal_aliases,
@@ -1779,18 +1854,58 @@ class _RequestStateAliasEnv:
                         while isinstance(f, ast.NamedExpr):
                             f = f.value
                         progressed = True
-                # ``methodcaller("__call__", fn, keys)(operator.call)`` ≡
-                # ``operator.call(fn, keys)`` (Unknown > false PASS).
+                # ``methodcaller("__call__", fn, keys)(operator.call)`` /
+                # Name-bound ``mc=…; mc(operator.call)`` /
+                # ``partial(mc)(operator.call)`` ≡ ``operator.call(fn, keys)``
+                # (Unknown > false PASS).
                 if isinstance(peeled, ast.Call):
                     from ovk.compilers.authorization.python_callee_resolution import (
                         _methodcaller_call_bound_args as _mc_call_bound,
+                        _is_partial_factory as _is_partial_mc_call,
+                        _peel_idle_partial_layers as _peel_idle_mc,
                     )
 
+                    mc_bound_map: dict[str, ast.AST] = dict(
+                        self.methodcaller_factories
+                    )
+                    # ``partial(mc)(operator.call)`` — recover Name-bound mc.
+                    peel_func = peeled.func
+                    while isinstance(peel_func, ast.NamedExpr):
+                        peel_func = peel_func.value
+                    if isinstance(peel_func, ast.Call) and _is_partial_mc_call(
+                        peel_func,
+                        getattr_aliases=frozenset(g_aliases),
+                    ):
+                        idle = _peel_idle_mc(
+                            peel_func,
+                            getattr_aliases=frozenset(g_aliases),
+                            sequence_aliases=self.sequence_literal_aliases,
+                            bound_partials=self.partial_factories,
+                        )
+                        if idle is not None:
+                            head = idle[0]
+                            while isinstance(head, ast.NamedExpr):
+                                head = head.value
+                            if isinstance(head, ast.Name) and head.id in (
+                                self.methodcaller_factories
+                            ):
+                                peeled = ast.Call(
+                                    func=self.methodcaller_factories[head.id],
+                                    args=list(peeled.args),
+                                    keywords=list(peeled.keywords),
+                                )
+                            elif isinstance(head, ast.Call):
+                                peeled = ast.Call(
+                                    func=head,
+                                    args=list(peeled.args),
+                                    keywords=list(peeled.keywords),
+                                )
                     mc_bound = _mc_call_bound(
                         peeled,
                         projection_aliases=self.operator_projection_aliases,
                         getattr_aliases=frozenset(g_aliases),
                         sequence_aliases=self.sequence_literal_aliases,
+                        bound_map=mc_bound_map,
                     )
                     if mc_bound is not None and peeled.args:
                         recv = peeled.args[0]
@@ -2462,6 +2577,7 @@ class _RequestStateAliasEnv:
             static_constant_names=dict(self.static_constant_names),
             dict_view_products=dict(self.dict_view_products),
             bound_view_receivers=dict(self.bound_view_receivers),
+            bound_view_expr_receivers=dict(self.bound_view_expr_receivers),
             sequence_string_lists=dict(self.sequence_string_lists),
             sequence_literal_aliases=dict(self.sequence_literal_aliases),
             itemgetter_products=dict(self.itemgetter_products),
@@ -2488,6 +2604,7 @@ class _RequestStateAliasEnv:
         self.static_constant_names = dict(other.static_constant_names)
         self.dict_view_products = dict(other.dict_view_products)
         self.bound_view_receivers = dict(other.bound_view_receivers)
+        self.bound_view_expr_receivers = dict(other.bound_view_expr_receivers)
         self.sequence_string_lists = dict(other.sequence_string_lists)
         self.sequence_literal_aliases = dict(other.sequence_literal_aliases)
         self.itemgetter_products = dict(other.itemgetter_products)
@@ -3213,6 +3330,7 @@ def join_request_state_alias_envs(
     static_constant_names: dict[str, object] = {}
     dict_view_products: dict[str, str] = {}
     bound_view_receivers: dict[str, str] = {}
+    bound_view_expr_receivers: dict[str, ast.AST] = {}
     sequence_string_lists: dict[str, tuple[str, ...]] = {}
     sequence_literal_aliases: dict[str, ast.AST] = {}
     itemgetter_products: dict[str, object] = {}
@@ -3233,6 +3351,7 @@ def join_request_state_alias_envs(
         static_constant_names.update(state.static_constant_names)
         dict_view_products.update(state.dict_view_products)
         bound_view_receivers.update(state.bound_view_receivers)
+        bound_view_expr_receivers.update(state.bound_view_expr_receivers)
         sequence_string_lists.update(state.sequence_string_lists)
         sequence_literal_aliases.update(state.sequence_literal_aliases)
         itemgetter_products.update(state.itemgetter_products)
@@ -3253,6 +3372,7 @@ def join_request_state_alias_envs(
         static_constant_names=static_constant_names,
         dict_view_products=dict_view_products,
         bound_view_receivers=bound_view_receivers,
+        bound_view_expr_receivers=bound_view_expr_receivers,
         sequence_string_lists=sequence_string_lists,
         sequence_literal_aliases=sequence_literal_aliases,
         itemgetter_products=itemgetter_products,
@@ -7235,17 +7355,61 @@ def _collect_writes_in_function(
             while isinstance(func, ast.NamedExpr):
                 func = func.value
             # ``operator.call(p, *([args].pop(0)))`` /
+            # ``partial(operator.call, p)(*([args].pop(0)))`` /
             # ``methodcaller("__call__", *([args].pop(0)))(operator.setitem)`` /
             # packed methodcaller("__call__", p, keys)(operator.call) —
             # rewrite onto the underlying setitem Call (Unknown > false PASS).
             from ovk.compilers.authorization.python_callee_resolution import (
                 _flatten_starred_args as _flat_call_si,
+                _is_partial_factory as _is_partial_call_si,
                 _methodcaller_call_bound_args as _mc_call_si,
                 _methodcaller_static_name,
+                _peel_call_func as _peel_call_si,
                 _projection_factory_name,
                 _shallow_packed_callee_exprs,
             )
 
+            # ``partial(operator.call, p)(*star)`` ≡ ``operator.call(p, *star)``.
+            if isinstance(func, ast.Call) and _is_partial_call_si(
+                func,
+                getattr_aliases=frozenset(getattr_aliases),
+            ):
+                p_flat = _flat_call_si(
+                    func.args,
+                    sequence_aliases=request_aliases.sequence_literal_aliases,
+                )
+                if p_flat:
+                    head = _peel_call_si(p_flat[0])
+                    head_is_call = (
+                        (
+                            isinstance(head, ast.Name)
+                            and (
+                                head.id == "call"
+                                or request_aliases.operator_projection_aliases.get(
+                                    head.id
+                                )
+                                == "call"
+                            )
+                        )
+                        or (
+                            isinstance(head, ast.Attribute) and head.attr == "call"
+                        )
+                    )
+                    if head_is_call:
+                        applied = _flat_call_si(
+                            child.args,
+                            sequence_aliases=(
+                                request_aliases.sequence_literal_aliases
+                            ),
+                        )
+                        child = ast.Call(
+                            func=head,
+                            args=[*p_flat[1:], *applied],
+                            keywords=list(child.keywords),
+                        )
+                        func = child.func
+                        while isinstance(func, ast.NamedExpr):
+                            func = func.value
             call_proj = _projection_factory_name(
                 child,
                 projection_aliases=request_aliases.operator_projection_aliases,
@@ -7286,6 +7450,7 @@ def _collect_writes_in_function(
                 projection_aliases=request_aliases.operator_projection_aliases,
                 getattr_aliases=frozenset(getattr_aliases),
                 sequence_aliases=request_aliases.sequence_literal_aliases,
+                bound_map=request_aliases.methodcaller_factories,
             )
             if mc_bound is not None and child.args:
                 recv = child.args[0]
