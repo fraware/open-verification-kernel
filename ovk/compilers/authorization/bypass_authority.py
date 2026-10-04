@@ -408,6 +408,8 @@ class _RequestStateAliasEnv:
     itemgetter_products: dict[str, object] = dc_field(default_factory=dict)
     # Name-bound ``mc = methodcaller("__setitem__", …)`` factory Calls.
     methodcaller_factories: dict[str, ast.Call] = dc_field(default_factory=dict)
+    # Name-bound ``p = partial(copy.copy, keys)`` factory Calls.
+    partial_factories: dict[str, ast.Call] = dc_field(default_factory=dict)
 
     @classmethod
     def seed(cls, *, param_names: frozenset[str]) -> "_RequestStateAliasEnv":
@@ -757,11 +759,16 @@ class _RequestStateAliasEnv:
             while isinstance(func, ast.NamedExpr):
                 func = func.value
             if isinstance(func, ast.Call):
-                return _itemgetter_key_of(func)
+                ig_direct = _itemgetter_key_of(func)
+                if ig_direct is not None:
+                    return ig_direct
+                # Fall through: ``next(iter([ig]))`` is a Call but not an
+                # itemgetter factory — peel packing for Name-bound products.
             if isinstance(func, ast.Name) and func.id in self.itemgetter_products:
                 return self.itemgetter_products[func.id]
             # Packed ``[operator.itemgetter("x")][0]`` /
-            # ``(False or itemgetter("x"))`` / ``(itemgetter("x") if True else …)``.
+            # ``(False or itemgetter("x"))`` / ``(itemgetter("x") if True else …)`` /
+            # ``next(iter([ig]))`` Name-bound applied products.
             from ovk.compilers.authorization.python_callee_resolution import (
                 _shallow_packed_callee_exprs,
             )
@@ -1036,6 +1043,10 @@ class _RequestStateAliasEnv:
                 ]
             else:
                 self.methodcaller_factories.pop(name, None)
+            if value.id in self.partial_factories:
+                self.partial_factories[name] = self.partial_factories[value.id]
+            else:
+                self.partial_factories.pop(name, None)
             if value.id in self.dict_view_products:
                 self.dict_view_products[name] = self.dict_view_products[value.id]
                 if value.id in self.bound_view_receivers:
@@ -1205,6 +1216,46 @@ class _RequestStateAliasEnv:
                 self.methodcaller_factories[name] = mc_seed
             else:
                 self.methodcaller_factories.pop(name, None)
+            # ``p = partial(copy.copy, keys)`` / packed / getattr partial.
+            from ovk.compilers.authorization.python_callee_resolution import (
+                _is_partial_factory as _is_partial_seed,
+            )
+
+            if _is_partial_seed(
+                value,
+                getattr_aliases=frozenset(g_aliases),
+            ):
+                self.partial_factories[name] = value
+            else:
+                partial_seed: ast.Call | None = None
+                for cand in _shallow_mc(value.func):
+                    nested = cand
+                    while isinstance(nested, ast.NamedExpr):
+                        nested = nested.value
+                    if isinstance(nested, ast.Call) and _is_partial_seed(
+                        nested,
+                        getattr_aliases=frozenset(g_aliases),
+                    ):
+                        partial_seed = nested
+                        break
+                    is_partial_name = (
+                        isinstance(nested, ast.Name)
+                        and (
+                            nested.id == "partial"
+                            or self.operator_projection_aliases.get(nested.id)
+                            == "partial"
+                        )
+                    ) or (
+                        isinstance(nested, ast.Attribute)
+                        and nested.attr == "partial"
+                    )
+                    if is_partial_name and value.args:
+                        partial_seed = value
+                        break
+                if partial_seed is not None:
+                    self.partial_factories[name] = partial_seed
+                else:
+                    self.partial_factories.pop(name, None)
             is_getattr = (
                 isinstance(func, ast.Name) and func.id in g_aliases
             ) or (isinstance(func, ast.Attribute) and func.attr == "getattr")
@@ -1430,13 +1481,38 @@ class _RequestStateAliasEnv:
             ):
                 # ``copy.copy(keys)`` / ``copy.deepcopy(keys)`` module peels.
                 copy_src = peeled.args[0]
-            elif isinstance(f, ast.Name) and peeled.args:
-                proj = self.operator_projection_aliases.get(f.id, f.id)
-                if proj in {"copy", "deepcopy"}:
-                    copy_src = peeled.args[0]
-                elif f.id == "dict" or proj == "dict":
-                    # ``dict(keys)`` shallow-copies a mapping carrier.
-                    copy_src = peeled.args[0]
+            elif isinstance(f, ast.Name):
+                from ovk.compilers.authorization.python_callee_resolution import (
+                    _methodcaller_static_name as _mc_name_copy,
+                )
+
+                if peeled.args:
+                    proj = self.operator_projection_aliases.get(f.id, f.id)
+                    if proj in {"copy", "deepcopy"}:
+                        copy_src = peeled.args[0]
+                    elif f.id == "dict" or proj == "dict":
+                        # ``dict(keys)`` shallow-copies a mapping carrier.
+                        copy_src = peeled.args[0]
+                    else:
+                        # ``mc = methodcaller("copy"); c = mc(keys)``.
+                        bound_mc = self.methodcaller_factories.get(f.id)
+                        if (
+                            bound_mc is not None
+                            and _mc_name_copy(
+                                bound_mc,
+                                projection_aliases=(
+                                    self.operator_projection_aliases
+                                ),
+                                getattr_aliases=frozenset(g_aliases),
+                            )
+                            == "copy"
+                        ):
+                            copy_src = peeled.args[0]
+                else:
+                    # ``p = partial(copy.copy, keys); c = p()``.
+                    bound_partial = self.partial_factories.get(f.id)
+                    if bound_partial is not None and len(bound_partial.args) >= 2:
+                        copy_src = bound_partial.args[1]
             elif isinstance(f, ast.Call):
                 # ``getattr(copy,"copy")(keys)`` / ``getattr(dict,"copy")(keys)`` /
                 # ``methodcaller("copy")(keys)`` / packed factory applies.
@@ -1501,10 +1577,12 @@ class _RequestStateAliasEnv:
                                 copy_src = peeled.args[0]
                                 break
             else:
-                # Packed ``[copy.copy][0](keys)`` / BoolOp / IfExp / next.
+                # Packed ``[copy.copy][0](keys)`` / BoolOp / IfExp / next /
+                # ``(0 or mc)(keys)`` Name-bound methodcaller|partial products.
                 from ovk.compilers.authorization.python_callee_resolution import (
                     _shallow_packed_callee_exprs as _shallow_copy2,
                     _getattr_static_name as _g_static2,
+                    _methodcaller_static_name as _mc_copy2,
                 )
 
                 for cand in _shallow_copy2(f):
@@ -1518,18 +1596,55 @@ class _RequestStateAliasEnv:
                     ):
                         copy_src = peeled.args[0]
                         break
-                    if isinstance(nested, ast.Name) and (
-                        nested.id in {"copy", "deepcopy"}
-                        or self.operator_projection_aliases.get(nested.id)
-                        in {"copy", "deepcopy"}
-                    ) and peeled.args:
-                        copy_src = peeled.args[0]
-                        break
+                    if isinstance(nested, ast.Name):
+                        if (
+                            nested.id in {"copy", "deepcopy"}
+                            or self.operator_projection_aliases.get(nested.id)
+                            in {"copy", "deepcopy"}
+                        ) and peeled.args:
+                            copy_src = peeled.args[0]
+                            break
+                        bound_mc = self.methodcaller_factories.get(nested.id)
+                        if (
+                            bound_mc is not None
+                            and peeled.args
+                            and _mc_copy2(
+                                bound_mc,
+                                projection_aliases=(
+                                    self.operator_projection_aliases
+                                ),
+                                getattr_aliases=frozenset(g_aliases),
+                            )
+                            == "copy"
+                        ):
+                            copy_src = peeled.args[0]
+                            break
+                        if not peeled.args:
+                            bound_partial = self.partial_factories.get(nested.id)
+                            if (
+                                bound_partial is not None
+                                and len(bound_partial.args) >= 2
+                            ):
+                                copy_src = bound_partial.args[1]
+                                break
                     if isinstance(nested, ast.Call):
                         gn = _g_static2(
                             nested, getattr_aliases=frozenset(g_aliases)
                         )
                         if gn in {"copy", "deepcopy"} and peeled.args:
+                            copy_src = peeled.args[0]
+                            break
+                        if (
+                            _mc_copy2(
+                                nested,
+                                projection_aliases=(
+                                    self.operator_projection_aliases
+                                ),
+                                getattr_aliases=frozenset(g_aliases),
+                            )
+                            == "copy"
+                            and peeled.args
+                        ):
                             copy_src = peeled.args[0]
                             break
             if copy_src is not None:
@@ -1600,6 +1715,7 @@ class _RequestStateAliasEnv:
             sequence_literal_aliases=dict(self.sequence_literal_aliases),
             itemgetter_products=dict(self.itemgetter_products),
             methodcaller_factories=dict(self.methodcaller_factories),
+            partial_factories=dict(self.partial_factories),
         )
 
     def restore(self, other: "_RequestStateAliasEnv") -> None:
@@ -1624,6 +1740,7 @@ class _RequestStateAliasEnv:
         self.sequence_literal_aliases = dict(other.sequence_literal_aliases)
         self.itemgetter_products = dict(other.itemgetter_products)
         self.methodcaller_factories = dict(other.methodcaller_factories)
+        self.partial_factories = dict(other.partial_factories)
 
     def install_join(self, states: Sequence["_RequestStateAliasEnv"]) -> None:
         """Install the sound must/may join of feasible predecessor alias envs."""
@@ -2347,6 +2464,7 @@ def join_request_state_alias_envs(
     sequence_literal_aliases: dict[str, ast.AST] = {}
     itemgetter_products: dict[str, object] = {}
     methodcaller_factories: dict[str, ast.Call] = {}
+    partial_factories: dict[str, ast.Call] = {}
     for state in states:
         adapter_aliases |= state.adapter_aliases
         for name, pack in state.container_adapter_packs.items():
@@ -2365,6 +2483,7 @@ def join_request_state_alias_envs(
         sequence_literal_aliases.update(state.sequence_literal_aliases)
         itemgetter_products.update(state.itemgetter_products)
         methodcaller_factories.update(state.methodcaller_factories)
+        partial_factories.update(state.partial_factories)
     return _RequestStateAliasEnv(
         request_names=must_request,
         state_names=must_state,
@@ -2383,6 +2502,7 @@ def join_request_state_alias_envs(
         sequence_literal_aliases=sequence_literal_aliases,
         itemgetter_products=itemgetter_products,
         methodcaller_factories=methodcaller_factories,
+        partial_factories=partial_factories,
     )
 
 
@@ -6172,10 +6292,27 @@ def _collect_writes_in_function(
         if isinstance(statement, ast.Assign):
             for target in statement.targets:
                 # Subscript stores mutate Name-bound key carriers.
+                # Walrus bases ``(c := copy(keys))["z"] = …`` seed ``c`` first.
                 if isinstance(target, ast.Subscript):
                     base = target.value
-                    while isinstance(base, ast.NamedExpr):
-                        base = base.value
+                    if isinstance(base, ast.NamedExpr) and isinstance(
+                        base.target, ast.Name
+                    ):
+                        request_aliases.note_binding(base.target, base.value)
+                        _note_callable_name_alias(
+                            base.target,
+                            base.value,
+                            control_dependent=control_dependent,
+                        )
+                        request_aliases.note_projection_name_alias(
+                            base.target.id,
+                            base.value,
+                            getattr_aliases=frozenset(getattr_aliases),
+                        )
+                        base = base.target
+                    else:
+                        while isinstance(base, ast.NamedExpr):
+                            base = base.value
                     if isinstance(base, ast.Name):
                         key = _static_key_for_mutation(target.slice)
                         set_val = statement.value
@@ -6194,8 +6331,24 @@ def _collect_writes_in_function(
         elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
             if isinstance(statement.target, ast.Subscript):
                 base = statement.target.value
-                while isinstance(base, ast.NamedExpr):
-                    base = base.value
+                if isinstance(base, ast.NamedExpr) and isinstance(
+                    base.target, ast.Name
+                ):
+                    request_aliases.note_binding(base.target, base.value)
+                    _note_callable_name_alias(
+                        base.target,
+                        base.value,
+                        control_dependent=control_dependent,
+                    )
+                    request_aliases.note_projection_name_alias(
+                        base.target.id,
+                        base.value,
+                        getattr_aliases=frozenset(getattr_aliases),
+                    )
+                    base = base.target
+                else:
+                    while isinstance(base, ast.NamedExpr):
+                        base = base.value
                 if isinstance(base, ast.Name):
                     key = _static_key_for_mutation(statement.target.slice)
                     set_val = statement.value
@@ -6383,19 +6536,117 @@ def _collect_writes_in_function(
                         if proj in {"setitem", "ior", "or_"}:
                             break
                         proj = None
+            # ``operator.setitem(keys, k, v)`` / ``getattr(keys,"__setitem__")(k, v)`` /
+            # ``partial(operator.setitem, keys, k)(v)`` / packed partial peels.
+            set_base: ast.AST | None = None
+            set_key_node: ast.AST | None = None
+            set_val_node: ast.AST | None = None
             if proj == "setitem" and len(child.args) >= 3:
-                base = child.args[0]
-                while isinstance(base, ast.NamedExpr):
-                    base = base.value
-                if isinstance(base, ast.Name):
-                    set_val = child.args[2]
+                set_base = child.args[0]
+                set_key_node = child.args[1]
+                set_val_node = child.args[2]
+            elif (
+                proj == "setitem"
+                and isinstance(func, ast.Call)
+                and len(child.args) >= 2
+                and len(func.args) >= 1
+            ):
+                # Bound ``getattr(keys, "__setitem__")(k, v)``.
+                set_base = func.args[0]
+                set_key_node = child.args[0]
+                set_val_node = child.args[1]
+            else:
+                from ovk.compilers.authorization.python_callee_resolution import (
+                    _is_partial_factory as _is_partial_setitem,
+                    _projection_factory_name as _proj_partial_bound,
+                )
+
+                partial_candidates = [func, *_shallow_packed_callee_exprs(func)]
+                for cand in partial_candidates:
+                    nested = cand
+                    while isinstance(nested, ast.NamedExpr):
+                        nested = nested.value
+                    if not (
+                        isinstance(nested, ast.Call)
+                        and _is_partial_setitem(
+                            nested,
+                            getattr_aliases=frozenset(getattr_aliases),
+                        )
+                        and len(nested.args) >= 3
+                        and child.args
+                    ):
+                        continue
+                    bound0 = nested.args[0]
+                    while isinstance(bound0, ast.NamedExpr):
+                        bound0 = bound0.value
+                    bound_proj = None
+                    if isinstance(bound0, ast.Name):
+                        bound_proj = request_aliases.operator_projection_aliases.get(
+                            bound0.id, bound0.id
+                        )
+                    elif isinstance(bound0, ast.Attribute):
+                        bound_proj = _PROJECTION_DUNDER_ALIASES.get(
+                            bound0.attr, bound0.attr
+                        )
+                    elif isinstance(bound0, ast.Call):
+                        syn = ast.Call(
+                            func=bound0, args=list(nested.args[1:3]), keywords=[]
+                        )
+                        bound_proj = _proj_partial_bound(
+                            syn,
+                            projection_aliases=(
+                                request_aliases.operator_projection_aliases
+                            ),
+                            getattr_aliases=frozenset(getattr_aliases),
+                        )
+                        if bound_proj is None:
+                            g_b = bound0.func
+                            while isinstance(g_b, ast.NamedExpr):
+                                g_b = g_b.value
+                            if (
+                                (
+                                    isinstance(g_b, ast.Name)
+                                    and g_b.id in getattr_aliases
+                                )
+                                or (
+                                    isinstance(g_b, ast.Attribute)
+                                    and g_b.attr == "getattr"
+                                )
+                            ) and len(bound0.args) >= 2 and isinstance(
+                                bound0.args[1], ast.Constant
+                            ):
+                                raw = bound0.args[1].value
+                                if isinstance(raw, str):
+                                    bound_proj = _PROJECTION_DUNDER_ALIASES.get(
+                                        raw, raw
+                                    )
+                    if bound_proj == "setitem" or (
+                        isinstance(bound0, ast.Attribute)
+                        and bound0.attr == "setitem"
+                    ) or (
+                        isinstance(bound0, ast.Name)
+                        and bound0.id == "setitem"
+                    ):
+                        set_base = nested.args[1]
+                        set_key_node = nested.args[2]
+                        set_val_node = child.args[0]
+                        break
+            if (
+                set_base is not None
+                and set_key_node is not None
+                and set_val_node is not None
+            ):
+                while isinstance(set_base, ast.NamedExpr):
+                    set_base = set_base.value
+                if isinstance(set_base, ast.Name):
+                    set_val = set_val_node
                     if isinstance(set_val, ast.Call):
                         pending = _pending_pop_values.get(id(set_val))
                         if pending is not None:
                             set_val = pending
                     _rewrite_sequence_dict(
-                        base.id,
-                        set_key=_static_key_for_mutation(child.args[1]),
+                        set_base.id,
+                        set_key=_static_key_for_mutation(set_key_node),
                         set_val=set_val,
                     )
                 continue
