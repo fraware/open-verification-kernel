@@ -111,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.38.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.39.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -139,9 +139,13 @@ _CONTAINER_ADAPTER_NAMES = frozenset(
         "reversed",
         "iter",
         "next",
+        "map",
+        "filter",
         "MappingProxyType",
     }
 )
+# Namespace / mapping view attrs that project key→value like ``.get``.
+_NS_DICT_VIEW_ATTRS = frozenset({"get", "pop", "__getitem__"})
 # operator.* / unbound projection names that yield packed request/state identity.
 _OPERATOR_PROJECTION_ATTRS = frozenset(
     {"getitem", "itemgetter", "attrgetter", "methodcaller", "call"}
@@ -504,10 +508,10 @@ class _RequestStateAliasEnv:
                     self.operator_projection_aliases[name] = attr
             # ``Proxy = types.__dict__.get("MappingProxyType")`` /
             # ``v(types).get("MappingProxyType")`` /
-            # ``getattr(types.__dict__, "get")("MappingProxyType")``.
+            # ``getattr(types.__dict__, "get"|"__getitem__"|"pop")("MappingProxyType")``.
             if (
                 isinstance(func, ast.Attribute)
-                and func.attr == "get"
+                and func.attr in _NS_DICT_VIEW_ATTRS
                 and value.args
                 and isinstance(value.args[0], ast.Constant)
                 and isinstance(value.args[0].value, str)
@@ -531,7 +535,7 @@ class _RequestStateAliasEnv:
                     is_g
                     and len(func.args) >= 2
                     and isinstance(func.args[1], ast.Constant)
-                    and func.args[1].value == "get"
+                    and func.args[1].value in _NS_DICT_VIEW_ATTRS
                     and isinstance(value.args[0], ast.Constant)
                     and isinstance(value.args[0].value, str)
                     and func.args
@@ -2494,8 +2498,6 @@ def _collect_writes_in_function(
                     _apply(sub_pat, nested)
                 return
             if isinstance(pat, ast.MatchMapping) and isinstance(value, ast.Dict):
-                if pat.rest is not None:
-                    return
                 value_by_key: dict[object, ast.AST] = {}
                 for map_key, map_val in zip(value.keys, value.values):
                     if (
@@ -2504,12 +2506,19 @@ def _collect_writes_in_function(
                         and isinstance(map_key, ast.Constant)
                     ):
                         value_by_key[map_key.value] = map_val
+                fixed_keys: set[object] = set()
                 for map_key, sub_pat in zip(pat.keys, pat.patterns):
                     if not isinstance(map_key, ast.Constant):
                         continue
+                    fixed_keys.add(map_key.value)
                     nested = value_by_key.get(map_key.value)
                     if nested is not None:
                         _apply(sub_pat, nested)
+                if pat.rest is not None:
+                    for key, map_val in value_by_key.items():
+                        if key in fixed_keys:
+                            continue
+                        _seed_name_instance_or_class(pat.rest, map_val)
                 return
             if isinstance(pat, ast.MatchOr):
                 for alt in pat.patterns:
@@ -2550,23 +2559,38 @@ def _collect_writes_in_function(
             while isinstance(func, ast.NamedExpr):
                 func = func.value
             adapter = False
-            if isinstance(func, ast.Name) and func.id in {
-                "next",
-                "iter",
-                "list",
-                "tuple",
-                "set",
-                "frozenset",
-                "sorted",
-                "reversed",
-            }:
+            if isinstance(func, ast.Name) and func.id in _CONTAINER_ADAPTER_NAMES:
                 adapter = True
             elif isinstance(func, ast.Attribute) and func.attr in {
                 "get",
                 "pop",
                 "__getitem__",
+                "values",
+                "keys",
+                "items",
             }:
-                # ``ns.get("C")`` / ``d["C"]`` style peels.
+                # ``ns.get("C")`` / ``d.values()`` / ``d["C"]`` style peels.
+                if func.attr == "values":
+                    return _resolve_class_constructor_alias(func.value)
+                if func.attr == "keys":
+                    # ``{Mut: 1}.keys()`` — class tokens live in keys.
+                    recv = func.value.value if isinstance(func.value, ast.NamedExpr) else func.value
+                    if isinstance(recv, ast.Dict):
+                        resolved_keys: ast.ClassDef | None = None
+                        for map_key in recv.keys:
+                            if map_key is None:
+                                continue
+                            cls = _resolve_class_constructor_alias(map_key)
+                            if cls is None:
+                                continue
+                            if resolved_keys is None:
+                                resolved_keys = cls
+                            elif resolved_keys is not cls:
+                                return None
+                        return resolved_keys
+                    return _resolve_class_constructor_alias(recv)
+                if func.attr == "items":
+                    return _resolve_class_constructor_alias(func.value)
                 resolved: ast.ClassDef | None = None
                 for arg in value.args:
                     nested = arg.value if isinstance(arg, ast.Starred) else arg
@@ -2588,7 +2612,15 @@ def _collect_writes_in_function(
                 return _resolve_class_constructor_alias(func.value)
             if adapter:
                 resolved = None
-                for arg in value.args:
+                # ``map(fn, [Cls])`` / ``filter(None, [Cls])`` — peel iterable.
+                arg_iter = value.args
+                if (
+                    isinstance(func, ast.Name)
+                    and func.id in {"map", "filter"}
+                    and len(value.args) >= 2
+                ):
+                    arg_iter = value.args[1:]
+                for arg in arg_iter:
                     nested = arg.value if isinstance(arg, ast.Starred) else arg
                     cls = _resolve_class_constructor_alias(nested)
                     if cls is None:
@@ -2598,6 +2630,14 @@ def _collect_writes_in_function(
                     elif resolved is not cls:
                         return None
                 return resolved
+            return None
+        if isinstance(value, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+            if value.generators:
+                return _resolve_class_constructor_alias(value.generators[0].iter)
+            return None
+        if isinstance(value, ast.DictComp):
+            if value.generators:
+                return _resolve_class_constructor_alias(value.generators[0].iter)
             return None
         if isinstance(value, ast.IfExp):
             left = _resolve_class_constructor_alias(value.body)
@@ -2698,6 +2738,48 @@ def _collect_writes_in_function(
     ) -> None:
         """Seed For/with/comp targets from packed Box/class carriers."""
 
+        value = value.value if isinstance(value, ast.NamedExpr) else value
+        # ``for C in d.values()/keys()/items()`` / ``map`` / comps — peel iter.
+        if isinstance(value, ast.Call):
+            func = value.func
+            while isinstance(func, ast.NamedExpr):
+                func = func.value
+            if isinstance(func, ast.Attribute) and func.attr == "items":
+                # ``for k, C in {"c": Mut}.items()`` — seed value binders.
+                if (
+                    isinstance(target, (ast.Tuple, ast.List))
+                    and len(target.elts) >= 2
+                    and isinstance(func.value, ast.Dict)
+                ):
+                    for map_val in func.value.values:
+                        if map_val is None:
+                            continue
+                        _seed_assign_target_instance_bindings(
+                            target.elts[1], map_val
+                        )
+                    return
+                _seed_assign_target_instance_bindings(target, func.value)
+                return
+            if isinstance(func, ast.Attribute) and func.attr in {"values", "keys"}:
+                recv = func.value
+                if func.attr == "keys" and isinstance(recv, ast.Dict):
+                    for map_key in recv.keys:
+                        if map_key is None:
+                            continue
+                        _seed_assign_target_instance_bindings(target, map_key)
+                    return
+                _seed_assign_target_instance_bindings(target, recv)
+                return
+            if isinstance(func, ast.Name) and func.id in {"map", "filter"}:
+                if len(value.args) >= 2:
+                    _seed_assign_target_instance_bindings(target, value.args[1])
+                    return
+        if isinstance(value, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+            if value.generators:
+                _seed_assign_target_instance_bindings(
+                    target, value.generators[0].iter
+                )
+                return
         if isinstance(target, ast.Name):
             _seed_name_instance_or_class(target.id, value)
             return
@@ -2770,12 +2852,112 @@ def _collect_writes_in_function(
                         and isinstance(map_key, ast.Constant)
                     ):
                         value_by_key[map_key.value] = map_val
+                fixed_keys: set[object] = set()
                 for map_key, sub_pat in zip(pat.keys, pat.patterns):
                     if not isinstance(map_key, ast.Constant):
                         continue
+                    fixed_keys.add(map_key.value)
                     nested = value_by_key.get(map_key.value)
                     if nested is not None:
                         _apply(sub_pat, nested)
+                # ``case {**rest}: rest["c"]()`` — seed remaining keys.
+                if pat.rest is not None:
+                    for key, map_val in value_by_key.items():
+                        if key in fixed_keys:
+                            continue
+                        _seed_name_instance_or_class(pat.rest, map_val)
+                return
+            if isinstance(pat, ast.MatchOr):
+                for alt in pat.patterns:
+                    _apply(alt, value)
+
+        _apply(pattern, matched)
+
+    def _seed_match_identity_binds(
+        session: RequestTimeIdentitySession,
+        pattern: ast.AST,
+        matched: ast.AST,
+    ) -> None:
+        """Seed identity protocol/container packs through match peels.
+
+        Match CF walks case bodies via per-statement observe (not whole-Match
+        ``_scan_stmts``), so Assign-equivalent seeds must be installed here for
+        exec / type / operator.call / container packs (Unknown > false PASS).
+        """
+
+        def _assign(name: str, value: ast.AST) -> None:
+            session.observe_statement(
+                ast.Assign(
+                    targets=[ast.Name(id=name, ctx=ast.Store())],
+                    value=value,
+                )
+            )
+
+        def _apply(pat: ast.AST, value: ast.AST) -> None:
+            if isinstance(pat, ast.MatchAs):
+                if pat.name:
+                    _assign(pat.name, value)
+                if pat.pattern is not None:
+                    _apply(pat.pattern, value)
+                return
+            if isinstance(pat, ast.MatchSequence) and isinstance(
+                value, (ast.List, ast.Tuple)
+            ):
+                has_star = any(
+                    isinstance(item, ast.MatchStar) for item in pat.patterns
+                )
+                if has_star:
+                    for item in pat.patterns:
+                        if isinstance(item, ast.MatchStar) and item.name:
+                            # ``case (*xs,):`` packs the whole subject sequence.
+                            _assign(item.name, value)
+                    for sub_pat, elt in zip(pat.patterns, value.elts):
+                        if isinstance(sub_pat, ast.MatchStar):
+                            continue
+                        nested = elt.value if isinstance(elt, ast.Starred) else elt
+                        _apply(sub_pat, nested)
+                    return
+                if len(pat.patterns) != len(value.elts):
+                    return
+                for sub_pat, elt in zip(pat.patterns, value.elts):
+                    nested = elt.value if isinstance(elt, ast.Starred) else elt
+                    _apply(sub_pat, nested)
+                return
+            if isinstance(pat, ast.MatchMapping) and isinstance(value, ast.Dict):
+                value_by_key: dict[object, ast.AST] = {}
+                for map_key, map_val in zip(value.keys, value.values):
+                    if (
+                        map_key is not None
+                        and map_val is not None
+                        and isinstance(map_key, ast.Constant)
+                    ):
+                        value_by_key[map_key.value] = map_val
+                fixed_keys: set[object] = set()
+                for map_key, sub_pat in zip(pat.keys, pat.patterns):
+                    if not isinstance(map_key, ast.Constant):
+                        continue
+                    fixed_keys.add(map_key.value)
+                    nested = value_by_key.get(map_key.value)
+                    if nested is not None:
+                        _apply(sub_pat, nested)
+                if pat.rest is not None:
+                    rest_keys: list[ast.AST] = []
+                    rest_vals: list[ast.AST] = []
+                    for map_key, map_val in zip(value.keys, value.values):
+                        if (
+                            map_key is None
+                            or map_val is None
+                            or not isinstance(map_key, ast.Constant)
+                        ):
+                            continue
+                        if map_key.value in fixed_keys:
+                            continue
+                        rest_keys.append(map_key)
+                        rest_vals.append(map_val)
+                    _assign(
+                        pat.rest,
+                        ast.Dict(keys=rest_keys, values=rest_vals),
+                    )
                 return
             if isinstance(pat, ast.MatchOr):
                 for alt in pat.patterns:
@@ -4994,6 +5176,8 @@ def _collect_writes_in_function(
                     dynamic=False,
                     control_dependent=control_dependent,
                 )
+                # Unpack / star peels: ``C, = [Cls]`` / ``*xs, = [Mut]``.
+                _seed_assign_target_instance_bindings(target, statement.value)
             # Calls on the RHS may escape request/state even when the store is
             # a simple Name alias (alias noted below; escape still recorded).
             if isinstance(statement.value, ast.Call) or any(
@@ -5329,6 +5513,7 @@ def _collect_writes_in_function(
                     )
                     if enter_cls is not None:
                         enter_ctor = None
+                        enter_return: ast.AST | None = None
                         if (
                             isinstance(item.context_expr, ast.Call)
                             and isinstance(item.context_expr.func, ast.Name)
@@ -5345,6 +5530,7 @@ def _collect_writes_in_function(
                                             isinstance(stmt, ast.Return)
                                             and stmt.value is not None
                                         ):
+                                            enter_return = stmt.value
                                             enter_ctor = (
                                                 _resolve_class_constructor_alias(
                                                     stmt.value
@@ -5353,8 +5539,13 @@ def _collect_writes_in_function(
                                             break
                         for name in as_names:
                             if enter_ctor is not None:
-                                local_classes[name] = enter_ctor
-                                instance_class_of.pop(name, None)
+                                # Shared seed notifies identity session so
+                                # ``with CM() as M: M()`` observes ``__init__``.
+                                if enter_return is not None:
+                                    _seed_name_instance_or_class(name, enter_return)
+                                else:
+                                    local_classes[name] = enter_ctor
+                                    instance_class_of.pop(name, None)
                             else:
                                 instance_class_of[name] = enter_cls
                     else:
@@ -5539,6 +5730,14 @@ def _collect_writes_in_function(
                 _apply_match_pattern_instance_class_bindings(
                     case.pattern, statement.subject
                 )
+                # Identity session is statement-CF (not whole-Match observe):
+                # seed protocol/container packs via synthetic Assigns so
+                # ``case (*xs,): xs[0](…)`` / ``case {"e": e}: e(…)`` /
+                # ``case {**rest}: rest["c"]()`` cannot false-PASS.
+                if identity_session is not None:
+                    _seed_match_identity_binds(
+                        identity_session, case.pattern, statement.subject
+                    )
                 # MatchValue Attribute: fail-closed export rebind
                 # (``match (evil,): case (helpers.write_state,):``).
                 for attr_target in _match_pattern_attribute_targets(case.pattern):

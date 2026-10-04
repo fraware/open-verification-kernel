@@ -3636,7 +3636,567 @@ def handler(request, bypass_filter=False):
     assert findings[0].reason != "source_proved_server_authority_write"
 
 
+def test_eighth_pass_alias_ns_view_getitem_pop_never_authorized() -> None:
+    """getattr(ns, \"__getitem__\"|\"pop\") MappingProxy seeds (shared ns views)."""
+
+    for routes in (
+        """
+import helpers
+import types
+def handler(request, bypass_filter=False):
+    Proxy = getattr(types.__dict__, "__getitem__")("MappingProxyType")
+    s = Proxy({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import types
+def handler(request, bypass_filter=False):
+    Proxy = getattr(vars(types), "__getitem__")("MappingProxyType")
+    s = Proxy({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import types
+def handler(request, bypass_filter=False):
+    Proxy = getattr(types.__dict__, "pop")("MappingProxyType")
+    s = Proxy({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_eighth_pass_dict_ctor_merge_and_adapters_never_authorized() -> None:
+    """Name-bound dict/__call__/builtins/|/`|=`/OrderedDict/map/filter packs."""
+
+    for routes in (
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    D = dict
+    D(e=exec)["e"]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    dict.__call__(e=exec)["e"]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import builtins
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    getattr(builtins, "dict")(e=exec)["e"]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    ({} | {"e": exec})["e"]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    d = {}
+    d |= {"e": exec}
+    d["e"]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from collections import OrderedDict
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    OrderedDict(e=exec)["e"]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from collections import UserDict
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    UserDict(e=exec)["e"]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from types import SimpleNamespace
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    SimpleNamespace(e=exec).e("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    dict.fromkeys(["e"], exec)["e"]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    oc = operator.call
+    next(map(lambda x: x, [oc]))(exec, "helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    oc = operator.call
+    next(filter(None, [oc]))(exec, "helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_eighth_pass_match_rest_and_protocol_binds_never_authorized() -> None:
+    """MatchMapping rest packs + Match Name exec/type/operator.call identity."""
+
+    for routes in (
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    match {"c": Mut}:
+        case {**rest}:
+            rest["c"]()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    match {"e": exec}:
+        case {"e": e}:
+            e("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    match (exec,):
+        case (*xs,):
+            xs[0]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    tn = type.__new__
+    match {"t": tn}:
+        case {"t": t}:
+            t(type, "C", (Base,), {})
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    oc = operator.call
+    match {"o": oc}:
+        case {**rest}:
+            rest["o"](exec, "helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_eighth_pass_type_protocol_and_dict_view_products_never_authorized() -> None:
+    """tc.__call__/tn.__call__/D.get/builtins.dict.get identity products."""
+
+    for routes in (
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    tc = type.__call__
+    tc.__call__(Mut)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    (tc := type.__call__).__call__(Mut)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    tn = type.__new__
+    tn.__call__(type, "C", (Base,), {})
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    tc = type.__call__
+    d = tc.__call__
+    d(Mut)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    D = dict
+    g = D.get
+    g({}, "missing", Mut)()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import builtins
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    g = builtins.dict.get
+    g({}, "missing", Mut)()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import builtins
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    g = builtins.dict.pop
+    g({"m": Mut}, "m")()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_eighth_pass_lexical_unpack_with_and_star_never_authorized() -> None:
+    """Assign unpack / with-as constructor / star pack class seeds."""
+
+    for routes in (
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Cls:
+        def __init__(self):
+            helpers.write_state = evil
+    C, = [Cls]
+    C()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Cls:
+        def __init__(self):
+            helpers.write_state = evil
+    [C] = [Cls]
+    C()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    class CM:
+        def __enter__(self):
+            return Mut
+        def __exit__(self, *a):
+            return False
+    with CM() as M:
+        M()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    *xs, = [Mut]
+    xs[0]()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_eighth_pass_for_class_seed_iter_variety_never_authorized() -> None:
+    """For class seeds via dict views / comps / star packs / genexps."""
+
+    for routes in (
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    for C in {"c": Mut}.values():
+        C()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    for C in {Mut: 1}.keys():
+        C()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    for k, C in {"c": Mut}.items():
+        C()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    *xs, = [Mut]
+    for C in xs:
+        C()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    for C in [x for x in [Mut]]:
+        C()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    for C in (x for x in [Mut]):
+        C()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_eighth_pass_nested_import_install_peels_never_authorized() -> None:
+    """getattr/__call__/list-pack/from-import nested install export rebinds."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for routes in (
+        """
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    getattr(n, "install")(evil)
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    n.install.__call__(evil)
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    [n.install][0](evil)
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+from pkg.nested import install
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    install(evil)
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
 def test_persistent_version_bumped_for_executed_expr_closure() -> None:
     """Cache / semantic versions bump with PASS-semantics change."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.59.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.60.0"

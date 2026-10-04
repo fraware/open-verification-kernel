@@ -2472,4 +2472,4 @@ def handler(request, bypass_filter=False):
 
 
 def test_persistent_version_bumped_for_lexical_closure() -> None:
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.59.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.60.0"
