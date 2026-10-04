@@ -10976,6 +10976,89 @@ def write_state(state, value):
         "        f(evil)",
         "from contextlib import nullcontext; args=(n.install,); "
         "f=nullcontext(*args).__enter__(); f(evil)",
+        # Relaunch digs: deferred enter / nested star / nested BoolOp star.
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); f=cm.__enter__(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*(0 or args)); f=cm.__enter__(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*(args if True else ())); f=cm.__enter__(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,); "
+        "f=nullcontext(*(*(args,),)).__enter__(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    with nullcontext(*(*(args,),)) as f:\n"
+        "        f(evil)",
+        "from contextlib import nullcontext; "
+        "f=nullcontext(*(('' or (n.install,)),)).__enter__(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,); "
+        "f=nullcontext(*(('' or args),)).__enter__(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,); "
+        "f=nullcontext(*((0 or args),)).__enter__(); f(evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_twenty_fourth_pass_interproc_methodcaller_nested_star_never_authorized() -> None:
+    """Interproc methodcaller nested star / Name method-str constructions."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "import operator; views=[]; args=('append', n.install); "
+        "operator.methodcaller(*(*(args,),))(views); views[0](evil)",
+        "import operator; views=[]; "
+        "operator.methodcaller(*(('' or ('append', n.install)),))(views); "
+        "views[0](evil)",
+        "import operator; views=[]; args=('append', n.install); "
+        "operator.methodcaller(*(('' or args),))(views); views[0](evil)",
+        "import operator; views=[]; args=('append', n.install); "
+        "operator.methodcaller(*((0 or args),))(views); views[0](evil)",
+        # Keep-closed bare star.
+        "import operator; views=[]; args=('append', n.install); "
+        "operator.methodcaller(*args)(views); views[0](evil)",
+        # Name method-str constructions (runtime poison).
+        "import operator; views=[]; nm=''.join(['ap','pend']); "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; x='append'; nm=f'{x}'; "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; nm='ap'+'pend'; "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; nm='{}'.format('append'); "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; nm='%s' % 'append'; "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; nm=str('append'); "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; nm=b'append'.decode(); "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
     ):
         routes = f"""
 import pkg.nested as n
@@ -11052,4 +11135,4 @@ def test_twenty_fourth_pass_positive_authorized_smoke() -> None:
 def test_persistent_version_bumped_for_executed_expr_closure() -> None:
     """Cache / semantic versions bump with PASS-semantics change."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.77.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.78.0"

@@ -1476,7 +1476,9 @@ def _methodcaller_static_name(
     """
 
     aliases = projection_aliases or {}
-    flat_args = _flatten_starred_args(
+    # Nested ``methodcaller(*(*(args,),))`` / ``*(('' or args),)`` share
+    # bare ``methodcaller(*args)`` (Unknown > false PASS).
+    flat_args = _flatten_factory_star_args(
         call.args, sequence_aliases=sequence_aliases
     )
     if not flat_args:
@@ -1788,8 +1790,9 @@ def _nullcontext_enter_arg(
     if not isinstance(peeled, ast.Call):
         return None
     # ``nullcontext(*(n.install,))`` / ``*((x if True else None),)`` /
-    # ``nullcontext(*args)`` / ``*(() if False else args)``.
-    flat_args = _flatten_starred_args(
+    # ``nullcontext(*args)`` / ``*(() if False else args)`` /
+    # nested ``*(*(args,),)`` / ``*(('' or args),)`` (Unknown > false PASS).
+    flat_args = _flatten_factory_star_args(
         peeled.args,
         sequence_aliases=sequence_aliases,
         slice_aliases=slice_aliases,
@@ -1814,6 +1817,20 @@ def _nullcontext_enter_arg(
             # (``nullcontext((0 or n.install))``) on the shared seed path.
             return flat_args[0]
     return None
+
+
+def _nullcontext_expr_is_enter_call(expr: ast.AST) -> bool:
+    """True for ``nullcontext(x).__enter__()`` / getattr ``__enter__`` wraps."""
+
+    peeled = _peel_call_func(expr)
+    if not isinstance(peeled, ast.Call):
+        return False
+    enter_func = _peel_transparent_callee(peeled.func)
+    if isinstance(enter_func, ast.Attribute) and enter_func.attr == "__enter__":
+        return True
+    if isinstance(enter_func, ast.Call):
+        return _getattr_static_name(enter_func) == "__enter__"
+    return False
 
 
 def _name_is_operator_call_alias(
@@ -2210,7 +2227,8 @@ def _preferred_seed_arm(expr: ast.AST) -> ast.AST:
 
     Shared With / Assign nullcontext enter seed and BoolOp RHS alias peels
     so ``nullcontext((n.install if True else None))`` / ``(0 or n.install)``
-    keep the accounted callable (Unknown > false PASS).
+    keep the accounted callable (Unknown > false PASS). Also digs one pack
+    level so nested ``*(('' or (n.install,)),)`` seeds share bare peels.
     """
 
     arms = _iter_boolop_ifexp_arms(expr)
@@ -2218,6 +2236,17 @@ def _preferred_seed_arm(expr: ast.AST) -> ast.AST:
         peeled = _peel_call_func(arm)
         if isinstance(peeled, (ast.Attribute, ast.Call, ast.Name)):
             return arm
+    # Nested 1-tuple / list wraps around a callable pack element.
+    for arm in arms:
+        peeled = _peel_call_func(arm)
+        if isinstance(peeled, (ast.Tuple, ast.List)) and peeled.elts:
+            for elt in peeled.elts:
+                nested = elt.value if isinstance(elt, ast.Starred) else elt
+                inner = _preferred_seed_arm(nested)
+                if isinstance(
+                    _peel_call_func(inner), (ast.Attribute, ast.Call, ast.Name)
+                ):
+                    return inner
     return arms[0] if arms else expr
 
 
@@ -2514,6 +2543,45 @@ def _flatten_starred_args(
         else:
             out.append(arg)
     return out
+
+
+def _flatten_factory_star_args(
+    args: Sequence[ast.AST],
+    *,
+    sequence_aliases: Mapping[str, ast.AST] | None = None,
+    slice_aliases: frozenset[str] | None = None,
+) -> list[ast.AST]:
+    """Factory star peel with one nested ``*(pack,)`` unwrap.
+
+    Shared by ``nullcontext`` / ``methodcaller`` so
+    ``f(*(*(args,),))`` / ``f(*(('' or args),))`` / ``f(*((0 or args),))``
+    share bare ``f(*args)`` peels without changing general star arity for
+    other callees (Unknown > false PASS).
+    """
+
+    aliases = sequence_aliases or {}
+    flat = _flatten_starred_args(
+        args,
+        sequence_aliases=aliases,
+        slice_aliases=slice_aliases,
+    )
+    if len(flat) != 1:
+        return flat
+    sole = _peel_call_func(flat[0])
+    # Only unwrap when the sole flattened arg is itself a pack carrier —
+    # not a direct Attribute/Call/Constant leaf (``nullcontext(*(n.install,))``).
+    if not isinstance(
+        sole, (ast.Name, ast.BoolOp, ast.IfExp, ast.Tuple, ast.List, ast.Starred)
+    ):
+        return flat
+    nested = _sequence_pack_elts(
+        sole,
+        sequence_aliases=aliases,
+        slice_aliases=slice_aliases,
+    )
+    if nested is not None and nested:
+        return nested
+    return flat
 
 
 def _peel_transparent_callee(func: ast.AST) -> ast.AST:
@@ -3932,6 +4000,9 @@ def _build_identity_scanner(
     partial_aliases: set[str] = {"partial"}
     # ``from contextlib import nullcontext as nc`` / ``NC = nullcontext``.
     nullcontext_aliases: set[str] = {"nullcontext"}
+    # Deferred ``cm = nullcontext(x)`` enter payloads for later ``cm.__enter__()``
+    # (shared With.as / inline ``nullcontext(x).__enter__()`` seed path).
+    nullcontext_enter_products: dict[str, ast.AST] = {}
     # ``from types import MappingProxyType as MPT`` / adapter Name aliases.
     adapter_aliases: set[str] = set()
     # Name-bound factory products: ``ag = attrgetter("Mut")`` / ``p = partial(Mut)``.
@@ -4097,6 +4168,8 @@ def _build_identity_scanner(
             value,
             projection_aliases=operator_projection_aliases,
             getattr_aliases=frozenset(getattr_aliases),
+            sequence_aliases=sequence_view_aliases,
+            str_resolver=_resolve_static_str,
         )
         if mc is not None:
             projection_factory_products[name] = ("methodcaller", mc)
@@ -4373,6 +4446,113 @@ def _build_identity_scanner(
                 return bound
             const = static_constant_names.get(peeled.id)
             return const if isinstance(const, str) else None
+        # Static string construction: ``'ap'+'pend'`` / ``f'{x}'`` /
+        # ``'%s' % 'append'`` (Name-bound methodcaller method strings).
+        if isinstance(peeled, ast.BinOp) and isinstance(peeled.op, ast.Add):
+            left = _resolve_static_str(peeled.left)
+            right = _resolve_static_str(peeled.right)
+            if left is not None and right is not None:
+                return left + right
+        if isinstance(peeled, ast.BinOp) and isinstance(peeled.op, ast.Mod):
+            fmt = _resolve_static_str(peeled.left)
+            arg = _resolve_static_str(peeled.right)
+            if fmt is not None and arg is not None:
+                try:
+                    return fmt % arg
+                except (TypeError, ValueError):
+                    return None
+        if isinstance(peeled, ast.JoinedStr):
+            parts: list[str] = []
+            for chunk in peeled.values:
+                if isinstance(chunk, ast.Constant) and isinstance(
+                    chunk.value, str
+                ):
+                    parts.append(chunk.value)
+                    continue
+                if isinstance(chunk, ast.FormattedValue):
+                    piece = _resolve_static_str(chunk.value)
+                    if piece is None:
+                        return None
+                    parts.append(piece)
+                    continue
+                return None
+            return "".join(parts)
+        if isinstance(peeled, ast.Call):
+            cfunc = _peel_call_func(peeled.func)
+            # ``str('append')`` / ``str(nm)``.
+            if (
+                isinstance(cfunc, ast.Name)
+                and cfunc.id == "str"
+                and peeled.args
+                and not peeled.keywords
+            ):
+                return _resolve_static_str(peeled.args[0])
+            # ``''.join(['ap','pend'])`` / ``sep.join([...])``.
+            if (
+                isinstance(cfunc, ast.Attribute)
+                and cfunc.attr == "join"
+                and peeled.args
+                and not peeled.keywords
+            ):
+                sep = _resolve_static_str(cfunc.value)
+                if sep is None:
+                    return None
+                seq = _peel_call_func(peeled.args[0])
+                elts = _sequence_pack_elts(
+                    seq,
+                    sequence_aliases=sequence_view_aliases,
+                    slice_aliases=frozenset(slice_aliases),
+                )
+                if elts is None and isinstance(seq, (ast.List, ast.Tuple)):
+                    elts = list(seq.elts)
+                if elts is None:
+                    return None
+                pieces: list[str] = []
+                for elt in elts:
+                    piece = _resolve_static_str(elt)
+                    if piece is None:
+                        return None
+                    pieces.append(piece)
+                return sep.join(pieces)
+            # ``'{}'.format('append')`` / ``nm.format(...)``.
+            if (
+                isinstance(cfunc, ast.Attribute)
+                and cfunc.attr == "format"
+                and not peeled.keywords
+            ):
+                fmt = _resolve_static_str(cfunc.value)
+                if fmt is None:
+                    return None
+                arg_strs: list[str] = []
+                for arg in peeled.args:
+                    piece = _resolve_static_str(arg)
+                    if piece is None:
+                        return None
+                    arg_strs.append(piece)
+                try:
+                    return fmt.format(*arg_strs)
+                except (TypeError, ValueError, IndexError, KeyError):
+                    return None
+            # ``b'append'.decode()`` / ``b'append'.decode('utf-8')``.
+            if (
+                isinstance(cfunc, ast.Attribute)
+                and cfunc.attr == "decode"
+                and not peeled.keywords
+            ):
+                recv = _peel_call_func(cfunc.value)
+                if isinstance(recv, ast.Constant) and isinstance(
+                    recv.value, bytes
+                ):
+                    encoding = "utf-8"
+                    if peeled.args:
+                        enc = _resolve_static_str(peeled.args[0])
+                        if enc is None:
+                            return None
+                        encoding = enc
+                    try:
+                        return recv.value.decode(encoding)
+                    except (LookupError, UnicodeDecodeError):
+                        return None
         # ``keys[0]`` / ``keys[idx]`` / ``keys[xk]`` / nested ``keys[0][0]``.
         if isinstance(peeled, ast.Subscript):
             key = _resolve_static_key_value(peeled.slice)
@@ -8407,8 +8587,10 @@ def _build_identity_scanner(
                     sequence_aliases=sequence_view_aliases,
                     str_resolver=_resolve_static_str,
                 )
-            mc_bound = _flatten_starred_args(
-                mc_func.args, sequence_aliases=sequence_view_aliases
+            mc_bound = _flatten_factory_star_args(
+                mc_func.args,
+                sequence_aliases=sequence_view_aliases,
+                slice_aliases=frozenset(slice_aliases),
             )
             if (
                 mc_name
@@ -9406,6 +9588,11 @@ def _build_identity_scanner(
         """Install exec/new_class/type/getattr aliases from an Assign/walrus RHS."""
 
         value = _peel_call_func(value)
+        # Deferred nullcontext enter products copy only on Name alias; other
+        # RHS forms clear (bare ``cm = nullcontext(...)`` sets the map
+        # directly on the Call Assign path).
+        if not isinstance(value, ast.Name):
+            nullcontext_enter_products.pop(name, None)
         # BoolOp / IfExp RHS: static string seeds first so
         # ``nm=('x' if False else 'append')`` / ``nm=('' or 'append')`` /
         # ``nm=(0 or 'append')`` share ``_static_str_expr`` with inline
@@ -9579,6 +9766,12 @@ def _build_identity_scanner(
                 partial_aliases.add(name)
             if value.id in nullcontext_aliases:
                 nullcontext_aliases.add(name)
+            if value.id in nullcontext_enter_products:
+                nullcontext_enter_products[name] = nullcontext_enter_products[
+                    value.id
+                ]
+            else:
+                nullcontext_enter_products.pop(name, None)
             if value.id in {"vars", "globals", "locals"} or value.id in ns_projection_aliases:
                 ns_projection_aliases.add(name)
             if value.id in _CALLEE_ADAPTER_NAMES or value.id in adapter_aliases:
@@ -9904,7 +10097,39 @@ def _build_identity_scanner(
             _note_container_pack_from_value(name, value)
             return
         if isinstance(value, ast.Call):
-            # ``f = nullcontext(n.install).__enter__()`` / import-as / Name-bound.
+            # Deferred ``f = cm.__enter__()`` after ``cm = nullcontext(*args)`` —
+            # recover enter payload from Name-bound factory products (shared
+            # With.as / inline ``nullcontext(*args).__enter__()``).
+            enter_func = _peel_transparent_callee(value.func)
+            if (
+                isinstance(enter_func, ast.Attribute)
+                and enter_func.attr == "__enter__"
+            ):
+                recv = _peel_call_func(enter_func.value)
+                if (
+                    isinstance(recv, ast.Name)
+                    and recv.id in nullcontext_enter_products
+                ):
+                    _note_protocol_alias_from_value(
+                        name, nullcontext_enter_products[recv.id]
+                    )
+                    return
+            if isinstance(enter_func, ast.Call):
+                g_enter = _getattr_static_name(
+                    enter_func, getattr_aliases=frozenset(getattr_aliases)
+                )
+                if g_enter == "__enter__" and enter_func.args:
+                    recv = _peel_call_func(enter_func.args[0])
+                    if (
+                        isinstance(recv, ast.Name)
+                        and recv.id in nullcontext_enter_products
+                    ):
+                        _note_protocol_alias_from_value(
+                            name, nullcontext_enter_products[recv.id]
+                        )
+                        return
+            # ``f = nullcontext(n.install).__enter__()`` / import-as / Name-bound
+            # / bare ``cm = nullcontext(*args)`` factory products.
             nc_enter = _nullcontext_enter_arg(
                 value,
                 getattr_aliases=frozenset(getattr_aliases),
@@ -9916,9 +10141,14 @@ def _build_identity_scanner(
                 # Prefer Attribute/Call/Name arm (shared With peel) so
                 # ``nullcontext((n.install if True else None)|or)`` does not
                 # last-win onto Constant None/0 (Unknown > false PASS).
-                _note_protocol_alias_from_value(
-                    name, _preferred_seed_arm(nc_enter)
-                )
+                seed = _preferred_seed_arm(nc_enter)
+                if _nullcontext_expr_is_enter_call(value):
+                    _note_protocol_alias_from_value(name, seed)
+                    nullcontext_enter_products.pop(name, None)
+                    return
+                # Bare factory ``cm = nullcontext(*args)`` — defer enter seed
+                # until ``cm.__enter__()`` (Unknown > false PASS).
+                nullcontext_enter_products[name] = seed
                 return
             # ``d=dict(list.__dict__)`` / ``dict(getattr(list,"__dict__"))`` —
             # mid-bind as list type-dict before ``.pop|.setdefault|.get``.
