@@ -3886,12 +3886,11 @@ def _peel_idle_partial_layers(
     factory_kw = list(call.keywords)
     if not flat:
         return None
-    head = _flatten_idle_lambda_apply(
-        _peel_call_func(flat[0]),
-        lambda_bindings=lambda_bindings,
-        sequence_aliases=aliases,
-        slice_aliases=slice_aliases,
-    )
+    # Idle-lambda flatten belongs on ``partial.__new__`` rest-args only
+    # (``_partial_new_rest_args``). Flattening every peel head turns nested
+    # ``partial(partial(operator.getitem, xs), slice)`` into a proved
+    # identity constructor (19th–22nd source_proved; Unknown > false PASS).
+    head = _peel_call_func(flat[0])
     rest = list(flat[1:])
     depth = 0
     while depth < 8:
@@ -3932,12 +3931,7 @@ def _peel_idle_partial_layers(
             partial_aliases=partial_aliases,
             getattr_aliases=getattr_aliases,
         ) and rest:
-            head = _flatten_idle_lambda_apply(
-                _peel_call_func(rest[0]),
-                lambda_bindings=lambda_bindings,
-                sequence_aliases=aliases,
-                slice_aliases=slice_aliases,
-            )
+            head = _peel_call_func(rest[0])
             rest = list(rest[1:])
             depth += 1
             continue
@@ -3968,12 +3962,7 @@ def _peel_idle_partial_layers(
             break
         factory_kw = list(head.keywords) + factory_kw
         rest = list(inner_flat[1:]) + rest
-        head = _flatten_idle_lambda_apply(
-            _peel_call_func(inner_flat[0]),
-            lambda_bindings=lambda_bindings,
-            sequence_aliases=aliases,
-            slice_aliases=slice_aliases,
-        )
+        head = _peel_call_func(inner_flat[0])
         depth += 1
     return head, rest, factory_kw
 
@@ -7690,6 +7679,17 @@ def _build_identity_scanner(
             )
             if idle_head is not None:
                 bound0 = _peel_call_func(idle_head[0])
+                idle_rest = list(idle_head[1])
+                # Nested ``partial(partial(getitem, xs), slice)`` idle-unwraps
+                # onto ``getitem`` + ``[xs, slice]``. Rebuild the already-closed
+                # ``partial(getitem, xs, slice)`` arg shape so Mut() stays
+                # observed. Do not treat idle rest as a mapping identity seed.
+                if idle_rest:
+                    cand = ast.Call(
+                        func=cand.func,
+                        args=[bound0, *idle_rest],
+                        keywords=list(idle_head[2]),
+                    )
             else:
                 bound0 = _peel_call_func(cand.args[0])
             is_gi = False
@@ -13335,10 +13335,31 @@ def _build_identity_scanner(
                                     sequence_aliases=sequence_view_aliases,
                                     slice_aliases=frozenset(slice_aliases),
                                     bound_partials=bound_callee_exprs,
-                lambda_bindings=lambda_bindings,
+                                    lambda_bindings=lambda_bindings,
                                 )
                                 if idle is not None and idle[1]:
-                                    extra_bases.append(idle[1][0])
+                                    idle_h = _peel_call_func(idle[0])
+                                    idle_is_gi = (
+                                        (
+                                            isinstance(idle_h, ast.Name)
+                                            and (
+                                                idle_h.id == "getitem"
+                                                or operator_projection_aliases.get(
+                                                    idle_h.id
+                                                )
+                                                == "getitem"
+                                            )
+                                        )
+                                        or (
+                                            isinstance(idle_h, ast.Attribute)
+                                            and idle_h.attr
+                                            in {"getitem", "__getitem__"}
+                                        )
+                                    )
+                                    # Getitem idle rest is the sequence
+                                    # carrier ``xs``, not a mapping identity.
+                                    if not idle_is_gi:
+                                        extra_bases.append(idle[1][0])
                     if isinstance(peeled_db, ast.Dict):
                         for map_key, map_val in zip(
                             peeled_db.keys, peeled_db.values
@@ -14134,10 +14155,33 @@ def _build_identity_scanner(
                                 sequence_aliases=sequence_view_aliases,
                                 slice_aliases=frozenset(slice_aliases),
                                 bound_partials=bound_callee_exprs,
-                lambda_bindings=lambda_bindings,
+                                lambda_bindings=lambda_bindings,
                             )
                             if idle is not None and idle[1]:
-                                if _is_list_type_dict_base(idle[1][0]):
+                                idle_h = _peel_call_func(idle[0])
+                                idle_is_gi = (
+                                    (
+                                        isinstance(idle_h, ast.Name)
+                                        and (
+                                            idle_h.id == "getitem"
+                                            or operator_projection_aliases.get(
+                                                idle_h.id
+                                            )
+                                            == "getitem"
+                                        )
+                                    )
+                                    or (
+                                        isinstance(idle_h, ast.Attribute)
+                                        and idle_h.attr
+                                        in {"getitem", "__getitem__"}
+                                    )
+                                )
+                                # Getitem idle rest is the sequence carrier
+                                # (``xs``), not a mapping identity seed.
+                                if (
+                                    not idle_is_gi
+                                    and _is_list_type_dict_base(idle[1][0])
+                                ):
                                     return True
                         if cand is not dict_base and _is_list_type_dict_base(
                             cand
