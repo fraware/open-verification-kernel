@@ -3560,6 +3560,9 @@ def _build_identity_scanner(
                 ]
             if attr == "copy":
                 return _iter_elements(recv, nxt)
+            if attr == "fromkeys":
+                # Unbound / Name-bound ``fromkeys(iterable)`` — recv is iterable.
+                return _iter_elements(recv, nxt)
         func_name: str | None = None
         if isinstance(func, ast.Name):
             # Name-bound ``ch = itertools.chain`` / adapter aliases share one peel.
@@ -3797,14 +3800,18 @@ def _build_identity_scanner(
                     out.extend(_callee_candidate_exprs(elt, nxt))
         elif isinstance(callee, ast.Call):
             view = _view_call_parts(callee)
-            if (
-                _getattr_static_name(
-                    callee, getattr_aliases=frozenset(getattr_aliases)
-                )
-                == "__call__"
-                and callee.args
-            ):
+            gname = _getattr_static_name(
+                callee, getattr_aliases=frozenset(getattr_aliases)
+            )
+            if gname == "__call__" and callee.args:
                 out.extend(_callee_candidate_exprs(callee.args[0], nxt))
+            elif gname is not None and callee.args:
+                # ``getattr(Mut, "make")`` ≡ ``Mut.make`` for method / install peels.
+                synthetic = ast.Attribute(
+                    value=callee.args[0], attr=gname, ctx=ast.Load()
+                )
+                out.append(synthetic)
+                out.extend(_callee_candidate_exprs(synthetic, nxt))
             elif view is not None and view[0] in _CANDIDATE_VIEW_ATTRS:
                 for _, val in _mapping_items(_peel_call_func(view[1])) or []:
                     if val is not None:
@@ -4613,7 +4620,15 @@ def _build_identity_scanner(
                 "keys",
                 "values",
                 "items",
+                "fromkeys",
             }:
+                sequence_view_aliases[name] = value
+            elif _is_dict_fromkeys(
+                _peel_call_func(value.func),
+                dict_ctor_aliases=frozenset(dict_ctor_aliases),
+                dict_view_products=dict_view_products,
+            ):
+                # ``ks = fk([Mut])`` / ``ks = dict.fromkeys([Mut])``.
                 sequence_view_aliases[name] = value
             elif (
                 isinstance(_peel_call_func(value.func), ast.Name)
@@ -5915,6 +5930,8 @@ def _build_identity_scanner(
                 if 0 <= default_idx < len(defaults):
                     default_expr = defaults[default_idx]
                     call_env[name] = _eval_expr(default_expr, env, path=path)
+                    # ``(lambda f=type.__call__: f(Mut))()`` — seed defaults.
+                    _note_protocol_alias_from_value(name, default_expr)
                     if isinstance(default_expr, ast.Lambda):
                         saved_lambda_bindings.setdefault(
                             name, lambda_bindings.get(name)
@@ -5930,6 +5947,7 @@ def _build_identity_scanner(
                 provided_kw.add(kw.arg)
                 if kw.arg in pos_params or kw.arg in kwonly_params:
                     call_env[kw.arg] = _eval_expr(kw.value, env, path=path)
+                    _note_protocol_alias_from_value(kw.arg, kw.value)
                     if isinstance(kw.value, ast.Lambda):
                         saved_lambda_bindings.setdefault(
                             kw.arg, lambda_bindings.get(kw.arg)
@@ -5942,6 +5960,7 @@ def _build_identity_scanner(
                     continue
                 if default is not None:
                     call_env[name] = _eval_expr(default, env, path=path)
+                    _note_protocol_alias_from_value(name, default)
                     if isinstance(default, ast.Lambda):
                         saved_lambda_bindings.setdefault(
                             name, lambda_bindings.get(name)
@@ -6940,14 +6959,31 @@ def _build_identity_scanner(
                 peeled_method = _peel_transparent_callee(func)
                 if isinstance(peeled_method, ast.Attribute):
                     method_attr = peeled_method
-            method = _resolve_attribute_method(
-                method_attr, local_classes=local_classes
+                elif isinstance(peeled_method, ast.Call):
+                    # ``getattr(Mut, "make").__call__()`` → ``Mut.make``.
+                    gname = _getattr_static_name(
+                        peeled_method,
+                        getattr_aliases=frozenset(getattr_aliases),
+                    )
+                    if gname is not None and gname != "__call__" and peeled_method.args:
+                        method_attr = ast.Attribute(
+                            value=peeled_method.args[0],
+                            attr=gname,
+                            ctx=ast.Load(),
+                        )
+            method = (
+                _resolve_attribute_method(
+                    method_attr, local_classes=local_classes
+                )
+                if isinstance(method_attr, ast.Attribute)
+                else None
             )
-            if method is not None:
+            if method is not None and isinstance(method_attr, ast.Attribute):
                 _follow_resolved_method(method, method_attr)
                 return
             # Packed Attribute methods under ``__call__`` /
-            # ``next(iter([Mut.make])).__call__()`` / ``rest["m"].__call__()``.
+            # ``next(iter([Mut.make])).__call__()`` / ``rest["m"].__call__()`` /
+            # ``getattr(Mut, "make").__call__()``.
             if func.attr == "__call__":
                 for cand in _callee_candidate_exprs(func.value):
                     if not isinstance(cand, ast.Attribute):

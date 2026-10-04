@@ -576,15 +576,34 @@ class _RequestStateAliasEnv:
                 self.ns_projection_aliases.add(name)
             if value.attr in _OPERATOR_PROJECTION_NAMES:
                 self.operator_projection_aliases[name] = value.attr
-            if value.attr in _NS_DICT_VIEW_ATTRS | _DICT_ITER_VIEW_ATTRS:
-                self.dict_view_products[name] = value.attr
+            if value.attr in _NS_DICT_VIEW_ATTRS | _DICT_ITER_VIEW_ATTRS | {
+                "fromkeys"
+            }:
+                # Unbound ``fk = dict.fromkeys`` shares the dict.* product tag
+                # so ``with fk([Mut])`` seeds like Attribute fromkeys.
                 recv = value.value
                 while isinstance(recv, ast.NamedExpr):
                     recv = recv.value
-                if isinstance(recv, ast.Name):
-                    self.bound_view_receivers[name] = recv.id
-                else:
+                if (
+                    value.attr == "fromkeys"
+                    and isinstance(recv, ast.Name)
+                    and recv.id == "dict"
+                ) or (
+                    value.attr == "fromkeys"
+                    and isinstance(recv, ast.Attribute)
+                    and recv.attr == "dict"
+                ):
+                    self.dict_view_products[name] = "dict.fromkeys"
                     self.bound_view_receivers.pop(name, None)
+                elif value.attr == "fromkeys" and isinstance(recv, ast.Name):
+                    self.dict_view_products[name] = "dict.fromkeys"
+                    self.bound_view_receivers.pop(name, None)
+                else:
+                    self.dict_view_products[name] = value.attr
+                    if isinstance(recv, ast.Name):
+                        self.bound_view_receivers[name] = recv.id
+                    else:
+                        self.bound_view_receivers.pop(name, None)
         elif isinstance(value, ast.Subscript):
             key = _static_or_bound_key(value.slice)
             if key is None:
@@ -3788,9 +3807,33 @@ def _collect_writes_in_function(
             inner = attr_expr.value
             while isinstance(inner, ast.NamedExpr):
                 inner = inner.value
-            if not isinstance(inner, ast.Attribute):
-                break
-            attr_expr = inner
+            if isinstance(inner, ast.Attribute):
+                attr_expr = inner
+                continue
+            # ``getattr(Mut, "make").__call__()`` → reconstruct ``Mut.make``.
+            if isinstance(inner, ast.Call) and len(inner.args) >= 2:
+                g_func = inner.func
+                while isinstance(g_func, ast.NamedExpr):
+                    g_func = g_func.value
+                is_getattr = (
+                    isinstance(g_func, ast.Name) and g_func.id == "getattr"
+                ) or (isinstance(g_func, ast.Attribute) and g_func.attr == "getattr")
+                name_arg = inner.args[1]
+                while isinstance(name_arg, ast.NamedExpr):
+                    name_arg = name_arg.value
+                if (
+                    is_getattr
+                    and isinstance(name_arg, ast.Constant)
+                    and isinstance(name_arg.value, str)
+                    and name_arg.value != "__call__"
+                ):
+                    attr_expr = ast.Attribute(
+                        value=inner.args[0],
+                        attr=name_arg.value,
+                        ctx=ast.Load(),
+                    )
+                    continue
+            break
 
         cls = _resolve_instance_or_class(attr_expr.value)
         if cls is None:
@@ -5745,7 +5788,12 @@ def _collect_writes_in_function(
                     seeded_enter_identity = False
 
                     def _context_is_dict_view(expr: ast.AST) -> bool:
-                        """``d.keys()`` / ``k()`` when ``k = d.keys`` (Name-bound)."""
+                        """``d.keys()`` / ``k()`` / ``fk([Mut])`` when Name-bound.
+
+                        Shared with identity session seeding so ``with`` as-targets
+                        observe class keys from keys/values/items/fromkeys views
+                        (Unknown > false PASS).
+                        """
 
                         peeled = expr
                         while isinstance(peeled, ast.NamedExpr):
@@ -5761,20 +5809,14 @@ def _collect_writes_in_function(
                             func = func.value
                             while isinstance(func, ast.NamedExpr):
                                 func = func.value
-                        if isinstance(func, ast.Attribute) and func.attr in {
-                            "keys",
-                            "values",
-                            "items",
-                        }:
+                        _VIEW_CTX = {"keys", "values", "items", "fromkeys"}
+                        if isinstance(func, ast.Attribute) and func.attr in _VIEW_CTX:
                             return True
-                        # Name-bound: ``k = d.keys; with k() as ks``.
+                        # Name-bound: ``k = d.keys; with k() as ks`` /
+                        # ``fk = dict.fromkeys; with fk([Mut]) as ks``.
                         if isinstance(func, ast.Name):
                             view = request_aliases.dict_view_products.get(func.id)
-                            if view is not None and view.split(".")[-1] in {
-                                "keys",
-                                "values",
-                                "items",
-                            }:
+                            if view is not None and view.split(".")[-1] in _VIEW_CTX:
                                 return True
                         return False
 

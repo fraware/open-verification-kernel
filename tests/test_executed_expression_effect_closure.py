@@ -4785,6 +4785,9 @@ def test_eleventh_pass_identity_higher_order_apply_never_authorized() -> None:
             ("{f(Mut) for f in [type.__call__]}", ""),
             ("{i: f(Mut) for i, f in enumerate([type.__call__])}", ""),
             ("(lambda f: f(Mut))(type.__call__)", ""),
+            ("(lambda f, *a: f(Mut))(type.__call__)", ""),
+            ("(lambda f, **k: f(Mut))(type.__call__)", ""),
+            ("(lambda f=type.__call__: f(Mut))()", ""),
             (
                 'getattr(type, "__new__").__call__(type, "C", (Base,), {})',
                 "",
@@ -4859,6 +4862,25 @@ match {"m": Mut.make}:
     case {**rest}:
         rest["m"].__call__()
 """.strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+getattr(Mut, "make").__call__()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+fns = [Mut.make]
+fns[0].__call__()
+""".strip(),
     )
     for body in cases:
         src = (
@@ -4882,6 +4904,10 @@ def test_eleventh_pass_lexical_name_views_and_fromkeys_never_authorized() -> Non
         (
             ('g={"c":Mut}.items; (k,C),=g(); C()', ""),
             ("fk=dict.fromkeys; C,=fk([Mut]); C()", ""),
+            (
+                "fk=dict.fromkeys\nwith fk([Mut]) as ks:\n    C,=ks\n    C()",
+                "",
+            ),
             ("C=next(iter({Mut:1})); C()", ""),
             ('d={Mut:1}; d|={}; C,=copy.copy(d).keys(); C()', "import copy"),
             ('k,C=dict.popitem({"c":Mut}); C()', ""),
@@ -4989,6 +5015,10 @@ def test_eleventh_pass_interproc_name_view_and_install_never_authorized() -> Non
             ("d={Mut:1}\nk=d.keys; C=next(iter(k())); C()", ""),
             (
                 'd={"c":Mut}\nk=d.values\nwith k() as ks:\n    C,=ks\n    C()',
+                "",
+            ),
+            (
+                "d={Mut:1}\nk=d.keys\nwith k() as ks:\n    C,=ks\n    C()",
                 "",
             ),
             ("d={Mut:1}\nviews=[d.keys]\nfor C in views[0]():\n    C()", ""),
