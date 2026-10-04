@@ -442,7 +442,7 @@ async def handler(request, bypass_filter: bool = False, user = Depends(get_curre
 def test_persistent_state_round_trip_and_version_invalidation(tmp_path) -> None:
     """13. Persistent-state round trip and version invalidation."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.40.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.62.0"
 
     trusted_helpers = """
 def write_state(state, value):
@@ -1677,3 +1677,487 @@ async def handler(request, bypass_filter: bool = False, user = Depends(get_curre
     )
     for item in incremental.ir.bypass_authority_evidence:
         assert item.reason != "source_proved_server_authority_write"
+
+
+def test_for_else_from_pre_loop_env_never_authorized() -> None:
+    """for-else walks from pre-loop env so body-mutated aliases cannot drop writes."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = request.state
+    for _ in [1]:
+        s = object()
+    else:
+        s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_for_iter_boolop_packing_never_authorized() -> None:
+    """For-iter BoolOp packing of ``[request.state]`` counts body writes."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False, flag=True):
+    request.state.bypass_filter = True
+    for s in (flag and [request.state] or [request.state]):
+        s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_ifexp_request_dot_state_write_never_authorized() -> None:
+    """``(request if f else request).state.field = client`` is counted."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False, flag=True):
+    request.state.bypass_filter = True
+    (request if flag else request).state.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_getattr_boolop_request_state_write_never_authorized() -> None:
+    """``getattr(flag and request or request, "state").field = client``."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False, flag=True):
+    request.state.bypass_filter = True
+    getattr(flag and request or request, "state").bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_subscript_projection_state_write_never_authorized() -> None:
+    """``[request.state][0].field = client`` is may-alias / dynamic, not omitted."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    [request.state][0].bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_list_set_projection_state_write_never_authorized() -> None:
+    """``list({request.state})[0].field = client`` must not omit the write."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    list({request.state})[0].bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_dict_values_projection_state_write_never_authorized() -> None:
+    """``list({\"k\": request.state}.values())[0].field = client`` residual."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    list({"k": request.state}.values())[0].bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_next_iter_dict_values_write_never_authorized() -> None:
+    """``next(iter({\"a\": request.state}.values())).field = client`` residual."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    next(iter({"a": request.state}.values())).bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_for_dict_values_inline_never_authorized() -> None:
+    """``for s in {\"k\": request.state}.values():`` must escape / count writes."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    for s in {"k": request.state}.values():
+        s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_for_module_generator_packing_never_authorized() -> None:
+    """Module-level generator yielding packed request.state must not authorize."""
+
+    findings = _unit(
+        """
+import helpers
+def gen(items):
+    for x in items:
+        yield x
+def handler(request, bypass_filter=False, flag=True):
+    request.state.bypass_filter = True
+    for s in gen([request.state] if flag else [request.state]):
+        s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_async_for_module_generator_packing_never_authorized() -> None:
+    """Async module-level generator packing request.state must not authorize."""
+
+    findings = _unit(
+        """
+import helpers
+async def agen(items):
+    for x in items:
+        yield x
+async def handler(request, bypass_filter=False, flag=True):
+    request.state.bypass_filter = True
+    async for s in agen(flag and [request.state] or [request.state]):
+        s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_try_finally_no_handler_joins_exceptional_predecessor() -> None:
+    """try/finally with no handler joins exceptional pred before finally."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    try:
+        helpers.write_state = evil
+        raise ValueError()
+    finally:
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_ifexp_subscript_store_after_trusted_never_authorized() -> None:
+    """Subscript store on IfExp state base must use classify() like attrs."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False, flag=True):
+    request.state.bypass_filter = True
+    (request.state if flag else request)["bypass_filter"] = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_boolop_subscript_store_after_trusted_never_authorized() -> None:
+    """Subscript store on BoolOp state base must not omit the client write."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False, flag=True):
+    request.state.bypass_filter = True
+    (flag and request.state)["bypass_filter"] = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_namedexpr_subscript_store_after_trusted_never_authorized() -> None:
+    """Subscript store on NamedExpr state base must not omit the client write."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    (s := request.state)["bypass_filter"] = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_dict_get_projection_write_never_authorized() -> None:
+    """``{\"s\": request.state}.get(\"s\").field = client`` must not authorize."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = {"s": request.state}.get("s")
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_dict_pop_projection_write_never_authorized() -> None:
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = {"s": request.state}.pop("s")
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_operator_getitem_projection_write_never_authorized() -> None:
+    findings = _unit(
+        """
+import helpers
+import operator
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = operator.getitem({"s": request.state}, "s")
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_itemgetter_projection_write_never_authorized() -> None:
+    findings = _unit(
+        """
+import helpers
+import operator
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = operator.itemgetter("s")({"s": request.state})
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_alias_lattice_projection_variants_never_authorized() -> None:
+    """Unbound/aliased dict/operator/MappingProxyType/| projections."""
+
+    for routes in (
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = dict.get({"s": request.state}, "s")
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from operator import itemgetter
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = itemgetter("s")({"s": request.state})
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator as op
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = op.itemgetter("s")({"s": request.state})
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = dict.__getitem__({"s": request.state}, "s")
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = getattr({"s": request.state}, "get")("s")
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    k, s = {"s": request.state}.popitem()
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = operator.methodcaller("get", "s")({"s": request.state})
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from types import MappingProxyType
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = MappingProxyType({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = ({} | {"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import types
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = types.MappingProxyType({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import types as t
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = t.MappingProxyType({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from types import MappingProxyType as MPT
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = MPT({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from operator import getitem as gi
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = gi({"s": request.state}, "s")
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from operator import itemgetter as ig
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = ig("s")({"s": request.state})
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from operator import methodcaller as mc
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    s = mc("get", "s")({"s": request.state})
+    s.bypass_filter = bypass_filter
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+        assert findings[0].status in {"violated", "unknown"}
