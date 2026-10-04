@@ -144,7 +144,7 @@ def test_persistent_fastapi_state_round_trips_typed_state(tmp_path) -> None:
         loaded.contract_composition_state.contracts.keys()
         == state.contract_composition_state.contracts.keys()
     )
-    # #157 persisted fields must survive the 0.75.0 round-trip.
+    # #157 persisted fields must survive the 0.76.0 round-trip.
     assert loaded.head_repository_python_manifest_digest is not None
     assert (
         loaded.head_repository_python_manifest_digest
@@ -159,14 +159,14 @@ def test_persistent_fastapi_state_round_trips_typed_state(tmp_path) -> None:
 def test_old_persistent_fastapi_state_implementation_version_is_cache_miss(
     tmp_path,
 ) -> None:
-    """0.74.0 key identity must not load under 0.75.0 (#173)."""
+    """0.75.0 key identity must not load under 0.76.0 (#173)."""
 
     from ovk.compilers.authorization.persistent_fastapi_state import (
         PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION,
         _key_components,
     )
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.75.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.76.0"
 
     summary_root = tmp_path / "summaries"
     state_root = tmp_path / "state"
@@ -187,8 +187,8 @@ def test_old_persistent_fastapi_state_implementation_version_is_cache_miss(
         profile_digest=state.profile_digest,
     )
     record = json.loads(cache_path.read_text(encoding="utf-8"))
-    # Forge a pre-audit implementation version inside the current key file.
-    record["key_components"]["implementation_version"] = "0.74.0"
+    # Forge a prior implementation version inside the current key file.
+    record["key_components"]["implementation_version"] = "0.75.0"
     record["key_digest"] = content_digest(record["key_components"])
     cache_path.write_text(
         json.dumps(record, indent=2, sort_keys=True) + "\n",
@@ -198,13 +198,13 @@ def test_old_persistent_fastapi_state_implementation_version_is_cache_miss(
         repo=state.repo,
         profile_digest=state.profile_digest,
     ) is None
-    # Current key components still advertise 0.75.0.
+    # Current key components still advertise 0.76.0.
     assert (
         _key_components(
             repo=state.repo,
             profile_digest=state.profile_digest,
         )["implementation_version"]
-        == "0.75.0"
+        == "0.76.0"
     )
 
 

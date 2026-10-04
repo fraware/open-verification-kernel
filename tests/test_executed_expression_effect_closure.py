@@ -10110,6 +10110,65 @@ def test_twenty_third_pass_identity_name_slice_pack_never_authorized() -> None:
                 "xs=[Mut]\ng(xs, key=type.__call__)",
                 "",
             ),
+            # Relaunch: getattr star packs + dict() mid-bind pop/setdefault.
+            (
+                "d=getattr(list, *('__dict__',)); m=d.get('sort'); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=getattr(list, *['__dict__']); m=d.get('sort'); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=getattr(list, *(0 or ('__dict__',))); m=d.get('sort'); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "attrs=('__dict__',)\n"
+                "d=getattr(list, *tuple(attrs)); m=d.get('sort'); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "attrs=('__dict__',)\n"
+                "d=getattr(list, *attrs); m=d.get('sort'); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=builtins.getattr(list, *('__dict__',)); m=d.get('sort'); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "import builtins",
+            ),
+            (
+                "d=dict(list.__dict__); m=d.pop(*('sort',)); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=dict(list.__dict__); m=d.setdefault(*('sort',)); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "import operator\n"
+                "args=(list.__dict__, 'sort')\n"
+                "m=operator.getitem(*args); nm='__get__'; "
+                "g=getattr(m, nm)(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "import operator",
+            ),
             # Twenty-second keep-closed anchors.
             (
                 "attr='__dict__'; g=getattr(list, attr).get('sort')"
@@ -10119,6 +10178,12 @@ def test_twenty_third_pass_identity_name_slice_pack_never_authorized() -> None:
             ),
             (
                 "d=list.__dict__; m=d.get('sort'); g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=list.__dict__; m=d.get('sort'); nm='__get__'; "
+                "g=getattr(m, nm)(None, list)\n"
                 "xs=[Mut]\ng(xs, key=type.__call__)",
                 "",
             ),
@@ -10191,7 +10256,34 @@ def test_twenty_third_pass_cf_importfrom_star_copy_never_authorized() -> None:
                 f'for f,a in p[0]([list.append],'
                 f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
                 f"xs[0](exec)\nns.e({ex})",
-                # Twenty-second keep-closed anchors.
+                # Relaunch: Attribute builtins.map + packed partial(zip).
+                f'ns=types.SimpleNamespace()\n'
+                f"M=builtins.map\n"
+                f'list(M(list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"M=builtins.map\n"
+                f'if list(M(list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])): pass\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in [partial(zip)][0]([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in (0 or partial(zip))([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in next(iter([partial(zip)]))([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in [partial([zip][0])][0]([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                # Twenty-second / relaunch keep-closed anchors.
                 f'ns=types.SimpleNamespace()\nxs=[]\n'
                 f"Z=zip\n"
                 f'for f,a in Z([list.append],'
@@ -10200,6 +10292,20 @@ def test_twenty_third_pass_cf_importfrom_star_copy_never_authorized() -> None:
                 f'ns=types.SimpleNamespace()\n'
                 f'list(map(list.append, [xs:=[]], '
                 f'[partial(setattr, ns, "e")])); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f"Z=builtins.zip\n"
+                f'for f,a in Z([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in partial(zip)([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'Z=getattr(builtins,"zip")\n'
+                f'for f,a in Z([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
                 f"xs[0](exec)\nns.e({ex})",
             )
         )
@@ -10292,6 +10398,27 @@ def write_state(state, value):
         "from operator import methodcaller; views=[]; "
         "a=('' or 'append'); nm=a; methodcaller(nm, n.install)(views); "
         "views[0](evil)",
+        # Relaunch: methodcaller/nullcontext star packs + Name seeds.
+        "from operator import methodcaller; views=[]; "
+        "methodcaller(*(() if False else ('append', n.install)))(views); "
+        "views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "args=(0 or ('append', n.install)); methodcaller(*args)(views); "
+        "views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "args=('' or ('append', n.install)); methodcaller(*args)(views); "
+        "views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "args=('append', n.install); "
+        "methodcaller(*(() if False else args))(views); views[0](evil)",
+        "from contextlib import nullcontext; args=(n.install,); "
+        "f=nullcontext(*args).__enter__(); f(evil)",
+        "from contextlib import nullcontext; "
+        "f=nullcontext(*(0 or (n.install,))).__enter__(); f(evil)",
+        "from contextlib import nullcontext; "
+        "f=nullcontext(*((n.install,) if True else ())).__enter__(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,); "
+        "f=nullcontext(*(() if False else args)).__enter__(); f(evil)",
         # Keep-closed anchors.
         "from operator import methodcaller; views=[]; "
         "methodcaller(('x' if False else 'append'), n.install)(views); "
@@ -10301,6 +10428,8 @@ def write_state(state, value):
         "from operator import methodcaller; views=[]; "
         "nm=('append' if True else 'x'); methodcaller(nm, n.install)(views); "
         "views[0](evil)",
+        "from contextlib import nullcontext; "
+        "f=nullcontext(*(n.install,)).__enter__(); f(evil)",
     ):
         routes = f"""
 import pkg.nested as n
@@ -10353,6 +10482,18 @@ def test_twenty_third_pass_positive_authorized_smoke() -> None:
         'for f,a in Z([list.append],'
         '[(xs, partial(setattr, ns, "x"))]): f(*a)\n'
         "xs[0](1)\nns.x",
+        "import types\nfrom functools import partial\nimport builtins\n"
+        'ns=types.SimpleNamespace()\n'
+        "M=builtins.map\n"
+        'list(M(list.append, [xs:=[]], [partial(setattr, ns, "x")])); '
+        "xs[0](1)\nns.x",
+        "import types\nfrom functools import partial\n"
+        'ns=types.SimpleNamespace()\nxs=[]\n'
+        'for f,a in [partial(zip)][0]([list.append],'
+        '[(xs, partial(setattr, ns, "x"))]): f(*a)\n'
+        "xs[0](1)\nns.x",
+        "d=getattr(list, *('__dict__',)); m=d.get('sort'); "
+        "g=m.__get__(None, list)\nxs=[1]\ng(xs, key=lambda x: x)",
         "import operator\nfrom functools import partial\nd={}\n"
         "xs=[getattr(operator,'methodcaller')('copy')]\n"
         "e=[partial(*(0 or (xs.__getitem__, slice(0,1))))][0]()[0](d)\n"
@@ -10373,4 +10514,4 @@ def test_twenty_third_pass_positive_authorized_smoke() -> None:
 def test_persistent_version_bumped_for_executed_expr_closure() -> None:
     """Cache / semantic versions bump with PASS-semantics change."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.75.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.76.0"
