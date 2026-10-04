@@ -883,9 +883,17 @@ class _RequestStateAliasEnv:
                     return self.string_constant_names.get(expr.id)
                 return None
 
+            from ovk.compilers.authorization.python_callee_resolution import (
+                _peel_transparent_callee as _peel_call_view,
+            )
+
             func = node.func
             while isinstance(func, ast.NamedExpr):
                 func = func.value
+            # ``getattr(...).__call__(0)`` / packed ``[getattr][0].__call__`` —
+            # peel transparent ``__call__`` before view projection
+            # (Unknown > false PASS).
+            func = _peel_call_view(func)
             # Nested ``attrgetter("pop")(xs)(0)`` — peel applied attrgetter
             # Attribute before the outer index. Skip factories themselves
             # (``attrgetter("pop")``) so args are not misread as the carrier
@@ -7226,16 +7234,75 @@ def _collect_writes_in_function(
             func = child.func
             while isinstance(func, ast.NamedExpr):
                 func = func.value
+            # ``operator.call(p, *([args].pop(0)))`` /
+            # ``methodcaller("__call__", *([args].pop(0)))(operator.setitem)`` /
+            # packed methodcaller("__call__", p, keys)(operator.call) —
+            # rewrite onto the underlying setitem Call (Unknown > false PASS).
+            from ovk.compilers.authorization.python_callee_resolution import (
+                _flatten_starred_args as _flat_call_si,
+                _methodcaller_call_bound_args as _mc_call_si,
+                _methodcaller_static_name,
+                _projection_factory_name,
+                _shallow_packed_callee_exprs,
+            )
+
+            call_proj = _projection_factory_name(
+                child,
+                projection_aliases=request_aliases.operator_projection_aliases,
+                getattr_aliases=frozenset(getattr_aliases),
+            )
+            if call_proj is None:
+                for cand in _shallow_packed_callee_exprs(func):
+                    nested = cand
+                    while isinstance(nested, ast.NamedExpr):
+                        nested = nested.value
+                    if isinstance(nested, ast.Name):
+                        call_proj = request_aliases.operator_projection_aliases.get(
+                            nested.id, nested.id
+                        )
+                    elif isinstance(nested, ast.Attribute):
+                        call_proj = _PROJECTION_DUNDER_ALIASES.get(
+                            nested.attr, nested.attr
+                        )
+                    if call_proj == "call":
+                        break
+                    call_proj = None
+            if call_proj == "call":
+                flat_call = _flat_call_si(
+                    child.args,
+                    sequence_aliases=request_aliases.sequence_literal_aliases,
+                )
+                if len(flat_call) >= 2:
+                    child = ast.Call(
+                        func=flat_call[0],
+                        args=list(flat_call[1:]),
+                        keywords=list(child.keywords),
+                    )
+                    func = child.func
+                    while isinstance(func, ast.NamedExpr):
+                        func = func.value
+            mc_bound = _mc_call_si(
+                child,
+                projection_aliases=request_aliases.operator_projection_aliases,
+                getattr_aliases=frozenset(getattr_aliases),
+                sequence_aliases=request_aliases.sequence_literal_aliases,
+            )
+            if mc_bound is not None and child.args:
+                recv = child.args[0]
+                while isinstance(recv, ast.NamedExpr):
+                    recv = recv.value
+                child = ast.Call(
+                    func=recv,
+                    args=list(mc_bound),
+                    keywords=[],
+                )
+                func = child.func
+                while isinstance(func, ast.NamedExpr):
+                    func = func.value
             # ``operator.setitem(keys, "z", val)`` / getattr setitem /
             # packed ``[operator.setitem][0]`` / Name-bound /
             # ``operator.ior(keys, {…})`` / ``operator.__ior__`` /
             # ``methodcaller("__setitem__", …)(keys)``.
-            from ovk.compilers.authorization.python_callee_resolution import (
-                _projection_factory_name,
-                _methodcaller_static_name,
-                _shallow_packed_callee_exprs,
-            )
-
             proj = _projection_factory_name(
                 child,
                 projection_aliases=request_aliases.operator_projection_aliases,
@@ -8309,6 +8376,42 @@ def _collect_writes_in_function(
                             )
                         )
                         seeded_enter_identity = True
+                    elif identity_session is not None and nc_enter is None:
+                        # Deferred Name-bound cm packing peels:
+                        # ``with (0 or cm) as f`` / ``with [cm][0] as f`` —
+                        # synthesize ``f = ctx.__enter__()`` so Assign-enter
+                        # shares the bare ``cm.__enter__()`` seed path
+                        # (Unknown > false PASS).
+                        from ovk.compilers.authorization.python_callee_resolution import (
+                            _iter_boolop_ifexp_arms as _with_arms,
+                            _peel_call_func as _with_peel,
+                            _shallow_packed_callee_exprs as _with_shallow,
+                        )
+
+                        deferred_cm_name = False
+                        for _arm in _with_shallow(item.context_expr):
+                            for _seed in _with_arms(_arm):
+                                if isinstance(_with_peel(_seed), ast.Name):
+                                    deferred_cm_name = True
+                                    break
+                            if deferred_cm_name:
+                                break
+                        if deferred_cm_name:
+                            identity_session.observe_statement(
+                                ast.Assign(
+                                    targets=[item.optional_vars],
+                                    value=ast.Call(
+                                        func=ast.Attribute(
+                                            value=item.context_expr,
+                                            attr="__enter__",
+                                            ctx=ast.Load(),
+                                        ),
+                                        args=[],
+                                        keywords=[],
+                                    ),
+                                )
+                            )
+                            seeded_enter_identity = True
                     if enter_cls is not None or enter_ctor is not None:
                         for name in as_names:
                             if enter_ctor is not None:
