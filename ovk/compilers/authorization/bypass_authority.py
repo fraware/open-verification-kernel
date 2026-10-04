@@ -402,6 +402,9 @@ class _RequestStateAliasEnv:
     # Bound ns/dict views: ``g = getattr(ns, "get")`` / ``g = ns.get``.
     dict_view_products: dict[str, str] = dc_field(default_factory=dict)
     bound_view_receivers: dict[str, str] = dc_field(default_factory=dict)
+    nullcontext_aliases: set[str] = dc_field(
+        default_factory=lambda: {"nullcontext"}
+    )
     # Name-bound string lists: ``keys=["MappingProxyType"]`` for ``keys[0]``.
     sequence_string_lists: dict[str, tuple[str, ...]] = dc_field(
         default_factory=dict
@@ -447,6 +450,8 @@ class _RequestStateAliasEnv:
                 local = alias.asname or alias.name
                 if alias.name == "MappingProxyType":
                     self.adapter_aliases.add(local)
+                elif alias.name == "nullcontext":
+                    self.nullcontext_aliases.add(local)
                 elif alias.name in _OPERATOR_PROJECTION_NAMES:
                     self.operator_projection_aliases[local] = alias.name
                 elif alias.name in {"vars", "globals", "locals"}:
@@ -1029,6 +1034,8 @@ class _RequestStateAliasEnv:
             if value.id in _CONTAINER_ADAPTER_NAMES or value.id in self.adapter_aliases:
                 if value.id == "MappingProxyType" or value.id in self.adapter_aliases:
                     self.adapter_aliases.add(name)
+            if value.id in self.nullcontext_aliases:
+                self.nullcontext_aliases.add(name)
             if value.id in {"vars", "globals", "locals"} or value.id in self.ns_projection_aliases:
                 self.ns_projection_aliases.add(name)
             if value.id in _OPERATOR_PROJECTION_NAMES:
@@ -1065,6 +1072,8 @@ class _RequestStateAliasEnv:
         elif isinstance(value, ast.Attribute):
             if value.attr == "MappingProxyType":
                 self.adapter_aliases.add(name)
+            if value.attr == "nullcontext":
+                self.nullcontext_aliases.add(name)
             if value.attr in {"vars", "globals", "locals"}:
                 self.ns_projection_aliases.add(name)
             if value.attr in _OPERATOR_PROJECTION_NAMES:
@@ -1272,6 +1281,8 @@ class _RequestStateAliasEnv:
                 attr = value.args[1].value
                 if attr == "MappingProxyType":
                     self.adapter_aliases.add(name)
+                if attr == "nullcontext":
+                    self.nullcontext_aliases.add(name)
                 if attr in {"vars", "globals", "locals"}:
                     self.ns_projection_aliases.add(name)
                 if attr in _OPERATOR_PROJECTION_NAMES:
@@ -1606,7 +1617,8 @@ class _RequestStateAliasEnv:
                                 copy_src = peeled.args[0]
                                 break
                             # ``mc=methodcaller("copy"); next(iter([mc]))(keys)`` /
-                            # ``p=partial(copy.copy,keys); next(iter([p]))()``.
+                            # ``p=partial(copy.copy,keys); next(iter([p]))()`` /
+                            # ``p=partial(copy.copy); next(iter([p]))(keys)``.
                             bound_mc = self.methodcaller_factories.get(nested.id)
                             if (
                                 bound_mc is not None
@@ -1622,16 +1634,45 @@ class _RequestStateAliasEnv:
                             ):
                                 copy_src = peeled.args[0]
                                 break
-                            if not peeled.args:
-                                bound_partial = self.partial_factories.get(
-                                    nested.id
+                            bound_partial = self.partial_factories.get(nested.id)
+                            if bound_partial is not None and bound_partial.args:
+                                from ovk.compilers.authorization.python_callee_resolution import (
+                                    _getattr_static_name as _g_next_partial,
+                                    _peel_call_func as _peel_next_partial,
                                 )
-                                if (
-                                    bound_partial is not None
-                                    and len(bound_partial.args) >= 2
-                                ):
-                                    copy_src = bound_partial.args[1]
-                                    break
+
+                                b0 = _peel_next_partial(bound_partial.args[0])
+                                is_copy_p = (
+                                    (
+                                        isinstance(b0, ast.Attribute)
+                                        and b0.attr in {"copy", "deepcopy"}
+                                    )
+                                    or (
+                                        isinstance(b0, ast.Name)
+                                        and (
+                                            b0.id in {"copy", "deepcopy"}
+                                            or self.operator_projection_aliases.get(
+                                                b0.id
+                                            )
+                                            in {"copy", "deepcopy"}
+                                        )
+                                    )
+                                    or (
+                                        isinstance(b0, ast.Call)
+                                        and _g_next_partial(
+                                            b0,
+                                            getattr_aliases=frozenset(g_aliases),
+                                        )
+                                        in {"copy", "deepcopy"}
+                                    )
+                                )
+                                if is_copy_p:
+                                    if len(bound_partial.args) >= 2 and not peeled.args:
+                                        copy_src = bound_partial.args[1]
+                                        break
+                                    if len(bound_partial.args) == 1 and peeled.args:
+                                        copy_src = peeled.args[0]
+                                        break
                         if isinstance(nested, ast.Call):
                             gn = _g_static(
                                 nested, getattr_aliases=frozenset(g_aliases)
@@ -1695,14 +1736,45 @@ class _RequestStateAliasEnv:
                         ):
                             copy_src = peeled.args[0]
                             break
-                        if not peeled.args:
-                            bound_partial = self.partial_factories.get(nested.id)
-                            if (
-                                bound_partial is not None
-                                and len(bound_partial.args) >= 2
-                            ):
-                                copy_src = bound_partial.args[1]
-                                break
+                        bound_partial = self.partial_factories.get(nested.id)
+                        if bound_partial is not None and bound_partial.args:
+                            from ovk.compilers.authorization.python_callee_resolution import (
+                                _getattr_static_name as _g_pack_partial,
+                                _peel_call_func as _peel_pack_partial,
+                            )
+
+                            b0 = _peel_pack_partial(bound_partial.args[0])
+                            is_copy_p = (
+                                (
+                                    isinstance(b0, ast.Attribute)
+                                    and b0.attr in {"copy", "deepcopy"}
+                                )
+                                or (
+                                    isinstance(b0, ast.Name)
+                                    and (
+                                        b0.id in {"copy", "deepcopy"}
+                                        or self.operator_projection_aliases.get(
+                                            b0.id
+                                        )
+                                        in {"copy", "deepcopy"}
+                                    )
+                                )
+                                or (
+                                    isinstance(b0, ast.Call)
+                                    and _g_pack_partial(
+                                        b0,
+                                        getattr_aliases=frozenset(g_aliases),
+                                    )
+                                    in {"copy", "deepcopy"}
+                                )
+                            )
+                            if is_copy_p:
+                                if len(bound_partial.args) >= 2 and not peeled.args:
+                                    copy_src = bound_partial.args[1]
+                                    break
+                                if len(bound_partial.args) == 1 and peeled.args:
+                                    copy_src = peeled.args[0]
+                                    break
                     if isinstance(nested, ast.Call):
                         gn = _g_static2(
                             nested, getattr_aliases=frozenset(g_aliases)
@@ -1777,6 +1849,7 @@ class _RequestStateAliasEnv:
             may_request_names=set(self.may_request_names),
             may_state_names=set(self.may_state_names),
             adapter_aliases=set(self.adapter_aliases),
+            nullcontext_aliases=set(self.nullcontext_aliases),
             container_adapter_packs={
                 k: dict(v) for k, v in self.container_adapter_packs.items()
             },
@@ -1802,6 +1875,7 @@ class _RequestStateAliasEnv:
         self.may_request_names = set(other.may_request_names)
         self.may_state_names = set(other.may_state_names)
         self.adapter_aliases = set(other.adapter_aliases)
+        self.nullcontext_aliases = set(other.nullcontext_aliases)
         self.container_adapter_packs = {
             k: dict(v) for k, v in other.container_adapter_packs.items()
         }
@@ -2528,6 +2602,7 @@ def join_request_state_alias_envs(
     may_request -= must_request
     may_state -= must_state
     adapter_aliases: set[str] = set()
+    nullcontext_aliases: set[str] = {"nullcontext"}
     container_adapter_packs: dict[str, dict[object, tuple[str, ...]]] = {}
     operator_projection_aliases: dict[str, str] = {}
     ns_projection_aliases: set[str] = set()
@@ -2543,6 +2618,7 @@ def join_request_state_alias_envs(
     partial_factories: dict[str, ast.Call] = {}
     for state in states:
         adapter_aliases |= state.adapter_aliases
+        nullcontext_aliases |= state.nullcontext_aliases
         for name, pack in state.container_adapter_packs.items():
             bucket = container_adapter_packs.setdefault(name, {})
             for key, names in pack.items():
@@ -2566,6 +2642,7 @@ def join_request_state_alias_envs(
         may_request_names=may_request,
         may_state_names=may_state,
         adapter_aliases=adapter_aliases,
+        nullcontext_aliases=nullcontext_aliases,
         container_adapter_packs=container_adapter_packs,
         operator_projection_aliases=operator_projection_aliases,
         ns_projection_aliases=ns_projection_aliases,
@@ -6621,33 +6698,25 @@ def _collect_writes_in_function(
                 set_base = child.args[0]
                 set_key_node = child.args[1]
                 set_val_node = child.args[2]
-            elif (
-                proj == "setitem"
-                and isinstance(func, ast.Call)
-                and len(child.args) >= 2
-                and len(func.args) >= 1
-            ):
-                # Bound ``getattr(keys, "__setitem__")(k, v)``.
-                set_base = func.args[0]
-                set_key_node = child.args[0]
-                set_val_node = child.args[1]
-            else:
+            # Name-bound view products before getattr Call layout: Name ``si``
+            # is also aliased to operator ``setitem``, so ``next(iter([si]))``
+            # must not treat ``next(...)`` as ``getattr(keys,"__setitem__")``.
+            if set_base is None and (
+                proj == "setitem" or proj is None
+            ) and len(child.args) >= 2:
                 from ovk.compilers.authorization.python_callee_resolution import (
-                    _is_partial_factory as _is_partial_setitem,
-                    _projection_factory_name as _proj_partial_bound,
-                    _getattr_static_name as _g_setitem_bound,
-                    _peel_call_func as _peel_setitem,
+                    _peel_transparent_callee as _peel_si_call,
                 )
 
-                # Name-bound ``si=getattr(keys,"__setitem__"); si(k,v)`` /
-                # ``si=keys.__setitem__; si(k,v)``.
-                if (
-                    isinstance(func, ast.Name)
-                    and len(child.args) >= 2
-                    and set_base is None
-                ):
-                    view = request_aliases.dict_view_products.get(func.id)
-                    recv = request_aliases.bound_view_receivers.get(func.id)
+                for si_cand in [func, *_shallow_packed_callee_exprs(func)]:
+                    si_nested = si_cand
+                    while isinstance(si_nested, ast.NamedExpr):
+                        si_nested = si_nested.value
+                    si_nested = _peel_si_call(si_nested)
+                    if not isinstance(si_nested, ast.Name):
+                        continue
+                    view = request_aliases.dict_view_products.get(si_nested.id)
+                    recv = request_aliases.bound_view_receivers.get(si_nested.id)
                     if (
                         view is not None
                         and view.split(".")[-1] in {"__setitem__", "setitem"}
@@ -6656,9 +6725,30 @@ def _collect_writes_in_function(
                         set_base = ast.Name(id=recv, ctx=ast.Load())
                         set_key_node = child.args[0]
                         set_val_node = child.args[1]
+                        break
+            if (
+                set_base is None
+                and proj == "setitem"
+                and isinstance(func, ast.Call)
+                and len(child.args) >= 2
+                and len(func.args) >= 1
+            ):
+                # Bound ``getattr(keys, "__setitem__")(k, v)``.
+                set_base = func.args[0]
+                set_key_node = child.args[0]
+                set_val_node = child.args[1]
+            if set_base is None:
+                from ovk.compilers.authorization.python_callee_resolution import (
+                    _is_partial_factory as _is_partial_setitem,
+                    _projection_factory_name as _proj_partial_bound,
+                    _getattr_static_name as _g_setitem_bound,
+                    _peel_call_func as _peel_setitem,
+                )
+
                 partial_candidates = [func, *_shallow_packed_callee_exprs(func)]
                 # Recover Name-bound ``p=partial(setitem, keys, k); p(v)`` /
-                # ``(0 or p)(v)`` / ``next(iter([p]))(v)`` via shallow peel.
+                # ``p=partial(setitem); p(keys,k,v)`` /
+                # ``(0 or p)(…)`` / ``next(iter([p]))(…)`` via shallow peel.
                 if isinstance(func, ast.Name):
                     bound_p = request_aliases.partial_factories.get(func.id)
                     if bound_p is not None:
@@ -6737,6 +6827,12 @@ def _collect_writes_in_function(
                         set_base = nested.args[1]
                         set_key_node = child.args[0]
                         set_val_node = child.args[1]
+                        break
+                    # ``partial(setitem)(keys, k, v)`` — zero-bound apply.
+                    if len(nested.args) == 1 and len(child.args) >= 3:
+                        set_base = child.args[0]
+                        set_key_node = child.args[1]
+                        set_val_node = child.args[2]
                         break
                     # ``partial(keys.__setitem__|getattr(keys,"__setitem__"), k)(v)``.
                     if (
@@ -7524,7 +7620,34 @@ def _collect_writes_in_function(
                     # ``with ({Mut:1}.keys()) as ks: C, = ks``.
                     # ``nullcontext(n.install)`` — enter returns the argument
                     # (shared peel with identity scanner; Unknown > false PASS).
-                    nc_enter = _nullcontext_enter_arg(item.context_expr)
+                    nc_enter = _nullcontext_enter_arg(
+                        item.context_expr,
+                        nullcontext_aliases=frozenset(
+                            request_aliases.nullcontext_aliases
+                        ),
+                    )
+                    if nc_enter is not None:
+                        from ovk.compilers.authorization.python_callee_resolution import (
+                            _iter_boolop_ifexp_arms as _nc_arms,
+                        )
+
+                        # Prefer Attribute/Call BoolOp/IfExp arm for as-target
+                        # seed (``nullcontext((0 or n.install))``).
+                        arms = _nc_arms(nc_enter)
+                        preferred = None
+                        for arm in arms:
+                            peeled_arm = arm
+                            while isinstance(peeled_arm, ast.NamedExpr):
+                                peeled_arm = peeled_arm.value
+                            if isinstance(
+                                peeled_arm, (ast.Attribute, ast.Call, ast.Name)
+                            ):
+                                preferred = arm
+                                break
+                        if preferred is not None:
+                            nc_enter = preferred
+                        elif arms:
+                            nc_enter = arms[0]
                     seed_value = (
                         enter_return
                         if enter_return is not None
