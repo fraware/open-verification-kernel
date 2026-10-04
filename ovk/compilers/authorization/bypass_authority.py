@@ -406,6 +406,8 @@ class _RequestStateAliasEnv:
     sequence_literal_aliases: dict[str, ast.AST] = dc_field(default_factory=dict)
     # Name-bound ``ig = itemgetter("x")`` → static key payload.
     itemgetter_products: dict[str, object] = dc_field(default_factory=dict)
+    # Name-bound ``mc = methodcaller("__setitem__", …)`` factory Calls.
+    methodcaller_factories: dict[str, ast.Call] = dc_field(default_factory=dict)
 
     @classmethod
     def seed(cls, *, param_names: frozenset[str]) -> "_RequestStateAliasEnv":
@@ -1028,6 +1030,12 @@ class _RequestStateAliasEnv:
                 self.itemgetter_products[name] = self.itemgetter_products[value.id]
             else:
                 self.itemgetter_products.pop(name, None)
+            if value.id in self.methodcaller_factories:
+                self.methodcaller_factories[name] = self.methodcaller_factories[
+                    value.id
+                ]
+            else:
+                self.methodcaller_factories.pop(name, None)
             if value.id in self.dict_view_products:
                 self.dict_view_products[name] = self.dict_view_products[value.id]
                 if value.id in self.bound_view_receivers:
@@ -1046,6 +1054,10 @@ class _RequestStateAliasEnv:
                 self.ns_projection_aliases.add(name)
             if value.attr in _OPERATOR_PROJECTION_NAMES:
                 self.operator_projection_aliases[name] = value.attr
+            else:
+                canon = _PROJECTION_DUNDER_ALIASES.get(value.attr)
+                if canon is not None and canon in _OPERATOR_PROJECTION_NAMES:
+                    self.operator_projection_aliases[name] = canon
             if value.attr in _NS_DICT_VIEW_ATTRS | _DICT_ITER_VIEW_ATTRS | {
                 "fromkeys"
             }:
@@ -1097,7 +1109,9 @@ class _RequestStateAliasEnv:
             while isinstance(func, ast.NamedExpr):
                 func = func.value
             # ``ig = itemgetter("x")`` / ``ig = operator.itemgetter("x")`` /
-            # ``ig = getattr(operator, "itemgetter")("x")``.
+            # ``ig = getattr(operator, "itemgetter")("x")`` /
+            # ``ig = [getattr(operator,"itemgetter")][0]("x")`` /
+            # ``ig = next(iter([getattr(...)]))("x")``.
             is_ig = (
                 isinstance(func, ast.Name)
                 and (
@@ -1121,6 +1135,9 @@ class _RequestStateAliasEnv:
                     and func.args[1].value == "itemgetter"
                 ):
                     is_ig = True
+            if not is_ig and value.args and _is_itemgetter_factory_expr(func):
+                # Packed / BoolOp / IfExp / next(iter) bare factory apply.
+                is_ig = True
             if is_ig and value.args:
                 ig_key = value.args[0]
                 while isinstance(ig_key, ast.NamedExpr):
@@ -1135,6 +1152,59 @@ class _RequestStateAliasEnv:
                     self.itemgetter_products.pop(name, None)
             else:
                 self.itemgetter_products.pop(name, None)
+            # ``mc = methodcaller("__setitem__", …)`` / packed / getattr factory.
+            from ovk.compilers.authorization.python_callee_resolution import (
+                _methodcaller_static_name as _mc_static,
+                _shallow_packed_callee_exprs as _shallow_mc,
+            )
+
+            mc_seed: ast.Call | None = None
+            if _mc_static(
+                value,
+                projection_aliases=self.operator_projection_aliases,
+                getattr_aliases=frozenset(g_aliases),
+            ) is not None:
+                mc_seed = value
+            else:
+                for cand in _shallow_mc(value.func):
+                    nested = cand
+                    while isinstance(nested, ast.NamedExpr):
+                        nested = nested.value
+                    is_mc_factory = (
+                        isinstance(nested, ast.Name)
+                        and (
+                            nested.id == "methodcaller"
+                            or self.operator_projection_aliases.get(nested.id)
+                            == "methodcaller"
+                        )
+                    ) or (
+                        isinstance(nested, ast.Attribute)
+                        and nested.attr == "methodcaller"
+                    )
+                    if isinstance(nested, ast.Call):
+                        g_n = nested.func
+                        while isinstance(g_n, ast.NamedExpr):
+                            g_n = g_n.value
+                        is_g_n = (
+                            isinstance(g_n, ast.Name) and g_n.id in g_aliases
+                        ) or (
+                            isinstance(g_n, ast.Attribute)
+                            and g_n.attr == "getattr"
+                        )
+                        if (
+                            is_g_n
+                            and len(nested.args) >= 2
+                            and isinstance(nested.args[1], ast.Constant)
+                            and nested.args[1].value == "methodcaller"
+                        ):
+                            is_mc_factory = True
+                    if is_mc_factory and value.args:
+                        mc_seed = value
+                        break
+            if mc_seed is not None:
+                self.methodcaller_factories[name] = mc_seed
+            else:
+                self.methodcaller_factories.pop(name, None)
             is_getattr = (
                 isinstance(func, ast.Name) and func.id in g_aliases
             ) or (isinstance(func, ast.Attribute) and func.attr == "getattr")
@@ -1151,6 +1221,11 @@ class _RequestStateAliasEnv:
                     self.ns_projection_aliases.add(name)
                 if attr in _OPERATOR_PROJECTION_NAMES:
                     self.operator_projection_aliases[name] = attr
+                else:
+                    # ``mut = getattr(operator, "__ior__")`` → ior.
+                    canon = _PROJECTION_DUNDER_ALIASES.get(attr)
+                    if canon is not None and canon in _OPERATOR_PROJECTION_NAMES:
+                        self.operator_projection_aliases[name] = canon
                 # ``g = getattr(ns, "get")`` — bound ns view product.
                 if attr in _NS_DICT_VIEW_ATTRS and value.args:
                     self.dict_view_products[name] = attr
@@ -1359,6 +1434,104 @@ class _RequestStateAliasEnv:
                 proj = self.operator_projection_aliases.get(f.id, f.id)
                 if proj in {"copy", "deepcopy"}:
                     copy_src = peeled.args[0]
+                elif f.id == "dict" or proj == "dict":
+                    # ``dict(keys)`` shallow-copies a mapping carrier.
+                    copy_src = peeled.args[0]
+            elif isinstance(f, ast.Call):
+                # ``getattr(copy,"copy")(keys)`` / ``getattr(dict,"copy")(keys)`` /
+                # ``methodcaller("copy")(keys)`` / packed factory applies.
+                from ovk.compilers.authorization.python_callee_resolution import (
+                    _getattr_static_name as _g_static,
+                    _methodcaller_static_name as _mc_copy,
+                    _shallow_packed_callee_exprs as _shallow_copy,
+                    _is_partial_factory as _is_partial_copy,
+                )
+
+                gcopy = _g_static(f, getattr_aliases=frozenset(g_aliases))
+                if gcopy in {"copy", "deepcopy"} and peeled.args:
+                    copy_src = peeled.args[0]
+                elif _mc_copy(
+                    f,
+                    projection_aliases=self.operator_projection_aliases,
+                    getattr_aliases=frozenset(g_aliases),
+                ) == "copy" and peeled.args:
+                    copy_src = peeled.args[0]
+                elif _is_partial_copy(
+                    f,
+                    getattr_aliases=frozenset(g_aliases),
+                ) and len(f.args) >= 2 and not peeled.args:
+                    # ``partial(copy.copy, keys)()``.
+                    copy_src = f.args[1]
+                else:
+                    for cand in _shallow_copy(f):
+                        nested = cand
+                        while isinstance(nested, ast.NamedExpr):
+                            nested = nested.value
+                        if (
+                            isinstance(nested, ast.Attribute)
+                            and nested.attr in {"copy", "deepcopy"}
+                            and peeled.args
+                        ):
+                            copy_src = peeled.args[0]
+                            break
+                        if isinstance(nested, ast.Name) and (
+                            self.operator_projection_aliases.get(nested.id, nested.id)
+                            in {"copy", "deepcopy"}
+                        ) and peeled.args:
+                            copy_src = peeled.args[0]
+                            break
+                        if isinstance(nested, ast.Call):
+                            gn = _g_static(
+                                nested, getattr_aliases=frozenset(g_aliases)
+                            )
+                            if gn in {"copy", "deepcopy"} and peeled.args:
+                                copy_src = peeled.args[0]
+                                break
+                            if (
+                                _mc_copy(
+                                    nested,
+                                    projection_aliases=(
+                                        self.operator_projection_aliases
+                                    ),
+                                    getattr_aliases=frozenset(g_aliases),
+                                )
+                                == "copy"
+                                and peeled.args
+                            ):
+                                copy_src = peeled.args[0]
+                                break
+            else:
+                # Packed ``[copy.copy][0](keys)`` / BoolOp / IfExp / next.
+                from ovk.compilers.authorization.python_callee_resolution import (
+                    _shallow_packed_callee_exprs as _shallow_copy2,
+                    _getattr_static_name as _g_static2,
+                )
+
+                for cand in _shallow_copy2(f):
+                    nested = cand
+                    while isinstance(nested, ast.NamedExpr):
+                        nested = nested.value
+                    if (
+                        isinstance(nested, ast.Attribute)
+                        and nested.attr in {"copy", "deepcopy"}
+                        and peeled.args
+                    ):
+                        copy_src = peeled.args[0]
+                        break
+                    if isinstance(nested, ast.Name) and (
+                        nested.id in {"copy", "deepcopy"}
+                        or self.operator_projection_aliases.get(nested.id)
+                        in {"copy", "deepcopy"}
+                    ) and peeled.args:
+                        copy_src = peeled.args[0]
+                        break
+                    if isinstance(nested, ast.Call):
+                        gn = _g_static2(
+                            nested, getattr_aliases=frozenset(g_aliases)
+                        )
+                        if gn in {"copy", "deepcopy"} and peeled.args:
+                            copy_src = peeled.args[0]
+                            break
             if copy_src is not None:
                 src = copy_src
                 while isinstance(src, ast.NamedExpr):
@@ -1426,6 +1599,7 @@ class _RequestStateAliasEnv:
             sequence_string_lists=dict(self.sequence_string_lists),
             sequence_literal_aliases=dict(self.sequence_literal_aliases),
             itemgetter_products=dict(self.itemgetter_products),
+            methodcaller_factories=dict(self.methodcaller_factories),
         )
 
     def restore(self, other: "_RequestStateAliasEnv") -> None:
@@ -1449,6 +1623,7 @@ class _RequestStateAliasEnv:
         self.sequence_string_lists = dict(other.sequence_string_lists)
         self.sequence_literal_aliases = dict(other.sequence_literal_aliases)
         self.itemgetter_products = dict(other.itemgetter_products)
+        self.methodcaller_factories = dict(other.methodcaller_factories)
 
     def install_join(self, states: Sequence["_RequestStateAliasEnv"]) -> None:
         """Install the sound must/may join of feasible predecessor alias envs."""
@@ -2171,6 +2346,7 @@ def join_request_state_alias_envs(
     sequence_string_lists: dict[str, tuple[str, ...]] = {}
     sequence_literal_aliases: dict[str, ast.AST] = {}
     itemgetter_products: dict[str, object] = {}
+    methodcaller_factories: dict[str, ast.Call] = {}
     for state in states:
         adapter_aliases |= state.adapter_aliases
         for name, pack in state.container_adapter_packs.items():
@@ -2188,6 +2364,7 @@ def join_request_state_alias_envs(
         sequence_string_lists.update(state.sequence_string_lists)
         sequence_literal_aliases.update(state.sequence_literal_aliases)
         itemgetter_products.update(state.itemgetter_products)
+        methodcaller_factories.update(state.methodcaller_factories)
     return _RequestStateAliasEnv(
         request_names=must_request,
         state_names=must_state,
@@ -2205,6 +2382,7 @@ def join_request_state_alias_envs(
         sequence_string_lists=sequence_string_lists,
         sequence_literal_aliases=sequence_literal_aliases,
         itemgetter_products=itemgetter_products,
+        methodcaller_factories=methodcaller_factories,
     )
 
 
@@ -6250,7 +6428,9 @@ def _collect_writes_in_function(
                     request_aliases.sequence_string_lists.pop(base.id, None)
                     request_aliases.container_adapter_packs.pop(base.id, None)
                 continue
-            # ``methodcaller("__setitem__"|"update", …)(keys)``.
+            # ``methodcaller("__setitem__"|"update", …)(keys)`` /
+            # Name-bound ``mc=methodcaller(...); mc(keys)`` /
+            # packed / getattr methodcaller factory peels.
             mc_name = None
             mc_factory = None
             if isinstance(func, ast.Call):
@@ -6261,6 +6441,18 @@ def _collect_writes_in_function(
                 )
                 if mc_name is not None:
                     mc_factory = func
+            if mc_name is None and isinstance(func, ast.Name):
+                bound_mc = request_aliases.methodcaller_factories.get(func.id)
+                if bound_mc is not None:
+                    mc_name = _methodcaller_static_name(
+                        bound_mc,
+                        projection_aliases=(
+                            request_aliases.operator_projection_aliases
+                        ),
+                        getattr_aliases=frozenset(getattr_aliases),
+                    )
+                    if mc_name is not None:
+                        mc_factory = bound_mc
             if mc_name is None:
                 for cand in _shallow_packed_callee_exprs(func):
                     if isinstance(cand, ast.Call):
@@ -6274,6 +6466,21 @@ def _collect_writes_in_function(
                         if mc_name is not None:
                             mc_factory = cand
                             break
+                    elif isinstance(cand, ast.Name):
+                        bound_mc = request_aliases.methodcaller_factories.get(
+                            cand.id
+                        )
+                        if bound_mc is not None:
+                            mc_name = _methodcaller_static_name(
+                                bound_mc,
+                                projection_aliases=(
+                                    request_aliases.operator_projection_aliases
+                                ),
+                                getattr_aliases=frozenset(getattr_aliases),
+                            )
+                            if mc_name is not None:
+                                mc_factory = bound_mc
+                                break
             if (
                 mc_name in {"__setitem__", "setdefault", "update"}
                 and mc_factory is not None
@@ -6364,6 +6571,33 @@ def _collect_writes_in_function(
                 continue
             if mut_attr == "pop":
                 # Already captured in the pre-pass above.
+                continue
+            if mut_attr in {"__ior__", "__or__"} and child.args:
+                # ``keys.__ior__({…})`` / ``keys.__or__({…})`` — share ior peels.
+                rhs = child.args[0]
+                while isinstance(rhs, ast.NamedExpr):
+                    rhs = rhs.value
+                if isinstance(rhs, ast.Dict):
+                    for map_key, map_val in zip(rhs.keys, rhs.values):
+                        if (
+                            map_val is None
+                            or not isinstance(map_key, ast.Constant)
+                        ):
+                            continue
+                        set_val = map_val
+                        if isinstance(set_val, ast.Call):
+                            pending = _pending_pop_values.get(id(set_val))
+                            if pending is not None:
+                                set_val = pending
+                        _rewrite_sequence_dict(
+                            base.id,
+                            set_key=map_key.value,
+                            set_val=set_val,
+                        )
+                else:
+                    request_aliases.sequence_literal_aliases.pop(base.id, None)
+                    request_aliases.sequence_string_lists.pop(base.id, None)
+                    request_aliases.container_adapter_packs.pop(base.id, None)
                 continue
             if mut_attr in {"__setitem__", "setdefault"} and len(child.args) >= 2:
                 set_val = child.args[1]
