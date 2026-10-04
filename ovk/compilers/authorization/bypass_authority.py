@@ -111,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.40.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.41.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -464,13 +464,18 @@ class _RequestStateAliasEnv:
         while isinstance(value, ast.NamedExpr):
             value = value.value
         # Static string keys for later Name-bound ns view application.
+        # Also ``k = keys[0]`` / ``k = keys["x"]`` after container projection.
+        # ``_static_or_bound_key`` is defined below; use a local peel first for
+        # Constant/Name, then Subscript after helpers exist.
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
             self.string_constant_names[name] = value.value
         elif isinstance(value, ast.Name) and value.id in self.string_constant_names:
             self.string_constant_names[name] = self.string_constant_names[value.id]
         else:
+            # Defer Subscript / container peels until helpers are defined.
             self.string_constant_names.pop(name, None)
-        # ``keys=["MappingProxyType"]`` for later ``keys[0]`` peels.
+        # ``keys=["MappingProxyType"]`` / ``keys={"x": "MappingProxyType"}``
+        # for later ``keys[0]`` / ``keys["x"]`` peels.
         if isinstance(value, (ast.List, ast.Tuple)):
             strs: list[str] = []
             for elt in value.elts:
@@ -538,6 +543,21 @@ class _RequestStateAliasEnv:
                         idx = key_node.value
                         if 0 <= idx < len(lit):
                             return lit[idx]
+                    # Name-bound Dict: ``keys={"x": "MappingProxyType"}; keys["x"]``.
+                    pack = self.container_adapter_packs.get(base.id)
+                    if (
+                        pack is not None
+                        and isinstance(key_node, ast.Constant)
+                        and key_node.value in pack
+                    ):
+                        for pname in pack[key_node.value]:
+                            bound = self.string_constant_names.get(pname)
+                            if bound is not None:
+                                return bound
+                            if isinstance(pname, str) and pname in {
+                                "MappingProxyType",
+                            } | _OPERATOR_PROJECTION_NAMES:
+                                return pname
             return None
 
         def _seed_ns_key(alias_name: str, key: str) -> None:
@@ -605,13 +625,21 @@ class _RequestStateAliasEnv:
                     else:
                         self.bound_view_receivers.pop(name, None)
         elif isinstance(value, ast.Subscript):
+            # ``k = keys[0]`` / ``k = keys["x"]`` — seed string constants from
+            # the whole Subscript before ns-key projection on the slice.
+            projected = _static_or_bound_key(value)
+            if projected is not None:
+                self.string_constant_names[name] = projected
+                if projected == "MappingProxyType":
+                    self.adapter_aliases.add(name)
+                if projected in _OPERATOR_PROJECTION_NAMES:
+                    self.operator_projection_aliases[name] = projected
             key = _static_or_bound_key(value.slice)
-            if key is None:
-                return
-            if self._base_is_namespace_projection(
+            if key is not None and self._base_is_namespace_projection(
                 value.value, getattr_aliases=g_aliases
             ):
                 _seed_ns_key(name, key)
+            # Do not return early: pack seeding below still applies.
         elif isinstance(value, ast.Call):
             # ``Proxy = getattr(types, "MappingProxyType")`` /
             # ``g = getattr; Proxy = g(types, …)`` / ``builtins.getattr(...)``.
@@ -748,6 +776,8 @@ class _RequestStateAliasEnv:
                     names.append(walk.id)
                 elif isinstance(walk, ast.Attribute):
                     names.append(walk.attr)
+                elif isinstance(walk, ast.Constant) and isinstance(walk.value, str):
+                    names.append(walk.value)
                 if names:
                     pack[map_key.value] = tuple(names)
         elif (
@@ -768,6 +798,10 @@ class _RequestStateAliasEnv:
                             names.append(walk.id)
                         elif isinstance(walk, ast.Attribute):
                             names.append(walk.attr)
+                        elif isinstance(walk, ast.Constant) and isinstance(
+                            walk.value, str
+                        ):
+                            names.append(walk.value)
                         if names:
                             pack[map_key.value] = tuple(names)
                 elif kw.arg is not None:
@@ -779,6 +813,10 @@ class _RequestStateAliasEnv:
                         names.append(walk.id)
                     elif isinstance(walk, ast.Attribute):
                         names.append(walk.attr)
+                    elif isinstance(walk, ast.Constant) and isinstance(
+                        walk.value, str
+                    ):
+                        names.append(walk.value)
                     if names:
                         pack[kw.arg] = tuple(names)
         elif isinstance(peeled, ast.Name) and peeled.id in self.container_adapter_packs:
@@ -789,6 +827,10 @@ class _RequestStateAliasEnv:
             peeled, (ast.Dict, ast.Call, ast.Name)
         ):
             self.container_adapter_packs.pop(name, None)
+        # ``k = keys[0]`` / ``k = keys["x"]`` after packs / sequence lists exist.
+        bound_key = _static_or_bound_key(value)
+        if bound_key is not None:
+            self.string_constant_names[name] = bound_key
 
     def snapshot(self) -> "_RequestStateAliasEnv":
         """Deep-copy alias sets for control-flow fork."""
@@ -6028,7 +6070,13 @@ def _collect_writes_in_function(
                     # Identity env: match-bound names may be class aliases
                     # (``match Base: case x: class C(x)``) — fail closed on
                     # unresolved bases via env membership (#173).
-                    if identity_session is not None:
+                    # Subject-capturing ``case x`` keeps subject identity for
+                    # ``match n: case x: x.install(…)`` (do not unknown-wipe).
+                    if identity_session is not None and not (
+                        isinstance(case.pattern, ast.MatchAs)
+                        and case.pattern.name == name
+                        and case.pattern.pattern is None
+                    ):
                         identity_session.bind_name_unknown(name)
                 # Class / instance aliases through MatchAs and seq/map/or peels
                 # (``match [Box()]: case [b]: b.fn()`` / ``match (Mut,): case (C,):``).
