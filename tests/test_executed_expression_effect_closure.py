@@ -12302,6 +12302,152 @@ def handler(request, bypass_filter=False):
         assert findings[0].reason != "source_proved_server_authority_write", call
 
 
+def test_twenty_sixth_pass_class_relaunch_never_authorized() -> None:
+    """Class relaunch: reduce identity peel, Name-seeded mutator, midbound setitem."""
+
+    ex = _NINTH_EXEC
+    class_imp = "import types\nimport operator\nfrom functools import partial, reduce"
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"reduce(lambda a,b: a, [partial(vars(ns).update, **kw)])()\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"reduce(lambda a,b: a, [partial(vars(ns).update, e=exec)])()\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"reduce(lambda a,b: a, [partial(partial(vars(ns).update), "
+                f"**kw)])()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'reduce(lambda a,b: a, [partial(vars(ns).__setitem__)])'
+                f'("e", exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"u=vars(ns).update\n"
+                f"next(iter([partial(u, **kw)]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f'u=getattr(vars(ns),"update")\n'
+                f"next(iter([partial(u, **kw)]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"u=ns.__dict__.update\n"
+                f"next(iter([partial(u, **kw)]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"si=vars(ns).__setitem__\n"
+                f'next(iter([partial(si)]))("e", exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'next(iter([partial(dict.__setitem__, vars(ns))]))'
+                f'("e", exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'next(iter([partial(operator.setitem, vars(ns))]))'
+                f'("e", exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'[partial(operator.setitem, vars(ns))][0]("e", exec)\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'(0 or partial(operator.setitem, vars(ns)))("e", exec)\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'next(iter([partial(partial(operator.setitem, vars(ns)), "e")]))'
+                f"(exec)\nns.e({ex})",
+                # Keep-closed anchors.
+                f'ns=types.SimpleNamespace()\n'
+                f'next(iter([partial(operator.setitem, vars(ns), "e")]))(exec)\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(dict.update, vars(ns))]))(**kw)\n"
+                f"ns.e({ex})",
+            )
+        )
+    )
+
+
+def test_twenty_sixth_pass_identity_relaunch_never_authorized() -> None:
+    """Identity relaunch: packed unbound pop, getattr star-concat, partial getattr."""
+
+    id_imp = "import copy\nfrom functools import partial"
+    _assert_ninth_not_authorized(
+        (
+            (
+                "g=next(iter([dict.pop]))(dict(list.__dict__),'sort')"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=dict(list.__dict__).pop('sort'); attrs=('__get__',); "
+                "g=getattr(*( (m,) + attrs ))(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[d.copy()][0].pop(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=next(iter([d.copy()])).pop(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[d.copy()].pop(0).pop(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(getattr(d,'pop'))][0](*('sort',))"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=(0 or partial(getattr(d,'pop')))(*('sort',))"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=next(iter([partial(getattr(d,'pop'))]))(*('sort',))"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(getattr(d,'get'))][0]('sort')"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            # Keep-closed / already-closed anchors.
+            (
+                "d=dict(list.__dict__); "
+                "g=getattr(d,'copy')().pop(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "g=dict.pop(dict(list.__dict__),'sort').__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=d.copy().pop(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+        )
+    )
+
+
 def test_twenty_sixth_pass_positive_authorized_smoke() -> None:
     """Benign analogues of twenty-sixth-pass shapes remain authorized."""
 
@@ -12340,4 +12486,4 @@ def test_twenty_sixth_pass_positive_authorized_smoke() -> None:
 def test_persistent_version_bumped_for_executed_expr_closure() -> None:
     """Cache / semantic versions bump with PASS-semantics change."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.81.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.82.0"

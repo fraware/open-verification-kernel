@@ -1167,6 +1167,21 @@ def _shallow_packed_callee_exprs(expr: ast.AST, *, depth: int = 0) -> list[ast.A
             for arg in expr.args:
                 nested = arg.value if isinstance(arg, ast.Starred) else arg
                 out.extend(_shallow_packed_callee_exprs(nested, depth=nxt))
+        elif (
+            (
+                isinstance(expr.func, ast.Name)
+                and expr.func.id == "reduce"
+            )
+            or (
+                isinstance(expr.func, ast.Attribute)
+                and expr.func.attr == "reduce"
+            )
+        ) and len(expr.args) >= 2:
+            # ``reduce(fn, [partial…])`` sole-element packing — reduce returns
+            # the sole iterable element without calling ``fn``
+            # (Unknown > false PASS).
+            for elt in _shallow_packed_callee_exprs(expr.args[1], depth=nxt):
+                out.extend(_shallow_packed_callee_exprs(elt, depth=nxt))
         elif isinstance(expr.func, ast.Attribute) and expr.func.attr in {
             "next",
             "iter",
@@ -2494,6 +2509,22 @@ def _sequence_pack_elts(
             sequence_aliases=aliases,
             slice_aliases=slice_aliases,
         )
+    # ``(m,) + attrs`` / ``attrs + ('__get__',)`` star-concat packs share
+    # bare ``*(m, '__get__')`` peels (Unknown > false PASS).
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _sequence_pack_elts(
+            node.left,
+            sequence_aliases=aliases,
+            slice_aliases=slice_aliases,
+        )
+        right = _sequence_pack_elts(
+            node.right,
+            sequence_aliases=aliases,
+            slice_aliases=slice_aliases,
+        )
+        if left is not None and right is not None:
+            return [*left, *right]
+        return None
     # ``args[0:2]`` / ``args[:]`` / ``args[s]`` / ``args[slice(0,2)]``.
     if isinstance(node, ast.Subscript) and _is_sequence_slice_key(
         node.slice,
@@ -5088,6 +5119,36 @@ def _build_identity_scanner(
                 ):
                     return attr, call.args[0]
                 return attr, recv
+            # Packed unbound views: ``next(iter([dict.pop]))(d, k)`` /
+            # ``[dict.pop][0](d, k)`` share Attribute peels
+            # (Unknown > false PASS).
+            for cand in _callee_candidate_exprs(func):
+                cand = _peel_transparent_callee(cand)
+                if isinstance(cand, ast.Attribute):
+                    parts = _parts_from_attr(cand)
+                    if parts is not None:
+                        return parts
+                if isinstance(cand, ast.Call):
+                    gname = _getattr_static_name(
+                        cand, getattr_aliases=frozenset(getattr_aliases)
+                    )
+                    if gname is not None and cand.args:
+                        grecv = cand.args[0]
+                        if (
+                            gname
+                            in _DICT_ITER_VIEW_ATTRS
+                            | _NS_DICT_VIEW_ATTRS
+                            | _MAPPING_COPY_FUNCS
+                            | {"fromkeys"}
+                            and _is_dict_constructor(
+                                grecv,
+                                dict_ctor_aliases=frozenset(dict_ctor_aliases),
+                                getattr_aliases=frozenset(getattr_aliases),
+                            )
+                            and call.args
+                        ):
+                            return gname, call.args[0]
+                        return gname, grecv
         if isinstance(func, ast.Name):
             view = dict_view_products.get(func.id)
             if view is not None:
@@ -7873,7 +7934,33 @@ def _build_identity_scanner(
                     projection_aliases=operator_projection_aliases,
                     getattr_aliases=frozenset(getattr_aliases),
                 )
-                if (
+                # ``reduce(fn, [partial…])`` / ``functools.reduce`` —
+                # sole iterable element packing (Unknown > false PASS).
+                f_reduce = _peel_call_func(callee.func)
+                is_reduce = proj == "reduce" or (
+                    isinstance(f_reduce, ast.Name)
+                    and (
+                        f_reduce.id == "reduce"
+                        or operator_projection_aliases.get(f_reduce.id)
+                        == "reduce"
+                    )
+                ) or (
+                    isinstance(f_reduce, ast.Attribute)
+                    and f_reduce.attr == "reduce"
+                )
+                if not is_reduce and isinstance(f_reduce, ast.Call):
+                    is_reduce = (
+                        _getattr_static_name(
+                            f_reduce,
+                            getattr_aliases=frozenset(getattr_aliases),
+                        )
+                        == "reduce"
+                    )
+                if is_reduce and len(callee.args) >= 2:
+                    elems = _iter_elements(callee.args[1]) or []
+                    if len(elems) == 1:
+                        out.extend(_callee_candidate_exprs(elems[0], nxt))
+                elif (
                     proj == "getitem"
                     and len(callee.args) >= 2
                     and _slice_key(callee.args[1])
@@ -8817,6 +8904,40 @@ def _build_identity_scanner(
                     is_setitem = True
                     bound0 = b_arm
                     break
+                # Name-seeded bound mutators: ``u=vars(ns).update`` /
+                # ``si=vars(ns).__setitem__`` / getattr / ``ns.__dict__.update``
+                # before ``partial(u, **kw)`` (Unknown > false PASS).
+                if isinstance(b_arm, ast.Name):
+                    view = dict_view_products.get(b_arm.id)
+                    if view is not None:
+                        base = view.split(".")[-1]
+                        expr_recv = bound_view_expr_receivers.get(b_arm.id)
+                        recv_name = bound_view_receivers.get(b_arm.id)
+                        synth_recv: ast.AST | None = expr_recv
+                        if synth_recv is None and recv_name is not None:
+                            synth_recv = ast.Name(
+                                id=recv_name, ctx=ast.Load()
+                            )
+                        if synth_recv is not None:
+                            if (
+                                base == "__setitem__"
+                                or _canonical_projection_name(base) == "setitem"
+                            ):
+                                is_setitem = True
+                                bound0 = ast.Attribute(
+                                    value=synth_recv,
+                                    attr="__setitem__",
+                                    ctx=ast.Load(),
+                                )
+                                break
+                            if base in {"update", "setdefault"}:
+                                update_attr = base
+                                bound0 = ast.Attribute(
+                                    value=synth_recv,
+                                    attr=base,
+                                    ctx=ast.Load(),
+                                )
+                                break
                 if isinstance(b_arm, ast.Attribute) and (
                     b_arm.attr == "setitem"
                     or _canonical_projection_name(b_arm.attr) == "setitem"
@@ -9146,6 +9267,54 @@ def _build_identity_scanner(
                         carrier,
                         "__setitem__",
                         [cand_args[2], call.args[0]],
+                        (),
+                    )
+                    return
+            if (
+                is_setitem
+                and bound_recv is None
+                and len(cand_args) == 2
+                and len(apply_args) >= 2
+            ):
+                # Under-applied midbound
+                # ``partial(operator.setitem, vars(ns))("e", exec)`` /
+                # ``partial(dict.__setitem__, vars(ns))("e", exec)`` /
+                # list0 / BoolOp packing (Unknown > false PASS).
+                base = _peel_call_func(cand_args[1])
+                carrier = _chainmap_carrier_name(base)
+                if carrier is None:
+                    carrier = _ns_dict_carrier_name(base)
+                if carrier is None and isinstance(base, ast.Name):
+                    carrier = base.id
+                if carrier is not None:
+                    _grow_named_pack(
+                        carrier,
+                        "__setitem__",
+                        list(apply_args[:2]),
+                        (),
+                    )
+                    return
+            if (
+                is_setitem
+                and bound_recv is None
+                and nested_carrier is not None
+                and len(cand_args) == 2
+                and len(apply_args) >= 1
+            ):
+                # Nested midbound half-key
+                # ``partial(partial(operator.setitem, vars(ns)), "e")(exec)``
+                # (Unknown > false PASS).
+                base = _peel_call_func(nested_carrier)
+                carrier = _chainmap_carrier_name(base)
+                if carrier is None:
+                    carrier = _ns_dict_carrier_name(base)
+                if carrier is None and isinstance(base, ast.Name):
+                    carrier = base.id
+                if carrier is not None:
+                    _grow_named_pack(
+                        carrier,
+                        "__setitem__",
+                        [cand_args[1], apply_args[0]],
                         (),
                     )
                     return
@@ -11290,8 +11459,11 @@ def _build_identity_scanner(
                         bound_view_receivers.pop(name, None)
                         bound_view_expr_receivers[name] = sort_recv
             # ``g = getattr(ns, "get"|"pop"|"__getitem__")`` — ns view product.
+            # ``u = getattr(vars(ns), "update"|"__setitem__")`` — mutator product.
             # ``fk = getattr(dict, "fromkeys")`` — unbound dict.fromkeys product.
-            if attr in _NS_DICT_VIEW_ATTRS | _DICT_ITER_VIEW_ATTRS | {"fromkeys"}:
+            if attr in _NS_DICT_VIEW_ATTRS | _DICT_ITER_VIEW_ATTRS | _DICT_MUTATOR_ATTRS | {
+                "fromkeys"
+            }:
                 if attr == "fromkeys" and value.args:
                     recv = _peel_call_func(value.args[0])
                     if _is_dict_constructor(
@@ -11314,11 +11486,18 @@ def _build_identity_scanner(
                         else:
                             bound_view_receivers.pop(name, None)
                             bound_view_expr_receivers[name] = recv
+                elif value.args and _is_dict_constructor(
+                    _peel_call_func(value.args[0]),
+                    dict_ctor_aliases=frozenset(dict_ctor_aliases),
+                    getattr_aliases=frozenset(getattr_aliases),
+                ):
+                    # Unbound ``getattr(dict, "update"|"pop"|…)``.
+                    dict_view_products[name] = f"dict.{attr}"
+                    bound_view_receivers.pop(name, None)
+                    bound_view_expr_receivers.pop(name, None)
                 else:
                     dict_view_products[name] = attr
-                    if attr in _NS_DICT_VIEW_ATTRS | _DICT_ITER_VIEW_ATTRS | {
-                        "fromkeys"
-                    } and value.args:
+                    if value.args:
                         recv = _peel_call_func(value.args[0])
                         if isinstance(recv, ast.Name):
                             bound_view_receivers[name] = recv.id
@@ -12063,6 +12242,33 @@ def _build_identity_scanner(
                                     ):
                                         head_attr = head.attr
                                         head_recv = head.value
+                                    elif isinstance(head, ast.Call):
+                                        # ``partial(getattr(d, "pop"|"get"))``
+                                        # packed / BoolOp apply
+                                        # (Unknown > false PASS).
+                                        hg = _getattr_static_name(
+                                            head,
+                                            getattr_aliases=frozenset(
+                                                getattr_aliases
+                                            ),
+                                            str_resolver=_resolve_static_str,
+                                            sequence_aliases=sequence_view_aliases,
+                                            slice_aliases=frozenset(
+                                                slice_aliases
+                                            ),
+                                        )
+                                        if (
+                                            hg
+                                            in {
+                                                "get",
+                                                "pop",
+                                                "setdefault",
+                                                "__getitem__",
+                                            }
+                                            and head.args
+                                        ):
+                                            head_attr = hg
+                                            head_recv = head.args[0]
                                     head_key = _type_dict_view_key(
                                         head_recv, sort_key_args
                                     )
