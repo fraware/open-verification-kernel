@@ -903,6 +903,28 @@ class _RequestStateAliasEnv:
                     inner_proj, ast.Call
                 ):
                     func = inner_proj
+            # ``next(iter([getattr(xs,"pop")]))(0)`` — peel packing onto the
+            # getattr Call before view projection (Unknown > false PASS).
+            if not isinstance(func, ast.Attribute):
+                for cand in _shallow_ag(func):
+                    if not isinstance(cand, ast.Call):
+                        continue
+                    gv = _g_proj_view(
+                        cand, getattr_aliases=frozenset(g_aliases)
+                    )
+                    gflat = _flat_proj_view(
+                        cand.args,
+                        sequence_aliases=self.sequence_literal_aliases,
+                    )
+                    if gv is None and len(gflat) >= 2:
+                        gv = _resolve_str_key(gflat[1])
+                    if (
+                        gv
+                        in {"get", "pop", "__getitem__", "setdefault"}
+                        and gflat
+                    ):
+                        func = cand
+                        break
             # ``partial(getattr, xs, "pop")()`` / ``partial(getattr, xs)("pop")``
             # share the getattr Attribute peel (Unknown > false PASS).
             if isinstance(func, ast.Call) and _partial_proj_view(
@@ -1744,6 +1766,32 @@ class _RequestStateAliasEnv:
                             func=call_fn,
                             args=list(flat_call_args[1:]),
                             keywords=list(peeled.keywords),
+                        )
+                        f = peeled.func
+                        while isinstance(f, ast.NamedExpr):
+                            f = f.value
+                        progressed = True
+                # ``methodcaller("__call__", fn, keys)(operator.call)`` ≡
+                # ``operator.call(fn, keys)`` (Unknown > false PASS).
+                if isinstance(peeled, ast.Call):
+                    from ovk.compilers.authorization.python_callee_resolution import (
+                        _methodcaller_call_bound_args as _mc_call_bound,
+                    )
+
+                    mc_bound = _mc_call_bound(
+                        peeled,
+                        projection_aliases=self.operator_projection_aliases,
+                        getattr_aliases=frozenset(g_aliases),
+                        sequence_aliases=self.sequence_literal_aliases,
+                    )
+                    if mc_bound is not None and peeled.args:
+                        recv = peeled.args[0]
+                        while isinstance(recv, ast.NamedExpr):
+                            recv = recv.value
+                        peeled = ast.Call(
+                            func=recv,
+                            args=list(mc_bound),
+                            keywords=[],
                         )
                         f = peeled.func
                         while isinstance(f, ast.NamedExpr):

@@ -2034,15 +2034,62 @@ def _methodcaller_call_bound_args(
     call: ast.Call,
     *,
     projection_aliases: Mapping[str, str] | None = None,
+    getattr_aliases: frozenset[str] | None = None,
+    sequence_aliases: Mapping[str, ast.AST] | None = None,
 ) -> list[ast.AST] | None:
     """Bound args of ``methodcaller("__call__", *bound)(receiver)``, if any."""
 
     func = _peel_call_func(call.func)
     if not isinstance(func, ast.Call):
         return None
-    if _methodcaller_static_name(func, projection_aliases=projection_aliases) != "__call__":
+    if (
+        _methodcaller_static_name(
+            func,
+            projection_aliases=projection_aliases,
+            getattr_aliases=getattr_aliases,
+            sequence_aliases=sequence_aliases,
+        )
+        != "__call__"
+    ):
         return None
-    return list(func.args[1:])
+    flat = _flatten_starred_args(
+        func.args, sequence_aliases=sequence_aliases
+    )
+    if len(flat) < 2:
+        return None
+    return list(flat[1:])
+
+
+def _methodcaller_getitem_key(
+    call: ast.Call,
+    *,
+    projection_aliases: Mapping[str, str] | None = None,
+    getattr_aliases: frozenset[str] | None = None,
+    sequence_aliases: Mapping[str, ast.AST] | None = None,
+    slice_aliases: frozenset[str] | None = None,
+    str_resolver: Callable[[ast.AST], str | None] | None = None,
+) -> ast.AST | None:
+    """Key expr of ``methodcaller("__getitem__", key)`` incl. star packs."""
+
+    if (
+        _methodcaller_static_name(
+            call,
+            projection_aliases=projection_aliases,
+            getattr_aliases=getattr_aliases,
+            sequence_aliases=sequence_aliases,
+            str_resolver=str_resolver,
+        )
+        != "__getitem__"
+    ):
+        return None
+    flat = _flatten_starred_args(
+        call.args,
+        sequence_aliases=sequence_aliases,
+        slice_aliases=slice_aliases,
+    )
+    if len(flat) >= 2:
+        return flat[1]
+    return None
 
 
 def _receiver_looks_like_type_builtin(
@@ -2427,22 +2474,21 @@ def _sequence_pack_elts(
             return None
         sl = node.slice
         if isinstance(sl, ast.Slice):
+            # ``::-1`` parses step as ``UnaryOp(USub, 1)`` — share
+            # ``_static_sequence_index`` (Unknown > false PASS).
             lower = (
-                sl.lower.value
-                if isinstance(sl.lower, ast.Constant)
-                and isinstance(sl.lower.value, int)
+                _static_sequence_index(sl.lower)
+                if sl.lower is not None
                 else None
             )
             upper = (
-                sl.upper.value
-                if isinstance(sl.upper, ast.Constant)
-                and isinstance(sl.upper.value, int)
+                _static_sequence_index(sl.upper)
+                if sl.upper is not None
                 else None
             )
             step = (
-                sl.step.value
-                if isinstance(sl.step, ast.Constant)
-                and isinstance(sl.step.value, int)
+                _static_sequence_index(sl.step)
+                if sl.step is not None
                 else None
             )
             if sl.lower is not None and lower is None:
@@ -2462,30 +2508,31 @@ def _sequence_pack_elts(
         ):
             # ``args[slice(0, 2)]`` — evaluate constant slice args when static.
             slice_call = sl if isinstance(sl, ast.Call) else None
-            if slice_call is not None and all(
-                isinstance(a, ast.Constant) and isinstance(a.value, int)
-                for a in slice_call.args
-            ):
-                vals = [a.value for a in slice_call.args]  # type: ignore[union-attr]
-                if len(vals) == 1:
-                    return base_elts[: vals[0]]
-                if len(vals) == 2:
-                    return base_elts[vals[0] : vals[1]]
-                if len(vals) >= 3:
-                    return base_elts[vals[0] : vals[1] : vals[2]]
+            if slice_call is not None:
+                vals = [_static_sequence_index(a) for a in slice_call.args]
+                if vals and all(v is not None for v in vals):
+                    if len(vals) == 1:
+                        return base_elts[: vals[0]]
+                    if len(vals) == 2:
+                        return base_elts[vals[0] : vals[1]]
+                    if len(vals) >= 3:
+                        return base_elts[vals[0] : vals[1] : vals[2]]
         # Name-bound ``s=slice(...)`` — packing-transparent when bounds are
         # not reified on the Name (full carrier; Unknown > false PASS).
         return base_elts
     # ``((*args,),)[0]`` / ``[(*args,)][0]`` / ``pack[0]`` index peels.
     if isinstance(node, ast.Subscript):
-        idx = _static_key(node.slice)
+        idx = _static_sequence_index(node.slice)
+        if idx is None:
+            key = _static_key(node.slice)
+            idx = key if isinstance(key, int) else None
         if isinstance(idx, int):
             base_elts = _sequence_pack_elts(
                 node.value,
                 sequence_aliases=aliases,
                 slice_aliases=slice_aliases,
             )
-            if base_elts is not None and 0 <= idx < len(base_elts):
+            if base_elts is not None and -len(base_elts) <= idx < len(base_elts):
                 nested = _sequence_pack_elts(
                     base_elts[idx],
                     sequence_aliases=aliases,
@@ -2509,6 +2556,32 @@ def _sequence_pack_elts(
                     sequence_aliases=aliases,
                     slice_aliases=slice_aliases,
                 ) or [elts[0]]
+        # ``[(args if True else ())].pop(0)`` / ``pack.pop()`` — element is
+        # the starred payload (Unknown > false PASS).
+        if isinstance(func, ast.Attribute) and func.attr == "pop":
+            base_elts = _sequence_pack_elts(
+                func.value,
+                sequence_aliases=aliases,
+                slice_aliases=slice_aliases,
+            )
+            if base_elts is not None and base_elts:
+                idx = -1
+                if node.args:
+                    parsed = _static_sequence_index(node.args[0])
+                    if parsed is None:
+                        return None
+                    idx = parsed
+                if -len(base_elts) <= idx < len(base_elts):
+                    nested = _sequence_pack_elts(
+                        base_elts[idx],
+                        sequence_aliases=aliases,
+                        slice_aliases=slice_aliases,
+                    )
+                    return (
+                        nested
+                        if nested is not None
+                        else [base_elts[idx]]
+                    )
         if node.args:
             is_seq_ctor = (
                 isinstance(func, ast.Name) and func.id in {"tuple", "list"}
@@ -4079,6 +4152,10 @@ def _build_identity_scanner(
     # Deferred ``cm = nullcontext(x)`` enter payloads for later ``cm.__enter__()``
     # (shared With.as / inline ``nullcontext(x).__enter__()`` seed path).
     nullcontext_enter_products: dict[str, ast.AST] = {}
+    # ``e = cm.__enter__`` / ``e = getattr(cm, "__enter__")`` bound enter
+    # methods — ``f = e()`` shares the enter product seed
+    # (Unknown > false PASS).
+    nullcontext_enter_callables: dict[str, ast.AST] = {}
     # ``from types import MappingProxyType as MPT`` / adapter Name aliases.
     adapter_aliases: set[str] = set()
     # Name-bound factory products: ``ag = attrgetter("Mut")`` / ``p = partial(Mut)``.
@@ -6054,16 +6131,17 @@ def _build_identity_scanner(
                         is_gi = True
                         bound0 = b0_arm
                         break
-                    mc = _methodcaller_static_name(
+                    mc_key = _methodcaller_getitem_key(
                         b0_arm,
                         projection_aliases=operator_projection_aliases,
                         getattr_aliases=frozenset(getattr_aliases),
                         sequence_aliases=sequence_view_aliases,
+                        slice_aliases=frozenset(slice_aliases),
                         str_resolver=_resolve_static_str,
                     )
-                    if mc == "__getitem__" and len(b0_arm.args) >= 2:
+                    if mc_key is not None:
                         is_gi = True
-                        mc_gi_key = b0_arm.args[1]
+                        mc_gi_key = mc_key
                         bound0 = b0_arm
                         break
                     # ``itemgetter(slice(0,1))`` / packed BoolOp/IfExp heads —
@@ -6111,6 +6189,19 @@ def _build_identity_scanner(
                 )
                 if star_elts:
                     head = _peel_call_func(star_elts[0])
+                    # ``partial(*(operator.call, ig, xs))`` ≡
+                    # ``partial(*(ig, xs))`` / ``call(ig, xs)``
+                    # (Unknown > false PASS).
+                    if len(star_elts) >= 3 and _expr_is_operator_call_receiver(
+                        head,
+                        projection_aliases=operator_projection_aliases,
+                        getattr_aliases=frozenset(getattr_aliases),
+                        partial_aliases=frozenset(partial_aliases),
+                        factory_products=projection_factory_products,
+                        dict_view_products=dict_view_products,
+                    ):
+                        star_elts = list(star_elts[1:])
+                        head = _peel_call_func(star_elts[0])
                     head_gi = _head_is_getitem(head)
                     head_bound_recv = (
                         None if head_gi else _bound_getitem_recv(head)
@@ -6124,18 +6215,18 @@ def _build_identity_scanner(
                             sequence_aliases=sequence_view_aliases,
                             slice_aliases=frozenset(slice_aliases),
                         )
-                        # ``methodcaller("__getitem__", slice)`` star heads
+                        # ``methodcaller("__getitem__", slice)`` /
+                        # ``methodcaller(*('__getitem__', slice))`` star heads
                         # share itemgetter carrier peels (Unknown > false PASS).
                         if head_ig_key is None:
-                            head_mc = _methodcaller_static_name(
+                            head_ig_key = _methodcaller_getitem_key(
                                 head,
                                 projection_aliases=operator_projection_aliases,
                                 getattr_aliases=frozenset(getattr_aliases),
                                 sequence_aliases=sequence_view_aliases,
+                                slice_aliases=frozenset(slice_aliases),
                                 str_resolver=_resolve_static_str,
                             )
-                            if head_mc == "__getitem__" and len(head.args) >= 2:
-                                head_ig_key = head.args[1]
                     elif isinstance(head, ast.Name):
                         product = projection_factory_products.get(head.id)
                         if product is not None and product[0] == "itemgetter":
@@ -6156,11 +6247,17 @@ def _build_identity_scanner(
                             and product[1] == "__getitem__"
                         ):
                             bound_mc = bound_callee_exprs.get(head.id)
-                            if (
-                                isinstance(bound_mc, ast.Call)
-                                and len(bound_mc.args) >= 2
-                            ):
-                                head_ig_key = bound_mc.args[1]
+                            if isinstance(bound_mc, ast.Call):
+                                head_ig_key = _methodcaller_getitem_key(
+                                    bound_mc,
+                                    projection_aliases=(
+                                        operator_projection_aliases
+                                    ),
+                                    getattr_aliases=frozenset(getattr_aliases),
+                                    sequence_aliases=sequence_view_aliases,
+                                    slice_aliases=frozenset(slice_aliases),
+                                    str_resolver=_resolve_static_str,
+                                )
                     # Nested ``partial(*(partial(xs.__getitem__), slice))`` /
                     # ``partial(*(0 or (partial(xs.__getitem__),)))`` /
                     # ``partial(*(partial(ig), xs))`` itemgetter nest.
@@ -8440,6 +8537,7 @@ def _build_identity_scanner(
             nest_partials = list(bound0_arms)
             nested_carrier: ast.AST | None = None
             nested_payload: ast.AST | None = None
+            nested_named_keywords: list[ast.keyword] = []
             for arm in nest_partials:
                 cursor: ast.AST = arm
                 depth = 0
@@ -8456,12 +8554,14 @@ def _build_identity_scanner(
                     depth += 1
                     if len(cursor.args) >= 2 and nested_carrier is None:
                         nested_carrier = cursor.args[1]
-                    # Nested ``**kw`` / positional payload closed over.
-                    if nested_payload is None and cursor.keywords:
+                    # Nested ``**kw`` / ``e=exec`` / positional payload.
+                    if cursor.keywords:
                         for kw in cursor.keywords:
                             if kw.arg is None:
-                                nested_payload = kw.value
-                                break
+                                if nested_payload is None:
+                                    nested_payload = kw.value
+                            else:
+                                nested_named_keywords.append(kw)
                     if nested_payload is None and len(cursor.args) >= 3:
                         nested_payload = cursor.args[2]
                     inner = _peel_call_func(cursor.args[0])
@@ -8545,10 +8645,13 @@ def _build_identity_scanner(
                         kw_payload = kw.value
                         break
             # Fully-bound ``partial(*args)()`` with payload prebound in args /
-            # ``partial(dict.update, vars(ns), kw)()`` / packed ``**kw``.
+            # ``partial(dict.update, vars(ns), kw)()`` / packed ``**kw`` /
+            # ``partial(vars(ns).update, e=exec)()`` named keywords
+            # (Unknown > false PASS).
             # ``setdefault`` closes key+default at cand_args[2:4] — do not
             # treat cand_args[2] as a unary update payload (Unknown > false PASS).
             bound_kw_payload: ast.AST | None = nested_payload
+            bound_named_keywords: list[ast.keyword] = list(nested_named_keywords)
             if (
                 update_attr != "setdefault"
                 and not call.args
@@ -8557,16 +8660,17 @@ def _build_identity_scanner(
             ):
                 # Positional payload closed over in the partial factory.
                 bound_kw_payload = cand_args[2]
-            if (
-                not call.args
-                and kw_payload is None
-                and bound_kw_payload is None
-                and cand.keywords
-            ):
+            if cand.keywords:
                 for kw in cand.keywords:
                     if kw.arg is None:
-                        bound_kw_payload = kw.value
-                        break
+                        if (
+                            not call.args
+                            and kw_payload is None
+                            and bound_kw_payload is None
+                        ):
+                            bound_kw_payload = kw.value
+                    else:
+                        bound_named_keywords.append(kw)
 
             def _ns_from_base(base: ast.AST) -> str | None:
                 base = _peel_call_func(base)
@@ -8778,15 +8882,16 @@ def _build_identity_scanner(
                 # nested ``partial(partial(…, vars(ns)))(payload)`` /
                 # fully-bound ``partial(*args)()`` with payload in args /
                 # ``partial(dict.setdefault, vars(ns), "e", exec)()`` /
-                # ``partial(vars(ns).setdefault, "e", exec)()``.
+                # ``partial(vars(ns).setdefault, "e", exec)()`` /
+                # ``partial(vars(ns).update, e=exec)()`` named keywords.
                 ns_name = _ns_from_base(carrier_expr)
                 if ns_name is not None:
                     payload_args = list(call.args)
-                    payload_kw = call.keywords
+                    payload_kw: list[ast.keyword] = list(call.keywords)
                     if bound_recv is not None:
                         # Bound method: payload starts at cand_args[1:].
-                        # Factory ``**(kw if True else {})`` closes via
-                        # ``bound_kw_payload`` when no positional payload
+                        # Factory ``**(kw if True else {})`` / ``e=exec``
+                        # closes via bound payload when no apply payload
                         # (Unknown > false PASS).
                         if (
                             not payload_args
@@ -8811,9 +8916,11 @@ def _build_identity_scanner(
                     elif not payload_args and bound_kw_payload is not None:
                         payload_args = [bound_kw_payload]
                     if not payload_args and kw_payload is not None:
-                        payload_kw = call.keywords or [
+                        payload_kw = list(call.keywords) or [
                             ast.keyword(arg=None, value=kw_payload)
                         ]
+                    if not payload_kw and bound_named_keywords:
+                        payload_kw = list(bound_named_keywords)
                     if payload_args or payload_kw:
                         _grow_named_pack(
                             ns_name, update_attr, payload_args, payload_kw
@@ -9998,11 +10105,37 @@ def _build_identity_scanner(
         """Install exec/new_class/type/getattr aliases from an Assign/walrus RHS."""
 
         value = _peel_call_func(value)
-        # Deferred nullcontext enter products copy only on Name alias; other
-        # RHS forms clear (bare ``cm = nullcontext(...)`` sets the map
-        # directly on the Call Assign path).
+        # Deferred nullcontext enter products / bound enter callables copy
+        # only on Name alias; other RHS forms clear then re-seed below.
         if not isinstance(value, ast.Name):
             nullcontext_enter_products.pop(name, None)
+            nullcontext_enter_callables.pop(name, None)
+
+        def _seed_enter_callable_from_recv(recv_expr: ast.AST) -> bool:
+            for arm in _shallow_packed_callee_exprs(recv_expr):
+                arm = _peel_call_func(arm)
+                for seed_arm in _iter_boolop_ifexp_arms(arm):
+                    seed_arm = _peel_call_func(seed_arm)
+                    if (
+                        isinstance(seed_arm, ast.Name)
+                        and seed_arm.id in nullcontext_enter_products
+                    ):
+                        nullcontext_enter_callables[name] = (
+                            nullcontext_enter_products[seed_arm.id]
+                        )
+                        return True
+            return False
+
+        # ``e = cm.__enter__`` / ``e = getattr(cm, "__enter__")`` /
+        # packed recv peels (Unknown > false PASS).
+        if isinstance(value, ast.Attribute) and value.attr == "__enter__":
+            _seed_enter_callable_from_recv(value.value)
+        elif isinstance(value, ast.Call):
+            g_enter_bind = _getattr_static_name(
+                value, getattr_aliases=frozenset(getattr_aliases)
+            )
+            if g_enter_bind == "__enter__" and value.args:
+                _seed_enter_callable_from_recv(value.args[0])
         # BoolOp / IfExp RHS: static string seeds first so
         # ``nm=('x' if False else 'append')`` / ``nm=('' or 'append')`` /
         # ``nm=(0 or 'append')`` share ``_static_str_expr`` with inline
@@ -10182,6 +10315,12 @@ def _build_identity_scanner(
                 ]
             else:
                 nullcontext_enter_products.pop(name, None)
+            if value.id in nullcontext_enter_callables:
+                nullcontext_enter_callables[name] = nullcontext_enter_callables[
+                    value.id
+                ]
+            else:
+                nullcontext_enter_callables.pop(name, None)
             if value.id in {"vars", "globals", "locals"} or value.id in ns_projection_aliases:
                 ns_projection_aliases.add(name)
             if value.id in _CALLEE_ADAPTER_NAMES or value.id in adapter_aliases:
@@ -10548,8 +10687,8 @@ def _build_identity_scanner(
             # recover enter payload from Name-bound factory products (shared
             # With.as / inline ``nullcontext(*args).__enter__()``).
             # Also ``(0 or cm).__enter__`` / ``[cm][0].__enter__`` /
-            # ``next(iter([cm])).__enter__`` / ``getattr(cm,"__enter__")``
-            # (Unknown > false PASS).
+            # ``next(iter([cm])).__enter__`` / ``getattr(cm,"__enter__")`` /
+            # ``e = cm.__enter__; f = e()`` (Unknown > false PASS).
             enter_func = _peel_transparent_callee(value.func)
 
             def _seed_from_nullcontext_recv(recv_expr: ast.AST) -> bool:
@@ -10567,6 +10706,16 @@ def _build_identity_scanner(
                             return True
                 return False
 
+            if (
+                isinstance(enter_func, ast.Name)
+                and enter_func.id in nullcontext_enter_callables
+                and not value.args
+                and not value.keywords
+            ):
+                _note_protocol_alias_from_value(
+                    name, nullcontext_enter_callables[enter_func.id]
+                )
+                return
             if (
                 isinstance(enter_func, ast.Attribute)
                 and enter_func.attr == "__enter__"
