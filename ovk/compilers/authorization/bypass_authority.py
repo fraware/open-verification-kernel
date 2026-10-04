@@ -520,9 +520,23 @@ class _RequestStateAliasEnv:
         # Peel walrus so ``(Proxy := MappingProxyType)`` seeds adapters.
         while isinstance(value, ast.NamedExpr):
             value = value.value
-        # Static string / int keys for later Name-bound ns view application.
-        # Also ``k = keys[0]`` / ``k = keys.get("x")`` after container projection.
-        if isinstance(value, ast.Constant) and isinstance(
+        from ovk.compilers.authorization.python_callee_resolution import (
+            _static_sequence_index as _static_idx_alias,
+            _static_str_expr as _static_str_alias,
+        )
+
+        # BoolOp / IfExp / Name-bound ``n=("__call__" if True else "x")`` /
+        # ``(0 or "__call__")`` share Constant string/int peels.
+        static_s = _static_str_alias(value)
+        static_i = _static_idx_alias(value)
+        if static_s is not None:
+            self.string_constant_names[name] = static_s
+            self.static_constant_names[name] = static_s
+        elif static_i is not None:
+            self.string_constant_names.pop(name, None)
+            self.static_constant_names[name] = static_i
+            self.sequence_literal_aliases[name] = ast.Constant(value=static_i)
+        elif isinstance(value, ast.Constant) and isinstance(
             value.value, (str, int, float, bytes, bool)
         ):
             if isinstance(value.value, str):
@@ -888,6 +902,7 @@ class _RequestStateAliasEnv:
                 _flatten_starred_args as _flat_proj_view,
                 _is_partial_factory as _partial_proj_view,
                 _peel_call_func as _peel_proj_view,
+                _rewrite_applied_dunder_call as _rewrite_call_view,
                 _shallow_packed_callee_exprs as _shallow_ag,
             )
 
@@ -902,12 +917,15 @@ class _RequestStateAliasEnv:
                 _peel_transparent_callee as _peel_call_view,
             )
 
+            rewritten_view = _rewrite_call_view(node)
+            if rewritten_view is not None:
+                node = rewritten_view
             func = node.func
             while isinstance(func, ast.NamedExpr):
                 func = func.value
-            # ``getattr(...).__call__(0)`` / packed ``[getattr][0].__call__`` —
-            # peel transparent ``__call__`` before view projection
-            # (Unknown > false PASS).
+            # ``getattr(...).__call__(0)`` / packed ``[getattr][0].__call__`` /
+            # Name-bound ``g.__call__(*[0])`` — peel transparent ``__call__``
+            # and star packs before view projection (Unknown > false PASS).
             func = _peel_call_view(func)
             # Nested ``attrgetter("pop")(xs)(0)`` — peel applied attrgetter
             # Attribute before the outer index. Skip factories themselves
@@ -1021,12 +1039,32 @@ class _RequestStateAliasEnv:
                         g_proj = _resolve_str_key(g_flat[1])
                 if g_proj is not None:
                     proj = g_proj
-            if proj == "getitem" and len(node.args) >= 2:
+            flat_apply = _flat_proj_view(
+                node.args,
+                sequence_aliases=self.sequence_literal_aliases,
+                projection_aliases=self.operator_projection_aliases,
+            )
+            if proj == "getitem" and len(flat_apply) >= 2:
                 return _carrier_element_ast(
-                    node.args[0], _static_key_value(node.args[1])
+                    flat_apply[0], _static_key_value(flat_apply[1])
                 )
             view_attr: str | None = None
             recv: ast.AST | None = None
+
+            def _bind_name_view(view_name: str) -> bool:
+                nonlocal view_attr, recv
+                view = self.dict_view_products.get(view_name)
+                if view is None:
+                    return False
+                view_attr = view.split(".")[-1]
+                recv_name = self.bound_view_receivers.get(view_name)
+                if recv_name is not None:
+                    recv = ast.Name(id=recv_name, ctx=ast.Load())
+                else:
+                    expr_recv = self.bound_view_expr_receivers.get(view_name)
+                    if expr_recv is not None:
+                        recv = expr_recv
+                return True
             # ``attrgetter("pop")([partial…])`` ≡ getattr(carrier, "pop").
             ag_name = None
             if isinstance(func, ast.Call):
@@ -1078,17 +1116,20 @@ class _RequestStateAliasEnv:
             elif (
                 view_attr is None
                 and isinstance(func, ast.Name)
-                and func.id in self.dict_view_products
+                and _bind_name_view(func.id)
             ):
-                view = self.dict_view_products[func.id]
-                view_attr = view.split(".")[-1]
-                recv_name = self.bound_view_receivers.get(func.id)
-                if recv_name is not None:
-                    recv = ast.Name(id=recv_name, ctx=ast.Load())
-                else:
-                    expr_recv = self.bound_view_expr_receivers.get(func.id)
-                    if expr_recv is not None:
-                        recv = expr_recv
+                pass
+            elif view_attr is None:
+                # Packed / BoolOp / IfExp Name-bound views:
+                # ``[g][0](*[0])`` / ``(0 or g).__call__(*[0])``.
+                for cand in _shallow_ag(func):
+                    nested = cand
+                    while isinstance(nested, ast.NamedExpr):
+                        nested = nested.value
+                    if isinstance(nested, ast.Name) and _bind_name_view(
+                        nested.id
+                    ):
+                        break
             # ``attrgetter("pop")(xs)`` selects the method — return Attribute
             # so the next Call ``(…)(0)`` peels via Attribute.pop / list0.
             if (
@@ -1102,9 +1143,11 @@ class _RequestStateAliasEnv:
             if (
                 view_attr in {"get", "pop", "__getitem__", "setdefault"}
                 and recv is not None
-                and node.args
+                and flat_apply
             ):
-                return _carrier_element_ast(recv, _static_key_value(node.args[0]))
+                return _carrier_element_ast(
+                    recv, _static_key_value(flat_apply[0])
+                )
             return None
 
         def _carrier_element_ast(
@@ -1828,6 +1871,7 @@ class _RequestStateAliasEnv:
                     flat_inner = _flat_call_args(
                         f.args,
                         sequence_aliases=self.sequence_literal_aliases,
+                        projection_aliases=self.operator_projection_aliases,
                     )
                     if flat_inner:
                         inner_fn = flat_inner[0]
@@ -1848,6 +1892,7 @@ class _RequestStateAliasEnv:
                     flat_call_args = _flat_call_args(
                         peeled.args,
                         sequence_aliases=self.sequence_literal_aliases,
+                        projection_aliases=self.operator_projection_aliases,
                     )
                     if len(flat_call_args) >= 2:
                         call_fn = flat_call_args[0]
@@ -1914,6 +1959,11 @@ class _RequestStateAliasEnv:
                         getattr_aliases=frozenset(g_aliases),
                         sequence_aliases=self.sequence_literal_aliases,
                         bound_map=mc_bound_map,
+                        str_resolver=lambda n: (
+                            self.string_constant_names.get(n.id)
+                            if isinstance(n, ast.Name)
+                            else None
+                        ),
                     )
                     if mc_bound is not None and peeled.args:
                         recv = peeled.args[0]
@@ -7377,14 +7427,42 @@ def _collect_writes_in_function(
                 _shallow_packed_callee_exprs,
             )
 
-            # ``partial(operator.call, p)(*star)`` ≡ ``operator.call(p, *star)``.
-            if isinstance(func, ast.Call) and _is_partial_call_si(
-                func,
+            # ``partial(operator.call, p)(*star)`` ≡ ``operator.call(p, *star)``
+            # including Name-bound ``poc=…`` / packed ``[partial(…)][0]``
+            # (Unknown > false PASS).
+            call_factory: ast.AST = func
+            if isinstance(func, ast.Name):
+                bound_call_p = request_aliases.partial_factories.get(func.id)
+                if bound_call_p is not None:
+                    call_factory = bound_call_p
+            elif not isinstance(func, ast.Call):
+                for cand in _shallow_packed_callee_exprs(func):
+                    nested = cand
+                    while isinstance(nested, ast.NamedExpr):
+                        nested = nested.value
+                    if isinstance(nested, ast.Name):
+                        bound_call_p = request_aliases.partial_factories.get(
+                            nested.id
+                        )
+                        if bound_call_p is not None:
+                            call_factory = bound_call_p
+                            break
+                    if isinstance(nested, ast.Call) and _is_partial_call_si(
+                        nested,
+                        getattr_aliases=frozenset(getattr_aliases),
+                    ):
+                        call_factory = nested
+                        break
+            if isinstance(call_factory, ast.Call) and _is_partial_call_si(
+                call_factory,
                 getattr_aliases=frozenset(getattr_aliases),
             ):
                 p_flat = _flat_call_si(
-                    func.args,
+                    call_factory.args,
                     sequence_aliases=request_aliases.sequence_literal_aliases,
+                    projection_aliases=(
+                        request_aliases.operator_projection_aliases
+                    ),
                 )
                 if p_flat:
                     head = _peel_call_si(p_flat[0])
@@ -7408,6 +7486,9 @@ def _collect_writes_in_function(
                             child.args,
                             sequence_aliases=(
                                 request_aliases.sequence_literal_aliases
+                            ),
+                            projection_aliases=(
+                                request_aliases.operator_projection_aliases
                             ),
                         )
                         child = ast.Call(
@@ -7443,6 +7524,9 @@ def _collect_writes_in_function(
                 flat_call = _flat_call_si(
                     child.args,
                     sequence_aliases=request_aliases.sequence_literal_aliases,
+                    projection_aliases=(
+                        request_aliases.operator_projection_aliases
+                    ),
                 )
                 if len(flat_call) >= 2:
                     child = ast.Call(
@@ -7459,6 +7543,11 @@ def _collect_writes_in_function(
                 getattr_aliases=frozenset(getattr_aliases),
                 sequence_aliases=request_aliases.sequence_literal_aliases,
                 bound_map=request_aliases.methodcaller_factories,
+                str_resolver=lambda n: (
+                    request_aliases.string_constant_names.get(n.id)
+                    if isinstance(n, ast.Name)
+                    else None
+                ),
             )
             if mc_bound is not None and child.args:
                 recv = child.args[0]
@@ -7533,6 +7622,9 @@ def _collect_writes_in_function(
             child_args = _flat_setitem_args(
                 child.args,
                 sequence_aliases=request_aliases.sequence_literal_aliases,
+                projection_aliases=(
+                    request_aliases.operator_projection_aliases
+                ),
             )
             set_base: ast.AST | None = None
             set_key_node: ast.AST | None = None
