@@ -1564,19 +1564,56 @@ def _is_partial_factory(
     """True for ``functools.partial(...)`` / ``partial(...)`` / aliases.
 
     Also ``getattr(functools, \"partial\")(...)`` so getattr packing cannot
-    omit partial construction observation (Unknown > false PASS).
+    omit partial construction observation (Unknown > false PASS). Peels
+    BoolOp / IfExp / packed factories ``(0 or partial)(...)`` /
+    ``[partial][0](...)`` / ``next(iter([partial]))(...)`` on the shared
+    shallow packing path.
     """
 
     aliases = partial_aliases or frozenset({"partial"})
-    func = _peel_call_func(call.func)
-    if isinstance(func, ast.Name) and func.id in aliases:
-        return True
-    if isinstance(func, ast.Attribute) and func.attr == "partial":
-        return True
-    if isinstance(func, ast.Call):
-        if _getattr_static_name(func, getattr_aliases=getattr_aliases) == "partial":
+    for cand in _shallow_packed_callee_exprs(call.func):
+        cand = _peel_call_func(cand)
+        if isinstance(cand, ast.Name) and cand.id in aliases:
             return True
+        if isinstance(cand, ast.Attribute) and cand.attr == "partial":
+            return True
+        if isinstance(cand, ast.Call):
+            if _getattr_static_name(cand, getattr_aliases=getattr_aliases) == "partial":
+                return True
     return False
+
+
+def _nullcontext_enter_arg(
+    expr: ast.AST,
+    *,
+    getattr_aliases: frozenset[str] | None = None,
+) -> ast.AST | None:
+    """Enter argument of ``nullcontext(x)`` / ``contextlib.nullcontext(x)``.
+
+    Shared peel for With as-target seeding: ``__enter__`` returns the argument
+    (Unknown > false PASS). Covers Name / Attribute / getattr factories and
+    BoolOp / IfExp / packed Call.func forms on the shallow packing path.
+    """
+
+    peeled = _peel_call_func(expr)
+    if not isinstance(peeled, ast.Call) or not peeled.args:
+        return None
+    for cand in _shallow_packed_callee_exprs(peeled.func):
+        cand = _peel_call_func(cand)
+        is_nc = (
+            (isinstance(cand, ast.Name) and cand.id == "nullcontext")
+            or (isinstance(cand, ast.Attribute) and cand.attr == "nullcontext")
+            or (
+                isinstance(cand, ast.Call)
+                and _getattr_static_name(
+                    cand, getattr_aliases=getattr_aliases
+                )
+                == "nullcontext"
+            )
+        )
+        if is_nc:
+            return peeled.args[0]
+    return None
 
 
 def _name_is_operator_call_alias(
@@ -2208,6 +2245,14 @@ def _names_packed_as_callee(
             found = []
             for value in node.values:
                 found.extend(_peel(value))
+            return found
+        # Sequence carriers: ``([mc] + [])[0]`` / ``([p] * 1)[0]`` — share
+        # BinOp peels with ``_shallow_packed_callee_exprs`` / candidate exprs
+        # (Unknown > false PASS).
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Mult)):
+            found = list(_peel(node.left))
+            if isinstance(node.op, ast.Add):
+                found.extend(_peel(node.right))
             return found
         # Comprehension / generator carriers: ``[x for x in [exec]]`` /
         # ``(x for x in [exec])`` / ``{k: v for k, v in d.items()}`` — union the
@@ -3818,7 +3863,42 @@ def _build_identity_scanner(
                         cand, getattr_aliases=frozenset(getattr_aliases)
                     )
                     if gname is not None and cand.args:
-                        return gname, cand.args[0]
+                        grecv = cand.args[0]
+                        # Module ``(0 or getattr(copy,"deepcopy"))(xs)`` /
+                        # ``[getattr(copy,"copy")][0](xs)`` — applied arg is
+                        # the carrier (same as bare getattr Call branch).
+                        if (
+                            gname in _MAPPING_COPY_FUNCS
+                            and call.args
+                            and (
+                                (
+                                    isinstance(_peel_call_func(grecv), ast.Name)
+                                    and _peel_call_func(grecv).id  # type: ignore[union-attr]
+                                    in copy_module_aliases
+                                )
+                                or _is_dict_constructor(
+                                    grecv,
+                                    dict_ctor_aliases=frozenset(dict_ctor_aliases),
+                                    getattr_aliases=frozenset(getattr_aliases),
+                                )
+                            )
+                        ):
+                            return gname, call.args[0]
+                        if (
+                            gname
+                            in _DICT_ITER_VIEW_ATTRS
+                            | _NS_DICT_VIEW_ATTRS
+                            | _MAPPING_COPY_FUNCS
+                            | {"fromkeys"}
+                            and _is_dict_constructor(
+                                grecv,
+                                dict_ctor_aliases=frozenset(dict_ctor_aliases),
+                                getattr_aliases=frozenset(getattr_aliases),
+                            )
+                            and call.args
+                        ):
+                            return gname, call.args[0]
+                        return gname, grecv
         if isinstance(func, ast.Call):
             attr = _getattr_static_name(
                 func, getattr_aliases=frozenset(getattr_aliases)
@@ -4189,6 +4269,18 @@ def _build_identity_scanner(
             return None
         expr = _peel_call_func(expr)
         nxt = depth + 1
+        # Positional ``(kw if True else {})`` / ``(kw or {})`` into
+        # ``update`` / ``|=`` / ``__ior__`` — share **spread peels
+        # (Unknown > false PASS).
+        if isinstance(expr, (ast.IfExp, ast.BoolOp)):
+            merged: list[tuple[ast.AST | None, ast.AST | None]] = []
+            resolved = False
+            for arm in _iter_boolop_ifexp_arms(expr):
+                sub = _mapping_items(arm, nxt)
+                if sub is not None:
+                    merged.extend(sub)
+                    resolved = True
+            return merged if resolved else None
         if isinstance(expr, ast.Dict):
             items: list[tuple[ast.AST | None, ast.AST | None]] = []
             for map_key, map_val in zip(expr.keys, expr.values):
@@ -4503,11 +4595,21 @@ def _build_identity_scanner(
                     ):
                         bound_is_copy = True
                     elif isinstance(bound, ast.Call):
-                        # ``partial(getattr(copy, "copy"))`` / deepcopy.
+                        # ``partial(getattr(copy, "copy"))`` / deepcopy /
+                        # ``partial(methodcaller("copy"))``.
                         gcopy = _getattr_static_name(
                             bound, getattr_aliases=frozenset(getattr_aliases)
                         )
                         if gcopy in _MAPPING_COPY_FUNCS:
+                            bound_is_copy = True
+                        elif (
+                            _methodcaller_static_name(
+                                bound,
+                                projection_aliases=operator_projection_aliases,
+                                getattr_aliases=frozenset(getattr_aliases),
+                            )
+                            in _MAPPING_COPY_FUNCS
+                        ):
                             bound_is_copy = True
                     if bound_is_copy:
                         # ``partial(copy.copy)(d)`` / ``partial(copy.copy, d)()``.
@@ -4726,8 +4828,17 @@ def _build_identity_scanner(
                 )
                 if gname == "getitem" or _canonical_projection_name(gname) == "getitem":
                     is_gi = True
-                elif gname == "__getitem__":
-                    is_list_gi = True
+                elif gname == "__getitem__" and bound0.args:
+                    # Bound ``getattr(xs,"__getitem__")`` vs unbound
+                    # ``getattr(list,"__getitem__")``.
+                    if _is_unbound_list_recv(bound0.args[0]) or (
+                        isinstance(_peel_call_func(bound0.args[0]), ast.Name)
+                        and _peel_call_func(bound0.args[0]).id  # type: ignore[union-attr]
+                        == "list"
+                    ):
+                        is_list_gi = True
+                    else:
+                        is_gi = True
                 else:
                     mc = _methodcaller_static_name(
                         bound0,
@@ -4737,6 +4848,97 @@ def _build_identity_scanner(
                     if mc == "__getitem__" and len(bound0.args) >= 2:
                         is_gi = True
                         mc_gi_key = bound0.args[1]
+            # ``args=(getitem, xs, slice); partial(*args)()`` — resolve
+            # Name-bound tuple/list star packs onto the shared getitem peel
+            # before the bare-bound0 gate (Starred is not a getitem Name).
+            if (
+                len(cand.args) == 1
+                and isinstance(cand.args[0], ast.Starred)
+                and not expr.args
+            ):
+                star = _peel_call_func(cand.args[0].value)
+                star_elts: list[ast.AST] | None = None
+                if isinstance(star, (ast.Tuple, ast.List)):
+                    star_elts = list(star.elts)
+                elif isinstance(star, ast.Name):
+                    aliased = sequence_view_aliases.get(star.id)
+                    if isinstance(aliased, (ast.Tuple, ast.List)):
+                        star_elts = list(aliased.elts)
+                    else:
+                        star_elts = _iter_elements(star)
+                if star_elts is not None and len(star_elts) >= 3:
+                    head = _peel_call_func(star_elts[0])
+                    head_gi = (
+                        (
+                            isinstance(head, ast.Name)
+                            and (
+                                head.id == "getitem"
+                                or operator_projection_aliases.get(head.id)
+                                == "getitem"
+                            )
+                        )
+                        or (
+                            isinstance(head, ast.Attribute)
+                            and (
+                                head.attr == "getitem"
+                                or _canonical_projection_name(head.attr)
+                                == "getitem"
+                            )
+                        )
+                    )
+                    if head_gi:
+                        carrier = star_elts[1]
+                        key_node = star_elts[2]
+                        if _slice_key(key_node):
+                            return _iter_elements(carrier, nxt)
+                        key = _resolve_static_key_value(key_node)
+                        if key is None:
+                            key = _static_sequence_index(key_node)
+                        elem = _carrier_element_at(carrier, key)
+                        if elem is not None:
+                            return [elem]
+            # Nested ``partial(partial(getitem, xs), slice)()`` — peel inner
+            # partial factory onto the shared getitem path.
+            if (
+                not (is_gi or is_list_gi)
+                and isinstance(bound0, ast.Call)
+                and _is_partial_factory(
+                    bound0,
+                    partial_aliases=frozenset(partial_aliases),
+                    getattr_aliases=frozenset(getattr_aliases),
+                )
+                and bound0.args
+            ):
+                inner0 = _peel_call_func(bound0.args[0])
+                if isinstance(inner0, ast.Name) and (
+                    inner0.id == "getitem"
+                    or operator_projection_aliases.get(inner0.id) == "getitem"
+                ):
+                    is_gi = True
+                elif isinstance(inner0, ast.Attribute) and (
+                    inner0.attr == "getitem"
+                    or _canonical_projection_name(inner0.attr) == "getitem"
+                ):
+                    is_gi = True
+                elif isinstance(inner0, ast.Call):
+                    g_inner = _getattr_static_name(
+                        inner0, getattr_aliases=frozenset(getattr_aliases)
+                    )
+                    if g_inner == "getitem" or _canonical_projection_name(
+                        g_inner
+                    ) == "getitem":
+                        is_gi = True
+                if is_gi and len(bound0.args) >= 2 and len(cand.args) >= 2 and not expr.args:
+                    carrier = bound0.args[1]
+                    key_node = cand.args[1]
+                    if _slice_key(key_node):
+                        return _iter_elements(carrier, nxt)
+                    key = _resolve_static_key_value(key_node)
+                    if key is None:
+                        key = _static_sequence_index(key_node)
+                    elem = _carrier_element_at(carrier, key)
+                    if elem is not None:
+                        return [elem]
             if not (is_gi or is_list_gi):
                 continue
             if mc_gi_key is not None and len(cand.args) >= 2 and not expr.args:
@@ -4747,6 +4949,41 @@ def _build_identity_scanner(
                 key = _resolve_static_key_value(mc_gi_key)
                 if key is None:
                     key = _static_sequence_index(mc_gi_key)
+                elem = _carrier_element_at(carrier, key)
+                if elem is not None:
+                    return [elem]
+            # Bound ``partial(xs.__getitem__, slice|idx)()`` /
+            # ``partial(getattr(xs,"__getitem__"), slice)()`` — carrier is the
+            # Attribute / getattr receiver; key is the first partial-bound arg.
+            bound_gi_recv: ast.AST | None = None
+            if (
+                isinstance(bound0, ast.Attribute)
+                and bound0.attr == "__getitem__"
+                and not _is_unbound_list_recv(bound0.value)
+            ):
+                bound_gi_recv = bound0.value
+            elif isinstance(bound0, ast.Call):
+                g_bound = _getattr_static_name(
+                    bound0, getattr_aliases=frozenset(getattr_aliases)
+                )
+                if (
+                    g_bound == "__getitem__"
+                    and bound0.args
+                    and not _is_unbound_list_recv(bound0.args[0])
+                ):
+                    bound_gi_recv = bound0.args[0]
+            if (
+                bound_gi_recv is not None
+                and len(cand.args) >= 2
+                and not expr.args
+            ):
+                carrier = bound_gi_recv
+                key_node = cand.args[1]
+                if _slice_key(key_node):
+                    return _iter_elements(carrier, nxt)
+                key = _resolve_static_key_value(key_node)
+                if key is None:
+                    key = _static_sequence_index(key_node)
                 elem = _carrier_element_at(carrier, key)
                 if elem is not None:
                     return [elem]
@@ -4928,6 +5165,32 @@ def _build_identity_scanner(
                 items = _mapping_items(recv, nxt)
                 if items is not None:
                     return [v for _, v in items if v is not None]
+            if attr in _MAPPING_COPY_FUNCS:
+                # Module ``copy.copy|deepcopy(xs)`` /
+                # ``getattr(copy,"deepcopy")(xs)`` /
+                # ``(0 or getattr(copy,"deepcopy"))(xs)`` /
+                # ``[getattr…][0](xs)`` — peel the applied arg.
+                # Bound ``d.copy()`` / ``xs.copy()`` — peel the receiver.
+                # Shared with ``_mapping_items`` (Unknown > false PASS).
+                recv_peel = _peel_call_func(recv)
+                if expr.args and (
+                    (
+                        isinstance(recv_peel, ast.Name)
+                        and recv_peel.id
+                        in copy_module_aliases | _MAPPING_COPY_FUNCS
+                    )
+                    or (
+                        isinstance(recv_peel, ast.Attribute)
+                        and recv_peel.attr in _MAPPING_COPY_FUNCS | {"copy"}
+                    )
+                    or _is_dict_constructor(
+                        recv_peel,
+                        dict_ctor_aliases=frozenset(dict_ctor_aliases),
+                        getattr_aliases=frozenset(getattr_aliases),
+                    )
+                ):
+                    return _iter_elements(expr.args[0], nxt)
+                return _iter_elements(recv, nxt)
         # ``methodcaller("keys|values|popitem|copy|pop|__getitem__")(e)`` /
         # packed ``[methodcaller("keys")][0](e)`` / Name-bound products.
         mc: str | None = None
@@ -5026,9 +5289,31 @@ def _build_identity_scanner(
                 first.value if isinstance(first, ast.Starred) else first, nxt
             )
         # ``copy.copy|deepcopy(xs)`` / ``from copy import copy as c; c(xs)`` /
-        # Name-bound ``fn=copy.copy; fn(xs)`` / packed ``[copy.copy][0](xs)``.
+        # Name-bound ``fn=copy.copy; fn(xs)`` / packed ``[copy.copy][0](xs)`` /
+        # ``(0 or getattr(copy,"deepcopy"))(xs)`` / ``[getattr…][0](xs)``.
         if func_name in _MAPPING_COPY_FUNCS and expr.args:
             return _iter_elements(expr.args[0], nxt)
+        # Shared shallow peel before candidate recursion so BoolOp / IfExp /
+        # Subscript getattr(copy, …) factories do not miss the copy path.
+        if expr.args:
+            for cand in _shallow_packed_callee_exprs(expr.func):
+                cand = _peel_call_func(cand)
+                shallow_copy: str | None = None
+                if isinstance(cand, ast.Attribute) and cand.attr in _MAPPING_COPY_FUNCS:
+                    shallow_copy = cand.attr
+                elif isinstance(cand, ast.Name) and (
+                    cand.id in _MAPPING_COPY_FUNCS
+                    or operator_projection_aliases.get(cand.id) in _MAPPING_COPY_FUNCS
+                ):
+                    shallow_copy = operator_projection_aliases.get(cand.id, cand.id)
+                elif isinstance(cand, ast.Call):
+                    shallow_copy = _getattr_static_name(
+                        cand, getattr_aliases=frozenset(getattr_aliases)
+                    )
+                    if shallow_copy not in _MAPPING_COPY_FUNCS:
+                        shallow_copy = None
+                if shallow_copy in _MAPPING_COPY_FUNCS:
+                    return _iter_elements(expr.args[0], nxt)
         if func_name is None:
             for cand in _callee_candidate_exprs(expr.func):
                 cand = _peel_call_func(cand)
@@ -5056,7 +5341,8 @@ def _build_identity_scanner(
                         getattr_aliases=frozenset(getattr_aliases),
                     ) and cand.args:
                         # ``[partial(copy.deepcopy)][0](xs)`` /
-                        # ``(0 or partial(copy.copy))(xs)``.
+                        # ``(0 or partial(copy.copy))(xs)`` /
+                        # ``[partial(methodcaller("copy"))][0](xs)``.
                         bound = _peel_call_func(cand.args[0])
                         bound_copy = (
                             (
@@ -5075,6 +5361,15 @@ def _build_identity_scanner(
                                 isinstance(bound, ast.Call)
                                 and _getattr_static_name(
                                     bound,
+                                    getattr_aliases=frozenset(getattr_aliases),
+                                )
+                                in _MAPPING_COPY_FUNCS
+                            )
+                            or (
+                                isinstance(bound, ast.Call)
+                                and _methodcaller_static_name(
+                                    bound,
+                                    projection_aliases=operator_projection_aliases,
                                     getattr_aliases=frozenset(getattr_aliases),
                                 )
                                 in _MAPPING_COPY_FUNCS
@@ -5896,6 +6191,39 @@ def _build_identity_scanner(
                     _pack_add(pack, None, names)
                 else:
                     _pack_add(pack, None, _packed_names_deep(nested))
+            # Preserve Call / Attribute element AST so
+            # ``xs.append(partial(...)); xs[0](...)`` /
+            # ``views.insert(0, n.install); views[0](...)`` share the
+            # Name-bound List peel (Unknown > false PASS).
+            prev_seq = sequence_view_aliases.get(base_name)
+            prev_elts: list[ast.AST] = []
+            if isinstance(prev_seq, (ast.List, ast.Tuple)):
+                prev_elts = list(prev_seq.elts)
+            elif prev_seq is not None:
+                prev_elts = list(_iter_elements(prev_seq) or [])
+            new_elts = list(prev_elts)
+            if attr == "insert" and len(args) >= 2:
+                idx = _static_sequence_index(args[0])
+                if idx is None:
+                    idx = 0
+                new_elts.insert(int(idx), args[1])
+            else:
+                for arg in value_args:
+                    nested = arg.value if isinstance(arg, ast.Starred) else arg
+                    if attr in {"extend", "extendleft"}:
+                        sub = _iter_elements(nested)
+                        if sub is not None:
+                            new_elts.extend(sub)
+                        else:
+                            new_elts.append(nested)
+                    else:
+                        new_elts.append(nested)
+            sequence_view_aliases[base_name] = ast.List(
+                elts=new_elts, ctx=ast.Load()
+            )
+            # Index slots for later ``xs[0]`` peels.
+            for index, elt in enumerate(new_elts):
+                _pack_add(pack, index, _packed_names_deep(elt))
         if pack:
             container_packs[base_name] = pack
             # Preserve Attribute values from the grow args so later
@@ -6323,26 +6651,37 @@ def _build_identity_scanner(
                 return
         # ``methodcaller("append", {…})(getattr(cm,"maps"))`` /
         # ``methodcaller("update|setdefault|__setitem__", …)(vars(ns))`` /
-        # packed forms.
+        # ``next(iter([methodcaller("update", **…)]))(vars(ns))`` packed forms.
         mc_func: ast.AST | None = None
+        mc_name: str | None = None
         if isinstance(func, ast.Call):
-            mc_func = func
-        else:
-            for cand in _callee_candidate_exprs(call.func):
-                cand = _peel_call_func(cand)
-                if isinstance(cand, ast.Call) and _methodcaller_static_name(
-                    cand,
-                    projection_aliases=operator_projection_aliases,
-                    getattr_aliases=frozenset(getattr_aliases),
-                ):
-                    mc_func = cand
-                    break
-        if isinstance(mc_func, ast.Call):
             mc_name = _methodcaller_static_name(
-                mc_func,
+                func,
                 projection_aliases=operator_projection_aliases,
                 getattr_aliases=frozenset(getattr_aliases),
             )
+            if mc_name is not None:
+                mc_func = func
+        if mc_func is None:
+            for cand in _callee_candidate_exprs(call.func):
+                cand = _peel_call_func(cand)
+                if isinstance(cand, ast.Call):
+                    cand_mc = _methodcaller_static_name(
+                        cand,
+                        projection_aliases=operator_projection_aliases,
+                        getattr_aliases=frozenset(getattr_aliases),
+                    )
+                    if cand_mc is not None:
+                        mc_func = cand
+                        mc_name = cand_mc
+                        break
+        if isinstance(mc_func, ast.Call):
+            if mc_name is None:
+                mc_name = _methodcaller_static_name(
+                    mc_func,
+                    projection_aliases=operator_projection_aliases,
+                    getattr_aliases=frozenset(getattr_aliases),
+                )
             if (
                 mc_name
                 in _PACK_ADD_METHODS
@@ -7779,6 +8118,26 @@ def _build_identity_scanner(
                             _seed_ns_key_aliases(name, key)
                             seeded_ns_key = True
                             break
+            # ``L = operator.getitem(vars(builtins)|builtins.__dict__, "list")`` /
+            # BoolOp / packed getitem — share ``.get("list")`` seed.
+            if not seeded_ns_key and len(value.args) >= 2:
+                gi_proj = _projection_factory_name(
+                    value,
+                    projection_aliases=operator_projection_aliases,
+                    getattr_aliases=frozenset(getattr_aliases),
+                )
+                if gi_proj == "getitem":
+                    key = _resolve_static_str(value.args[1])
+                    if key is not None and (
+                        _base_is_namespace_projection(value.args[0])
+                        or (
+                            isinstance(_peel_call_func(value.args[0]), ast.Name)
+                            and _peel_call_func(value.args[0]).id  # type: ignore[union-attr]
+                            in ns_dict_aliases
+                        )
+                    ):
+                        _seed_ns_key_aliases(name, key)
+                        seeded_ns_key = True
             del seeded_ns_key
             if attr is None:
                 # Applied view Call (``g(key)``) is a product, not a view binder.
@@ -7832,21 +8191,39 @@ def _build_identity_scanner(
                                 bound_view_expr_receivers[name] = sort_recv
                         break
                     ag_applied = None
-            # ``g = list.sort.__get__(None, list)`` / BoolOp / getattr __get__.
+            # ``g = list.sort.__get__(None, list)`` / BoolOp / getattr __get__ /
+            # ``next(iter([list.sort.__get__]))`` / ``object.__getattribute__`` /
+            # ``list.__dict__.get("sort").__get__`` (Unknown > false PASS).
             get_func = _peel_call_func(value.func)
             get_attr = None
             get_recv: ast.AST | None = None
             if isinstance(get_func, ast.Attribute) and get_func.attr == "__get__":
                 get_attr = "__get__"
                 get_recv = get_func.value
-            elif isinstance(get_func, ast.Call):
+            if get_attr is None and isinstance(get_func, ast.Call):
                 g_get = _getattr_static_name(
                     get_func, getattr_aliases=frozenset(getattr_aliases)
                 )
                 if g_get == "__get__" and get_func.args:
                     get_attr = "__get__"
                     get_recv = get_func.args[0]
-            else:
+                else:
+                    # ``object.__getattribute__(list.sort, "__get__")``.
+                    f_ga = _peel_call_func(get_func.func)
+                    is_getattribute = (
+                        isinstance(f_ga, ast.Attribute)
+                        and f_ga.attr == "__getattribute__"
+                    ) or (
+                        isinstance(f_ga, ast.Name) and f_ga.id == "__getattribute__"
+                    )
+                    if (
+                        is_getattribute
+                        and len(get_func.args) >= 2
+                        and _resolve_static_str(get_func.args[1]) == "__get__"
+                    ):
+                        get_attr = "__get__"
+                        get_recv = get_func.args[0]
+            if get_attr is None:
                 for cand in _callee_candidate_exprs(value.func):
                     cand = _peel_call_func(cand)
                     if isinstance(cand, ast.Attribute) and cand.attr == "__get__":
@@ -7858,6 +8235,22 @@ def _build_identity_scanner(
                             cand, getattr_aliases=frozenset(getattr_aliases)
                         )
                         if g_get == "__get__" and cand.args:
+                            get_attr = "__get__"
+                            get_recv = cand.args[0]
+                            break
+                        f_ga = _peel_call_func(cand.func)
+                        is_getattribute = (
+                            isinstance(f_ga, ast.Attribute)
+                            and f_ga.attr == "__getattribute__"
+                        ) or (
+                            isinstance(f_ga, ast.Name)
+                            and f_ga.id == "__getattribute__"
+                        )
+                        if (
+                            is_getattribute
+                            and len(cand.args) >= 2
+                            and _resolve_static_str(cand.args[1]) == "__get__"
+                        ):
                             get_attr = "__get__"
                             get_recv = cand.args[0]
                             break
@@ -7879,6 +8272,15 @@ def _build_identity_scanner(
                         else:
                             bound_view_receivers.pop(name, None)
                             bound_view_expr_receivers[name] = inner
+                elif isinstance(sort_recv, ast.Name) and (
+                    operator_projection_aliases.get(sort_recv.id) == "list.sort"
+                    or dict_view_products.get(sort_recv.id) == "list.sort"
+                ):
+                    # ``inner=getattr(list,"sort"); getattr(inner,"__get__")``.
+                    dict_view_products[name] = "list.sort"
+                    operator_projection_aliases[name] = "list.sort"
+                    bound_view_receivers.pop(name, None)
+                    bound_view_expr_receivers.pop(name, None)
                 elif isinstance(sort_recv, ast.Subscript):
                     # ``list.__dict__["sort"].__get__(None, list)``.
                     sub_key = _resolve_static_str(sort_recv.slice)
@@ -7887,12 +8289,105 @@ def _build_identity_scanner(
                         operator_projection_aliases[name] = "list.sort"
                         bound_view_receivers.pop(name, None)
                         bound_view_expr_receivers.pop(name, None)
-            # Keep partial Call AST so Name-bound ``next(iter([p]))`` peels
-            # recover ``partial(setattr|…,...)`` (Unknown > false PASS).
+                elif isinstance(sort_recv, ast.Call):
+                    # ``getattr(list,"sort").__get__`` /
+                    # ``getattr(getattr(list,"sort"),"__get__")`` —
+                    # peel nested getattr sort before dict.get paths.
+                    g_sort = _getattr_static_name(
+                        sort_recv, getattr_aliases=frozenset(getattr_aliases)
+                    )
+                    if (
+                        g_sort == "sort"
+                        and sort_recv.args
+                        and _is_unbound_list_recv(sort_recv.args[0])
+                    ):
+                        dict_view_products[name] = "list.sort"
+                        operator_projection_aliases[name] = "list.sort"
+                        bound_view_receivers.pop(name, None)
+                        bound_view_expr_receivers.pop(name, None)
+                    else:
+                        # ``list.__dict__.get("sort").__get__`` /
+                        # ``vars(list).get|pop("sort").__get__`` /
+                        # BoolOp get before __get__.
+                        view = _view_call_parts(sort_recv)
+                        view_attr = view[0] if view is not None else None
+                        view_recv = view[1] if view is not None else None
+                        if view_attr is None:
+                            for vc in _callee_candidate_exprs(sort_recv.func):
+                                vc = _peel_call_func(vc)
+                                if isinstance(vc, ast.Attribute) and vc.attr in {
+                                    "get",
+                                    "pop",
+                                    "__getitem__",
+                                }:
+                                    view_attr = vc.attr
+                                    view_recv = vc.value
+                                    break
+                                if isinstance(vc, ast.Call):
+                                    vg = _getattr_static_name(
+                                        vc,
+                                        getattr_aliases=frozenset(getattr_aliases),
+                                    )
+                                    if (
+                                        vg in {"get", "pop", "__getitem__"}
+                                        and vc.args
+                                    ):
+                                        view_attr = vg
+                                        view_recv = vc.args[0]
+                                        break
+                        if (
+                            view_attr in {"get", "pop", "__getitem__"}
+                            and view_recv is not None
+                            and sort_recv.args
+                            and _resolve_static_str(sort_recv.args[0]) == "sort"
+                        ):
+                            dict_base = _peel_call_func(view_recv)
+                            is_list_dict = (
+                                isinstance(dict_base, ast.Attribute)
+                                and dict_base.attr == "__dict__"
+                                and _is_unbound_list_recv(dict_base.value)
+                            ) or (
+                                isinstance(dict_base, ast.Call)
+                                and (
+                                    (
+                                        isinstance(
+                                            _peel_call_func(dict_base.func),
+                                            ast.Name,
+                                        )
+                                        and _peel_call_func(dict_base.func).id  # type: ignore[union-attr]
+                                        == "vars"
+                                    )
+                                    or (
+                                        isinstance(
+                                            _peel_call_func(dict_base.func),
+                                            ast.Attribute,
+                                        )
+                                        and _peel_call_func(dict_base.func).attr  # type: ignore[union-attr]
+                                        == "vars"
+                                    )
+                                )
+                                and dict_base.args
+                                and _is_unbound_list_recv(dict_base.args[0])
+                            )
+                            if is_list_dict:
+                                dict_view_products[name] = "list.sort"
+                                operator_projection_aliases[name] = "list.sort"
+                                bound_view_receivers.pop(name, None)
+                                bound_view_expr_receivers.pop(name, None)
+            # Keep partial / methodcaller Call AST so Name-bound
+            # ``next(iter([p|mc]))`` / BinOp / concat peels recover the factory
+            # with bound args (Unknown > false PASS).
             if _is_partial_factory(
                 value,
                 partial_aliases=frozenset(partial_aliases),
                 getattr_aliases=frozenset(getattr_aliases),
+            ) or (
+                _methodcaller_static_name(
+                    value,
+                    projection_aliases=operator_projection_aliases,
+                    getattr_aliases=frozenset(getattr_aliases),
+                )
+                is not None
             ):
                 bound_callee_exprs[name] = value
             else:
@@ -8557,6 +9052,11 @@ def _build_identity_scanner(
                 elif alias.name == "slice":
                     slice_aliases.add(local)
                 elif alias.name in {"vars", "globals", "locals"}:
+                    ns_projection_aliases.add(local)
+                elif alias.name == "__dict__":
+                    # ``from builtins import __dict__ as D; D.get("list")`` —
+                    # share namespace-projection seeds (Unknown > false PASS).
+                    ns_dict_aliases.add(local)
                     ns_projection_aliases.add(local)
                 elif alias.name in _MAPPING_CTOR_NAMES | {"list", "set", "tuple"}:
                     # ``from collections import OrderedDict as OD`` /
@@ -9929,6 +10429,13 @@ def _build_identity_scanner(
                 )
                 return
             packed_func_names = _packed_names(func)
+            # Name-bound factory products packed through ``next(iter([mc]))`` /
+            # ``next(reversed([p]))`` / ``operator.concat([mc],[])[0]`` —
+            # share the Subscript ``[mc][0]`` observe path (Unknown > false PASS).
+            for pname in packed_func_names:
+                if pname in projection_factory_products:
+                    if _observe_name_bound_factory_product(pname):
+                        return
             # Shared packing/projection peel: .get/.pop/getattr/attrgetter/
             # itemgetter/getitem/methodcaller/partial/next(iter)/…
             if _observe_classes_from_names(packed_func_names):
@@ -12718,13 +13225,40 @@ def _build_identity_scanner(
                             )
                         # Merge Attribute-preserving RHS mapping into seq alias
                         # (``d=dict(); d|={'e': n.install}; d['e'](evil)``).
+                        # Also merge List carriers for ``xs += [partial(...)]`` /
+                        # ``views += [n.install]`` (Unknown > false PASS).
                         rhs_items = _mapping_items(stmt.value)
                         left_items = (
                             list(_mapping_items(saved_seq) or [])
                             if saved_seq is not None
                             else []
                         )
-                        if rhs_items is not None or left_items:
+                        rhs_elts = _iter_elements(stmt.value)
+                        left_elts: list[ast.AST] | None = None
+                        if isinstance(saved_seq, (ast.List, ast.Tuple)):
+                            left_elts = list(saved_seq.elts)
+                        elif saved_seq is not None and rhs_items is None:
+                            left_elts = list(_iter_elements(saved_seq) or []) or None
+                        if (
+                            isinstance(stmt.op, ast.Add)
+                            and (rhs_elts is not None or left_elts is not None)
+                            and rhs_items is None
+                        ):
+                            merged_elts = [
+                                *(left_elts or []),
+                                *(rhs_elts or []),
+                            ]
+                            sequence_view_aliases[stmt.target.id] = ast.List(
+                                elts=merged_elts, ctx=ast.Load()
+                            )
+                            for index, elt in enumerate(merged_elts):
+                                grown = container_packs.get(stmt.target.id, {})
+                                _pack_add(
+                                    grown, index, _packed_names_deep(elt)
+                                )
+                                if grown:
+                                    container_packs[stmt.target.id] = grown
+                        elif rhs_items is not None or left_items:
                             by_key: dict[object, ast.AST] = {}
                             for k, v in left_items:
                                 if isinstance(k, ast.Constant) and v is not None:
@@ -12970,6 +13504,17 @@ def _build_identity_scanner(
                             # Attribute view path (Unknown > false PASS).
                             seed_call = _peel_call_func(seed_expr)
                             as_name = item.optional_vars.id
+                            # ``with nullcontext(n.install) as f`` /
+                            # ``contextlib.nullcontext(...)`` — enter returns the
+                            # argument (Unknown > false PASS).
+                            nc_arg = _nullcontext_enter_arg(
+                                seed_expr,
+                                getattr_aliases=frozenset(getattr_aliases),
+                            )
+                            if nc_arg is not None:
+                                seed_expr = nc_arg
+                                seed_call = _peel_call_func(seed_expr)
+                                _note_protocol_alias_from_value(as_name, seed_expr)
                             if isinstance(seed_call, ast.Call):
                                 view = _view_call_parts(seed_call)
                                 reconstructed: ast.AST | None = None
