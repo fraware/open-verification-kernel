@@ -1566,10 +1566,35 @@ class _RequestStateAliasEnv:
                                 if is_copy:
                                     copy_src = peeled.args[0]
                 else:
-                    # ``p = partial(copy.copy, keys); c = p()``.
+                    # ``p = partial(copy.copy, keys); c = p()`` /
+                    # ``p = partial(keys.copy); c = p()``.
                     bound_partial = self.partial_factories.get(f.id)
-                    if bound_partial is not None and len(bound_partial.args) >= 2:
-                        copy_src = bound_partial.args[1]
+                    if bound_partial is not None and bound_partial.args:
+                        if len(bound_partial.args) >= 2:
+                            copy_src = bound_partial.args[1]
+                        else:
+                            from ovk.compilers.authorization.python_callee_resolution import (
+                                _getattr_static_name as _g_bound_copy,
+                                _peel_call_func as _peel_bound_copy,
+                            )
+
+                            b0 = _peel_bound_copy(bound_partial.args[0])
+                            if (
+                                isinstance(b0, ast.Attribute)
+                                and b0.attr == "copy"
+                            ):
+                                copy_src = b0.value
+                            elif (
+                                isinstance(b0, ast.Call)
+                                and _g_bound_copy(
+                                    b0,
+                                    getattr_aliases=frozenset(g_aliases),
+                                )
+                                == "copy"
+                                and b0.args
+                            ):
+                                # ``partial(getattr(keys,"copy"))()``.
+                                copy_src = b0.args[0]
             elif isinstance(f, ast.Call):
                 # ``getattr(copy,"copy")(keys)`` / ``getattr(dict,"copy")(keys)`` /
                 # ``methodcaller("copy")(keys)`` / packed factory applies.
@@ -1592,9 +1617,24 @@ class _RequestStateAliasEnv:
                 elif _is_partial_copy(
                     f,
                     getattr_aliases=frozenset(g_aliases),
-                ) and len(f.args) >= 2 and not peeled.args:
-                    # ``partial(copy.copy, keys)()``.
-                    copy_src = f.args[1]
+                ) and f.args and not peeled.args:
+                    # ``partial(copy.copy, keys)()`` /
+                    # ``partial(keys.copy)()`` /
+                    # ``partial(getattr(keys,"copy"))()``.
+                    if len(f.args) >= 2:
+                        copy_src = f.args[1]
+                    else:
+                        b0 = f.args[0]
+                        while isinstance(b0, ast.NamedExpr):
+                            b0 = b0.value
+                        if isinstance(b0, ast.Attribute) and b0.attr == "copy":
+                            copy_src = b0.value
+                        else:
+                            g_b = _g_static(
+                                b0, getattr_aliases=frozenset(g_aliases)
+                            ) if isinstance(b0, ast.Call) else None
+                            if g_b == "copy" and isinstance(b0, ast.Call) and b0.args:
+                                copy_src = b0.args[0]
                 else:
                     for cand in _shallow_copy(f):
                         nested = cand
@@ -1673,6 +1713,28 @@ class _RequestStateAliasEnv:
                                     if len(bound_partial.args) == 1 and peeled.args:
                                         copy_src = peeled.args[0]
                                         break
+                                    if (
+                                        len(bound_partial.args) == 1
+                                        and not peeled.args
+                                        and isinstance(b0, ast.Attribute)
+                                        and b0.attr == "copy"
+                                    ):
+                                        # ``p=partial(keys.copy); next(iter([p]))()``.
+                                        copy_src = b0.value
+                                        break
+                                    if (
+                                        len(bound_partial.args) == 1
+                                        and not peeled.args
+                                        and isinstance(b0, ast.Call)
+                                        and _g_next_partial(
+                                            b0,
+                                            getattr_aliases=frozenset(g_aliases),
+                                        )
+                                        == "copy"
+                                        and b0.args
+                                    ):
+                                        copy_src = b0.args[0]
+                                        break
                         if isinstance(nested, ast.Call):
                             gn = _g_static(
                                 nested, getattr_aliases=frozenset(g_aliases)
@@ -1693,6 +1755,60 @@ class _RequestStateAliasEnv:
                             ):
                                 copy_src = peeled.args[0]
                                 break
+                            # Inline packed ``partial(copy.copy)`` /
+                            # ``partial(keys.copy)`` factory Call itself.
+                            if _is_partial_copy(
+                                nested,
+                                getattr_aliases=frozenset(g_aliases),
+                            ) and nested.args:
+                                from ovk.compilers.authorization.python_callee_resolution import (
+                                    _peel_call_func as _peel_inline_p,
+                                )
+
+                                b0 = _peel_inline_p(nested.args[0])
+                                is_copy_inline = (
+                                    (
+                                        isinstance(b0, ast.Attribute)
+                                        and b0.attr in {"copy", "deepcopy"}
+                                    )
+                                    or (
+                                        isinstance(b0, ast.Name)
+                                        and (
+                                            b0.id in {"copy", "deepcopy"}
+                                            or self.operator_projection_aliases.get(
+                                                b0.id
+                                            )
+                                            in {"copy", "deepcopy"}
+                                        )
+                                    )
+                                    or (
+                                        isinstance(b0, ast.Call)
+                                        and _g_static(
+                                            b0,
+                                            getattr_aliases=frozenset(g_aliases),
+                                        )
+                                        in {"copy", "deepcopy"}
+                                    )
+                                )
+                                if is_copy_inline:
+                                    if (
+                                        len(nested.args) >= 2
+                                        and not peeled.args
+                                    ):
+                                        copy_src = nested.args[1]
+                                        break
+                                    if (
+                                        len(nested.args) == 1
+                                        and isinstance(b0, ast.Attribute)
+                                        and b0.attr == "copy"
+                                        and not peeled.args
+                                    ):
+                                        # ``partial(keys.copy)()``.
+                                        copy_src = b0.value
+                                        break
+                                    if len(nested.args) == 1 and peeled.args:
+                                        copy_src = peeled.args[0]
+                                        break
             else:
                 # Packed ``[copy.copy][0](keys)`` / BoolOp / IfExp / next /
                 # ``(0 or mc)(keys)`` Name-bound methodcaller|partial products.
@@ -6690,20 +6806,29 @@ def _collect_writes_in_function(
                             break
                         proj = None
             # ``operator.setitem(keys, k, v)`` / ``getattr(keys,"__setitem__")(k, v)`` /
-            # ``partial(operator.setitem, keys, k)(v)`` / packed partial peels.
+            # ``partial(operator.setitem, keys, k)(v)`` / packed partial peels /
+            # ``p(*args)`` with ``args=(keys,k,v)`` (Unknown > false PASS).
+            from ovk.compilers.authorization.python_callee_resolution import (
+                _flatten_starred_args as _flat_setitem_args,
+            )
+
+            child_args = _flat_setitem_args(
+                child.args,
+                sequence_aliases=request_aliases.sequence_literal_aliases,
+            )
             set_base: ast.AST | None = None
             set_key_node: ast.AST | None = None
             set_val_node: ast.AST | None = None
-            if proj == "setitem" and len(child.args) >= 3:
-                set_base = child.args[0]
-                set_key_node = child.args[1]
-                set_val_node = child.args[2]
+            if proj == "setitem" and len(child_args) >= 3:
+                set_base = child_args[0]
+                set_key_node = child_args[1]
+                set_val_node = child_args[2]
             # Name-bound view products before getattr Call layout: Name ``si``
             # is also aliased to operator ``setitem``, so ``next(iter([si]))``
             # must not treat ``next(...)`` as ``getattr(keys,"__setitem__")``.
             if set_base is None and (
                 proj == "setitem" or proj is None
-            ) and len(child.args) >= 2:
+            ) and len(child_args) >= 2:
                 from ovk.compilers.authorization.python_callee_resolution import (
                     _peel_transparent_callee as _peel_si_call,
                 )
@@ -6723,20 +6848,20 @@ def _collect_writes_in_function(
                         and recv is not None
                     ):
                         set_base = ast.Name(id=recv, ctx=ast.Load())
-                        set_key_node = child.args[0]
-                        set_val_node = child.args[1]
+                        set_key_node = child_args[0]
+                        set_val_node = child_args[1]
                         break
             if (
                 set_base is None
                 and proj == "setitem"
                 and isinstance(func, ast.Call)
-                and len(child.args) >= 2
+                and len(child_args) >= 2
                 and len(func.args) >= 1
             ):
                 # Bound ``getattr(keys, "__setitem__")(k, v)``.
                 set_base = func.args[0]
-                set_key_node = child.args[0]
-                set_val_node = child.args[1]
+                set_key_node = child_args[0]
+                set_val_node = child_args[1]
             if set_base is None:
                 from ovk.compilers.authorization.python_callee_resolution import (
                     _is_partial_factory as _is_partial_setitem,
@@ -6769,7 +6894,7 @@ def _collect_writes_in_function(
                             getattr_aliases=frozenset(getattr_aliases),
                         )
                         and nested.args
-                        and child.args
+                        and child_args
                     ):
                         continue
                     bound0 = _peel_setitem(nested.args[0])
@@ -6817,32 +6942,32 @@ def _collect_writes_in_function(
                     if not is_setitem:
                         continue
                     # ``partial(setitem, keys, k)(v)`` — 3 bound, 1 apply.
-                    if len(nested.args) >= 3 and child.args:
+                    if len(nested.args) >= 3 and child_args:
                         set_base = nested.args[1]
                         set_key_node = nested.args[2]
-                        set_val_node = child.args[0]
+                        set_val_node = child_args[0]
                         break
                     # ``partial(setitem, keys)(k, v)`` — under-applied.
-                    if len(nested.args) >= 2 and len(child.args) >= 2:
+                    if len(nested.args) >= 2 and len(child_args) >= 2:
                         set_base = nested.args[1]
-                        set_key_node = child.args[0]
-                        set_val_node = child.args[1]
+                        set_key_node = child_args[0]
+                        set_val_node = child_args[1]
                         break
-                    # ``partial(setitem)(keys, k, v)`` — zero-bound apply.
-                    if len(nested.args) == 1 and len(child.args) >= 3:
-                        set_base = child.args[0]
-                        set_key_node = child.args[1]
-                        set_val_node = child.args[2]
+                    # ``partial(setitem)(keys, k, v)`` / ``p(*args)`` zero-bound.
+                    if len(nested.args) == 1 and len(child_args) >= 3:
+                        set_base = child_args[0]
+                        set_key_node = child_args[1]
+                        set_val_node = child_args[2]
                         break
                     # ``partial(keys.__setitem__|getattr(keys,"__setitem__"), k)(v)``.
                     if (
                         bound_recv is not None
                         and len(nested.args) >= 2
-                        and child.args
+                        and child_args
                     ):
                         set_base = bound_recv
                         set_key_node = nested.args[1]
-                        set_val_node = child.args[0]
+                        set_val_node = child_args[0]
                         break
             if (
                 set_base is not None

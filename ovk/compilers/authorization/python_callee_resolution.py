@@ -1393,17 +1393,17 @@ def _methodcaller_static_name(
     func = _peel_transparent_callee(call.func)
     if isinstance(func, ast.Name) and call.args:
         if func.id == "methodcaller" or aliases.get(func.id) == "methodcaller":
-            return _static_str(call.args[0])
+            return _static_str_expr(call.args[0])
     if (
         isinstance(func, ast.Attribute)
         and func.attr == "methodcaller"
         and call.args
     ):
-        return _static_str(call.args[0])
+        return _static_str_expr(call.args[0])
     if isinstance(func, ast.Call) and call.args:
         gname = _getattr_static_name(func, getattr_aliases=getattr_aliases)
         if gname == "methodcaller":
-            return _static_str(call.args[0])
+            return _static_str_expr(call.args[0])
     # Packed ``[operator.methodcaller][0]("x")`` / ``(0 or methodcaller)("x")``.
     if call.args and _is_projection_factory_expr(
         func,
@@ -1411,7 +1411,7 @@ def _methodcaller_static_name(
         projection_aliases=aliases,
         getattr_aliases=getattr_aliases,
     ):
-        return _static_str(call.args[0])
+        return _static_str_expr(call.args[0])
     return None
 
 
@@ -1964,6 +1964,69 @@ def _iter_boolop_ifexp_arms(expr: ast.AST) -> list[ast.AST]:
             out.extend(_iter_boolop_ifexp_arms(value))
         return out
     return [node]
+
+
+def _static_str_expr(node: ast.AST) -> str | None:
+    """Constant str with NamedExpr / BoolOp / IfExp peels (Unknown > false PASS).
+
+    Shared peel for ``methodcaller(('append' if True else 'x'))`` /
+    ``('sort' if True else 'x')`` keys and any arm that resolves to a
+    static string. First matching arm wins.
+    """
+
+    for arm in _iter_boolop_ifexp_arms(node):
+        s = _static_str(_peel_call_func(arm))
+        if s is not None:
+            return s
+    return None
+
+
+def _preferred_seed_arm(expr: ast.AST) -> ast.AST:
+    """Prefer Attribute / Call / Name over Constant in BoolOp / IfExp arms.
+
+    Shared With / Assign nullcontext enter seed and BoolOp RHS alias peels
+    so ``nullcontext((n.install if True else None))`` / ``(0 or n.install)``
+    keep the accounted callable (Unknown > false PASS).
+    """
+
+    arms = _iter_boolop_ifexp_arms(expr)
+    for arm in arms:
+        peeled = _peel_call_func(arm)
+        if isinstance(peeled, (ast.Attribute, ast.Call, ast.Name)):
+            return arm
+    return arms[0] if arms else expr
+
+
+def _flatten_starred_args(
+    args: Sequence[ast.AST],
+    *,
+    sequence_aliases: Mapping[str, ast.AST] | None = None,
+) -> list[ast.AST]:
+    """Flatten ``f(*[a, b])`` / ``f(*args)`` Name-bound tuple/list packs.
+
+    Shared peel for unbound ``list.append(*…)`` / ``operator.iadd(*…)`` /
+    ``partial(setitem)(*args)`` / ``getitem(*args)`` (Unknown > false PASS).
+    """
+
+    aliases = sequence_aliases or {}
+    out: list[ast.AST] = []
+    for arg in args:
+        if not isinstance(arg, ast.Starred):
+            out.append(arg)
+            continue
+        star = _peel_call_func(arg.value)
+        elts: list[ast.AST] | None = None
+        if isinstance(star, (ast.Tuple, ast.List)):
+            elts = list(star.elts)
+        elif isinstance(star, ast.Name):
+            aliased = aliases.get(star.id)
+            if isinstance(aliased, (ast.Tuple, ast.List)):
+                elts = list(aliased.elts)
+        if elts is not None:
+            out.extend(elts)
+        else:
+            out.append(arg)
+    return out
 
 
 def _peel_transparent_callee(func: ast.AST) -> ast.AST:
@@ -4864,123 +4927,172 @@ def _build_identity_scanner(
                 NOT match: dunder canonicalization would otherwise collapse them
                 onto ``getitem`` and skip the 2-elt star-bound peel
                 (``partial(*(xs.__getitem__, slice))()`` — Unknown > false PASS).
+                Also BoolOp / IfExp heads: ``(0 or operator.getitem)``.
                 """
 
-                head = _peel_call_func(head)
-                if isinstance(head, ast.Name) and (
-                    head.id == "getitem"
-                    or operator_projection_aliases.get(head.id) == "getitem"
-                ):
-                    return True
-                if isinstance(head, ast.Attribute) and head.attr == "getitem":
-                    return True
-                if (
-                    isinstance(head, ast.Attribute)
-                    and head.attr == "__getitem__"
-                    and _is_unbound_list_recv(head.value)
-                ):
-                    # Unbound ``list.__getitem__`` / ``builtins.list.__getitem__``.
-                    return True
-                if isinstance(head, ast.Call):
-                    g_h = _getattr_static_name(
-                        head, getattr_aliases=frozenset(getattr_aliases)
-                    )
-                    if g_h == "getitem":
-                        return True
-                    if (
-                        g_h == "__getitem__"
-                        and head.args
-                        and _is_unbound_list_recv(head.args[0])
+                for arm in _iter_boolop_ifexp_arms(head):
+                    arm = _peel_call_func(arm)
+                    if isinstance(arm, ast.Name) and (
+                        arm.id == "getitem"
+                        or operator_projection_aliases.get(arm.id) == "getitem"
                     ):
                         return True
+                    if isinstance(arm, ast.Attribute) and arm.attr == "getitem":
+                        return True
+                    if (
+                        isinstance(arm, ast.Attribute)
+                        and arm.attr == "__getitem__"
+                        and _is_unbound_list_recv(arm.value)
+                    ):
+                        # Unbound ``list.__getitem__`` / ``builtins.list.__getitem__``.
+                        return True
+                    if isinstance(arm, ast.Call):
+                        g_h = _getattr_static_name(
+                            arm, getattr_aliases=frozenset(getattr_aliases)
+                        )
+                        if g_h == "getitem":
+                            return True
+                        if (
+                            g_h == "__getitem__"
+                            and arm.args
+                            and _is_unbound_list_recv(arm.args[0])
+                        ):
+                            return True
                 return False
 
             def _bound_getitem_recv(head: ast.AST) -> ast.AST | None:
                 """Receiver of bound ``xs.__getitem__`` / Name-bound ``gi``."""
 
-                head = _peel_call_func(head)
-                if (
-                    isinstance(head, ast.Attribute)
-                    and head.attr == "__getitem__"
-                    and not _is_unbound_list_recv(head.value)
-                ):
-                    return head.value
-                if isinstance(head, ast.Call):
-                    g_h = _getattr_static_name(
-                        head, getattr_aliases=frozenset(getattr_aliases)
-                    )
+                for arm in _iter_boolop_ifexp_arms(head):
+                    arm = _peel_call_func(arm)
                     if (
-                        g_h == "__getitem__"
-                        and head.args
-                        and not _is_unbound_list_recv(head.args[0])
+                        isinstance(arm, ast.Attribute)
+                        and arm.attr == "__getitem__"
+                        and not _is_unbound_list_recv(arm.value)
                     ):
-                        return head.args[0]
-                if isinstance(head, ast.Name):
-                    view = dict_view_products.get(head.id)
-                    if view is not None and view.split(".")[-1] == "__getitem__":
-                        recv_n = bound_view_receivers.get(head.id)
-                        if recv_n is not None:
-                            return ast.Name(id=recv_n, ctx=ast.Load())
-                        expr_recv = bound_view_expr_receivers.get(head.id)
-                        if expr_recv is not None:
-                            return expr_recv
-                    bound_attr = bound_callee_exprs.get(head.id)
-                    if bound_attr is not None:
-                        return _bound_getitem_recv(bound_attr)
+                        return arm.value
+                    if isinstance(arm, ast.Call):
+                        g_h = _getattr_static_name(
+                            arm, getattr_aliases=frozenset(getattr_aliases)
+                        )
+                        if (
+                            g_h == "__getitem__"
+                            and arm.args
+                            and not _is_unbound_list_recv(arm.args[0])
+                        ):
+                            return arm.args[0]
+                    if isinstance(arm, ast.Name):
+                        view = dict_view_products.get(arm.id)
+                        if view is not None and view.split(".")[-1] == "__getitem__":
+                            recv_n = bound_view_receivers.get(arm.id)
+                            if recv_n is not None:
+                                return ast.Name(id=recv_n, ctx=ast.Load())
+                            expr_recv = bound_view_expr_receivers.get(arm.id)
+                            if expr_recv is not None:
+                                return expr_recv
+                        bound_attr = bound_callee_exprs.get(arm.id)
+                        if bound_attr is not None:
+                            nested = _bound_getitem_recv(bound_attr)
+                            if nested is not None:
+                                return nested
+                        # Name-bound ``inner=partial(getitem, xs)``.
+                        product = projection_factory_products.get(arm.id)
+                        if product is not None and product[0] == "partial":
+                            bound_call = bound_callee_exprs.get(arm.id)
+                            if isinstance(bound_call, ast.Call) and bound_call.args:
+                                return _bound_getitem_recv(bound_call) or (
+                                    _peel_call_func(bound_call.args[1])
+                                    if len(bound_call.args) >= 2
+                                    and _head_is_getitem(bound_call.args[0])
+                                    else None
+                                )
                 return None
 
-            if isinstance(bound0, ast.Name) and (
-                bound0.id == "getitem"
-                or operator_projection_aliases.get(bound0.id) == "getitem"
-            ):
-                is_gi = True
-            elif isinstance(bound0, ast.Attribute) and bound0.attr == "getitem":
-                is_gi = True
-            elif isinstance(bound0, ast.Attribute) and bound0.attr == "__getitem__":
-                if _is_unbound_list_recv(bound0.value) or (
-                    isinstance(_peel_call_func(bound0.value), ast.Name)
-                    and _peel_call_func(bound0.value).id == "list"  # type: ignore[union-attr]
+            # BoolOp / IfExp / Name / Attribute / getattr getitem heads.
+            for b0_arm in _iter_boolop_ifexp_arms(bound0):
+                b0_arm = _peel_call_func(b0_arm)
+                if isinstance(b0_arm, ast.Name) and (
+                    b0_arm.id == "getitem"
+                    or operator_projection_aliases.get(b0_arm.id) == "getitem"
                 ):
-                    is_list_gi = True
-                else:
-                    # Bound ``xs.__getitem__`` — receiver via name_bound path.
-                    name_bound_gi_recv = _bound_getitem_recv(bound0)
-                    if name_bound_gi_recv is not None:
-                        is_gi = True
-            elif isinstance(bound0, ast.Name):
-                # Name-bound ``gi=xs.__getitem__`` / ``gi=getattr(xs,"__getitem__")``.
-                name_bound_gi_recv = _bound_getitem_recv(bound0)
-                if name_bound_gi_recv is not None:
                     is_gi = True
-            elif isinstance(bound0, ast.Call):
-                gname = _getattr_static_name(
-                    bound0, getattr_aliases=frozenset(getattr_aliases)
-                )
-                if gname == "getitem":
+                    bound0 = b0_arm
+                    break
+                if isinstance(b0_arm, ast.Attribute) and b0_arm.attr == "getitem":
                     is_gi = True
-                elif gname == "__getitem__" and bound0.args:
-                    # Bound ``getattr(xs,"__getitem__")`` vs unbound
-                    # ``getattr(list,"__getitem__")``.
-                    if _is_unbound_list_recv(bound0.args[0]) or (
-                        isinstance(_peel_call_func(bound0.args[0]), ast.Name)
-                        and _peel_call_func(bound0.args[0]).id  # type: ignore[union-attr]
-                        == "list"
+                    bound0 = b0_arm
+                    break
+                if isinstance(b0_arm, ast.Attribute) and b0_arm.attr == "__getitem__":
+                    if _is_unbound_list_recv(b0_arm.value) or (
+                        isinstance(_peel_call_func(b0_arm.value), ast.Name)
+                        and _peel_call_func(b0_arm.value).id == "list"  # type: ignore[union-attr]
                     ):
                         is_list_gi = True
-                    else:
+                        bound0 = b0_arm
+                        break
+                    # Bound ``xs.__getitem__`` — receiver via name_bound path.
+                    name_bound_gi_recv = _bound_getitem_recv(b0_arm)
+                    if name_bound_gi_recv is not None:
                         is_gi = True
-                else:
+                        bound0 = b0_arm
+                        break
+                if isinstance(b0_arm, ast.Name):
+                    # Name-bound ``gi=xs.__getitem__`` / ``gi=getattr(xs,"__getitem__")``
+                    # / ``inner=partial(getitem, xs)``.
+                    name_bound_gi_recv = _bound_getitem_recv(b0_arm)
+                    if name_bound_gi_recv is not None:
+                        is_gi = True
+                        bound0 = b0_arm
+                        break
+                    bound_partial = bound_callee_exprs.get(b0_arm.id)
+                    if (
+                        isinstance(bound_partial, ast.Call)
+                        and _is_partial_factory(
+                            bound_partial,
+                            partial_aliases=frozenset(partial_aliases),
+                            getattr_aliases=frozenset(getattr_aliases),
+                        )
+                        and bound_partial.args
+                    ):
+                        # Treat Name-bound partial as nested partial head.
+                        bound0 = bound_partial
+                        break
+                if isinstance(b0_arm, ast.Call):
+                    gname = _getattr_static_name(
+                        b0_arm, getattr_aliases=frozenset(getattr_aliases)
+                    )
+                    if gname == "getitem":
+                        is_gi = True
+                        bound0 = b0_arm
+                        break
+                    if gname == "__getitem__" and b0_arm.args:
+                        # Bound ``getattr(xs,"__getitem__")`` vs unbound
+                        # ``getattr(list,"__getitem__")``.
+                        if _is_unbound_list_recv(b0_arm.args[0]) or (
+                            isinstance(_peel_call_func(b0_arm.args[0]), ast.Name)
+                            and _peel_call_func(b0_arm.args[0]).id  # type: ignore[union-attr]
+                            == "list"
+                        ):
+                            is_list_gi = True
+                            bound0 = b0_arm
+                            break
+                        is_gi = True
+                        bound0 = b0_arm
+                        break
                     mc = _methodcaller_static_name(
-                        bound0,
+                        b0_arm,
                         projection_aliases=operator_projection_aliases,
                         getattr_aliases=frozenset(getattr_aliases),
                     )
-                    if mc == "__getitem__" and len(bound0.args) >= 2:
+                    if mc == "__getitem__" and len(b0_arm.args) >= 2:
                         is_gi = True
-                        mc_gi_key = bound0.args[1]
+                        mc_gi_key = b0_arm.args[1]
+                        bound0 = b0_arm
+                        break
             # ``args=(getitem, xs, slice); partial(*args)()`` /
             # ``args=(getitem, xs); partial(*args)(slice)`` /
             # ``args=(getattr(operator,"getitem"), xs, slice)`` /
+            # ``args=((0 or getitem), xs, slice); partial(*args)()`` /
             # ``args=(xs.__getitem__, slice); partial(*args)()``.
             if len(cand.args) == 1 and isinstance(cand.args[0], ast.Starred):
                 star = _peel_call_func(cand.args[0].value)
@@ -5059,8 +5171,10 @@ def _build_identity_scanner(
                             if elem is not None:
                                 return [elem]
             # Nested ``partial(partial(getitem, xs), slice)()`` /
+            # ``partial(partial(partial(getitem, xs)), slice)()`` /
             # ``partial(partial(getitem, xs))(slice)`` /
-            # ``partial(partial(xs.__getitem__), slice)()``.
+            # ``partial(partial(xs.__getitem__), slice)()`` /
+            # ``inner=(0 or partial(getitem, xs)); partial(inner, slice)()``.
             if (
                 not (is_gi or is_list_gi)
                 and isinstance(bound0, ast.Call)
@@ -5071,46 +5185,107 @@ def _build_identity_scanner(
                 )
                 and bound0.args
             ):
-                inner0 = _peel_call_func(bound0.args[0])
-                nested_bound_recv = _bound_getitem_recv(inner0)
-                if _head_is_getitem(inner0):
-                    is_gi = True
-                elif nested_bound_recv is not None:
-                    is_gi = True
-                    name_bound_gi_recv = nested_bound_recv
-                if is_gi and len(bound0.args) >= 2:
-                    carrier = (
-                        nested_bound_recv
-                        if nested_bound_recv is not None
-                        else bound0.args[1]
+                # Walk nested partial layers until a getitem head / bound recv.
+                nest_cursor: ast.AST = bound0
+                nest_carrier: ast.AST | None = None
+                nest_depth = 0
+                while (
+                    nest_depth < 6
+                    and isinstance(nest_cursor, ast.Call)
+                    and _is_partial_factory(
+                        nest_cursor,
+                        partial_aliases=frozenset(partial_aliases),
+                        getattr_aliases=frozenset(getattr_aliases),
                     )
-                    if len(cand.args) >= 2 and not expr.args:
-                        key_node = cand.args[1]
-                        if _slice_key(key_node):
-                            return _iter_elements(carrier, nxt)
-                        key = _resolve_static_key_value(key_node)
-                        if key is None:
-                            key = _static_sequence_index(key_node)
-                        elem = _carrier_element_at(carrier, key)
-                        if elem is not None:
-                            return [elem]
-                    if len(cand.args) == 1 and len(expr.args) >= 1:
-                        key_node = expr.args[0]
-                        if _slice_key(key_node):
-                            return _iter_elements(carrier, nxt)
-                        key = _resolve_static_key_value(key_node)
-                        if key is None:
-                            key = _static_sequence_index(key_node)
-                        elem = _carrier_element_at(carrier, key)
-                        if elem is not None:
-                            return [elem]
+                    and nest_cursor.args
+                ):
+                    nest_depth += 1
+                    inner0 = _peel_call_func(nest_cursor.args[0])
+                    # BoolOp / IfExp / Name-bound inner peels.
+                    for inner_arm in _iter_boolop_ifexp_arms(inner0):
+                        inner_arm = _peel_call_func(inner_arm)
+                        if isinstance(inner_arm, ast.Name):
+                            bound_inner = bound_callee_exprs.get(inner_arm.id)
+                            if bound_inner is not None:
+                                inner_arm = _peel_call_func(bound_inner)
+                        nested_bound_recv = _bound_getitem_recv(inner_arm)
+                        if _head_is_getitem(inner_arm):
+                            is_gi = True
+                            if len(nest_cursor.args) >= 2:
+                                nest_carrier = nest_cursor.args[1]
+                            break
+                        if nested_bound_recv is not None:
+                            is_gi = True
+                            name_bound_gi_recv = nested_bound_recv
+                            nest_carrier = nested_bound_recv
+                            break
+                        if (
+                            isinstance(inner_arm, ast.Call)
+                            and _is_partial_factory(
+                                inner_arm,
+                                partial_aliases=frozenset(partial_aliases),
+                                getattr_aliases=frozenset(getattr_aliases),
+                            )
+                            and inner_arm.args
+                        ):
+                            nest_cursor = inner_arm
+                            if len(inner_arm.args) >= 2 and nest_carrier is None:
+                                # Carrier from innermost ``partial(getitem, xs)``.
+                                if _head_is_getitem(inner_arm.args[0]):
+                                    nest_carrier = inner_arm.args[1]
+                                else:
+                                    br = _bound_getitem_recv(inner_arm.args[0])
+                                    if br is not None:
+                                        nest_carrier = br
+                            break
+                    else:
+                        break
+                    if is_gi:
+                        break
+                    if nest_cursor is bound0:
+                        break
+                if is_gi:
+                    carrier = (
+                        nest_carrier
+                        if nest_carrier is not None
+                        else (
+                            name_bound_gi_recv
+                            if name_bound_gi_recv is not None
+                            else (
+                                bound0.args[1]
+                                if len(bound0.args) >= 2
+                                else None
+                            )
+                        )
+                    )
+                    if carrier is not None:
+                        if len(cand.args) >= 2 and not expr.args:
+                            key_node = cand.args[1]
+                            if _slice_key(key_node):
+                                return _iter_elements(carrier, nxt)
+                            key = _resolve_static_key_value(key_node)
+                            if key is None:
+                                key = _static_sequence_index(key_node)
+                            elem = _carrier_element_at(carrier, key)
+                            if elem is not None:
+                                return [elem]
+                        if len(cand.args) == 1 and len(expr.args) >= 1:
+                            key_node = expr.args[0]
+                            if _slice_key(key_node):
+                                return _iter_elements(carrier, nxt)
+                            key = _resolve_static_key_value(key_node)
+                            if key is None:
+                                key = _static_sequence_index(key_node)
+                            elem = _carrier_element_at(carrier, key)
+                            if elem is not None:
+                                return [elem]
                 if (
-                    nested_bound_recv is not None
+                    name_bound_gi_recv is not None
                     and len(bound0.args) == 1
                     and len(cand.args) >= 2
                     and not expr.args
                 ):
-                    carrier = nested_bound_recv
+                    carrier = name_bound_gi_recv
                     key_node = cand.args[1]
                     if _slice_key(key_node):
                         return _iter_elements(carrier, nxt)
@@ -6791,6 +6966,16 @@ def _build_identity_scanner(
         """``d.update(...)`` / getattr/Name-bound / ``operator.setitem`` grow packs."""
 
         func = _peel_transparent_callee(call.func)
+        # Flatten ``f(*[a, b])`` / ``f(*args)`` before arity gates so
+        # ``list.append(*…)`` / ``operator.iadd(*…)`` / setitem star packs
+        # share the bare positional peel (Unknown > false PASS).
+        flat_args = _flatten_starred_args(
+            call.args, sequence_aliases=sequence_view_aliases
+        )
+        if flat_args != list(call.args):
+            call = ast.Call(
+                func=call.func, args=list(flat_args), keywords=list(call.keywords)
+            )
         # ``operator.setitem(d, "e", exec)`` / renamed setitem.
         # ``operator.iadd|iconcat|ior(xs, [exec])`` merge packs in place.
         proj = _projection_factory_name(
@@ -6814,8 +6999,9 @@ def _build_identity_scanner(
         # Packed ``[partial(operator.setitem, vars(ns), "e")][0](exec)`` /
         # BoolOp / IfExp partial(setitem) peels (Name-bound ``p=partial(...);
         # p(exec)`` already closed via factory products).
-        # Also under-applied ``partial(dict.update|__ior__|operator.ior, vars(ns))``
-        # / ``partial(list.append, xs)`` via next/[0]/(0 or) (Unknown > false PASS).
+        # Also under-applied ``partial(dict.update|__ior__|operator.ior)`` then
+        # ``(vars(ns), payload)`` / ``partial(*args)`` / ``**(kw)`` /
+        # ``partial(list.append, xs)`` via next/[0]/(0 or) (Unknown > false PASS).
         partial_cands: list[ast.Call] = []
         func_peel_partial = _peel_call_func(call.func)
         if (
@@ -6841,53 +7027,101 @@ def _build_identity_scanner(
             ):
                 partial_cands.append(cand)
         for cand in partial_cands:
-            bound0 = _peel_call_func(cand.args[0])
+            # ``args=(dict.update, vars(ns)); partial(*args)(payload)``.
+            cand_args = list(cand.args)
+            if len(cand_args) == 1 and isinstance(cand_args[0], ast.Starred):
+                star = _peel_call_func(cand_args[0].value)
+                star_elts: list[ast.AST] | None = None
+                if isinstance(star, (ast.Tuple, ast.List)):
+                    star_elts = list(star.elts)
+                elif isinstance(star, ast.Name):
+                    aliased = sequence_view_aliases.get(star.id)
+                    if isinstance(aliased, (ast.Tuple, ast.List)):
+                        star_elts = list(aliased.elts)
+                if star_elts is not None and star_elts:
+                    cand_args = star_elts
+            bound0 = _peel_call_func(cand_args[0])
+            # BoolOp / IfExp partial heads: ``partial((0 or dict.update), …)``.
+            bound0_arms = _iter_boolop_ifexp_arms(bound0)
             is_setitem = False
             update_attr: str | None = None
             is_ior = False
             append_attr: str | None = None
-            if isinstance(bound0, ast.Name) and (
-                bound0.id == "setitem"
-                or operator_projection_aliases.get(bound0.id) == "setitem"
-            ):
-                is_setitem = True
-            elif isinstance(bound0, ast.Attribute) and (
-                bound0.attr == "setitem"
-                or _canonical_projection_name(bound0.attr) == "setitem"
-            ):
-                is_setitem = True
-            elif isinstance(bound0, ast.Attribute) and bound0.attr in {
-                "update",
-                "__ior__",
-                "ior",
-            } | _PACK_ADD_METHODS | _INPLACE_MERGE_METHODS:
-                if bound0.attr in {"update"}:
-                    update_attr = "update"
-                elif bound0.attr in {"__ior__", "ior"} | _INPLACE_MERGE_METHODS:
-                    is_ior = True
-                elif bound0.attr in _PACK_ADD_METHODS:
-                    append_attr = bound0.attr
-            elif isinstance(bound0, ast.Name) and (
-                bound0.id in {"ior", "or_"}
-                or operator_projection_aliases.get(bound0.id) in {"ior", "or_"}
-            ):
-                is_ior = True
-            elif isinstance(bound0, ast.Call):
-                gname = _getattr_static_name(
-                    bound0, getattr_aliases=frozenset(getattr_aliases)
-                )
-                if gname == "setitem" or _canonical_projection_name(gname) == "setitem":
+            for b_arm in bound0_arms:
+                b_arm = _peel_call_func(b_arm)
+                if isinstance(b_arm, ast.Name) and (
+                    b_arm.id == "setitem"
+                    or operator_projection_aliases.get(b_arm.id) == "setitem"
+                ):
                     is_setitem = True
-                elif gname == "update":
-                    update_attr = "update"
-                elif gname in {"__ior__", "ior"} or _canonical_projection_name(
-                    gname
-                ) in {"ior", "or_"}:
+                    bound0 = b_arm
+                    break
+                if isinstance(b_arm, ast.Attribute) and (
+                    b_arm.attr == "setitem"
+                    or _canonical_projection_name(b_arm.attr) == "setitem"
+                ):
+                    is_setitem = True
+                    bound0 = b_arm
+                    break
+                if isinstance(b_arm, ast.Attribute) and b_arm.attr in {
+                    "update",
+                    "__ior__",
+                    "ior",
+                } | _PACK_ADD_METHODS | _INPLACE_MERGE_METHODS:
+                    bound0 = b_arm
+                    if b_arm.attr in {"update"}:
+                        update_attr = "update"
+                    elif b_arm.attr in {"__ior__", "ior"} | _INPLACE_MERGE_METHODS:
+                        is_ior = True
+                    elif b_arm.attr in _PACK_ADD_METHODS:
+                        append_attr = b_arm.attr
+                    break
+                if isinstance(b_arm, ast.Name) and (
+                    b_arm.id in {"ior", "or_"}
+                    or operator_projection_aliases.get(b_arm.id) in {"ior", "or_"}
+                ):
                     is_ior = True
-                elif gname in _PACK_ADD_METHODS:
-                    append_attr = gname
-            if is_setitem and len(cand.args) >= 3 and call.args:
-                base = _peel_call_func(cand.args[1])
+                    bound0 = b_arm
+                    break
+                if isinstance(b_arm, ast.Call):
+                    gname = _getattr_static_name(
+                        b_arm, getattr_aliases=frozenset(getattr_aliases)
+                    )
+                    if gname == "setitem" or _canonical_projection_name(gname) == "setitem":
+                        is_setitem = True
+                        bound0 = b_arm
+                        break
+                    if gname == "update":
+                        update_attr = "update"
+                        bound0 = b_arm
+                        break
+                    if gname in {"__ior__", "ior"} or _canonical_projection_name(
+                        gname
+                    ) in {"ior", "or_"}:
+                        is_ior = True
+                        bound0 = b_arm
+                        break
+                    if gname in _PACK_ADD_METHODS:
+                        append_attr = gname
+                        bound0 = b_arm
+                        break
+            # ``**`` payload on under-applied / carrier-prebound ior|update.
+            kw_payload: ast.AST | None = None
+            if call.keywords:
+                for kw in call.keywords:
+                    if kw.arg is None:
+                        kw_payload = kw.value
+                        break
+
+            def _ns_from_base(base: ast.AST) -> str | None:
+                base = _peel_call_func(base)
+                ns_name = _ns_dict_carrier_name(base)
+                if ns_name is None and isinstance(base, ast.Name):
+                    ns_name = ns_dict_alias_roots.get(base.id, base.id)
+                return ns_name
+
+            if is_setitem and len(cand_args) >= 3 and call.args:
+                base = _peel_call_func(cand_args[1])
                 carrier = _chainmap_carrier_name(base)
                 if carrier is None:
                     carrier = _ns_dict_carrier_name(base)
@@ -6895,32 +7129,53 @@ def _build_identity_scanner(
                     _grow_named_pack(
                         carrier,
                         "__setitem__",
-                        [cand.args[2], call.args[0]],
+                        [cand_args[2], call.args[0]],
                         (),
                     )
                     return
-            if update_attr is not None and len(cand.args) >= 2:
-                base = _peel_call_func(cand.args[1])
-                ns_name = _ns_dict_carrier_name(base)
-                if ns_name is None and isinstance(base, ast.Name):
-                    ns_name = ns_dict_alias_roots.get(base.id, base.id)
+            if update_attr is not None and len(cand_args) >= 2:
+                # Carrier-prebound ``partial(dict.update, vars(ns))(payload)``.
+                ns_name = _ns_from_base(cand_args[1])
                 if ns_name is not None:
                     _grow_named_pack(
                         ns_name, update_attr, list(call.args), call.keywords
                     )
                     return
-            if is_ior and len(cand.args) >= 2 and call.args:
-                _merge_inplace_pack(cand.args[1], call.args[0])
+            if update_attr is not None and len(cand_args) == 1 and call.args:
+                # Under-applied ``partial(dict.update)(vars(ns), payload)`` /
+                # ``partial(dict.update)(vars(ns), **payload)``.
+                ns_name = _ns_from_base(call.args[0])
+                if ns_name is not None:
+                    _grow_named_pack(
+                        ns_name,
+                        update_attr,
+                        list(call.args[1:]),
+                        call.keywords,
+                    )
+                    return
+            if is_ior and len(cand_args) >= 2 and (call.args or kw_payload is not None):
+                # Carrier-prebound ``partial(dict.__ior__|ior, vars(ns))`` /
+                # ``(**(kw if True else {}))``.
+                rhs = call.args[0] if call.args else kw_payload
+                if rhs is not None:
+                    _merge_inplace_pack(cand_args[1], rhs)
+                    return
+            if is_ior and len(cand_args) == 1 and len(call.args) >= 2:
+                # Under-applied ``partial(dict.__ior__|ior)(vars(ns), payload)``.
+                _merge_inplace_pack(call.args[0], call.args[1])
                 return
-            if append_attr is not None and len(cand.args) >= 2:
+            if is_ior and len(cand_args) == 1 and call.args and kw_payload is not None:
+                _merge_inplace_pack(call.args[0], kw_payload)
+                return
+            if append_attr is not None and len(cand_args) >= 2:
                 # ``partial(list.append, xs)(val)`` / packed peels.
-                target = _peel_call_func(cand.args[1])
+                target = _peel_call_func(cand_args[1])
                 while isinstance(target, ast.NamedExpr):
                     if isinstance(target.target, ast.Name):
                         _grow_named_pack(
                             target.target.id,
                             append_attr,
-                            list(cand.args[2:]) + list(call.args),
+                            list(cand_args[2:]) + list(call.args),
                             call.keywords,
                         )
                         return
@@ -6929,7 +7184,28 @@ def _build_identity_scanner(
                     _grow_named_pack(
                         target.id,
                         append_attr,
-                        list(cand.args[2:]) + list(call.args),
+                        list(cand_args[2:]) + list(call.args),
+                        call.keywords,
+                    )
+                    return
+            if append_attr is not None and len(cand_args) == 1 and call.args:
+                # Under-applied ``partial(list.append)(xs, val)``.
+                target = _peel_call_func(call.args[0])
+                while isinstance(target, ast.NamedExpr):
+                    if isinstance(target.target, ast.Name):
+                        _grow_named_pack(
+                            target.target.id,
+                            append_attr,
+                            list(call.args[1:]),
+                            call.keywords,
+                        )
+                        return
+                    target = _peel_call_func(target.value)
+                if isinstance(target, ast.Name):
+                    _grow_named_pack(
+                        target.id,
+                        append_attr,
+                        list(call.args[1:]),
                         call.keywords,
                     )
                     return
@@ -7110,7 +7386,8 @@ def _build_identity_scanner(
                                 recv.id, gname, call.args, call.keywords
                             )
                     return
-        # Name-bound ``u = d.update; u(...)`` / ``u = dict.update; u(d, ...)``.
+        # Name-bound ``u = d.update; u(...)`` / ``u = dict.update; u(d, ...)`` /
+        # ``LA = getattr(list, "append"); LA(xs, …)`` / ``f = list.append``.
         if isinstance(func, ast.Name) and func.id in dict_view_products:
             view = dict_view_products[func.id]
             base_attr = view.split(".")[-1]
@@ -7119,6 +7396,36 @@ def _build_identity_scanner(
                 "setdefault",
                 "__setitem__",
             } | _PACK_ADD_METHODS | _INPLACE_MERGE_METHODS:
+                return
+            if view.startswith("list.") and base_attr in (
+                _PACK_ADD_METHODS | _INPLACE_MERGE_METHODS
+            ) and call.args:
+                # Unbound ``list.append`` Name product — share Attribute peel.
+                if base_attr in _INPLACE_MERGE_METHODS and len(call.args) >= 2:
+                    _merge_inplace_pack(call.args[0], call.args[1])
+                    return
+                target = call.args[0]
+                while isinstance(target, ast.NamedExpr):
+                    if isinstance(target.target, ast.Name):
+                        _note_container_pack_from_value(
+                            target.target.id, target.value
+                        )
+                        _grow_named_pack(
+                            target.target.id,
+                            base_attr,
+                            list(call.args[1:]),
+                            call.keywords,
+                        )
+                        return
+                    target = target.value
+                target = _peel_call_func(target)
+                if isinstance(target, ast.Name):
+                    _grow_named_pack(
+                        target.id,
+                        base_attr,
+                        list(call.args[1:]),
+                        call.keywords,
+                    )
                 return
             if view.startswith("dict.") and call.args:
                 recv = _peel_call_func(call.args[0])
@@ -7931,6 +8238,13 @@ def _build_identity_scanner(
         """Install exec/new_class/type/getattr aliases from an Assign/walrus RHS."""
 
         value = _peel_call_func(value)
+        # BoolOp / IfExp RHS: prefer Attribute/Call/Name arm so
+        # ``inner=(0 or partial(getitem, xs))`` / ``gi=(0 or xs.__getitem__)``
+        # / ``f=nullcontext((n.install if True else None))`` share the bare
+        # Assign peel (Unknown > false PASS).
+        if isinstance(value, (ast.BoolOp, ast.IfExp)):
+            _note_protocol_alias_from_value(name, _preferred_seed_arm(value))
+            return
         # Static string keys: ``k = "MappingProxyType"`` / ``k = keys[0]`` /
         # ``k = keys["x"]`` / ``k = keys.get("x")`` after shared projection.
         resolved_str = _resolve_static_str(value)
@@ -8319,8 +8633,12 @@ def _build_identity_scanner(
                 nullcontext_aliases=frozenset(nullcontext_aliases),
             )
             if nc_enter is not None:
-                for arm in _iter_boolop_ifexp_arms(nc_enter):
-                    _note_protocol_alias_from_value(name, arm)
+                # Prefer Attribute/Call/Name arm (shared With peel) so
+                # ``nullcontext((n.install if True else None)|or)`` does not
+                # last-win onto Constant None/0 (Unknown > false PASS).
+                _note_protocol_alias_from_value(
+                    name, _preferred_seed_arm(nc_enter)
+                )
                 return
             attr = _getattr_static_name(
                 value, getattr_aliases=frozenset(getattr_aliases)
@@ -8692,9 +9010,30 @@ def _build_identity_scanner(
                                 and _is_unbound_list_recv(arm.value)
                             ):
                                 return True
-                            if (
-                                isinstance(arm, ast.Call)
-                                and (
+                            if isinstance(arm, ast.Name):
+                                # ``d=list.__dict__`` / ``d=vars(list)`` /
+                                # ``d=getattr(list,"__dict__")``.
+                                bound = bound_callee_exprs.get(arm.id)
+                                if bound is not None and bound is not arm:
+                                    if _is_list_type_dict(bound):
+                                        return True
+                                root = ns_dict_alias_roots.get(arm.id)
+                                if root is not None and _is_unbound_list_recv(
+                                    ast.Name(id=root, ctx=ast.Load())
+                                ):
+                                    return True
+                            if isinstance(arm, ast.Call):
+                                g_dict = _getattr_static_name(
+                                    arm,
+                                    getattr_aliases=frozenset(getattr_aliases),
+                                )
+                                if (
+                                    g_dict == "__dict__"
+                                    and arm.args
+                                    and _is_unbound_list_recv(arm.args[0])
+                                ):
+                                    return True
+                                if (
                                     (
                                         isinstance(
                                             _peel_call_func(arm.func),
@@ -8711,11 +9050,10 @@ def _build_identity_scanner(
                                         and _peel_call_func(arm.func).attr  # type: ignore[union-attr]
                                         == "vars"
                                     )
-                                )
-                                and arm.args
-                                and _is_unbound_list_recv(arm.args[0])
-                            ):
-                                return True
+                                ) and arm.args and _is_unbound_list_recv(
+                                    arm.args[0]
+                                ):
+                                    return True
                         return False
 
                     g_sort = _getattr_static_name(
@@ -8736,11 +9074,15 @@ def _build_identity_scanner(
                             projection_aliases=operator_projection_aliases,
                             getattr_aliases=frozenset(getattr_aliases),
                         )
+                        gi_sort_args = _flatten_starred_args(
+                            sort_recv.args,
+                            sequence_aliases=sequence_view_aliases,
+                        )
                         if (
                             gi_sort == "getitem"
-                            and len(sort_recv.args) >= 2
-                            and _static_str_arms_contain(sort_recv.args[1], "sort")
-                            and _is_list_type_dict(sort_recv.args[0])
+                            and len(gi_sort_args) >= 2
+                            and _static_str_arms_contain(gi_sort_args[1], "sort")
+                            and _is_list_type_dict(gi_sort_args[0])
                         ):
                             dict_view_products[name] = "list.sort"
                             operator_projection_aliases[name] = "list.sort"
@@ -9833,6 +10175,66 @@ def _build_identity_scanner(
         local_classes: Mapping[str, ast.ClassDef] | None = None,
     ) -> None:
         func = call.func
+
+        def _map_filter_applicator_name(func_expr: ast.AST) -> str | None:
+            """Shared peel for ``map`` / ``filter`` / builtins.map / packed forms."""
+
+            for cand in _shallow_packed_callee_exprs(func_expr):
+                cand = _peel_call_func(cand)
+                if isinstance(cand, ast.Name) and cand.id in {"map", "filter"}:
+                    return cand.id
+                if isinstance(cand, ast.Attribute) and cand.attr in {"map", "filter"}:
+                    return cand.attr
+                if isinstance(cand, ast.Call):
+                    gname = _getattr_static_name(
+                        cand, getattr_aliases=frozenset(getattr_aliases)
+                    )
+                    if gname in {"map", "filter"}:
+                        return gname
+            return None
+
+        def _observe_map_zip_apply(fn: ast.AST, iterables: Sequence[ast.AST]) -> None:
+            """``map(fn, xs, ys)`` → observe ``fn(x, y)`` per zipped row."""
+
+            lists: list[list[ast.AST]] = []
+            for arg in iterables:
+                _eval_expr(arg, env, path=path)
+                lists.append(list(_iter_elements(arg) or []))
+            if not lists or not any(lists):
+                return
+            width = min((len(lst) for lst in lists if lst), default=0)
+            for i in range(width):
+                actuals = [
+                    lst[i] if i < len(lst) else ast.Constant(value=None)
+                    for lst in lists
+                ]
+                _scan_call(
+                    ast.Call(func=fn, args=actuals, keywords=[]),
+                    path=path,
+                    index=index,
+                    env=env,
+                    visited_fns=visited_fns,
+                    local_fns=local_fns,
+                    local_classes=local_classes,
+                )
+
+        # Packed / Attribute / getattr ``map`` before Name fallthrough so
+        # ``builtins.map`` / ``[map][0]`` / ``(0 or map)`` / ``getattr(…,"map")``
+        # share the zip applicator peel (Unknown > false PASS).
+        mf_name = _map_filter_applicator_name(func)
+        if mf_name == "map" and len(call.args) >= 2:
+            first = call.args[0]
+            for name in _packed_names(first):
+                if (
+                    name in _EXEC_EVAL_COMPILE_NAMES
+                    or name in exec_eval_compile_aliases
+                ):
+                    accum.unsupported = True
+                    break
+            _observe_map_zip_apply(first, call.args[1:])
+            for arg in call.args:
+                _eval_expr(arg, env, path=path)
+            return
         # ``(mk := Mut.make)()`` — evaluate walrus then peel to Attribute/Name.
         if isinstance(func, ast.NamedExpr):
             _eval_expr(func, env, path=path)
@@ -11161,17 +11563,34 @@ def _build_identity_scanner(
             )
             if (func.attr == "reduce" or adapter == "reduce") and len(call.args) >= 2:
                 elems = _iter_elements(call.args[1]) or []
-                _observe_lambda_apply(
-                    call.args[0],
-                    elems,
-                    path=path,
-                    index=index,
-                    env=env,
-                    visited_fns=visited_fns,
-                    local_fns=local_fns,
-                    local_classes=local_classes,
-                    skip_first_formal=True,
-                )
+                if len(call.args) >= 3:
+                    acc_attr: ast.AST = call.args[2]
+                    for elem in elems:
+                        _scan_call(
+                            ast.Call(
+                                func=call.args[0],
+                                args=[acc_attr, elem],
+                                keywords=[],
+                            ),
+                            path=path,
+                            index=index,
+                            env=env,
+                            visited_fns=visited_fns,
+                            local_fns=local_fns,
+                            local_classes=local_classes,
+                        )
+                else:
+                    _observe_lambda_apply(
+                        call.args[0],
+                        elems,
+                        path=path,
+                        index=index,
+                        env=env,
+                        visited_fns=visited_fns,
+                        local_fns=local_fns,
+                        local_classes=local_classes,
+                        skip_first_formal=True,
+                    )
                 for arg in call.args:
                     _eval_expr(arg, env, path=path)
                 return
@@ -12081,17 +12500,38 @@ def _build_identity_scanner(
             # ``functools.reduce`` / ``itertools.starmap`` Name peels.
             if proj_name == "reduce" and len(call.args) >= 2:
                 elems = _iter_elements(call.args[1]) or []
-                _observe_lambda_apply(
-                    call.args[0],
-                    elems,
-                    path=path,
-                    index=index,
-                    env=env,
-                    visited_fns=visited_fns,
-                    local_fns=local_fns,
-                    local_classes=local_classes,
-                    skip_first_formal=True,
-                )
+                # ``reduce(iadd|iconcat|fn, iterable, init)`` — observe
+                # ``fn(init, elem)`` so inplace merges grow packs
+                # (Unknown > false PASS).
+                if len(call.args) >= 3:
+                    acc: ast.AST = call.args[2]
+                    for elem in elems:
+                        synthetic = ast.Call(
+                            func=call.args[0],
+                            args=[acc, elem],
+                            keywords=[],
+                        )
+                        _scan_call(
+                            synthetic,
+                            path=path,
+                            index=index,
+                            env=env,
+                            visited_fns=visited_fns,
+                            local_fns=local_fns,
+                            local_classes=local_classes,
+                        )
+                else:
+                    _observe_lambda_apply(
+                        call.args[0],
+                        elems,
+                        path=path,
+                        index=index,
+                        env=env,
+                        visited_fns=visited_fns,
+                        local_fns=local_fns,
+                        local_classes=local_classes,
+                        skip_first_formal=True,
+                    )
                 for arg in call.args:
                     _eval_expr(arg, env, path=path)
                 return
@@ -12121,8 +12561,53 @@ def _build_identity_scanner(
                     ):
                         accum.unsupported = True
                         break
-                # ``map(lambda f: f(Mut), [tc])`` / ``filter(lambda f: f(Mut)…)``
-                # — shared per-element apply (Unknown > false PASS).
+                # ``map(list.append, [xs], [val])`` — zip iterables and
+                # observe ``fn(*row)`` (Unknown > false PASS). Filter keeps
+                # single-iterable apply.
+                if func.id == "map" and len(call.args) >= 2:
+                    lists: list[list[ast.AST]] = []
+                    for arg in call.args[1:]:
+                        _eval_expr(arg, env, path=path)
+                        lists.append(list(_iter_elements(arg) or []))
+                    if lists and any(lists):
+                        width = min((len(lst) for lst in lists if lst), default=0)
+                        for i in range(width):
+                            actuals = [
+                                lst[i] if i < len(lst) else ast.Constant(value=None)
+                                for lst in lists
+                            ]
+                            synthetic = ast.Call(
+                                func=first,
+                                args=actuals,
+                                keywords=[],
+                            )
+                            _scan_call(
+                                synthetic,
+                                path=path,
+                                index=index,
+                                env=env,
+                                visited_fns=visited_fns,
+                                local_fns=local_fns,
+                                local_classes=local_classes,
+                            )
+                    for arg in call.args[1:]:
+                        for name in _packed_names(arg):
+                            cls_node = _lookup_class(name, local_classes)
+                            if cls_node is not None:
+                                _observe_class_construction(
+                                    cls_node,
+                                    call,
+                                    path=path,
+                                    index=index,
+                                    env=env,
+                                    visited_fns=visited_fns,
+                                    local_fns=local_fns,
+                                    local_classes=local_classes,
+                                )
+                    for arg in call.args:
+                        _eval_expr(arg, env, path=path)
+                    return
+                # ``filter(lambda f: f(Mut)…)`` — shared per-element apply.
                 for arg in call.args[1:]:
                     _eval_expr(arg, env, path=path)
                     elems = _iter_elements(arg) or []
