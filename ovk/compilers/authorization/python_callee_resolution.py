@@ -50,6 +50,9 @@ from ovk.compilers.authorization.python_import_space import (
 
 _IMPLEMENTATION_VERSION = "0.30.0"
 _MAX_IMPORT_FOLLOW_DEPTH = 8
+# Shared peel budget for idle partial / nested-lambda / mapping wrappers
+# (Unknown > false PASS). Not a per-program depth special case.
+_TRANSPARENT_PEEL_MAX_DEPTH = 16
 
 BindingKind = Literal["function", "import_name", "import_module", "rebound"]
 
@@ -354,6 +357,22 @@ def _static_sequence_index(
             if idx is not None:
                 return idx
         return None
+    if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.And):
+        # ``True and 0`` / ``1 and 0`` — last live static index.
+        last: int | None = None
+        for value in node.values:
+            idx = _static_sequence_index(
+                value,
+                sequence_aliases=sequence_aliases,
+                slice_aliases=slice_aliases,
+            )
+            if idx is None:
+                truth = _static_truthiness(value)
+                if truth is True:
+                    continue
+                return None
+            last = idx
+        return last
     if isinstance(node, ast.Name) and sequence_aliases and node.id in sequence_aliases:
         return _static_sequence_index(
             sequence_aliases[node.id],
@@ -580,10 +599,16 @@ def _partial_map_zip_filter_prebound(
         cand = _peel_call_func(cand)
         if isinstance(cand, ast.Name) and cand.id in bound:
             cand = _peel_call_func(bound[cand.id])
+        if isinstance(cand, ast.Attribute) and cand.attr == "__new__":
+            if isinstance(func_expr, ast.Call):
+                cand = func_expr
+            else:
+                continue
         if not isinstance(cand, ast.Call) or not _is_partial_factory(
             cand,
             partial_aliases=partial_aliases,
             getattr_aliases=getattr_aliases,
+            bound_callees=bound,
         ):
             continue
         peeled = _peel_idle_partial_layers(
@@ -1208,6 +1233,15 @@ def _shallow_packed_callee_exprs(expr: ast.AST, *, depth: int = 0) -> list[ast.A
     closure (Unknown > false PASS).
     """
 
+    raw = _peel_call_func(expr)
+    if isinstance(raw, ast.Attribute) and raw.attr == "__call__":
+        out_call: list[ast.AST] = [raw]
+        if depth > 6:
+            return out_call
+        out_call.extend(
+            _shallow_packed_callee_exprs(raw.value, depth=depth + 1)
+        )
+        return out_call
     expr = _peel_transparent_callee(expr)
     out: list[ast.AST] = [expr]
     if depth > 6:
@@ -1938,6 +1972,7 @@ def _is_partial_factory(
     *,
     partial_aliases: frozenset[str] | None = None,
     getattr_aliases: frozenset[str] | None = None,
+    bound_callees: Mapping[str, ast.AST] | None = None,
 ) -> bool:
     """True for ``functools.partial(...)`` / ``partial(...)`` / aliases.
 
@@ -1945,9 +1980,13 @@ def _is_partial_factory(
     omit partial construction observation (Unknown > false PASS). Peels
     BoolOp / IfExp / packed factories ``(0 or partial)(...)`` /
     ``[partial][0](...)`` / ``next(iter([partial]))(...)`` on the shared
-    shallow packing path.
+    shallow packing path. ``partial.__new__.__call__(...)`` /
+    Name-bound ``new=partial.__new__; new(...)`` share ``partial(...)``.
     """
 
+    rewritten = _rewrite_applied_dunder_call(call)
+    if rewritten is not None:
+        call = rewritten
     aliases = partial_aliases or frozenset({"partial"})
     for cand in _shallow_packed_callee_exprs(call.func):
         cand = _peel_call_func(cand)
@@ -1963,6 +2002,7 @@ def _is_partial_factory(
             call,
             partial_aliases=aliases,
             getattr_aliases=getattr_aliases,
+            bound_callees=bound_callees,
         )
         is not None
     )
@@ -2001,16 +2041,25 @@ def _partial_new_rest_args(
     getattr_aliases: frozenset[str] | None = None,
     sequence_aliases: Mapping[str, ast.AST] | None = None,
     slice_aliases: frozenset[str] | None = None,
+    bound_callees: Mapping[str, ast.AST] | None = None,
 ) -> list[ast.AST] | None:
     """``partial.__new__(partial, *args)`` → ``args`` (skip the type operand).
 
     Shared peel so ``functools.partial.__new__(functools.partial, map, fn)``
-    / ``getattr(partial, \"__new__\")(partial, map)`` share ``partial(map, fn)``
-    (Unknown > false PASS).
+    / ``getattr(partial, \"__new__\")(partial, map)`` /
+    ``partial.__new__.__call__(partial, map, fn)`` /
+    Name-bound ``new=partial.__new__; new(partial, map, fn)`` share
+    ``partial(map, fn)`` (Unknown > false PASS).
     """
 
+    rewritten = _rewrite_applied_dunder_call(call)
+    if rewritten is not None:
+        call = rewritten
     aliases = partial_aliases or frozenset({"partial"})
+    bound = bound_callees or {}
     func = _peel_call_func(call.func)
+    if isinstance(func, ast.Name) and func.id in bound:
+        func = _peel_call_func(bound[func.id])
     new_recv: ast.AST | None = None
     if isinstance(func, ast.Attribute) and func.attr == "__new__":
         new_recv = func.value
@@ -2033,6 +2082,7 @@ def _partial_new_rest_args(
         call.args,
         sequence_aliases=sequence_aliases,
         slice_aliases=slice_aliases,
+        bound_callees=bound,
     )
     if not flat or not _expr_is_partial_type(
         flat[0],
@@ -3258,6 +3308,40 @@ def _sequence_pack_elts(
                     return None
                 out.extend(nested)
             else:
+                peeled_elt = _peel_call_func(elt)
+                if isinstance(peeled_elt, ast.IfExp):
+                    truth = _static_truthiness(peeled_elt.test)
+                    live = None
+                    if truth is True:
+                        live = peeled_elt.body
+                    elif truth is False:
+                        live = peeled_elt.orelse
+                    if live is not None:
+                        idx = _static_sequence_index(
+                            live,
+                            sequence_aliases=aliases,
+                            slice_aliases=slice_aliases,
+                        )
+                        if idx is not None:
+                            out.append(ast.Constant(value=idx))
+                            continue
+                if isinstance(peeled_elt, ast.BoolOp):
+                    arms = _iter_boolop_ifexp_arms(peeled_elt)
+                    idxs = [
+                        _static_sequence_index(
+                            arm,
+                            sequence_aliases=aliases,
+                            slice_aliases=slice_aliases,
+                        )
+                        for arm in arms
+                    ]
+                    if (
+                        idxs
+                        and all(v is not None for v in idxs)
+                        and len(set(idxs)) == 1
+                    ):
+                        out.append(ast.Constant(value=idxs[0]))
+                        continue
                 out.append(elt)
         return out
     if isinstance(node, ast.Name):
@@ -3400,6 +3484,22 @@ def _expr_is_empty_pack(
                 slice_aliases=slice_aliases,
             )
         return False
+    if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.And):
+        # ``1 and {}`` / ``True and dict()`` — last live empty mapping.
+        last: ast.AST | None = None
+        for value in node.values:
+            truth = _static_truthiness(value)
+            if truth is True:
+                last = value
+                continue
+            last = value
+        if last is None:
+            return False
+        return _expr_is_empty_pack(
+            last,
+            sequence_aliases=aliases,
+            slice_aliases=slice_aliases,
+        )
     elts = _sequence_pack_elts(
         node,
         sequence_aliases=aliases,
@@ -3463,13 +3563,39 @@ def _expr_is_empty_pack(
         if ctor in _EMPTY_SEQUENCE_CTOR_NAMES and not node.keywords:
             if not call_flat:
                 return True
-            if ctor == "range" and len(call_flat) == 1:
+            if ctor == "range":
+                idxs = [
+                    _static_sequence_index(
+                        arg,
+                        sequence_aliases=aliases,
+                        slice_aliases=slice_aliases,
+                    )
+                    for arg in call_flat
+                ]
+                if idxs and all(v is not None for v in idxs):
+                    if len(idxs) == 1:
+                        return idxs[0] == 0
+                    if len(idxs) >= 2:
+                        start, stop = idxs[0], idxs[1]
+                        step = idxs[2] if len(idxs) >= 3 else 1
+                        if step == 0:
+                            return False
+                        return len(range(start, stop, step)) == 0
+                if len(call_flat) == 1:
+                    n = _static_sequence_index(
+                        call_flat[0],
+                        sequence_aliases=aliases,
+                        slice_aliases=slice_aliases,
+                    )
+                    return n == 0
+            if ctor in {"bytes", "bytearray"} and len(call_flat) == 1:
                 n = _static_sequence_index(
                     call_flat[0],
                     sequence_aliases=aliases,
                     slice_aliases=slice_aliases,
                 )
-                return n == 0
+                if n == 0:
+                    return True
             if len(call_flat) == 1 and _expr_is_empty_pack(
                 call_flat[0],
                 sequence_aliases=aliases,
@@ -3624,6 +3750,7 @@ def _peel_idle_partial_layers(
         getattr_aliases=getattr_aliases,
         sequence_aliases=aliases,
         slice_aliases=slice_aliases,
+        bound_callees=bound,
     )
     if new_rest is None and not _is_partial_factory(
         call,
@@ -3676,8 +3803,6 @@ def _peel_idle_partial_layers(
             partial_aliases=partial_aliases,
             getattr_aliases=getattr_aliases,
         ) and rest:
-            # ``partial(partial, map)`` / ``partial.__new__(partial, partial, map)``
-            # idle type-application: next arg is the real head.
             head = _peel_call_func(rest[0])
             rest = list(rest[1:])
             depth += 1
@@ -3696,6 +3821,7 @@ def _peel_idle_partial_layers(
             getattr_aliases=getattr_aliases,
             sequence_aliases=aliases,
             slice_aliases=slice_aliases,
+            bound_callees=bound,
         )
         inner_flat = inner_new if inner_new is not None else _flatten_starred_args(
             head.args,
@@ -3801,6 +3927,9 @@ def _namespace_projection_key(
 
     aliases = projection_aliases or {}
     node = _peel_call_func(expr)
+    copy_inner = _copy_wrapper_operand(node)
+    if copy_inner is not None:
+        node = _peel_call_func(copy_inner)
     if isinstance(node, ast.Subscript):
         key = _static_str_expr(node.slice)
         if key is None:
@@ -3810,6 +3939,8 @@ def _namespace_projection_key(
             base,
             getattr_aliases=getattr_aliases,
             ns_mapping_names=ns_mapping_names,
+            sequence_aliases=sequence_aliases,
+            slice_aliases=slice_aliases,
         ):
             return key
         return None
@@ -3826,12 +3957,16 @@ def _namespace_projection_key(
             slice_aliases=slice_aliases,
         )
         if gname in _NS_DICT_VIEW_ATTRS and len(flat) >= 2:
+            mapping = flat[0]
+            key_node = flat[1]
             if _base_looks_like_namespace_mapping(
-                flat[0],
+                mapping,
                 getattr_aliases=getattr_aliases,
                 ns_mapping_names=ns_mapping_names,
+                sequence_aliases=sequence_aliases,
+                slice_aliases=slice_aliases,
             ):
-                return _static_str_expr(flat[1])
+                return _static_str_expr(key_node)
         func = _peel_transparent_callee(node.func)
         proj: str | None = None
         if isinstance(func, ast.Name):
@@ -3842,15 +3977,35 @@ def _namespace_projection_key(
             proj = _getattr_static_name(
                 func, getattr_aliases=getattr_aliases
             )
-        if proj in {"getitem", "__getitem__"} | _NS_DICT_VIEW_ATTRS and len(flat) >= 1:
-            if proj in {"getitem", "__getitem__"} and len(flat) >= 2:
-                if _base_looks_like_namespace_mapping(
-                    flat[0],
-                    getattr_aliases=getattr_aliases,
-                    ns_mapping_names=ns_mapping_names,
-                ):
-                    return _static_str_expr(flat[1])
-            if (
+        if proj in {"getitem", "__getitem__", "pop"} | _NS_DICT_VIEW_ATTRS and flat:
+            mapping: ast.AST | None = None
+            key_node: ast.AST | None = None
+            unbound_type = False
+            peeled_f = _peel_call_func(node.func)
+            recv = None
+            if isinstance(peeled_f, ast.Attribute):
+                recv = peeled_f.value
+            if recv is not None and (
+                (
+                    isinstance(recv, ast.Name)
+                    and recv.id in {"dict", "list", "tuple"}
+                )
+                or (
+                    isinstance(recv, ast.Attribute)
+                    and recv.attr in {"dict", "list", "tuple"}
+                )
+                or _is_dict_constructor(
+                    recv, getattr_aliases=getattr_aliases
+                )
+            ):
+                unbound_type = True
+            if unbound_type and len(flat) >= 2:
+                mapping = flat[0]
+                key_node = flat[1]
+            elif proj in {"getitem", "__getitem__"} and len(flat) >= 2:
+                mapping = flat[0]
+                key_node = flat[1]
+            elif (
                 isinstance(func, ast.Call)
                 and proj in _NS_DICT_VIEW_ATTRS
                 and flat
@@ -3860,23 +4015,33 @@ def _namespace_projection_key(
                     sequence_aliases=sequence_aliases,
                     slice_aliases=slice_aliases,
                 )
-                if gflat_f and _base_looks_like_namespace_mapping(
-                    gflat_f[0],
+                mapping = gflat_f[0] if gflat_f else None
+                key_node = flat[0]
+            elif isinstance(peeled_f, ast.Attribute) and peeled_f.attr in _NS_DICT_VIEW_ATTRS:
+                mapping = peeled_f.value
+                key_node = flat[0]
+            if mapping is not None and key_node is not None:
+                if _base_looks_like_namespace_mapping(
+                    mapping,
                     getattr_aliases=getattr_aliases,
                     ns_mapping_names=ns_mapping_names,
+                    sequence_aliases=sequence_aliases,
+                    slice_aliases=slice_aliases,
                 ):
-                    return _static_str_expr(flat[0] if len(flat) == 1 else flat[-1])
+                    return _static_str_expr(key_node)
         peeled_f = _peel_call_func(node.func)
         if (
             isinstance(peeled_f, ast.Attribute)
             and peeled_f.attr in _NS_DICT_VIEW_ATTRS
             and flat
         ):
-            key = _static_str_expr(flat[0] if len(flat) == 1 else flat[-1])
+            key = _static_str_expr(flat[0])
             if key is not None and _base_looks_like_namespace_mapping(
                 peeled_f.value,
                 getattr_aliases=getattr_aliases,
                 ns_mapping_names=ns_mapping_names,
+                sequence_aliases=sequence_aliases,
+                slice_aliases=slice_aliases,
             ):
                 return key
     return None
@@ -3887,16 +4052,19 @@ def _base_looks_like_namespace_mapping(
     *,
     getattr_aliases: frozenset[str] | None = None,
     ns_mapping_names: frozenset[str] | None = None,
+    sequence_aliases: Mapping[str, ast.AST] | None = None,
+    slice_aliases: frozenset[str] | None = None,
     _depth: int = 0,
 ) -> bool:
     """True for ``vars(builtins)`` / ``builtins.__dict__`` / Name ``vars``.
 
-    Also packed / copy / ``dict`` / ``MappingProxyType`` / ``ChainMap``
-    wrappers so ``[vars(builtins)][0][\"map\"]`` shares bare
+    Also packed / copy / ``dict`` / ``MappingProxyType`` / ``ChainMap`` /
+    assignment wrappers / type-dunder ``list.__getitem__([vars], 0)`` so
+    ``d=copy.copy(vars(builtins)); d[\"map\"]`` shares bare
     ``vars(builtins)[\"map\"]`` (Unknown > false PASS).
     """
 
-    if _depth > 6:
+    if _depth > _TRANSPARENT_PEEL_MAX_DEPTH:
         return False
     node = _peel_call_func(expr)
     copy_inner = _copy_wrapper_operand(node)
@@ -3905,6 +4073,8 @@ def _base_looks_like_namespace_mapping(
             copy_inner,
             getattr_aliases=getattr_aliases,
             ns_mapping_names=ns_mapping_names,
+            sequence_aliases=sequence_aliases,
+            slice_aliases=slice_aliases,
             _depth=_depth + 1,
         )
     if isinstance(node, ast.Name) and ns_mapping_names and node.id in ns_mapping_names:
@@ -3916,6 +4086,8 @@ def _base_looks_like_namespace_mapping(
             node.value,
             getattr_aliases=getattr_aliases,
             ns_mapping_names=ns_mapping_names,
+            sequence_aliases=sequence_aliases,
+            slice_aliases=slice_aliases,
             _depth=_depth + 1,
         )
     if isinstance(node, ast.Call):
@@ -3956,6 +4128,8 @@ def _base_looks_like_namespace_mapping(
                     nested,
                     getattr_aliases=getattr_aliases,
                     ns_mapping_names=ns_mapping_names,
+                    sequence_aliases=sequence_aliases,
+                    slice_aliases=slice_aliases,
                     _depth=_depth + 1,
                 ):
                     return True
@@ -3966,6 +4140,8 @@ def _base_looks_like_namespace_mapping(
                                 val,
                                 getattr_aliases=getattr_aliases,
                                 ns_mapping_names=ns_mapping_names,
+                                sequence_aliases=sequence_aliases,
+                                slice_aliases=slice_aliases,
                                 _depth=_depth + 1,
                             ):
                                 return True
@@ -3974,6 +4150,8 @@ def _base_looks_like_namespace_mapping(
                     kw.value,
                     getattr_aliases=getattr_aliases,
                     ns_mapping_names=ns_mapping_names,
+                    sequence_aliases=sequence_aliases,
+                    slice_aliases=slice_aliases,
                     _depth=_depth + 1,
                 ):
                     return True
@@ -3983,8 +4161,64 @@ def _base_looks_like_namespace_mapping(
                     func.value,
                     getattr_aliases=getattr_aliases,
                     ns_mapping_names=ns_mapping_names,
+                    sequence_aliases=sequence_aliases,
+                    slice_aliases=slice_aliases,
                     _depth=_depth + 1,
                 )
+        # Type-dunder packing: ``list.__getitem__([vars(builtins)], 0)`` /
+        # ``tuple.__getitem__((vars,), 0)`` / ``list.pop([vars], 0)``.
+        flat = _flatten_starred_args(
+            node.args,
+            sequence_aliases=sequence_aliases,
+            slice_aliases=slice_aliases,
+        )
+        pack_attr = None
+        if isinstance(func, ast.Attribute) and func.attr in {
+            "__getitem__",
+            "pop",
+            "getitem",
+        }:
+            pack_attr = func.attr
+        proj = None
+        if isinstance(func, ast.Name):
+            proj = func.id
+        if pack_attr is not None or proj in {"getitem", "__getitem__", "pop"}:
+            if len(flat) >= 2:
+                idx = _static_sequence_index(
+                    flat[1],
+                    sequence_aliases=sequence_aliases,
+                    slice_aliases=slice_aliases,
+                )
+                elts = _sequence_pack_elts(
+                    flat[0],
+                    sequence_aliases=sequence_aliases or {},
+                    slice_aliases=slice_aliases,
+                )
+                if elts is not None and idx is not None:
+                    if -len(elts) <= idx < len(elts) and _base_looks_like_namespace_mapping(
+                        elts[idx],
+                        getattr_aliases=getattr_aliases,
+                        ns_mapping_names=ns_mapping_names,
+                        sequence_aliases=sequence_aliases,
+                        slice_aliases=slice_aliases,
+                        _depth=_depth + 1,
+                    ):
+                        return True
+            elif len(flat) == 1:
+                elts = _sequence_pack_elts(
+                    flat[0],
+                    sequence_aliases=sequence_aliases or {},
+                    slice_aliases=slice_aliases,
+                )
+                if elts and _base_looks_like_namespace_mapping(
+                    elts[0],
+                    getattr_aliases=getattr_aliases,
+                    ns_mapping_names=ns_mapping_names,
+                    sequence_aliases=sequence_aliases,
+                    slice_aliases=slice_aliases,
+                    _depth=_depth + 1,
+                ):
+                    return True
     if not isinstance(node, ast.Name):
         for cand in _shallow_packed_callee_exprs(node):
             if cand is node:
@@ -3993,6 +4227,8 @@ def _base_looks_like_namespace_mapping(
                 cand,
                 getattr_aliases=getattr_aliases,
                 ns_mapping_names=ns_mapping_names,
+                sequence_aliases=sequence_aliases,
+                slice_aliases=slice_aliases,
                 _depth=_depth + 1,
             ):
                 return True
@@ -4061,6 +4297,8 @@ def _peel_getattr_attr(
     expr: ast.AST,
     *,
     getattr_aliases: frozenset[str] | None = None,
+    sequence_aliases: Mapping[str, ast.AST] | None = None,
+    slice_aliases: frozenset[str] | None = None,
 ) -> tuple[ast.AST, str] | None:
     """``obj.attr`` / ``getattr(obj, "attr")`` → ``(obj, attr)`` when static."""
 
@@ -4068,9 +4306,18 @@ def _peel_getattr_attr(
     if isinstance(node, ast.Attribute):
         return node.value, node.attr
     if isinstance(node, ast.Call):
-        name = _getattr_static_name(node, getattr_aliases=getattr_aliases)
+        name = _getattr_static_name(
+            node,
+            getattr_aliases=getattr_aliases,
+            sequence_aliases=sequence_aliases,
+            slice_aliases=slice_aliases,
+        )
         if name is not None:
-            gflat = _flatten_starred_args(node.args)
+            gflat = _flatten_starred_args(
+                node.args,
+                sequence_aliases=sequence_aliases,
+                slice_aliases=slice_aliases,
+            )
             if gflat:
                 return gflat[0], name
     return None
@@ -5460,6 +5707,8 @@ def _build_identity_scanner(
     ns_dict_alias_roots: dict[str, str] = {}
     # ``m = cm.maps`` / ``m = getattr(cm, "maps")`` → ChainMap list alias.
     chainmap_list_aliases: dict[str, tuple[str, str]] = {}
+    # ``cm = ChainMap(a, b)`` positional child mappings (indexed maps peels).
+    chainmap_ctor_maps: dict[str, list[ast.AST]] = {}
     # Name-bound mapping constructors: ``D = dict`` / ``OD = OrderedDict``.
     dict_ctor_aliases: set[str] = set()
     # ``import copy`` / ``import copy as cp`` / ``m = copy`` module aliases.
@@ -5795,6 +6044,18 @@ def _build_identity_scanner(
                         return elems[0]
                     return _carrier_element_at(elems[0], key)
             return None
+        if isinstance(carrier, ast.Attribute) and carrier.attr in _CHAINMAP_LIST_ATTRS:
+            parts = _chainmap_list_parts(carrier)
+            if parts is not None:
+                kids = _chainmap_ctor_children(
+                    ast.Name(id=parts[0], ctx=ast.Load())
+                )
+                if (
+                    kids
+                    and isinstance(key, int)
+                    and -len(kids) <= key < len(kids)
+                ):
+                    return kids[key]
         return None
 
     def _call_projected_carrier_value(call: ast.Call) -> ast.AST | None:
@@ -7093,10 +7354,25 @@ def _build_identity_scanner(
                 return _iter_elements(aliased, nxt)
             pack = container_packs.get(expr.id)
             if pack is None:
+                maps_parts = _chainmap_list_parts(expr)
+                if maps_parts is not None:
+                    kids = _chainmap_ctor_children(
+                        ast.Name(id=maps_parts[0], ctx=ast.Load())
+                    )
+                    if kids is not None:
+                        return list(kids)
                 return None
             return [
                 ast.Name(id=pname, ctx=ast.Load()) for pname in _flat_pack_names(pack)
             ]
+        if isinstance(expr, ast.Attribute) and expr.attr in _CHAINMAP_LIST_ATTRS:
+            maps_parts = _chainmap_list_parts(expr)
+            if maps_parts is not None:
+                kids = _chainmap_ctor_children(
+                    ast.Name(id=maps_parts[0], ctx=ast.Load())
+                )
+                if kids is not None:
+                    return list(kids)
         # ``cm.maps[i]`` / ``cm.parents[i]`` — ChainMap internal mapping lists.
         if isinstance(expr, ast.Subscript):
             base = _peel_call_func(expr.value)
@@ -7106,6 +7382,10 @@ def _build_identity_scanner(
             if _slice_key(expr.slice):
                 return _iter_elements(expr.value, nxt)
             if isinstance(base, ast.Attribute) and base.attr in {"maps", "parents"}:
+                # Indexed child mapping: ``cm.maps[1]`` / ``maps[-1]``.
+                child = _chainmap_child_at(expr)
+                if child is not None:
+                    return [child]
                 # One child mapping carrier: peel the ChainMap constructor args /
                 # Name pack as a mapping (``cm.maps[0]`` may-alias any child).
                 items = _mapping_items(base.value, nxt)
@@ -7222,7 +7502,10 @@ def _build_identity_scanner(
         # ``partial(list.__getitem__, xs, slice)()`` /
         # ``partial(operator.getitem, xs)(slice)`` /
         # ``partial(methodcaller("__getitem__", slice), xs)()``.
-        for cand in _callee_candidate_exprs(expr.func):
+        for cand in (
+            *_callee_candidate_exprs(expr.func),
+            *_shallow_packed_callee_exprs(expr.func),
+        ):
             cand = _peel_call_func(cand)
             if not (
                 isinstance(cand, ast.Call)
@@ -7230,8 +7513,8 @@ def _build_identity_scanner(
                     cand,
                     partial_aliases=frozenset(partial_aliases),
                     getattr_aliases=frozenset(getattr_aliases),
+                    bound_callees=bound_callee_exprs,
                 )
-                and cand.args
             ):
                 continue
             # ``partial(head, *[xs])`` / ``partial(*(p,), *[xs])`` share bare
@@ -7256,7 +7539,18 @@ def _build_identity_scanner(
                     )
             if not cand.args:
                 continue
-            bound0 = _peel_call_func(cand.args[0])
+            idle_head = _peel_idle_partial_layers(
+                cand,
+                partial_aliases=frozenset(partial_aliases),
+                getattr_aliases=frozenset(getattr_aliases),
+                sequence_aliases=sequence_view_aliases,
+                slice_aliases=frozenset(slice_aliases),
+                bound_partials=bound_callee_exprs,
+            )
+            if idle_head is not None:
+                bound0 = _peel_call_func(idle_head[0])
+            else:
+                bound0 = _peel_call_func(cand.args[0])
             is_gi = False
             is_list_gi = False
             mc_gi_key: ast.AST | None = None
@@ -7455,10 +7749,12 @@ def _build_identity_scanner(
                     # (Unknown > false PASS).
                     lam_func = _lambda_from_func(b0_arm.func)
                     if isinstance(lam_func, ast.Lambda):
-                        body = _peel_call_func(lam_func.body)
+                        body = _peel_call_func(
+                            _preferred_seed_arm(lam_func.body)
+                        )
                         # Peel nested zero-arg lambda applies.
                         nest_lam = 0
-                        while nest_lam < 6 and isinstance(body, ast.Call):
+                        while nest_lam < _TRANSPARENT_PEEL_MAX_DEPTH and isinstance(body, ast.Call):
                             inner_lam = _lambda_from_func(body.func)
                             if (
                                 isinstance(inner_lam, ast.Lambda)
@@ -7705,7 +8001,7 @@ def _build_identity_scanner(
                         )
                         nest_lam = 0
                         while (
-                            nest_lam < 6
+                            nest_lam < _TRANSPARENT_PEEL_MAX_DEPTH
                             and isinstance(lam_head, ast.Lambda)
                             and _call_is_empty_apply(
                                 head,
@@ -9862,7 +10158,10 @@ def _build_identity_scanner(
         if isinstance(node, ast.Name) and node.id in chainmap_list_aliases:
             return chainmap_list_aliases[node.id]
         peeled = _peel_getattr_attr(
-            node, getattr_aliases=frozenset(getattr_aliases)
+            node,
+            getattr_aliases=frozenset(getattr_aliases),
+            sequence_aliases=sequence_view_aliases,
+            slice_aliases=frozenset(slice_aliases),
         )
         if peeled is None and isinstance(node, ast.Call) and node.args:
             # ``attrgetter("maps")(cm)`` / ``operator.attrgetter("maps")(cm)`` /
@@ -9941,8 +10240,14 @@ def _build_identity_scanner(
         Also ``getattr(cm, "maps")`` / ``getattr(cm, "maps")[i]``. Bare Names
         are not ChainMap carriers (``list.__iadd__(xs, …)`` must not treat
         ``list`` as a pack target) unless Name-bound via ``m = cm.maps``.
+        Indexed ``maps[1]`` / ``maps[-1]`` resolve to that child's ns carrier.
         """
 
+        child = _chainmap_child_at(expr)
+        if child is not None:
+            nested = _ns_dict_carrier_name(child)
+            if nested is not None:
+                return nested
         node = _peel_call_func(expr)
         if isinstance(node, ast.Name) and node.id in chainmap_list_aliases:
             return chainmap_list_aliases[node.id][0]
@@ -9955,6 +10260,220 @@ def _build_identity_scanner(
             return parts[0]
         return None
 
+    def _is_chainmap_ctor_func(func: ast.AST) -> bool:
+        for cand in _shallow_packed_callee_exprs(func):
+            cand = _peel_transparent_callee(cand)
+            if isinstance(cand, ast.Name) and (
+                cand.id == "ChainMap"
+                or operator_projection_aliases.get(cand.id) == "ChainMap"
+            ):
+                return True
+            if isinstance(cand, ast.Attribute) and cand.attr == "ChainMap":
+                return True
+            if isinstance(cand, ast.Call):
+                if (
+                    _getattr_static_name(
+                        cand,
+                        getattr_aliases=frozenset(getattr_aliases),
+                    )
+                    == "ChainMap"
+                ):
+                    return True
+        return False
+
+    def _chainmap_ctor_children(cm_expr: ast.AST) -> list[ast.AST] | None:
+        node = _peel_call_func(cm_expr)
+        if isinstance(node, ast.Name):
+            kids = chainmap_ctor_maps.get(node.id)
+            if kids is not None:
+                return kids
+            for cid, ckids in chainmap_ctor_maps.items():
+                if ns_dict_alias_roots.get(cid) == node.id:
+                    return ckids
+            bound = bound_callee_exprs.get(node.id)
+            if bound is not None and bound is not node:
+                return _chainmap_ctor_children(bound)
+            return None
+        if isinstance(node, ast.Call) and _is_chainmap_ctor_func(node.func):
+            return _flatten_starred_args(
+                node.args,
+                sequence_aliases=sequence_view_aliases,
+                slice_aliases=frozenset(slice_aliases),
+            )
+        return None
+
+    def _chainmap_child_at(expr: ast.AST) -> ast.AST | None:
+        """Child mapping of ``cm.maps[i]`` / getitem / next / copy / list peels."""
+
+        node = _peel_call_func(expr)
+        copy_inner = _copy_wrapper_operand(node)
+        if copy_inner is not None:
+            nested = _chainmap_child_at(copy_inner)
+            if nested is not None:
+                return nested
+        idx: int | None = None
+        maps_expr: ast.AST | None = None
+        if isinstance(node, ast.Subscript):
+            if _slice_key(node.slice):
+                kids_seq = _chainmap_child_at(node.value)
+                return kids_seq
+            idx = _static_sequence_index(
+                node.slice,
+                sequence_aliases=sequence_view_aliases,
+                slice_aliases=frozenset(slice_aliases),
+            )
+            if idx is None:
+                raw = _resolve_static_key_value(node.slice)
+                if isinstance(raw, int):
+                    idx = raw
+                elif raw is True:
+                    idx = 1
+                elif raw is False:
+                    idx = 0
+            maps_expr = node.value
+        elif isinstance(node, ast.Call):
+            func = _peel_transparent_callee(node.func)
+            flat = _flatten_starred_args(
+                node.args,
+                sequence_aliases=sequence_view_aliases,
+                slice_aliases=frozenset(slice_aliases),
+            )
+            if isinstance(func, ast.Attribute) and func.attr in {
+                "__getitem__",
+                "pop",
+                "getitem",
+            }:
+                if func.attr == "getitem" and len(flat) >= 2:
+                    maps_expr = flat[0]
+                    idx = _static_sequence_index(
+                        flat[1],
+                        sequence_aliases=sequence_view_aliases,
+                        slice_aliases=frozenset(slice_aliases),
+                    )
+                elif not node.args:
+                    maps_expr = func.value
+                    idx = 0
+                elif (
+                    isinstance(func.value, ast.Name)
+                    and func.value.id == "list"
+                ) or (
+                    isinstance(func.value, ast.Attribute)
+                    and func.value.attr == "list"
+                ):
+                    if len(flat) >= 2:
+                        maps_expr = flat[0]
+                        idx = _static_sequence_index(
+                            flat[1],
+                            sequence_aliases=sequence_view_aliases,
+                            slice_aliases=frozenset(slice_aliases),
+                        )
+                else:
+                    maps_expr = func.value
+                    idx = _static_sequence_index(
+                        flat[0],
+                        sequence_aliases=sequence_view_aliases,
+                        slice_aliases=frozenset(slice_aliases),
+                    ) if flat else 0
+            proj = _projection_factory_name(
+                node,
+                projection_aliases=operator_projection_aliases,
+                getattr_aliases=frozenset(getattr_aliases),
+            )
+            if maps_expr is None and proj in {"getitem", "__getitem__", "pop"}:
+                if len(flat) >= 2:
+                    maps_expr = flat[0]
+                    idx = _static_sequence_index(
+                        flat[1],
+                        sequence_aliases=sequence_view_aliases,
+                        slice_aliases=frozenset(slice_aliases),
+                    )
+            if maps_expr is None:
+                ident = None
+                if isinstance(func, ast.Name):
+                    ident = func.id
+                elif isinstance(func, ast.Attribute):
+                    ident = func.attr
+                if ident in {"next", "iter", "list", "tuple"} and flat:
+                    maps_expr = flat[0]
+                    if ident == "next":
+                        idx = 0
+                        inner = _peel_call_func(flat[0])
+                        if isinstance(inner, ast.Call):
+                            inf = _peel_transparent_callee(inner.func)
+                            is_iter = (
+                                isinstance(inf, ast.Name) and inf.id == "iter"
+                            ) or (
+                                isinstance(inf, ast.Attribute)
+                                and inf.attr == "iter"
+                            )
+                            if is_iter and inner.args:
+                                maps_expr = inner.args[0]
+                    elif ident == "iter":
+                        idx = 0
+                    elif ident in {"list", "tuple"}:
+                        # ``list(cm.maps)`` — whole maps list; index from outer.
+                        parts = _chainmap_list_parts(flat[0])
+                        if parts is not None:
+                            kids = _chainmap_ctor_children(
+                                ast.Name(id=parts[0], ctx=ast.Load())
+                            )
+                            return None if kids is None else ast.List(
+                                elts=list(kids), ctx=ast.Load()
+                            )
+            view = _view_call_parts(node)
+            if maps_expr is None and view is not None and view[0] in _MAPPING_COPY_FUNCS:
+                maps_expr = view[1]
+                idx = 0 if not isinstance(expr, ast.Subscript) else idx
+        if maps_expr is None:
+            parts = _chainmap_list_parts(node)
+            if parts is None:
+                return None
+            kids = _chainmap_ctor_children(ast.Name(id=parts[0], ctx=ast.Load()))
+            if not kids:
+                return None
+            return kids[0]
+        peeled_maps = _peel_call_func(maps_expr)
+        if isinstance(peeled_maps, ast.Subscript) and _slice_key(peeled_maps.slice):
+            peeled_maps = _peel_call_func(peeled_maps.value)
+        if isinstance(peeled_maps, ast.Call):
+            mf = _peel_transparent_callee(peeled_maps.func)
+            mid = (
+                mf.id
+                if isinstance(mf, ast.Name)
+                else (mf.attr if isinstance(mf, ast.Attribute) else None)
+            )
+            if mid in {"list", "tuple", "iter", "copy", "deepcopy"} and peeled_maps.args:
+                peeled_maps = _peel_call_func(peeled_maps.args[0])
+            elif mid == "next" and peeled_maps.args:
+                inner = _peel_call_func(peeled_maps.args[0])
+                if isinstance(inner, ast.Call):
+                    inf = _peel_transparent_callee(inner.func)
+                    is_iter = (
+                        isinstance(inf, ast.Name) and inf.id == "iter"
+                    ) or (
+                        isinstance(inf, ast.Attribute) and inf.attr == "iter"
+                    )
+                    if is_iter and inner.args:
+                        peeled_maps = _peel_call_func(inner.args[0])
+                else:
+                    peeled_maps = inner
+        maps_expr = peeled_maps
+        parts = _chainmap_list_parts(maps_expr)
+        if parts is None:
+            copy_maps = _copy_wrapper_operand(maps_expr)
+            if copy_maps is not None:
+                parts = _chainmap_list_parts(copy_maps)
+        if parts is None:
+            return None
+        kids = _chainmap_ctor_children(ast.Name(id=parts[0], ctx=ast.Load()))
+        if not kids:
+            return None
+        if idx is None:
+            return kids[0]
+        if -len(kids) <= idx < len(kids):
+            return kids[idx]
+        return None
+
     def _ns_dict_carrier_name(expr: ast.AST) -> str | None:
         """``ns`` / ``vars(ns)`` / ``ns.__dict__`` / ``getattr(ns, "__dict__")``.
 
@@ -9963,6 +10482,11 @@ def _build_identity_scanner(
         """
 
         node = _peel_call_func(expr)
+        copy_inner = _copy_wrapper_operand(node)
+        if copy_inner is not None:
+            nested = _ns_dict_carrier_name(copy_inner)
+            if nested is not None:
+                return nested
         if isinstance(node, ast.Name):
             # ``d = vars(ns); d["e"] = exec`` grows the owning ns pack.
             root = ns_dict_alias_roots.get(node.id)
@@ -9975,7 +10499,13 @@ def _build_identity_scanner(
             is_cm = False
             for cand in _shallow_packed_callee_exprs(ctor):
                 cand = _peel_transparent_callee(cand)
-                if isinstance(cand, ast.Name) and cand.id == "ChainMap":
+                if isinstance(cand, ast.Name) and (
+                    cand.id == "ChainMap"
+                    or operator_projection_aliases.get(cand.id) == "ChainMap"
+                    or cand.id in dict_ctor_aliases
+                    and operator_projection_aliases.get(cand.id, cand.id)
+                    == "ChainMap"
+                ):
                     is_cm = True
                     break
                 if isinstance(cand, ast.Attribute) and cand.attr == "ChainMap":
@@ -9991,10 +10521,16 @@ def _build_identity_scanner(
                     ):
                         is_cm = True
                         break
-            if is_cm and node.args:
-                nested = _ns_dict_carrier_name(node.args[0])
-                if nested is not None:
-                    return nested
+            if is_cm:
+                cm_flat = _flatten_starred_args(
+                    node.args,
+                    sequence_aliases=sequence_view_aliases,
+                    slice_aliases=frozenset(slice_aliases),
+                )
+                if cm_flat:
+                    nested = _ns_dict_carrier_name(cm_flat[0])
+                    if nested is not None:
+                        return nested
             is_vars = False
             if isinstance(func, ast.Name) and (
                 func.id in {"vars", "globals", "locals"}
@@ -11930,6 +12466,17 @@ def _build_identity_scanner(
 
         for arm in _iter_boolop_ifexp_arms(base):
             arm = _peel_call_func(arm)
+            copy_inner = _copy_wrapper_operand(arm)
+            if copy_inner is not None:
+                arm = _peel_call_func(copy_inner)
+            if _base_looks_like_namespace_mapping(
+                arm,
+                getattr_aliases=frozenset(getattr_aliases),
+                ns_mapping_names=frozenset(ns_dict_aliases),
+                sequence_aliases=sequence_view_aliases,
+                slice_aliases=frozenset(slice_aliases),
+            ):
+                return True
             if isinstance(arm, ast.Attribute) and arm.attr == "__dict__":
                 return True
             # Name-bound namespace carriers: ``ns = types.__dict__; ns.get(...)``.
@@ -12142,6 +12689,13 @@ def _build_identity_scanner(
                     _note_protocol_alias_from_value(name, seed)
                     sequence_view_aliases[name] = saved_seq
                 return
+            if _expr_is_empty_pack(
+                value,
+                sequence_aliases=sequence_view_aliases,
+                slice_aliases=frozenset(slice_aliases),
+            ):
+                sequence_view_aliases[name] = ast.Dict(keys=[], values=[])
+                return
             _note_protocol_alias_from_value(name, _preferred_seed_arm(value))
             return
         # Static string keys: ``k = "MappingProxyType"`` / ``k = keys[0]`` /
@@ -12211,9 +12765,20 @@ def _build_identity_scanner(
                 ns_dict_alias_roots[name] = root
             else:
                 ns_dict_alias_roots.pop(name, None)
+            peeled_cm = _peel_call_func(value)
+            if isinstance(peeled_cm, ast.Call) and _is_chainmap_ctor_func(
+                peeled_cm.func
+            ):
+                chainmap_ctor_maps[name] = _flatten_starred_args(
+                    peeled_cm.args,
+                    sequence_aliases=sequence_view_aliases,
+                    slice_aliases=frozenset(slice_aliases),
+                )
+                bound_callee_exprs[name] = peeled_cm
         else:
             ns_dict_aliases.discard(name)
             ns_dict_alias_roots.pop(name, None)
+            chainmap_ctor_maps.pop(name, None)
         # ``m = cm.maps`` / ``m = getattr(cm, "maps")`` ChainMap list aliases.
         maps_parts = _chainmap_list_parts(value)
         if maps_parts is not None:
@@ -12268,11 +12833,26 @@ def _build_identity_scanner(
                         elts=list(elems), ctx=ast.Load()
                     )
                 else:
-                    sequence_view_aliases.pop(name, None)
+                    if _expr_is_empty_pack(
+                        value,
+                        sequence_aliases=sequence_view_aliases,
+                        slice_aliases=frozenset(slice_aliases),
+                    ):
+                        sequence_view_aliases[name] = ast.Dict(
+                            keys=[], values=[]
+                        )
+                    else:
+                        sequence_view_aliases.pop(name, None)
         elif isinstance(value, ast.Constant) and isinstance(value.value, int):
             sequence_view_aliases[name] = value
         elif isinstance(value, ast.Name) and value.id in sequence_view_aliases:
             sequence_view_aliases[name] = sequence_view_aliases[value.id]
+        elif _expr_is_empty_pack(
+            value,
+            sequence_aliases=sequence_view_aliases,
+            slice_aliases=frozenset(slice_aliases),
+        ):
+            sequence_view_aliases[name] = ast.Dict(keys=[], values=[])
         else:
             sequence_view_aliases.pop(name, None)
         if isinstance(value, ast.Name):
@@ -12314,6 +12894,11 @@ def _build_identity_scanner(
                     operator_projection_aliases[name] = value.id
             if value.id in _MAPPING_CTOR_NAMES or value.id in dict_ctor_aliases:
                 dict_ctor_aliases.add(name)
+                if (
+                    value.id == "ChainMap"
+                    or operator_projection_aliases.get(value.id) == "ChainMap"
+                ):
+                    operator_projection_aliases[name] = "ChainMap"
             if value.id in copy_module_aliases:
                 copy_module_aliases.add(name)
             if value.id in _OPERATOR_PROJECTION_NAMES | _KEY_APPLICATOR_NAMES | _HEAPQ_IDENTITY_SELECTORS:
@@ -12578,6 +13163,35 @@ def _build_identity_scanner(
                 for peel_cand in _shallow_packed_callee_exprs(dict_base):
                     if peel_cand not in pack_bases:
                         pack_bases.append(peel_cand)
+                extra_bases: list[ast.AST] = []
+                for dict_base_cand in pack_bases:
+                    copy_inner = _copy_wrapper_operand(dict_base_cand)
+                    if copy_inner is not None:
+                        extra_bases.append(copy_inner)
+                    peeled_db = _peel_call_func(dict_base_cand)
+                    if isinstance(peeled_db, ast.Dict):
+                        for map_key, map_val in zip(
+                            peeled_db.keys, peeled_db.values
+                        ):
+                            if map_key is None and map_val is not None:
+                                extra_bases.append(map_val)
+                    if isinstance(peeled_db, ast.Call):
+                        for w_arg in peeled_db.args:
+                            nested_w = (
+                                w_arg.value
+                                if isinstance(w_arg, ast.Starred)
+                                else w_arg
+                            )
+                            extra_bases.append(nested_w)
+                            if isinstance(nested_w, ast.Dict):
+                                for map_key, map_val in zip(
+                                    nested_w.keys, nested_w.values
+                                ):
+                                    if map_key is None and map_val is not None:
+                                        extra_bases.append(map_val)
+                for extra in extra_bases:
+                    if extra not in pack_bases:
+                        pack_bases.append(extra)
                 is_list_dict = False
                 for dict_base_cand in pack_bases:
                     if is_list_dict:
@@ -12877,6 +13491,11 @@ def _build_identity_scanner(
                 )
                 if g_enter == "__enter__" and g_enter_flat:
                     if _seed_from_nullcontext_recv(g_enter_flat[0]):
+                        return
+                # ``f=getattr(e,"__call__")()`` / ``f=getattr(*pack)()`` after
+                # ``pack=(e,"__call__")`` share empty ``e()`` enter peels.
+                if g_enter == "__call__" and g_enter_flat:
+                    if _seed_from_enter_callable(g_enter_flat[0]):
                         return
             # ``f = nullcontext(n.install).__enter__()`` / import-as / Name-bound
             # / bare ``cm = nullcontext(*args)`` factory products.
@@ -13241,6 +13860,15 @@ def _build_identity_scanner(
             # ``getattr(m,"__get__")`` (Unknown > false PASS).
             def _is_list_type_dict_base(dict_base: ast.AST) -> bool:
                 dict_base = _peel_call_func(dict_base)
+                copy_inner = _copy_wrapper_operand(dict_base)
+                if copy_inner is not None:
+                    return _is_list_type_dict_base(copy_inner)
+                if isinstance(dict_base, ast.Dict):
+                    for map_key, map_val in zip(dict_base.keys, dict_base.values):
+                        if map_key is None and map_val is not None:
+                            if _is_list_type_dict_base(map_val):
+                                return True
+                    return False
                 bases: list[ast.AST] = [dict_base]
                 # Packing: ``[d][0]`` / ``next(iter([d]))`` / ``(0 or [d])[0]``.
                 if isinstance(dict_base, ast.Subscript):
@@ -13305,6 +13933,40 @@ def _build_identity_scanner(
                                 and _is_list_type_dict_base(arm.args[0])
                             ):
                                 return True
+                            wrap_n = None
+                            for w_cand in _shallow_packed_callee_exprs(arm.func):
+                                w_cand = _peel_transparent_callee(w_cand)
+                                if (
+                                    isinstance(w_cand, ast.Name)
+                                    and w_cand.id in _NS_MAPPING_WRAPPER_NAMES
+                                ):
+                                    wrap_n = w_cand.id
+                                    break
+                                if (
+                                    isinstance(w_cand, ast.Attribute)
+                                    and w_cand.attr in _NS_MAPPING_WRAPPER_NAMES
+                                ):
+                                    wrap_n = w_cand.attr
+                                    break
+                            if wrap_n is not None:
+                                for w_arg in arm.args:
+                                    nested_w = (
+                                        w_arg.value
+                                        if isinstance(w_arg, ast.Starred)
+                                        else w_arg
+                                    )
+                                    if _is_list_type_dict_base(nested_w):
+                                        return True
+                                    if isinstance(nested_w, ast.Dict):
+                                        for mk, mv in zip(
+                                            nested_w.keys, nested_w.values
+                                        ):
+                                            if (
+                                                mk is None
+                                                and mv is not None
+                                                and _is_list_type_dict_base(mv)
+                                            ):
+                                                return True
                             # ``d.copy()`` / ``copy.copy(d)`` /
                             # ``getattr(d,"copy")()`` / packed getattr copy
                             # (Unknown > false PASS).
@@ -13725,10 +14387,78 @@ def _build_identity_scanner(
                             bound_view_receivers.pop(name, None)
                             bound_view_expr_receivers.pop(name, None)
                         else:
-                            # ``list.__dict__.get("sort").__get__`` /
-                            # ``vars(list).get|pop("sort").__get__`` /
-                            # BoolOp / IfExp key before __get__.
-                            view = _view_call_parts(sort_recv)
+                            ig_hit = False
+                            for ig_cand in _shallow_packed_callee_exprs(
+                                sort_recv.func
+                            ):
+                                ig_cand = _peel_call_func(ig_cand)
+                                if not isinstance(ig_cand, ast.Call):
+                                    continue
+                                ig_key_n = _itemgetter_key_node(
+                                    ig_cand,
+                                    projection_aliases=operator_projection_aliases,
+                                    getattr_aliases=frozenset(
+                                        getattr_aliases
+                                    ),
+                                    sequence_aliases=sequence_view_aliases,
+                                    slice_aliases=frozenset(slice_aliases),
+                                )
+                                if (
+                                    ig_key_n is not None
+                                    and _static_str_arms_contain(
+                                        ig_key_n, "sort"
+                                    )
+                                    and sort_recv.args
+                                    and (
+                                        _is_list_type_dict(sort_recv.args[0])
+                                        or _is_list_type_dict_base(
+                                            sort_recv.args[0]
+                                        )
+                                    )
+                                ):
+                                    dict_view_products[name] = "list.sort"
+                                    operator_projection_aliases[name] = (
+                                        "list.sort"
+                                    )
+                                    bound_view_receivers.pop(name, None)
+                                    bound_view_expr_receivers.pop(
+                                        name, None
+                                    )
+                                    ig_hit = True
+                                    break
+                                mc_gi = _methodcaller_getitem_key(
+                                    ig_cand,
+                                    projection_aliases=operator_projection_aliases,
+                                    getattr_aliases=frozenset(
+                                        getattr_aliases
+                                    ),
+                                    sequence_aliases=sequence_view_aliases,
+                                    slice_aliases=frozenset(slice_aliases),
+                                    str_resolver=_resolve_static_str,
+                                )
+                                if (
+                                    mc_gi is not None
+                                    and _static_str_arms_contain(mc_gi, "sort")
+                                    and sort_recv.args
+                                    and _is_list_type_dict_base(
+                                        sort_recv.args[0]
+                                    )
+                                ):
+                                    dict_view_products[name] = "list.sort"
+                                    operator_projection_aliases[name] = (
+                                        "list.sort"
+                                    )
+                                    bound_view_receivers.pop(name, None)
+                                    bound_view_expr_receivers.pop(
+                                        name, None
+                                    )
+                                    ig_hit = True
+                                    break
+                            if not ig_hit:
+                                # ``list.__dict__.get("sort").__get__`` /
+                                # ``vars(list).get|pop("sort").__get__`` /
+                                # BoolOp / IfExp key before __get__.
+                                view = _view_call_parts(sort_recv)
                             view_attr = view[0] if view is not None else None
                             view_recv = view[1] if view is not None else None
                             if view_attr is None:
@@ -13806,8 +14536,11 @@ def _build_identity_scanner(
                                 # ``[partial(d.pop)][0](*('sort',)).__get__`` /
                                 # ``[partial(d.pop, *('sort',))][0]()`` empty
                                 # apply with factory-bound key (Unknown > false PASS).
-                                for pc in _callee_candidate_exprs(
-                                    sort_recv.func
+                                for pc in (
+                                    *_callee_candidate_exprs(sort_recv.func),
+                                    *_shallow_packed_callee_exprs(
+                                        sort_recv.func
+                                    ),
                                 ):
                                     pc = _peel_call_func(pc)
                                     copy_inner = _copy_wrapper_operand(pc)
@@ -13823,6 +14556,7 @@ def _build_identity_scanner(
                                             getattr_aliases=frozenset(
                                                 getattr_aliases
                                             ),
+                                            bound_callees=bound_callee_exprs,
                                         )
                                     ):
                                         continue
@@ -13867,7 +14601,31 @@ def _build_identity_scanner(
                                         }
                                     ):
                                         head_attr = head.attr
-                                        head_recv = head.value
+                                        recv_v = _peel_call_func(head.value)
+                                        unbound_dict = (
+                                            (
+                                                isinstance(recv_v, ast.Name)
+                                                and recv_v.id == "dict"
+                                            )
+                                            or (
+                                                isinstance(recv_v, ast.Attribute)
+                                                and recv_v.attr == "dict"
+                                            )
+                                            or _is_dict_constructor(
+                                                recv_v,
+                                                dict_ctor_aliases=frozenset(
+                                                    dict_ctor_aliases
+                                                ),
+                                                getattr_aliases=frozenset(
+                                                    getattr_aliases
+                                                ),
+                                            )
+                                        )
+                                        if unbound_dict and key_args:
+                                            head_recv = key_args[0]
+                                            key_args = list(key_args[1:])
+                                        else:
+                                            head_recv = head.value
                                     elif isinstance(head, ast.Name):
                                         ident = (
                                             operator_projection_aliases.get(
@@ -13949,6 +14707,7 @@ def _build_identity_scanner(
                     value,
                     partial_aliases=frozenset(partial_aliases),
                     getattr_aliases=frozenset(getattr_aliases),
+                    bound_callees=bound_callee_exprs,
                 )
                 or (
                     _methodcaller_static_name(
@@ -14653,6 +15412,8 @@ def _build_identity_scanner(
                     dict_ctor_aliases.add(local)
                     if alias.name in {"list", "set", "tuple"}:
                         operator_projection_aliases[local] = alias.name
+                    if alias.name == "ChainMap":
+                        operator_projection_aliases[local] = "ChainMap"
                 elif alias.name in _MAPPING_COPY_FUNCS:
                     # ``from copy import copy as c`` / ``deepcopy as dc``.
                     operator_projection_aliases[local] = alias.name
@@ -15051,6 +15812,113 @@ def _build_identity_scanner(
                     local_classes=local_classes,
                 )
                 return
+        already_dunder_call = (
+            isinstance(_peel_call_func(call.func), ast.Attribute)
+            and _peel_call_func(call.func).attr == "__call__"  # type: ignore[union-attr]
+        )
+        if not already_dunder_call:
+            for packed_f in _shallow_packed_callee_exprs(call.func):
+                packed_f = _peel_call_func(packed_f)
+                if not (
+                    isinstance(packed_f, ast.Attribute)
+                    and packed_f.attr == "__call__"
+                ):
+                    continue
+                recv = _peel_call_func(packed_f.value)
+                if not (
+                    isinstance(recv, ast.Name) and recv.id in bound_callee_exprs
+                ):
+                    continue
+                _follow_local_callee(
+                    ast.Call(
+                        func=packed_f,
+                        args=list(call.args),
+                        keywords=list(call.keywords),
+                    ),
+                    path=path,
+                    index=index,
+                    env=env,
+                    visited_fns=visited_fns,
+                    local_fns=local_fns,
+                    local_classes=local_classes,
+                )
+                return
+        packed_partial_followed = False
+        for packed_f in _shallow_packed_callee_exprs(call.func):
+            packed_f = _peel_call_func(packed_f)
+            if isinstance(packed_f, ast.Name) and packed_f.id in bound_callee_exprs:
+                packed_f = _peel_call_func(bound_callee_exprs[packed_f.id])
+            if not isinstance(packed_f, ast.Call):
+                continue
+            if not (
+                _is_partial_factory(
+                    packed_f,
+                    partial_aliases=frozenset(partial_aliases),
+                    getattr_aliases=frozenset(getattr_aliases),
+                    bound_callees=bound_callee_exprs,
+                )
+            ):
+                continue
+            peeled_p = _peel_idle_partial_layers(
+                packed_f,
+                partial_aliases=frozenset(partial_aliases),
+                getattr_aliases=frozenset(getattr_aliases),
+                sequence_aliases=sequence_view_aliases,
+                slice_aliases=frozenset(slice_aliases),
+                bound_partials=bound_callee_exprs,
+            )
+            if peeled_p is None:
+                continue
+            head, pre, factory_kw = peeled_p
+            apply_flat = _flatten_starred_args(
+                call.args,
+                sequence_aliases=sequence_view_aliases,
+                slice_aliases=frozenset(slice_aliases),
+            )
+            merged = [*pre, *apply_flat]
+            merged_kw = [*factory_kw, *call.keywords]
+            if _expr_is_operator_call_receiver(
+                head,
+                projection_aliases=operator_projection_aliases,
+                getattr_aliases=frozenset(getattr_aliases),
+                partial_aliases=frozenset(partial_aliases),
+                factory_products=projection_factory_products,
+                dict_view_products=dict_view_products,
+            ):
+                if merged:
+                    _follow_local_callee(
+                        ast.Call(
+                            func=merged[0],
+                            args=list(merged[1:]),
+                            keywords=list(merged_kw),
+                        ),
+                        path=path,
+                        index=index,
+                        env=env,
+                        visited_fns=visited_fns,
+                        local_fns=local_fns,
+                        local_classes=local_classes,
+                    )
+                    packed_partial_followed = True
+                    break
+            else:
+                _follow_local_callee(
+                    ast.Call(
+                        func=head,
+                        args=list(merged),
+                        keywords=list(merged_kw),
+                    ),
+                    path=path,
+                    index=index,
+                    env=env,
+                    visited_fns=visited_fns,
+                    local_fns=local_fns,
+                    local_classes=local_classes,
+                )
+                packed_partial_followed = True
+                break
+        if packed_partial_followed:
+            return
         if _is_operator_call_factory(
             call,
             projection_aliases=operator_projection_aliases,

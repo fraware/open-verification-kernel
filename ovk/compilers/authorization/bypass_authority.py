@@ -467,10 +467,31 @@ class _RequestStateAliasEnv:
         *,
         getattr_aliases: frozenset[str],
     ) -> bool:
-        """True for ``types.__dict__`` / ``vars(types)`` / ``getattr(..., "__dict__")``."""
+        """True for ``types.__dict__`` / ``vars(types)`` / ``getattr(..., "__dict__")``.
+
+        Shared peel with callee resolution so copy / dict / MappingProxyType /
+        packed wrappers of ``vars(builtins)`` seed ns aliases (Unknown >
+        false PASS).
+        """
+
+        from ovk.compilers.authorization.python_callee_resolution import (
+            _base_looks_like_namespace_mapping,
+            _copy_wrapper_operand,
+            _peel_call_func,
+        )
 
         while isinstance(base, ast.NamedExpr):
             base = base.value
+        copy_inner = _copy_wrapper_operand(base)
+        if copy_inner is not None:
+            base = _peel_call_func(copy_inner)
+        if _base_looks_like_namespace_mapping(
+            base,
+            getattr_aliases=getattr_aliases,
+            ns_mapping_names=frozenset(self.ns_dict_names),
+            sequence_aliases=self.sequence_literal_aliases,
+        ):
+            return True
         if isinstance(base, ast.Name) and base.id in self.ns_dict_names:
             return True
         if isinstance(base, ast.Attribute) and base.attr == "__dict__":
