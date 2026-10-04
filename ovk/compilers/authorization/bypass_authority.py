@@ -111,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.39.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.40.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -145,7 +145,7 @@ _CONTAINER_ADAPTER_NAMES = frozenset(
     }
 )
 # Namespace / mapping view attrs that project key→value like ``.get``.
-_NS_DICT_VIEW_ATTRS = frozenset({"get", "pop", "__getitem__"})
+_NS_DICT_VIEW_ATTRS = frozenset({"get", "pop", "__getitem__", "setdefault"})
 # operator.* / unbound projection names that yield packed request/state identity.
 _OPERATOR_PROJECTION_ATTRS = frozenset(
     {"getitem", "itemgetter", "attrgetter", "methodcaller", "call"}
@@ -352,6 +352,8 @@ class _RequestStateAliasEnv:
     operator_projection_aliases: dict[str, str] = dc_field(default_factory=dict)
     # Renamed ``vars`` / ``globals`` / ``locals`` namespace projectors.
     ns_projection_aliases: set[str] = dc_field(default_factory=set)
+    # Name-bound namespace projections: ``ns = types.__dict__`` / ``ns = vars(types)``.
+    ns_dict_names: set[str] = dc_field(default_factory=set)
 
     @classmethod
     def seed(cls, *, param_names: frozenset[str]) -> "_RequestStateAliasEnv":
@@ -402,6 +404,8 @@ class _RequestStateAliasEnv:
 
         while isinstance(base, ast.NamedExpr):
             base = base.value
+        if isinstance(base, ast.Name) and base.id in self.ns_dict_names:
+            return True
         if isinstance(base, ast.Attribute) and base.attr == "__dict__":
             return True
         if isinstance(base, ast.Call):
@@ -449,6 +453,12 @@ class _RequestStateAliasEnv:
         # Peel walrus so ``(Proxy := MappingProxyType)`` seeds adapters.
         while isinstance(value, ast.NamedExpr):
             value = value.value
+        # ``ns = types.__dict__`` / ``ns = vars(types)`` / ``ns2 = ns``: later
+        # ``ns.get(...)`` / ``getattr(ns, "get")(...)`` project like the literal.
+        if self._base_is_namespace_projection(value, getattr_aliases=g_aliases):
+            self.ns_dict_names.add(name)
+        else:
+            self.ns_dict_names.discard(name)
         if isinstance(value, ast.Name):
             if value.id in _CONTAINER_ADAPTER_NAMES or value.id in self.adapter_aliases:
                 if value.id == "MappingProxyType" or value.id in self.adapter_aliases:
@@ -621,6 +631,7 @@ class _RequestStateAliasEnv:
             },
             operator_projection_aliases=dict(self.operator_projection_aliases),
             ns_projection_aliases=set(self.ns_projection_aliases),
+            ns_dict_names=set(self.ns_dict_names),
         )
 
     def restore(self, other: "_RequestStateAliasEnv") -> None:
@@ -636,6 +647,7 @@ class _RequestStateAliasEnv:
         }
         self.operator_projection_aliases = dict(other.operator_projection_aliases)
         self.ns_projection_aliases = set(other.ns_projection_aliases)
+        self.ns_dict_names = set(other.ns_dict_names)
 
     def install_join(self, states: Sequence["_RequestStateAliasEnv"]) -> None:
         """Install the sound must/may join of feasible predecessor alias envs."""
@@ -1350,6 +1362,7 @@ def join_request_state_alias_envs(
     container_adapter_packs: dict[str, dict[object, tuple[str, ...]]] = {}
     operator_projection_aliases: dict[str, str] = {}
     ns_projection_aliases: set[str] = set()
+    ns_dict_names: set[str] = set()
     for state in states:
         adapter_aliases |= state.adapter_aliases
         for name, pack in state.container_adapter_packs.items():
@@ -1359,6 +1372,7 @@ def join_request_state_alias_envs(
                 bucket[key] = tuple(dict.fromkeys([*prev, *names]))
         operator_projection_aliases.update(state.operator_projection_aliases)
         ns_projection_aliases |= state.ns_projection_aliases
+        ns_dict_names |= state.ns_dict_names
     return _RequestStateAliasEnv(
         request_names=must_request,
         state_names=must_state,
@@ -1368,6 +1382,7 @@ def join_request_state_alias_envs(
         container_adapter_packs=container_adapter_packs,
         operator_projection_aliases=operator_projection_aliases,
         ns_projection_aliases=ns_projection_aliases,
+        ns_dict_names=ns_dict_names,
     )
 
 
@@ -2701,14 +2716,22 @@ def _collect_writes_in_function(
             return left or right
         return None
 
-    def _seed_name_instance_or_class(name: str, value: ast.AST) -> None:
-        """Shared seed for instance carriers and class constructor aliases."""
+    def _seed_name_instance_or_class(
+        name: str, value: ast.AST, *, observe_session: bool = True
+    ) -> None:
+        """Shared seed for instance carriers and class constructor aliases.
+
+        ``observe_session`` emits the synthetic element alias into the identity
+        session. Callers that bind ``name`` to the *whole* value (Assign / AnnAssign
+        already observed by the session) must pass ``False``: a synthetic
+        ``d = Cls`` for ``d = {"c": Cls}`` would clobber the container pack.
+        """
 
         # Class constructor aliases first (packed ``[Cls][0]`` / bare ``Cls``).
         src_cls = _resolve_class_constructor_alias(value)
         if src_cls is not None:
             local_classes[name] = src_cls
-            if identity_session is not None:
+            if identity_session is not None and observe_session:
                 identity_session.observe_statement(
                     ast.Assign(
                         targets=[ast.Name(id=name, ctx=ast.Store())],
@@ -2725,7 +2748,7 @@ def _collect_writes_in_function(
             src_cls = _lookup_local_class(value.id)
             if src_cls is not None:
                 local_classes[name] = src_cls
-                if identity_session is not None:
+                if identity_session is not None and observe_session:
                     identity_session.observe_statement(
                         ast.Assign(
                             targets=[ast.Name(id=name, ctx=ast.Store())],
@@ -2734,7 +2757,7 @@ def _collect_writes_in_function(
                     )
 
     def _seed_assign_target_instance_bindings(
-        target: ast.AST, value: ast.AST
+        target: ast.AST, value: ast.AST, *, observe_session: bool = True
     ) -> None:
         """Seed For/with/comp targets from packed Box/class carriers."""
 
@@ -2755,10 +2778,12 @@ def _collect_writes_in_function(
                         if map_val is None:
                             continue
                         _seed_assign_target_instance_bindings(
-                            target.elts[1], map_val
+                            target.elts[1], map_val, observe_session=observe_session
                         )
                     return
-                _seed_assign_target_instance_bindings(target, func.value)
+                _seed_assign_target_instance_bindings(
+                    target, func.value, observe_session=observe_session
+                )
                 return
             if isinstance(func, ast.Attribute) and func.attr in {"values", "keys"}:
                 recv = func.value
@@ -2766,25 +2791,35 @@ def _collect_writes_in_function(
                     for map_key in recv.keys:
                         if map_key is None:
                             continue
-                        _seed_assign_target_instance_bindings(target, map_key)
+                        _seed_assign_target_instance_bindings(
+                            target, map_key, observe_session=observe_session
+                        )
                     return
-                _seed_assign_target_instance_bindings(target, recv)
+                _seed_assign_target_instance_bindings(
+                    target, recv, observe_session=observe_session
+                )
                 return
             if isinstance(func, ast.Name) and func.id in {"map", "filter"}:
                 if len(value.args) >= 2:
-                    _seed_assign_target_instance_bindings(target, value.args[1])
+                    _seed_assign_target_instance_bindings(
+                        target, value.args[1], observe_session=observe_session
+                    )
                     return
         if isinstance(value, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
             if value.generators:
                 _seed_assign_target_instance_bindings(
-                    target, value.generators[0].iter
+                    target, value.generators[0].iter, observe_session=observe_session
                 )
                 return
         if isinstance(target, ast.Name):
-            _seed_name_instance_or_class(target.id, value)
+            _seed_name_instance_or_class(
+                target.id, value, observe_session=observe_session
+            )
             return
         if isinstance(target, ast.Starred):
-            _seed_assign_target_instance_bindings(target.value, value)
+            _seed_assign_target_instance_bindings(
+                target.value, value, observe_session=observe_session
+            )
             return
         if isinstance(target, (ast.Tuple, ast.List)):
             if isinstance(value, (ast.Tuple, ast.List)) and len(target.elts) == len(
@@ -2793,7 +2828,9 @@ def _collect_writes_in_function(
                 for elt_t, elt_v in zip(target.elts, value.elts):
                     nested_t = elt_t.value if isinstance(elt_t, ast.Starred) else elt_t
                     nested_v = elt_v.value if isinstance(elt_v, ast.Starred) else elt_v
-                    _seed_assign_target_instance_bindings(nested_t, nested_v)
+                    _seed_assign_target_instance_bindings(
+                        nested_t, nested_v, observe_session=observe_session
+                    )
                 return
             # ``for (x,) in [(Box(),)]`` / starred packs: peel iter class once.
             packed_cls = _instance_class_name_from_expr(value)
@@ -2881,94 +2918,23 @@ def _collect_writes_in_function(
         """Seed identity protocol/container packs through match peels.
 
         Match CF walks case bodies via per-statement observe (not whole-Match
-        ``_scan_stmts``), so Assign-equivalent seeds must be installed here for
-        exec / type / operator.call / container packs (Unknown > false PASS).
+        ``_scan_stmts``), so the binder seed is delegated to the scanner's shared
+        element / mapping resolver (walrus, Name-bound and ``dict()`` subjects,
+        ``**rest`` packs, star binders) instead of a parallel literal-only peel
+        (Unknown > false PASS).
         """
 
-        def _assign(name: str, value: ast.AST) -> None:
-            session.observe_statement(
-                ast.Assign(
-                    targets=[ast.Name(id=name, ctx=ast.Store())],
-                    value=value,
-                )
-            )
-
-        def _apply(pat: ast.AST, value: ast.AST) -> None:
-            if isinstance(pat, ast.MatchAs):
-                if pat.name:
-                    _assign(pat.name, value)
-                if pat.pattern is not None:
-                    _apply(pat.pattern, value)
-                return
-            if isinstance(pat, ast.MatchSequence) and isinstance(
-                value, (ast.List, ast.Tuple)
-            ):
-                has_star = any(
-                    isinstance(item, ast.MatchStar) for item in pat.patterns
-                )
-                if has_star:
-                    for item in pat.patterns:
-                        if isinstance(item, ast.MatchStar) and item.name:
-                            # ``case (*xs,):`` packs the whole subject sequence.
-                            _assign(item.name, value)
-                    for sub_pat, elt in zip(pat.patterns, value.elts):
-                        if isinstance(sub_pat, ast.MatchStar):
-                            continue
-                        nested = elt.value if isinstance(elt, ast.Starred) else elt
-                        _apply(sub_pat, nested)
-                    return
-                if len(pat.patterns) != len(value.elts):
-                    return
-                for sub_pat, elt in zip(pat.patterns, value.elts):
-                    nested = elt.value if isinstance(elt, ast.Starred) else elt
-                    _apply(sub_pat, nested)
-                return
-            if isinstance(pat, ast.MatchMapping) and isinstance(value, ast.Dict):
-                value_by_key: dict[object, ast.AST] = {}
-                for map_key, map_val in zip(value.keys, value.values):
-                    if (
-                        map_key is not None
-                        and map_val is not None
-                        and isinstance(map_key, ast.Constant)
-                    ):
-                        value_by_key[map_key.value] = map_val
-                fixed_keys: set[object] = set()
-                for map_key, sub_pat in zip(pat.keys, pat.patterns):
-                    if not isinstance(map_key, ast.Constant):
-                        continue
-                    fixed_keys.add(map_key.value)
-                    nested = value_by_key.get(map_key.value)
-                    if nested is not None:
-                        _apply(sub_pat, nested)
-                if pat.rest is not None:
-                    rest_keys: list[ast.AST] = []
-                    rest_vals: list[ast.AST] = []
-                    for map_key, map_val in zip(value.keys, value.values):
-                        if (
-                            map_key is None
-                            or map_val is None
-                            or not isinstance(map_key, ast.Constant)
-                        ):
-                            continue
-                        if map_key.value in fixed_keys:
-                            continue
-                        rest_keys.append(map_key)
-                        rest_vals.append(map_val)
-                    _assign(
-                        pat.rest,
-                        ast.Dict(keys=rest_keys, values=rest_vals),
-                    )
-                return
-            if isinstance(pat, ast.MatchOr):
-                for alt in pat.patterns:
-                    _apply(alt, value)
-
-        _apply(pattern, matched)
+        session.observe_match_binding(pattern, matched)
 
     def _enter_return_instance_class(
         context_expr: ast.AST, *, async_enter: bool
     ) -> str | None:
-        """Class name returned by local ``__enter__`` / ``__aenter__``, if any."""
+        """Class name returned by local ``__enter__`` / ``__aenter__``, if any.
+
+        Shared constructor peel covers ``return Mut`` and pack views
+        (``return {Mut: 1}.keys()`` / ``.values()``) so with-as carriers
+        seed the same as Assign (Unknown > false PASS).
+        """
 
         if not isinstance(context_expr, ast.Call) or not isinstance(
             context_expr.func, ast.Name
@@ -2986,6 +2952,9 @@ def _collect_writes_in_function(
                 packed = _instance_class_name_from_expr(stmt.value)
                 if packed is not None:
                     return packed
+                ctor = _resolve_class_constructor_alias(stmt.value)
+                if ctor is not None:
+                    return ctor.name
         return _instance_class_name_from_expr(context_expr)
 
     def _note_callable_name_alias(
@@ -3153,7 +3122,9 @@ def _collect_writes_in_function(
                 target.id, value, getattr_aliases=frozenset(getattr_aliases)
             )
             # Shared constructor/instance peel before callable-product join.
-            _seed_name_instance_or_class(target.id, value)
+            _seed_name_instance_or_class(
+                target.id, value, observe_session=False
+            )
             packed_cls = instance_class_of.get(target.id)
             # Dual-may precise join when both arms are known nested/returned
             # closures; unknown callable arm → fail closed on later call.
@@ -3182,7 +3153,9 @@ def _collect_writes_in_function(
                 target.id, value, getattr_aliases=frozenset(getattr_aliases)
             )
             # Shared peel: ``b = Box()`` instances and ``C = next(iter([Cls]))``.
-            _seed_name_instance_or_class(target.id, value)
+            _seed_name_instance_or_class(
+                target.id, value, observe_session=False
+            )
             if _bind_call_product_to_name(target.id, value):
                 return
         else:
@@ -3192,7 +3165,9 @@ def _collect_writes_in_function(
             )
             # Shared peel: class constructor packs (``C = [Cls][0]``) and
             # instance packs (``xs = [Box()]``) — Unknown > false PASS.
-            _seed_name_instance_or_class(target.id, value)
+            _seed_name_instance_or_class(
+                target.id, value, observe_session=False
+            )
         # Container packing of governed closures into a Name carrier: the
         # Name is not itself callable under the theorem → residual escape so
         # later ``bucket[0]()`` cannot omit the writer (Unknown > false PASS).
@@ -5177,7 +5152,11 @@ def _collect_writes_in_function(
                     control_dependent=control_dependent,
                 )
                 # Unpack / star peels: ``C, = [Cls]`` / ``*xs, = [Mut]``.
-                _seed_assign_target_instance_bindings(target, statement.value)
+                # The session already observed the real Assign; a synthetic
+                # element alias would clobber ``d = {...}`` container packs.
+                _seed_assign_target_instance_bindings(
+                    target, statement.value, observe_session=False
+                )
             # Calls on the RHS may escape request/state even when the store is
             # a simple Name alias (alias noted below; escape still recorded).
             if isinstance(statement.value, ast.Call) or any(
@@ -5387,6 +5366,13 @@ def _collect_writes_in_function(
                         value=statement.iter,
                     )
                 )
+            # Identity-session seed (shared element resolver): ``for C in
+            # d.keys()/values()/items()`` / comps / zip / enumerate / Name packs
+            # flow into class, exec/eval, type-protocol and container aliases.
+            if identity_session is not None:
+                identity_session.observe_for_binding(
+                    statement.target, statement.iter
+                )
             # Instance carriers: ``for x in [Box()]: x.fn()`` (comp parity).
             _seed_assign_target_instance_bindings(statement.target, statement.iter)
             # ``for s in [request.state]: s.field = client`` must not authorize.
@@ -5506,58 +5492,85 @@ def _collect_writes_in_function(
                         classification = direct.as_may_only()
                     else:
                         classification = AliasClassification()
-                    # Instance / class-constructor carriers from ``__enter__``
-                    # return / context expr (``with CM() as C: C()()``).
+                    # Instance / class-constructor / pack carriers from
+                    # ``__enter__`` return / context expr
+                    # (``with CM() as M: M()`` / ``with CM() as ks: C, = ks``).
                     enter_cls = _enter_return_instance_class(
                         item.context_expr, async_enter=is_async_with
                     )
-                    if enter_cls is not None:
-                        enter_ctor = None
-                        enter_return: ast.AST | None = None
-                        if (
-                            isinstance(item.context_expr, ast.Call)
-                            and isinstance(item.context_expr.func, ast.Name)
-                        ):
-                            cm_cls = _lookup_local_class(item.context_expr.func.id)
-                            if cm_cls is not None:
-                                method_name = (
-                                    "__aenter__" if is_async_with else "__enter__"
-                                )
-                                method = _governed_class_method(cm_cls, method_name)
-                                if method is not None:
-                                    for stmt in method.body:
-                                        if (
-                                            isinstance(stmt, ast.Return)
-                                            and stmt.value is not None
-                                        ):
-                                            enter_return = stmt.value
-                                            enter_ctor = (
-                                                _resolve_class_constructor_alias(
-                                                    stmt.value
-                                                )
+                    enter_ctor = None
+                    enter_return: ast.AST | None = None
+                    if (
+                        isinstance(item.context_expr, ast.Call)
+                        and isinstance(item.context_expr.func, ast.Name)
+                    ):
+                        cm_cls = _lookup_local_class(item.context_expr.func.id)
+                        if cm_cls is not None:
+                            method_name = (
+                                "__aenter__" if is_async_with else "__enter__"
+                            )
+                            method = _governed_class_method(cm_cls, method_name)
+                            if method is not None:
+                                for stmt in method.body:
+                                    if (
+                                        isinstance(stmt, ast.Return)
+                                        and stmt.value is not None
+                                    ):
+                                        enter_return = stmt.value
+                                        enter_ctor = (
+                                            _resolve_class_constructor_alias(
+                                                stmt.value
                                             )
-                                            break
+                                        )
+                                        break
+                    # Prefer ``__enter__`` return as the as-target seed so
+                    # ``return {Mut:1}.keys()`` / dict packs share Assign peel.
+                    seed_value = (
+                        enter_return
+                        if enter_return is not None
+                        else item.context_expr
+                    )
+                    seeded_enter_identity = False
+                    if identity_session is not None and enter_return is not None:
+                        identity_session.observe_statement(
+                            ast.Assign(
+                                targets=[item.optional_vars],
+                                value=enter_return,
+                            )
+                        )
+                        seeded_enter_identity = True
+                    if enter_cls is not None or enter_ctor is not None:
                         for name in as_names:
                             if enter_ctor is not None:
                                 # Shared seed notifies identity session so
                                 # ``with CM() as M: M()`` observes ``__init__``.
+                                # Skip session when Assign(enter_return) already
+                                # installed packs (``ks = {Mut:1}.keys()``).
                                 if enter_return is not None:
-                                    _seed_name_instance_or_class(name, enter_return)
+                                    _seed_name_instance_or_class(
+                                        name,
+                                        enter_return,
+                                        observe_session=not seeded_enter_identity,
+                                    )
                                 else:
                                     local_classes[name] = enter_ctor
                                     instance_class_of.pop(name, None)
-                            else:
+                            elif enter_cls is not None:
                                 instance_class_of[name] = enter_cls
                     else:
                         _seed_assign_target_instance_bindings(
-                            item.optional_vars, item.context_expr
+                            item.optional_vars,
+                            seed_value,
+                            observe_session=not seeded_enter_identity,
                         )
                     for name in as_names:
                         request_aliases.apply_classification(name, classification)
                         if not classification.any_alias:
                             alias_state.poison(name)
-                        # Opaque with-as projection for callable identity.
-                        if identity_session is not None:
+                        # Opaque with-as projection for callable identity —
+                        # skip when ``__enter__`` return was already observed
+                        # (pack/class seeds must not be wiped).
+                        if identity_session is not None and not seeded_enter_identity:
                             identity_session.bind_name_unknown(name)
                         # ``with CM() as fn``: bind ``__enter__`` return products
                         # so later ``fn()`` follows the governed closure.

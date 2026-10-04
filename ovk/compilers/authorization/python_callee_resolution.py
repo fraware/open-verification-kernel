@@ -37,7 +37,8 @@ name matches. Import follow uses :func:`python_import_space.module_candidates_in
 from __future__ import annotations
 
 import ast
-from collections.abc import Mapping, Sequence
+import copy
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Literal
 
@@ -47,7 +48,7 @@ from ovk.compilers.authorization.python_import_space import (
     normalize_path,
 )
 
-_IMPLEMENTATION_VERSION = "0.26.0"
+_IMPLEMENTATION_VERSION = "0.27.0"
 _MAX_IMPORT_FOLLOW_DEPTH = 8
 
 BindingKind = Literal["function", "import_name", "import_module", "rebound"]
@@ -296,11 +297,23 @@ def _static_key(node: ast.AST) -> object | None:
 
 # Namespace / mapping view attrs that project key→value identity the same way
 # ``.get`` does (``getattr(ns, "__getitem__"|"pop")`` / ``ns.__getitem__``).
-_NS_DICT_VIEW_ATTRS = frozenset({"get", "pop", "__getitem__"})
+_NS_DICT_VIEW_ATTRS = frozenset({"get", "pop", "__getitem__", "setdefault"})
 # Mapping / namespace constructors that pack kwargs / dict literals like ``dict``.
 _MAPPING_CTOR_NAMES = frozenset(
-    {"dict", "OrderedDict", "UserDict", "SimpleNamespace"}
+    {
+        "dict",
+        "OrderedDict",
+        "UserDict",
+        "SimpleNamespace",
+        "defaultdict",
+        "ChainMap",
+    }
 )
+# Mapping merge spellings that union both operand packs (``a | b``).
+_MAPPING_MERGE_METHODS = frozenset({"__or__", "__ior__", "__ror__"})
+# ``operator.or_`` / ``operator.ior`` merge the same way (alias-tracked via
+# ``operator_projection_aliases`` so ``from operator import or_ as o`` peels).
+_MAPPING_MERGE_FUNCS = frozenset({"or_", "ior"})
 
 
 def _is_dict_constructor(
@@ -331,10 +344,24 @@ def _is_dict_constructor(
                 getattr_aliases=getattr_aliases,
             )
         return False
+    if isinstance(func, ast.Subscript):
+        # Namespace projections: ``vars(builtins)["dict"]`` /
+        # ``builtins.__dict__["dict"]`` / ``ns["dict"]``.
+        return _static_str(func.slice) in _MAPPING_CTOR_NAMES
     if isinstance(func, ast.Call):
         # ``getattr(builtins, "dict")`` / renamed getattr.
         attr = _getattr_static_name(func, getattr_aliases=getattr_aliases)
-        return attr in _MAPPING_CTOR_NAMES
+        if attr in _MAPPING_CTOR_NAMES:
+            return True
+        # ``vars(builtins).get("dict")`` / ``.setdefault`` / ``.pop`` /
+        # ``.__getitem__`` namespace key projections.
+        peeled = _peel_call_func(func.func)
+        if (
+            isinstance(peeled, ast.Attribute)
+            and peeled.attr in _NS_DICT_VIEW_ATTRS
+            and func.args
+        ):
+            return _static_str(func.args[0]) in _MAPPING_CTOR_NAMES
     return False
 
 
@@ -946,7 +973,16 @@ _EXEC_EVAL_COMPILE_NAMES = frozenset({"exec", "eval", "compile"})
 _TYPES_NEW_CLASS_NAME = "new_class"
 _TYPE_BUILTIN_NAME = "type"
 _OPERATOR_PROJECTION_NAMES = frozenset(
-    {"getitem", "itemgetter", "attrgetter", "methodcaller", "attrsetter", "call"}
+    {
+        "getitem",
+        "itemgetter",
+        "attrgetter",
+        "methodcaller",
+        "attrsetter",
+        "call",
+        "or_",
+        "ior",
+    }
 )
 # Shared Call peels for packed/projected callees (identity + PE parity).
 _CALLEE_VIEW_ATTRS = frozenset(
@@ -959,7 +995,12 @@ _CALLEE_VIEW_ATTRS = frozenset(
         "values",
         "keys",
         "items",
+        "copy",
     }
+)
+# Container-mutating methods that add packed identities to a Name-bound pack.
+_PACK_ADD_METHODS = frozenset(
+    {"append", "extend", "insert", "add", "appendleft", "extendleft"}
 )
 _CALLEE_ADAPTER_NAMES = frozenset(
     {
@@ -973,9 +1014,14 @@ _CALLEE_ADAPTER_NAMES = frozenset(
         "next",
         "map",
         "filter",
+        "zip",
+        "enumerate",
         "MappingProxyType",
     }
 )
+# Container-pack slot for non-constant dict keys (``{Mut: 1}``) so ``.keys()``
+# iteration and unpack seeds observe class keys without aliasing value slots.
+_KEYS_SLOT: object = ("<keys>",)
 
 
 def _attrsetter_static_name(
@@ -1123,6 +1169,9 @@ def _expr_is_operator_call_receiver(
     getattr_aliases: frozenset[str] | None = None,
     partial_aliases: frozenset[str] | None = None,
     adapter_aliases: frozenset[str] | None = None,
+    container_packs: Mapping[str, Mapping[object, tuple[str, ...]]] | None = None,
+    factory_products: Mapping[str, tuple[str, str | None]] | None = None,
+    dict_view_products: Mapping[str, str] | None = None,
 ) -> bool:
     """True when ``expr`` peels to ``operator.call`` / renamed ``call``."""
 
@@ -1143,6 +1192,9 @@ def _expr_is_operator_call_receiver(
         getattr_aliases=getattr_aliases,
         partial_aliases=partial_aliases,
         adapter_aliases=adapter_aliases,
+        container_packs=container_packs,
+        factory_products=factory_products,
+        dict_view_products=dict_view_products,
     ):
         if _name_is_operator_call_alias(name, projection_aliases=aliases):
             return True
@@ -1178,13 +1230,17 @@ def _is_operator_call_factory(
     elif isinstance(func, ast.Attribute):
         if func.attr == "call":
             return True
-        # ``oc.__call__(...)`` / ``operator.call.__call__(...)``.
+        # ``oc.__call__(...)`` / ``operator.call.__call__(...)`` /
+        # ``rest["o"].__call__(...)`` via Name-bound packs.
         if func.attr == "__call__" and _expr_is_operator_call_receiver(
             func.value,
             projection_aliases=aliases,
             getattr_aliases=getattr_aliases,
             partial_aliases=partial_aliases,
             adapter_aliases=adapter_aliases,
+            container_packs=container_packs,
+            factory_products=factory_products,
+            dict_view_products=dict_view_products,
         ):
             return True
     elif isinstance(func, ast.Call):
@@ -1199,6 +1255,9 @@ def _is_operator_call_factory(
             getattr_aliases=getattr_aliases,
             partial_aliases=partial_aliases,
             adapter_aliases=adapter_aliases,
+            container_packs=container_packs,
+            factory_products=factory_products,
+            dict_view_products=dict_view_products,
         ):
             return True
     # Shared packing peel: ``[oc][0]`` / ``next(iter([oc]))`` / walrus packs /
@@ -1233,11 +1292,18 @@ def _methodcaller_call_bound_args(
     return list(func.args[1:])
 
 
-def _receiver_looks_like_type_builtin(recv: ast.AST) -> bool:
-    """True for ``type`` / ``object`` / ``object.__class__`` receivers."""
+def _receiver_looks_like_type_builtin(
+    recv: ast.AST,
+    *,
+    type_aliases: frozenset[str] | None = None,
+) -> bool:
+    """True for ``type`` / ``object`` / ``object.__class__`` / ``T = type`` receivers."""
 
     recv = _peel_call_func(recv)
-    if isinstance(recv, ast.Name) and recv.id in {_TYPE_BUILTIN_NAME, "object"}:
+    if isinstance(recv, ast.Name) and (
+        recv.id in {_TYPE_BUILTIN_NAME, "object"}
+        or (type_aliases is not None and recv.id in type_aliases)
+    ):
         return True
     if isinstance(recv, ast.Attribute) and recv.attr in {
         "__class__",
@@ -1251,22 +1317,46 @@ def _type_protocol_attr_from_value(
     value: ast.AST,
     *,
     getattr_aliases: frozenset[str] | None = None,
+    protocol_products: Mapping[str, str] | None = None,
+    type_aliases: frozenset[str] | None = None,
 ) -> str | None:
-    """``type.__new__`` / ``getattr(type, "__call__")`` → protocol attr name."""
+    """``type.__new__`` / ``getattr(type, "__call__")`` → protocol attr name.
 
+    ``X.__call__`` / ``getattr(X, "__call__")`` where ``X`` already is a type
+    protocol product (``tc = type.__call__``; ``type.__call__.__call__``) keeps
+    X's protocol: calling the wrapper's ``__call__`` is calling the wrapper
+    (Unknown > false PASS).
+    """
+
+    products = protocol_products or {}
     value = _peel_call_func(value)
+    if isinstance(value, ast.Name):
+        return products.get(value.id)
     if isinstance(value, ast.Attribute) and value.attr in {"__new__", "__call__"}:
-        if _receiver_looks_like_type_builtin(value.value):
+        if _receiver_looks_like_type_builtin(value.value, type_aliases=type_aliases):
             return value.attr
+        if value.attr == "__call__":
+            return _type_protocol_attr_from_value(
+                value.value,
+                getattr_aliases=getattr_aliases,
+                protocol_products=products,
+                type_aliases=type_aliases,
+            )
         return None
     if isinstance(value, ast.Call):
         attr = _getattr_static_name(value, getattr_aliases=getattr_aliases)
-        if (
-            attr in {"__new__", "__call__"}
-            and value.args
-            and _receiver_looks_like_type_builtin(value.args[0])
-        ):
-            return attr
+        if attr in {"__new__", "__call__"} and value.args:
+            if _receiver_looks_like_type_builtin(
+                value.args[0], type_aliases=type_aliases
+            ):
+                return attr
+            if attr == "__call__":
+                return _type_protocol_attr_from_value(
+                    value.args[0],
+                    getattr_aliases=getattr_aliases,
+                    protocol_products=products,
+                    type_aliases=type_aliases,
+                )
     return None
 
 
@@ -1357,6 +1447,41 @@ def _match_pattern_attribute_targets(pattern: ast.AST) -> list[ast.Attribute]:
 
     _walk(pattern)
     return found
+
+
+_DICT_VIEW_DEFAULTING = frozenset({"get", "setdefault", "pop"})
+
+
+def _dict_view_applied_parts(
+    view: str, args: Sequence[ast.AST]
+) -> tuple[list[ast.AST], list[str]]:
+    """Expressions / static keys packed by applying a dict view product.
+
+    ``view`` is ``dict.get`` / ``dict.setdefault`` / ``dict.pop`` /
+    ``dict.__getitem__`` (unbound: mapping first) or ``get`` / ``setdefault`` /
+    ``pop`` / ``__getitem__`` (bound). Shared by name peels, class products and
+    the Call.func follow so views cannot diverge (Unknown > false PASS).
+    """
+
+    exprs: list[ast.AST] = []
+    keys: list[str] = []
+    if view.startswith("dict."):
+        base = view[len("dict.") :]
+        remaining = list(args)
+        if remaining:
+            exprs.append(remaining.pop(0))
+    else:
+        base = view
+        remaining = list(args)
+    if remaining:
+        key = _static_str(remaining[0])
+        if key is not None:
+            keys.append(key)
+        else:
+            exprs.append(remaining[0])
+    if base in _DICT_VIEW_DEFAULTING and len(remaining) >= 2:
+        exprs.append(remaining[1])
+    return exprs, keys
 
 
 def _lambdas_packed_as_callee(expr: ast.AST) -> list[ast.Lambda]:
@@ -1460,9 +1585,22 @@ def _names_packed_as_callee(
             for value in node.values:
                 found.extend(_peel(value))
             return found
+        # Comprehension / generator carriers: ``[x for x in [exec]]`` /
+        # ``(x for x in [exec])`` / ``{k: v for k, v in d.items()}`` — union the
+        # element expression(s) with every generator iterable (Unknown > false PASS).
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
+            found = []
+            if isinstance(node, ast.DictComp):
+                found.extend(_peel(node.key))
+                found.extend(_peel(node.value))
+            else:
+                found.extend(_peel(node.elt))
+            for gen in node.generators:
+                found.extend(_peel_mapping(gen.iter))
+            return found
         # ``{} | {"e": exec}`` / Name-bound ``d | {"e": exec}`` merge peels.
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-            return _peel(node.left) + _peel(node.right)
+            return _peel_mapping(node.left) + _peel_mapping(node.right)
         if isinstance(node, ast.Subscript):
             names = list(_peel(node.value))
             key = _static_key(node.slice)
@@ -1483,7 +1621,7 @@ def _names_packed_as_callee(
                 getattr_aliases=g_aliases,
             ):
                 for val in _dict_call_values_for_key(node.value, key):
-                    names.extend(_peel(val))
+                    names.extend(_peel_mapping(val))
             # ``dict.fromkeys(["e"], exec)["e"]``.
             if isinstance(node.value, ast.Call) and _is_dict_fromkeys(
                 node.value.func, dict_ctor_aliases=d_ctors
@@ -1492,13 +1630,17 @@ def _names_packed_as_callee(
                     names.extend(_peel(node.value.args[1]))
                 elif node.value.args:
                     names.extend(_peel(node.value.args[0]))
-            # ``({}|{"e": exec})["e"]`` — peel merge then key.
-            if isinstance(node.value, ast.BinOp) and isinstance(
-                node.value.op, ast.BitOr
-            ):
-                names.extend(_peel(node.value))
             return names
         if isinstance(node, ast.Attribute):
+            # ``X.__call__`` peels the receiver and keeps the ``__call__``
+            # marker so ``rest["e"].__call__`` / ``oc.__call__`` surface the
+            # packed identity while ``next(iter([type.__call__]))(Mut)`` still
+            # observes the type-protocol product (Unknown > false PASS).
+            if node.attr == "__call__":
+                names = list(_peel(node.value))
+                if "__call__" not in names:
+                    names.append("__call__")
+                return names
             # ``SimpleNamespace(e=exec).e`` — attr projects the kwarg pack.
             if isinstance(node.value, ast.Call) and _is_dict_constructor(
                 node.value.func,
@@ -1514,25 +1656,31 @@ def _names_packed_as_callee(
             return _peel_call(node)
         return []
 
+    def _peel_mapping(node: ast.AST) -> list[str]:
+        """Peel a mapping/sequence operand, expanding Name-bound container packs."""
+
+        names = list(_peel(node))
+        inner = _peel_call_func(node)
+        if isinstance(inner, ast.Name) and inner.id in c_packs:
+            for vs in c_packs[inner.id].values():
+                names.extend(vs)
+        return names
+
     def _peel_call(call: ast.Call) -> list[str]:
         func = call.func
         # Container views: ``{\"e\": exec}.get(\"e\")`` / ``[exec].pop()`` /
-        # ``vars().get(\"exec\")`` / Name-bound ``d.get(\"Mut\")``.
+        # ``vars().get(\"exec\")`` / Name-bound ``d.get(\"Mut\")`` / ``.copy()``.
         if isinstance(func, ast.Attribute) and func.attr in _CALLEE_VIEW_ATTRS:
-            recv = func.value
+            recv = _peel_call_func(func.value)
             names: list[str] = []
             key: str | None = None
-            if func.attr in {"get", "__getitem__"} and call.args:
-                key = _static_str(call.args[0])
-            elif func.attr == "pop" and call.args:
+            if func.attr in {"get", "__getitem__", "pop", "setdefault"} and call.args:
                 key = _static_str(call.args[0])
             if key is not None and isinstance(recv, ast.Dict):
                 matched = _dict_values_for_static_key(recv, key)
                 if matched:
                     for value in matched:
                         names.extend(_peel(value))
-                elif func.attr == "get" and len(call.args) >= 2:
-                    names.extend(_peel(call.args[1]))
                 else:
                     names.append(key)
             elif (
@@ -1546,19 +1694,32 @@ def _names_packed_as_callee(
                 else:
                     for vs in pack.values():
                         names.extend(vs)
-                if func.attr == "get" and len(call.args) >= 2 and key not in pack:
-                    names.extend(_peel(call.args[1]))
             else:
-                names.extend(_peel(recv))
+                names.extend(_peel_mapping(recv))
                 if key is not None:
                     names.append(key)
-                if func.attr == "get" and len(call.args) >= 2:
-                    names.extend(_peel(call.args[1]))
+            # ``get`` / ``setdefault`` / ``pop`` default stores / yields its arg.
+            if func.attr in _DICT_VIEW_DEFAULTING and len(call.args) >= 2:
+                names.extend(_peel(call.args[1]))
+            return names
+        # ``a.__or__(b)`` / ``a.__ior__(b)`` / ``operator.or_(a, b)`` /
+        # ``operator.ior(a, b)`` — mapping merges union both operand packs.
+        if isinstance(func, ast.Attribute) and func.attr in _MAPPING_MERGE_METHODS:
+            names = _peel_mapping(func.value)
+            for arg in call.args:
+                names.extend(_peel_mapping(arg))
+            return names
+        if _projection_factory_name(call, projection_aliases=aliases) in (
+            _MAPPING_MERGE_FUNCS
+        ):
+            names = []
+            for arg in call.args:
+                names.extend(_peel_mapping(arg))
             return names
         # Unbound ``dict.get(packed, key)`` / ``D.get`` / ``builtins.dict.get``.
         if (
             isinstance(func, ast.Attribute)
-            and func.attr in {"get", "__getitem__", "pop"}
+            and func.attr in {"get", "__getitem__", "pop", "setdefault"}
             and call.args
             and _is_dict_constructor(
                 func.value,
@@ -1566,38 +1727,22 @@ def _names_packed_as_callee(
                 getattr_aliases=g_aliases,
             )
         ):
-            names = list(_peel(call.args[0]))
-            key = _static_str(call.args[1]) if len(call.args) >= 2 else None
-            if key is not None:
-                names.append(key)
-            if func.attr == "get" and len(call.args) >= 3:
-                names.extend(_peel(call.args[2]))
+            exprs, keys = _dict_view_applied_parts(f"dict.{func.attr}", call.args)
+            names = []
+            for expr in exprs:
+                names.extend(_peel_mapping(expr))
+            names.extend(keys)
             return names
         # Name-bound unbound/bound dict views: ``g = dict.get; g({}, k, Mut)``.
         peeled_func = _peel_call_func(func)
         if isinstance(peeled_func, ast.Name) and peeled_func.id in d_views:
-            view = d_views[peeled_func.id]
+            exprs, keys = _dict_view_applied_parts(
+                d_views[peeled_func.id], call.args
+            )
             names = []
-            if view in {"dict.get", "dict.__getitem__", "dict.pop"}:
-                if call.args:
-                    names.extend(_peel(call.args[0]))
-                if len(call.args) >= 2:
-                    key = _static_str(call.args[1])
-                    if key is not None:
-                        names.append(key)
-                    else:
-                        names.extend(_peel(call.args[1]))
-                if view == "dict.get" and len(call.args) >= 3:
-                    names.extend(_peel(call.args[2]))
-                return names
-            if view == "get" and len(call.args) >= 2:
-                names.extend(_peel(call.args[1]))
-            elif call.args:
-                key = _static_str(call.args[0])
-                if key is not None:
-                    names.append(key)
-                else:
-                    names.extend(_peel(call.args[0]))
+            for expr in exprs:
+                names.extend(_peel_mapping(expr))
+            names.extend(keys)
             return names
         # Name-bound factory applied: ``ig = itemgetter(0); ig([oc])``.
         if isinstance(peeled_func, ast.Name) and peeled_func.id in f_products:
@@ -1634,7 +1779,7 @@ def _names_packed_as_callee(
             names = []
             for arg in call.args:
                 nested = arg.value if isinstance(arg, ast.Starred) else arg
-                names.extend(_peel(nested))
+                names.extend(_peel_mapping(nested))
             return names
         # ``dict(p=Proxy)`` / ``D(e=exec)`` / ``OrderedDict`` / ``dict.__call__``.
         if _is_dict_constructor(
@@ -1642,7 +1787,7 @@ def _names_packed_as_callee(
         ):
             names = []
             for val in _dict_call_values_for_key(call):
-                names.extend(_peel(val))
+                names.extend(_peel_mapping(val))
             return names
         # ``dict.fromkeys(["e"], exec)`` — value arg is the packed identity.
         if _is_dict_fromkeys(func, dict_ctor_aliases=d_ctors):
@@ -2022,6 +2167,8 @@ class RequestTimeIdentitySession:
     visited_fns: set[int]
     _scan_stmts: object
     _observe_expr: object
+    _seed_for: object
+    _seed_match: object
     _resolver: "CalleeResolver"
     _reestablished_exports: dict[tuple[str, str], tuple[str, str]]
     _reestablished_behaviors: set[tuple[str, str]]
@@ -2057,6 +2204,36 @@ class RequestTimeIdentitySession:
 
         self._observe_expr(  # type: ignore[operator]
             expr,
+            path=self.path,
+            env=self.env,
+            visited_fns=self.visited_fns,
+            local_fns=self.local_fns,
+        )
+
+    def observe_for_binding(self, target: ast.AST, iter_expr: ast.AST) -> None:
+        """Seed a For / AsyncFor target from the iterated element union.
+
+        For CF walkers that visit loop bodies themselves (not whole-``For``
+        ``observe_statement``): dict ``keys`` / ``values`` / ``items`` views,
+        comprehensions, ``zip`` / ``enumerate`` and Name-bound packs flow into
+        class / protocol / container aliases exactly like Assign unpack.
+        """
+
+        self._seed_for(  # type: ignore[operator]
+            target,
+            iter_expr,
+            path=self.path,
+            env=self.env,
+            visited_fns=self.visited_fns,
+            local_fns=self.local_fns,
+        )
+
+    def observe_match_binding(self, pattern: ast.AST, subject: ast.AST) -> None:
+        """Seed one Match case pattern's binders from the subject union."""
+
+        self._seed_match(  # type: ignore[operator]
+            pattern,
+            subject,
             path=self.path,
             env=self.env,
             visited_fns=self.visited_fns,
@@ -2391,6 +2568,8 @@ def _build_identity_scanner(
     container_packs: dict[str, dict[object, tuple[str, ...]]] = {}
     # Renamed ``vars`` / ``globals`` / ``locals`` for namespace adapter seeds.
     ns_projection_aliases: set[str] = set()
+    # Name-bound namespace carriers: ``ns = types.__dict__`` / ``ns = vars(types)``.
+    ns_dict_aliases: set[str] = set()
     # Name-bound mapping constructors: ``D = dict`` / ``OD = OrderedDict``.
     dict_ctor_aliases: set[str] = set()
 
@@ -2458,133 +2637,795 @@ def _build_identity_scanner(
         projection_factory_products.pop(name, None)
         partial_product_names.pop(name, None)
 
+    def _pack_add(
+        pack: dict[object, tuple[str, ...]],
+        key: object,
+        names: Sequence[str],
+    ) -> None:
+        """Union ``names`` into ``pack[key]`` (may-alias, order-preserving)."""
+
+        if not names:
+            return
+        pack[key] = tuple(dict.fromkeys((*pack.get(key, ()), *names)))
+
+    def _pack_union(
+        *packs: Mapping[object, tuple[str, ...]] | None,
+    ) -> dict[object, tuple[str, ...]]:
+        merged: dict[object, tuple[str, ...]] = {}
+        for pack in packs:
+            for key, names in (pack or {}).items():
+                _pack_add(merged, key, names)
+        return merged
+
+    def _flat_pack_names(pack: Mapping[object, tuple[str, ...]]) -> list[str]:
+        return list(dict.fromkeys(n for vs in pack.values() for n in vs))
+
+    def _packed_names_deep(expr: ast.AST) -> list[str]:
+        """Packed names plus nested Name-bound container pack contents."""
+
+        found: list[str] = []
+        seen: set[str] = set()
+        pending = list(_packed_names(expr))
+        while pending:
+            name = pending.pop(0)
+            if name not in found:
+                found.append(name)
+            if name in seen:
+                continue
+            seen.add(name)
+            pack = container_packs.get(name)
+            if pack:
+                pending.extend(_flat_pack_names(pack))
+        return found
+
+    def _view_call_parts(call: ast.Call) -> tuple[str, ast.AST] | None:
+        """``recv.attr(...)`` / ``getattr(recv, "attr")(...)`` → ``(attr, recv)``."""
+
+        func = _peel_call_func(call.func)
+        if isinstance(func, ast.Attribute):
+            return func.attr, func.value
+        if isinstance(func, ast.Call):
+            attr = _getattr_static_name(
+                func, getattr_aliases=frozenset(getattr_aliases)
+            )
+            if attr is not None and func.args:
+                return attr, func.args[0]
+        return None
+
+    def _subst_names(node: ast.AST, bind: Mapping[str, ast.AST]) -> ast.AST:
+        """Replace Load Names in ``node`` by bound element expressions."""
+
+        if not bind:
+            return node
+
+        class _Subst(ast.NodeTransformer):
+            def visit_Name(self, name_node: ast.Name) -> ast.AST:
+                repl = bind.get(name_node.id)
+                if repl is not None and isinstance(name_node.ctx, ast.Load):
+                    return repl
+                return name_node
+
+        return _Subst().visit(copy.deepcopy(node))
+
+    def _destructure_target(
+        target: ast.AST, elem: ast.AST
+    ) -> dict[str, ast.AST]:
+        """Bind comprehension / for targets to element expressions."""
+
+        elem = _peel_call_func(elem)
+        if isinstance(target, ast.Name):
+            return {target.id: elem}
+        if isinstance(target, ast.Starred):
+            return _destructure_target(target.value, elem)
+        if (
+            isinstance(target, (ast.Tuple, ast.List))
+            and isinstance(elem, (ast.Tuple, ast.List))
+            and len(target.elts) == len(elem.elts)
+            and not any(isinstance(e, ast.Starred) for e in elem.elts)
+        ):
+            bound: dict[str, ast.AST] = {}
+            for sub_t, sub_e in zip(target.elts, elem.elts):
+                bound.update(_destructure_target(sub_t, sub_e))
+            return bound
+        return {}
+
+    def _mapping_items(
+        expr: ast.AST, depth: int = 0
+    ) -> list[tuple[ast.AST | None, ast.AST | None]] | None:
+        """``(key_expr, value_expr)`` pairs for a resolvable mapping carrier.
+
+        Resolves Dict literals (incl. ``**`` spreads and non-constant keys),
+        mapping constructors (``dict`` / ``defaultdict`` / ``ChainMap`` / …),
+        ``dict.fromkeys``, ``a | b`` / ``__or__`` / ``operator.or_`` merges,
+        ``.copy()``, Name-bound packs, walrus, and DictComps. ``None`` means
+        unresolved (callers must not claim the mapping is empty).
+        """
+
+        if depth > 8:
+            return None
+        expr = _peel_call_func(expr)
+        nxt = depth + 1
+        if isinstance(expr, ast.Dict):
+            items: list[tuple[ast.AST | None, ast.AST | None]] = []
+            for map_key, map_val in zip(expr.keys, expr.values):
+                if map_val is None:
+                    continue
+                if map_key is None:
+                    sub = _mapping_items(map_val, nxt)
+                    if sub is None:
+                        items.append((None, map_val))
+                    else:
+                        items.extend(sub)
+                else:
+                    items.append((map_key, map_val))
+            return items
+        if isinstance(expr, ast.Name):
+            pack = container_packs.get(expr.id)
+            if pack is None:
+                return None
+            named: list[tuple[ast.AST | None, ast.AST | None]] = []
+            for key, names in pack.items():
+                for pname in names:
+                    node = ast.Name(id=pname, ctx=ast.Load())
+                    if key is _KEYS_SLOT:
+                        named.append((node, None))
+                    elif isinstance(key, (str, int, float, bytes)):
+                        named.append((ast.Constant(value=key), node))
+                    else:
+                        named.append((None, node))
+            return named
+        if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.BitOr):
+            merged: list[tuple[ast.AST | None, ast.AST | None]] = []
+            for side in (expr.left, expr.right):
+                sub = _mapping_items(side, nxt)
+                if sub is None:
+                    merged.append((None, side))
+                else:
+                    merged.extend(sub)
+            return merged
+        if isinstance(expr, ast.DictComp):
+            if len(expr.generators) != 1:
+                return [(expr.key, expr.value)]
+            gen = expr.generators[0]
+            elems = _iter_elements(gen.iter, nxt)
+            if elems is None:
+                return [(expr.key, expr.value)]
+            comp_items: list[tuple[ast.AST | None, ast.AST | None]] = []
+            for elem in elems:
+                bind = _destructure_target(gen.target, elem)
+                comp_items.append(
+                    (_subst_names(expr.key, bind), _subst_names(expr.value, bind))
+                )
+            return comp_items
+        if not isinstance(expr, ast.Call):
+            return None
+        func = _peel_call_func(expr.func)
+        if _is_dict_constructor(
+            func,
+            dict_ctor_aliases=frozenset(dict_ctor_aliases),
+            getattr_aliases=frozenset(getattr_aliases),
+        ):
+            ctor_items: list[tuple[ast.AST | None, ast.AST | None]] = []
+            for kw in expr.keywords:
+                if kw.arg is None:
+                    sub = _mapping_items(kw.value, nxt)
+                    if sub is None:
+                        ctor_items.append((None, kw.value))
+                    else:
+                        ctor_items.extend(sub)
+                else:
+                    ctor_items.append((ast.Constant(value=kw.arg), kw.value))
+            for arg in expr.args:
+                nested = arg.value if isinstance(arg, ast.Starred) else arg
+                if isinstance(nested, ast.Constant):
+                    continue
+                sub = _mapping_items(nested, nxt)
+                if sub is not None:
+                    ctor_items.extend(sub)
+                    continue
+                # ``dict([("c", Mut)])`` — iterable of key/value pairs.
+                pairs = _iter_elements(nested, nxt)
+                if pairs is None:
+                    ctor_items.append((None, nested))
+                    continue
+                for pair in pairs:
+                    pair = _peel_call_func(pair)
+                    if isinstance(pair, (ast.Tuple, ast.List)) and len(pair.elts) == 2:
+                        ctor_items.append((pair.elts[0], pair.elts[1]))
+                    else:
+                        ctor_items.append((None, pair))
+            return ctor_items
+        if _is_dict_fromkeys(func, dict_ctor_aliases=frozenset(dict_ctor_aliases)):
+            value = expr.args[1] if len(expr.args) >= 2 else None
+            keys = _iter_elements(expr.args[0], nxt) if expr.args else None
+            if keys is None:
+                return [(None, value)] if value is not None else []
+            return [(key, value) for key in keys]
+        view = _view_call_parts(expr)
+        if view is not None:
+            attr, recv = view
+            if attr == "copy":
+                return _mapping_items(recv, nxt)
+            if attr in _MAPPING_MERGE_METHODS:
+                out: list[tuple[ast.AST | None, ast.AST | None]] = []
+                for side in (recv, *expr.args):
+                    sub = _mapping_items(side, nxt)
+                    if sub is None:
+                        out.append((None, side))
+                    else:
+                        out.extend(sub)
+                return out
+        if _projection_factory_name(
+            expr, projection_aliases=operator_projection_aliases
+        ) in _MAPPING_MERGE_FUNCS:
+            out = []
+            for side in expr.args:
+                sub = _mapping_items(side, nxt)
+                if sub is None:
+                    out.append((None, side))
+                else:
+                    out.extend(sub)
+            return out
+        # ``MappingProxyType(d)`` and renamed adapters wrap a mapping.
+        if (
+            isinstance(func, ast.Name)
+            and (func.id == "MappingProxyType" or func.id in adapter_aliases)
+        ) or (isinstance(func, ast.Attribute) and func.attr == "MappingProxyType"):
+            if expr.args:
+                return _mapping_items(expr.args[0], nxt)
+        return None
+
+    def _iter_elements(expr: ast.AST, depth: int = 0) -> list[ast.AST] | None:
+        """Expressions yielded by iterating ``expr``; ``None`` when unresolved.
+
+        One shared element resolver for For targets, Assign / star unpack and
+        Match sequence subjects: literal containers, Name-bound packs, dict
+        ``keys`` / ``values`` / ``items`` views (also via ``getattr``),
+        ``list`` / ``iter`` / ``sorted`` / ``reversed`` adapters, ``map`` /
+        ``filter`` / ``zip`` / ``enumerate``, and comprehensions / generators
+        (Unknown > false PASS).
+        """
+
+        if depth > 8:
+            return None
+        expr = _peel_call_func(expr)
+        nxt = depth + 1
+        if isinstance(expr, (ast.List, ast.Tuple, ast.Set)):
+            out: list[ast.AST] = []
+            for elt in expr.elts:
+                if isinstance(elt, ast.Starred):
+                    sub = _iter_elements(elt.value, nxt)
+                    out.extend(sub if sub is not None else [elt.value])
+                else:
+                    out.append(elt)
+            return out
+        if isinstance(expr, ast.Dict):
+            keys: list[ast.AST] = []
+            for map_key, map_val in zip(expr.keys, expr.values):
+                if map_key is None:
+                    if map_val is None:
+                        continue
+                    sub = _iter_elements(map_val, nxt)
+                    keys.extend(sub if sub is not None else [map_val])
+                else:
+                    keys.append(map_key)
+            return keys
+        if isinstance(expr, ast.Name):
+            pack = container_packs.get(expr.id)
+            if pack is None:
+                return None
+            return [
+                ast.Name(id=pname, ctx=ast.Load()) for pname in _flat_pack_names(pack)
+            ]
+        if isinstance(
+            expr, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
+        ):
+            tail = expr.key if isinstance(expr, ast.DictComp) else expr.elt
+            if len(expr.generators) != 1:
+                return [tail]
+            gen = expr.generators[0]
+            elems = _iter_elements(gen.iter, nxt)
+            if elems is None:
+                return [tail]
+            produced: list[ast.AST] = []
+            for elem in elems:
+                bind = _destructure_target(gen.target, elem)
+                produced.append(_subst_names(tail, bind))
+            return produced
+        if not isinstance(expr, ast.Call):
+            return None
+        func = _peel_call_func(expr.func)
+        view = _view_call_parts(expr)
+        if view is not None:
+            attr, recv = view
+            if attr in {"keys", "values", "items"}:
+                items = _mapping_items(recv, nxt)
+                if items is None:
+                    return None
+                if attr == "keys":
+                    return [k for k, _ in items if k is not None]
+                if attr == "values":
+                    return [v for _, v in items if v is not None]
+                return [
+                    ast.Tuple(
+                        elts=[
+                            k if k is not None else ast.Constant(value=None),
+                            v if v is not None else ast.Constant(value=None),
+                        ],
+                        ctx=ast.Load(),
+                    )
+                    for k, v in items
+                ]
+            if attr == "copy":
+                return _iter_elements(recv, nxt)
+        func_name: str | None = None
+        if isinstance(func, ast.Name):
+            func_name = func.id
+        elif isinstance(func, ast.Attribute):
+            func_name = func.attr
+        if func_name in {
+            "list",
+            "tuple",
+            "set",
+            "frozenset",
+            "sorted",
+            "reversed",
+            "iter",
+        } and expr.args:
+            first = expr.args[0]
+            return _iter_elements(
+                first.value if isinstance(first, ast.Starred) else first, nxt
+            )
+        if func_name in {"map", "filter"} and len(expr.args) >= 2:
+            mapped: list[ast.AST] = []
+            resolved = False
+            for arg in expr.args[1:]:
+                sub = _iter_elements(arg, nxt)
+                if sub is not None:
+                    resolved = True
+                    mapped.extend(sub)
+            head = _peel_call_func(expr.args[0])
+            if isinstance(head, ast.Lambda) and func_name == "map":
+                mapped.append(head.body)
+                resolved = True
+            return mapped if resolved else None
+        if func_name == "enumerate" and expr.args:
+            sub = _iter_elements(expr.args[0], nxt)
+            if sub is None:
+                return None
+            return [
+                ast.Tuple(elts=[ast.Constant(value=0), elem], ctx=ast.Load())
+                for elem in sub
+            ]
+        if func_name == "zip" and expr.args:
+            lists = [
+                _iter_elements(
+                    arg.value if isinstance(arg, ast.Starred) else arg, nxt
+                )
+                for arg in expr.args
+            ]
+            if all(lst is None for lst in lists):
+                return None
+            width = max(len(lst) for lst in lists if lst)
+            rows: list[ast.AST] = []
+            for i in range(width):
+                rows.append(
+                    ast.Tuple(
+                        elts=[
+                            lst[min(i, len(lst) - 1)]
+                            if lst
+                            else ast.Constant(value=None)
+                            for lst in lists
+                        ],
+                        ctx=ast.Load(),
+                    )
+                )
+            return rows
+        if _is_dict_constructor(
+            func,
+            dict_ctor_aliases=frozenset(dict_ctor_aliases),
+            getattr_aliases=frozenset(getattr_aliases),
+        ):
+            items = _mapping_items(expr, nxt)
+            if items is None:
+                return None
+            return [k for k, _ in items if k is not None]
+        return None
+
+    _CANDIDATE_VIEW_ATTRS = frozenset({"get", "pop", "setdefault", "__getitem__"})
+    _CANDIDATE_ITER_ADAPTERS = frozenset(
+        {"next", "iter", "list", "tuple", "sorted", "reversed", "set", "frozenset"}
+    )
+
+    def _callee_candidate_exprs(callee: ast.AST, depth: int = 0) -> list[ast.AST]:
+        """Expressions a packed / projected ``Call.func`` may denote.
+
+        Mirrors the name-level peel in ``_names_packed_as_callee`` but keeps the
+        original expressions so receiver-bearing callees (``n.install``,
+        ``getattr(n, "install")``) survive packing in literals, subscripts,
+        ``next(iter(...))``, mapping views and conditional expressions.
+        """
+
+        callee = _peel_call_func(callee)
+        out: list[ast.AST] = [callee]
+        if depth > 6:
+            return out
+        nxt = depth + 1
+        if isinstance(callee, ast.Attribute) and callee.attr == "__call__":
+            # ``X.__call__`` denotes ``X`` itself.
+            out.extend(_callee_candidate_exprs(callee.value, nxt))
+        elif isinstance(callee, ast.IfExp):
+            out.extend(_callee_candidate_exprs(callee.body, nxt))
+            out.extend(_callee_candidate_exprs(callee.orelse, nxt))
+        elif isinstance(callee, ast.BoolOp):
+            for value in callee.values:
+                out.extend(_callee_candidate_exprs(value, nxt))
+        elif isinstance(callee, ast.Subscript):
+            base = _peel_call_func(callee.value)
+            mapped = _mapping_items(base)
+            if isinstance(base, (ast.Dict, ast.DictComp)) or (
+                mapped is not None and not isinstance(base, (ast.List, ast.Tuple))
+            ):
+                for _, val in mapped or []:
+                    if val is not None:
+                        out.extend(_callee_candidate_exprs(val, nxt))
+            else:
+                for elt in _iter_elements(base) or []:
+                    out.extend(_callee_candidate_exprs(elt, nxt))
+        elif isinstance(callee, ast.Call):
+            view = _view_call_parts(callee)
+            if (
+                _getattr_static_name(
+                    callee, getattr_aliases=frozenset(getattr_aliases)
+                )
+                == "__call__"
+                and callee.args
+            ):
+                out.extend(_callee_candidate_exprs(callee.args[0], nxt))
+            elif view is not None and view[0] in _CANDIDATE_VIEW_ATTRS:
+                for _, val in _mapping_items(_peel_call_func(view[1])) or []:
+                    if val is not None:
+                        out.extend(_callee_candidate_exprs(val, nxt))
+                if view[0] in {"get", "pop", "setdefault"} and len(callee.args) >= 2:
+                    out.extend(_callee_candidate_exprs(callee.args[1], nxt))
+            elif (
+                isinstance(callee.func, ast.Name)
+                and callee.func.id in _CANDIDATE_ITER_ADAPTERS
+                and callee.args
+            ):
+                for elt in _iter_elements(callee.args[0]) or []:
+                    out.extend(_callee_candidate_exprs(elt, nxt))
+        return out
+
+    def _accounted_attr_refs(cand: ast.AST) -> list[tuple[ast.AST, str]]:
+        """``(receiver, attr)`` refs for ``n.attr`` / ``getattr(n, "attr")``.
+
+        ``X.__call__`` and ``getattr(X, "__call__")`` are transparent: they
+        denote ``X`` itself, so ``n.install.__call__`` refs ``(n, "install")``.
+        """
+
+        cand = _peel_call_func(cand)
+        if isinstance(cand, ast.Attribute):
+            if cand.attr == "__call__":
+                inner = _accounted_attr_refs(cand.value)
+                if inner:
+                    return inner
+            return [(cand.value, cand.attr)]
+        if isinstance(cand, ast.Call) and cand.args:
+            name = _getattr_static_name(
+                cand, getattr_aliases=frozenset(getattr_aliases)
+            )
+            if name is not None:
+                if name == "__call__":
+                    inner = _accounted_attr_refs(cand.args[0])
+                    if inner:
+                        return inner
+                return [(cand.args[0], name)]
+        return []
+
+    def _pack_from_items(
+        items: Sequence[tuple[ast.AST | None, ast.AST | None]],
+    ) -> dict[object, tuple[str, ...]]:
+        pack: dict[object, tuple[str, ...]] = {}
+        for key, val in items:
+            if val is not None:
+                names = _packed_names_deep(val)
+                if isinstance(key, ast.Constant):
+                    _pack_add(pack, key.value, names)
+                else:
+                    _pack_add(pack, None, names)
+            if key is not None and not isinstance(key, ast.Constant):
+                _pack_add(pack, _KEYS_SLOT, _packed_names_deep(key))
+        return pack
+
     def _container_pack_from_expr(
         value: ast.AST,
     ) -> dict[object, tuple[str, ...]] | None:
         """Key→packed-name map for dict/list/tuple/set / ``dict(...)`` packs."""
 
         value = _peel_call_func(value)
+        if isinstance(value, ast.Name):
+            if value.id in container_packs:
+                return dict(container_packs[value.id])
+            return None
         pack: dict[object, tuple[str, ...]] = {}
-        if isinstance(value, ast.Dict):
-            for map_key, map_val in zip(value.keys, value.values):
-                if map_val is None or not isinstance(map_key, ast.Constant):
-                    continue
-                names = tuple(_packed_names(map_val))
-                if names:
-                    pack[map_key.value] = names
-            return pack or None
         if isinstance(value, (ast.List, ast.Tuple)):
             for index, elt in enumerate(value.elts):
-                nested = elt.value if isinstance(elt, ast.Starred) else elt
-                names = tuple(_packed_names(nested))
-                if names:
-                    pack[index] = names
+                if isinstance(elt, ast.Starred):
+                    sub = _iter_elements(elt.value)
+                    names = (
+                        [n for e in sub for n in _packed_names_deep(e)]
+                        if sub is not None
+                        else _packed_names_deep(elt.value)
+                    )
+                    _pack_add(pack, None, names)
+                    continue
+                _pack_add(pack, index, _packed_names_deep(elt))
             return pack or None
         if isinstance(value, ast.Set):
             # Sets have no stable keys; pack under None for full peel.
-            names: list[str] = []
+            names = []
             for elt in value.elts:
                 nested = elt.value if isinstance(elt, ast.Starred) else elt
-                names.extend(_packed_names(nested))
+                names.extend(_packed_names_deep(nested))
             if names:
                 return {None: tuple(dict.fromkeys(names))}
             return None
-        if isinstance(value, ast.Call) and _is_dict_constructor(
-            value.func,
-            dict_ctor_aliases=frozenset(dict_ctor_aliases),
-            getattr_aliases=frozenset(getattr_aliases),
-        ):
-            for kw in value.keywords:
-                if kw.arg is None and isinstance(kw.value, ast.Dict):
-                    nested = _container_pack_from_expr(kw.value)
-                    if nested:
-                        pack.update(nested)
-                elif kw.arg is not None:
-                    names = tuple(_packed_names(kw.value))
-                    if names:
-                        pack[kw.arg] = names
-            for arg in value.args:
-                nested_pack = _container_pack_from_expr(
-                    arg.value if isinstance(arg, ast.Starred) else arg
-                )
-                if nested_pack:
-                    pack.update(nested_pack)
-            return pack or None
-        if isinstance(value, ast.Call) and _is_dict_fromkeys(
-            value.func, dict_ctor_aliases=frozenset(dict_ctor_aliases)
-        ):
-            # ``dict.fromkeys(keys, exec)`` — every key projects the value.
-            if len(value.args) >= 2:
-                names = tuple(_packed_names(value.args[1]))
-                keys_expr = value.args[0]
-                if names and isinstance(keys_expr, (ast.List, ast.Tuple, ast.Set)):
-                    for elt in keys_expr.elts:
-                        key = _static_key(elt)
-                        if key is not None:
-                            pack[key] = names
-                elif names:
-                    pack[None] = names
-            return pack or None
-        if isinstance(value, ast.BinOp) and isinstance(value.op, ast.BitOr):
-            left = _container_pack_from_expr(value.left) or {}
-            right = _container_pack_from_expr(value.right) or {}
-            merged = dict(left)
-            merged.update(right)
-            return merged or None
-        if isinstance(value, ast.Name) and value.id in container_packs:
-            return dict(container_packs[value.id])
+        items = _mapping_items(value)
+        if items is not None:
+            return _pack_from_items(items) or None
+        elems = _iter_elements(value)
+        if elems is not None:
+            flat = [n for e in elems for n in _packed_names_deep(e)]
+            if flat:
+                return {None: tuple(dict.fromkeys(flat))}
         return None
 
     def _note_container_pack_from_value(name: str, value: ast.AST) -> None:
         pack = _container_pack_from_expr(value)
         if pack is not None:
             container_packs[name] = pack
-        elif isinstance(value, ast.Name) and value.id in container_packs:
-            container_packs[name] = dict(container_packs[value.id])
         else:
             container_packs.pop(name, None)
 
-    def _iter_element_pack_expr(iter_expr: ast.AST) -> ast.AST:
-        """Peel For-iter adapters to the packed element carrier expression."""
+    def _note_container_mutation(call: ast.Call) -> None:
+        """``d.update(...)`` / ``d.setdefault`` / ``xs.append`` grow a Name pack."""
 
-        iter_expr = _peel_call_func(iter_expr)
-        if isinstance(iter_expr, ast.Call):
-            func = _peel_call_func(iter_expr.func)
-            # ``{"c": Mut}.values()`` / ``.keys()`` / ``.items()``.
-            if isinstance(func, ast.Attribute) and func.attr in {
-                "values",
-                "keys",
-                "items",
-            }:
-                return func.value
-            # ``map(fn, [Mut])`` / ``filter(None, [Mut])`` — iterable arg.
-            if isinstance(func, ast.Name) and func.id in {"map", "filter"}:
-                if len(iter_expr.args) >= 2:
-                    return iter_expr.args[1]
-            if isinstance(func, ast.Attribute) and func.attr in {"map", "filter"}:
-                if len(iter_expr.args) >= 2:
-                    return iter_expr.args[1]
-            # ``list(...)`` / ``iter(...)`` / ``reversed(...)`` adapters.
-            if (
-                isinstance(func, ast.Name) and func.id in _CALLEE_ADAPTER_NAMES
-            ) or (
-                isinstance(func, ast.Attribute)
-                and func.attr in _CALLEE_ADAPTER_NAMES
-            ):
-                if iter_expr.args:
-                    return _iter_element_pack_expr(
-                        iter_expr.args[0].value
-                        if isinstance(iter_expr.args[0], ast.Starred)
-                        else iter_expr.args[0]
+        func = _peel_call_func(call.func)
+        if not isinstance(func, ast.Attribute):
+            return
+        base = _peel_call_func(func.value)
+        if not isinstance(base, ast.Name):
+            return
+        attr = func.attr
+        if attr not in {"update", "setdefault", "__setitem__"} | _PACK_ADD_METHODS:
+            return
+        pack = dict(container_packs.get(base.id, {}))
+        if attr == "update":
+            for kw in call.keywords:
+                if kw.arg is None:
+                    sub = _container_pack_from_expr(kw.value)
+                    pack = _pack_union(pack, sub)
+                else:
+                    _pack_add(pack, kw.arg, _packed_names_deep(kw.value))
+            for arg in call.args:
+                nested = arg.value if isinstance(arg, ast.Starred) else arg
+                sub_items = _mapping_items(nested)
+                if sub_items is not None:
+                    pack = _pack_union(pack, _pack_from_items(sub_items))
+                else:
+                    pairs = _iter_elements(nested)
+                    if pairs is not None:
+                        for pair in pairs:
+                            pair = _peel_call_func(pair)
+                            if (
+                                isinstance(pair, (ast.Tuple, ast.List))
+                                and len(pair.elts) == 2
+                            ):
+                                pack = _pack_union(
+                                    pack,
+                                    _pack_from_items([(pair.elts[0], pair.elts[1])]),
+                                )
+                    else:
+                        _pack_add(pack, None, _packed_names_deep(nested))
+        elif attr in {"setdefault", "__setitem__"}:
+            if len(call.args) >= 2:
+                pack = _pack_union(
+                    pack, _pack_from_items([(call.args[0], call.args[1])])
+                )
+            elif call.args:
+                _pack_add(pack, None, _packed_names_deep(call.args[0]))
+        else:
+            value_args = call.args[1:] if attr == "insert" else call.args
+            for arg in value_args:
+                nested = arg.value if isinstance(arg, ast.Starred) else arg
+                if attr in {"extend", "extendleft"}:
+                    sub = _iter_elements(nested)
+                    names = (
+                        [n for e in sub for n in _packed_names_deep(e)]
+                        if sub is not None
+                        else _packed_names_deep(nested)
                     )
-        # ``[x for x in [Mut]]`` / ``(x for x in [Mut])``.
-        if isinstance(iter_expr, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
-            if iter_expr.generators:
-                return _iter_element_pack_expr(iter_expr.generators[0].iter)
-        if isinstance(iter_expr, ast.DictComp):
-            if iter_expr.generators:
-                return _iter_element_pack_expr(iter_expr.generators[0].iter)
-        return iter_expr
+                    _pack_add(pack, None, names)
+                else:
+                    _pack_add(pack, None, _packed_names_deep(nested))
+        if pack:
+            container_packs[base.id] = pack
+
+    def _seed_pack_binder(
+        name: str,
+        pack: Mapping[object, tuple[str, ...]],
+        *,
+        active_classes: dict[str, ast.ClassDef],
+    ) -> None:
+        """Bind ``name`` to a container pack (star binder / mapping ``**rest``)."""
+
+        if not pack:
+            container_packs.pop(name, None)
+            return
+        container_packs[name] = dict(pack)
+        class_names = [
+            n
+            for n in _flat_pack_names(pack)
+            if _lookup_class(n, active_classes) is not None
+        ]
+        if class_names:
+            class_projection_products[name] = class_names
+            src = _lookup_class(class_names[0], active_classes)
+            if src is not None:
+                active_classes[name] = src
+                class_registry[name] = src
+        else:
+            class_projection_products.pop(name, None)
+
+    def _seed_name_from_elements(
+        name: str,
+        items: Sequence[ast.AST],
+        *,
+        active_classes: dict[str, ast.ClassDef],
+    ) -> None:
+        """Bind ``name`` to the may-union of ``items`` (shared protocol/class seed)."""
+
+        if not items:
+            return
+        keep_tables = (
+            type_protocol_products,
+            dict_view_products,
+            projection_factory_products,
+            partial_product_names,
+            operator_projection_aliases,
+        )
+        kept: dict[int, object] = {}
+        pack_union: dict[object, tuple[str, ...]] = {}
+        class_union: list[str] = []
+        for item in items:
+            _note_protocol_alias_from_value(name, item)
+            for index, table in enumerate(keep_tables):
+                if name in table and index not in kept:
+                    kept[index] = table[name]  # type: ignore[index]
+            pack_union = _pack_union(pack_union, container_packs.get(name))
+            class_union.extend(class_projection_products.get(name, ()))
+            class_union.extend(_packed_names_deep(item))
+        for index, table in enumerate(keep_tables):
+            if index in kept:
+                table[name] = kept[index]  # type: ignore[index]
+        if pack_union:
+            container_packs[name] = pack_union
+        class_names = [
+            n
+            for n in dict.fromkeys(class_union)
+            if _lookup_class(n, active_classes) is not None
+        ]
+        if class_names:
+            class_projection_products[name] = class_names
+            src = _lookup_class(class_names[0], active_classes)
+            if src is not None:
+                active_classes[name] = src
+                class_registry[name] = src
+        else:
+            class_projection_products.pop(name, None)
+
+    def _distribute_items(
+        slot_count: int,
+        star_index: int | None,
+        items: Sequence[ast.AST],
+    ) -> list[list[ast.AST]]:
+        """Distribute unpacked ``items`` over target / pattern slots.
+
+        Literal sequences and resolvable iterables align positionally when the
+        arity matches; otherwise every slot receives every element (may-alias).
+        The star slot receives synthetic Lists of its middle elements.
+        """
+
+        slots: list[list[ast.AST]] = [[] for _ in range(slot_count)]
+        for item in items:
+            item = _peel_call_func(item)
+            if isinstance(item, (ast.Tuple, ast.List)) and not any(
+                isinstance(e, ast.Starred) for e in item.elts
+            ):
+                elems: list[ast.AST] | None = list(item.elts)
+            else:
+                elems = _iter_elements(item)
+            if elems is None:
+                continue
+            count = len(elems)
+            if star_index is None:
+                if count == slot_count:
+                    for i, elem in enumerate(elems):
+                        slots[i].append(elem)
+                else:
+                    for i in range(slot_count):
+                        slots[i].extend(elems)
+                continue
+            after = slot_count - 1 - star_index
+            if count >= star_index + after:
+                for i in range(star_index):
+                    slots[i].append(elems[i])
+                slots[star_index].append(
+                    ast.List(elts=list(elems[star_index : count - after]), ctx=ast.Load())
+                )
+                for j in range(after):
+                    slots[star_index + 1 + j].append(elems[count - after + j])
+            else:
+                for i in range(slot_count):
+                    if i == star_index:
+                        slots[i].append(ast.List(elts=list(elems), ctx=ast.Load()))
+                    else:
+                        slots[i].extend(elems)
+        return slots
+
+    def _seed_star_binder(
+        name: str,
+        lists: Sequence[ast.AST],
+        *,
+        active_classes: dict[str, ast.ClassDef],
+    ) -> None:
+        """``*xs`` / ``case [*xs]`` binders pack the union of their middle lists."""
+
+        elts: list[ast.AST] = []
+        for lst in lists:
+            if isinstance(lst, ast.List):
+                elts.extend(lst.elts)
+        if not elts:
+            return
+        synthetic = ast.List(elts=elts, ctx=ast.Load())
+        _note_protocol_alias_from_value(name, synthetic)
+        _seed_pack_binder(
+            name,
+            _container_pack_from_expr(synthetic) or {},
+            active_classes=active_classes,
+        )
+
+    def _seed_unpack_union(
+        target: ast.AST,
+        items: Sequence[ast.AST],
+        *,
+        active_classes: dict[str, ast.ClassDef],
+    ) -> None:
+        """Seed ``target`` from the may-union of ``items`` (For / Assign / Match)."""
+
+        if not items:
+            return
+        if isinstance(target, ast.Name):
+            _seed_name_from_elements(target.id, items, active_classes=active_classes)
+            return
+        if isinstance(target, ast.Starred):
+            _seed_unpack_union(target.value, items, active_classes=active_classes)
+            return
+        if isinstance(target, (ast.Tuple, ast.List)):
+            star_index = next(
+                (i for i, e in enumerate(target.elts) if isinstance(e, ast.Starred)),
+                None,
+            )
+            slots = _distribute_items(len(target.elts), star_index, items)
+            for index, (sub_target, slot) in enumerate(zip(target.elts, slots)):
+                if isinstance(sub_target, ast.Starred):
+                    if isinstance(sub_target.value, ast.Name):
+                        _seed_star_binder(
+                            sub_target.value.id, slot, active_classes=active_classes
+                        )
+                    continue
+                _seed_unpack_union(sub_target, slot, active_classes=active_classes)
 
     def _seed_for_iter_class_aliases(
         target: ast.AST,
@@ -2592,74 +3433,17 @@ def _build_identity_scanner(
         *,
         active_classes: dict[str, ast.ClassDef],
     ) -> None:
-        """Seed For/AsyncFor targets from packed class/protocol iter carriers."""
+        """Seed For/AsyncFor targets from the iterated element union.
 
-        carrier = _iter_element_pack_expr(iter_expr)
-        # ``.items()`` yields (key, value) pairs — peel values for Name targets
-        # and unpack Tuple targets element-wise when lengths align.
-        peeled_func = None
-        raw = _peel_call_func(iter_expr)
-        if isinstance(raw, ast.Call):
-            peeled_func = _peel_call_func(raw.func)
-        if (
-            isinstance(peeled_func, ast.Attribute)
-            and peeled_func.attr == "items"
-            and isinstance(carrier, ast.Dict)
-            and isinstance(target, (ast.Tuple, ast.List))
-            and len(target.elts) == 2
-        ):
-            # ``for k, C in {"c": Mut}.items()`` — seed value binder.
-            value_target = target.elts[1]
-            if isinstance(value_target, ast.Name):
-                for map_val in carrier.values:
-                    if map_val is None:
-                        continue
-                    _seed_assign_unpack_aliases(
-                        value_target, map_val, active_classes=active_classes
-                    )
+        Shared with Assign / star unpack and Match binds: class, exec/eval,
+        type-protocol, operator.call and container-pack aliases all flow
+        through ``_note_protocol_alias_from_value`` per element.
+        """
+
+        elems = _iter_elements(iter_expr)
+        if elems is None:
             return
-        if (
-            isinstance(peeled_func, ast.Attribute)
-            and peeled_func.attr == "keys"
-            and isinstance(carrier, ast.Dict)
-        ):
-            # ``for C in {Mut: 1}.keys()``.
-            for map_key in carrier.keys:
-                if map_key is None:
-                    continue
-                _seed_assign_unpack_aliases(
-                    target, map_key, active_classes=active_classes
-                )
-            return
-        if (
-            isinstance(peeled_func, ast.Attribute)
-            and peeled_func.attr == "values"
-            and isinstance(carrier, ast.Dict)
-        ):
-            for map_val in carrier.values:
-                if map_val is None:
-                    continue
-                _seed_assign_unpack_aliases(
-                    target, map_val, active_classes=active_classes
-                )
-            return
-        # Name-bound packs: ``*xs,=[Mut]; for C in xs``.
-        if isinstance(carrier, ast.Name) and carrier.id in container_packs:
-            pack = container_packs[carrier.id]
-            for names in pack.values():
-                for cname in names:
-                    src = _lookup_class(cname, active_classes)
-                    if src is not None:
-                        for tname in _collect_store_names(target):
-                            active_classes[tname] = src
-                            class_registry[tname] = src
-                            _note_protocol_alias_from_value(
-                                tname, ast.Name(id=cname, ctx=ast.Load())
-                            )
-            return
-        _seed_assign_unpack_aliases(
-            target, carrier, active_classes=active_classes
-        )
+        _seed_unpack_union(target, elems, active_classes=active_classes)
 
     def _seed_assign_unpack_aliases(
         target: ast.AST,
@@ -2669,73 +3453,145 @@ def _build_identity_scanner(
     ) -> None:
         """Seed class/protocol/container aliases through Assign unpack peels.
 
-        Shared path for ``C, = [Cls]`` / ``[C] = [Cls]`` / ``*xs, = [Mut]`` so
-        later ``C()`` / ``xs[0]()`` observe construction (Unknown > false PASS).
+        Shared path for ``C, = [Cls]`` / ``[C] = {Cls: 1}.keys()`` /
+        ``*xs, = [Mut]`` so later ``C()`` / ``xs[0]()`` observe construction
+        (Unknown > false PASS).
         """
 
         if isinstance(target, ast.Name):
-            _note_protocol_alias_from_value(target.id, value)
-            for cname in _packed_names(value):
-                src_cls = _lookup_class(cname, active_classes)
-                if src_cls is not None:
-                    active_classes[target.id] = src_cls
-                    class_registry[target.id] = src_cls
-                    break
-            _note_container_pack_from_value(target.id, value)
+            _seed_name_from_elements(target.id, [value], active_classes=active_classes)
             return
-        if isinstance(target, ast.Starred):
-            # Star binder packs the whole RHS sequence.
-            if isinstance(target.value, ast.Name):
-                pack = _container_pack_from_expr(value)
-                if pack is not None:
-                    container_packs[target.value.id] = pack
-                    flat = list(
-                        dict.fromkeys(n for vs in pack.values() for n in vs)
-                    )
-                    if flat:
-                        class_projection_products[target.value.id] = flat
-                    for cname in flat:
-                        src = _lookup_class(cname, active_classes)
-                        if src is not None:
-                            active_classes[target.value.id] = src
-                            class_registry[target.value.id] = src
-                            break
-                    _note_protocol_alias_from_value(
-                        target.value.id,
-                        value,
-                    )
+        _seed_unpack_union(target, [value], active_classes=active_classes)
+
+    def _seed_match_binds(
+        pattern: ast.AST,
+        items: Sequence[ast.AST],
+        *,
+        active_classes: dict[str, ast.ClassDef],
+        on_class_alias: Callable[[str, ast.AST], None] | None = None,
+    ) -> None:
+        """Seed Match pattern binders from the may-union of subject ``items``.
+
+        Subjects normalize through the shared element / mapping resolvers
+        (walrus, Name-bound packs, ``dict()`` constructors, ``**`` spreads,
+        non-constant keys, ``.items()`` views, zip / enumerate / comps) before
+        MatchAs / MatchSequence / MatchMapping ``rest`` / MatchStar seeding, so
+        ``match d: case {**rest}: rest["c"]()`` observes construction.
+        """
+
+        if not items:
             return
-        if isinstance(target, (ast.Tuple, ast.List)):
-            if isinstance(value, (ast.Tuple, ast.List)) and len(target.elts) == len(
-                value.elts
-            ):
-                for elt_t, elt_v in zip(target.elts, value.elts):
-                    nested_t = elt_t.value if isinstance(elt_t, ast.Starred) else elt_t
-                    nested_v = elt_v.value if isinstance(elt_v, ast.Starred) else elt_v
-                    if isinstance(elt_t, ast.Starred):
-                        _seed_assign_unpack_aliases(
-                            elt_t, value, active_classes=active_classes
+        if isinstance(pattern, ast.MatchAs):
+            if pattern.name:
+                _seed_name_from_elements(
+                    pattern.name, items, active_classes=active_classes
+                )
+                for item in items:
+                    peeled = _peel_call_func(item)
+                    packed_inst: str | None = None
+                    if isinstance(peeled, ast.Call) and isinstance(
+                        peeled.func, ast.Name
+                    ):
+                        packed_inst = peeled.func.id
+                    elif isinstance(peeled, ast.Name):
+                        packed_inst = instance_class_of.get(peeled.id)
+                    if packed_inst is not None and _lookup_class(
+                        packed_inst, active_classes
+                    ) is not None:
+                        instance_class_of[pattern.name] = packed_inst
+                    if on_class_alias is not None and isinstance(peeled, ast.Name):
+                        if _lookup_class(peeled.id, active_classes) is not None:
+                            on_class_alias(pattern.name, peeled)
+            if pattern.pattern is not None:
+                _seed_match_binds(
+                    pattern.pattern,
+                    items,
+                    active_classes=active_classes,
+                    on_class_alias=on_class_alias,
+                )
+            return
+        if isinstance(pattern, ast.MatchSequence):
+            star_index = next(
+                (
+                    i
+                    for i, sub in enumerate(pattern.patterns)
+                    if isinstance(sub, ast.MatchStar)
+                ),
+                None,
+            )
+            slots = _distribute_items(len(pattern.patterns), star_index, items)
+            for sub_pat, slot in zip(pattern.patterns, slots):
+                if isinstance(sub_pat, ast.MatchStar):
+                    if sub_pat.name:
+                        _seed_star_binder(
+                            sub_pat.name, slot, active_classes=active_classes
                         )
-                    else:
-                        _seed_assign_unpack_aliases(
-                            nested_t, nested_v, active_classes=active_classes
-                        )
-                return
-            # Length-mismatch / non-literal RHS: peel packed class once.
-            for cname in _packed_names(value):
-                src = _lookup_class(cname, active_classes)
-                if src is None:
                     continue
-                for name in _collect_store_names(target):
-                    active_classes[name] = src
-                    class_registry[name] = src
-                break
+                _seed_match_binds(
+                    sub_pat,
+                    slot,
+                    active_classes=active_classes,
+                    on_class_alias=on_class_alias,
+                )
+            return
+        if isinstance(pattern, ast.MatchMapping):
+            entries: list[tuple[ast.AST | None, ast.AST | None]] = []
+            for item in items:
+                resolved = _mapping_items(item)
+                if resolved is not None:
+                    entries.extend(resolved)
+            fixed_keys: set[object] = set()
+            for key_node, sub_pat in zip(pattern.keys, pattern.patterns):
+                if isinstance(key_node, ast.Constant):
+                    fixed_keys.add(key_node.value)
+                    selected = [
+                        val
+                        for key, val in entries
+                        if val is not None
+                        and (
+                            not isinstance(key, ast.Constant)
+                            or key.value == key_node.value
+                        )
+                    ]
+                else:
+                    selected = [val for _, val in entries if val is not None]
+                _seed_match_binds(
+                    sub_pat,
+                    selected,
+                    active_classes=active_classes,
+                    on_class_alias=on_class_alias,
+                )
+            if pattern.rest is not None:
+                remaining = [
+                    (key, val)
+                    for key, val in entries
+                    if not (
+                        isinstance(key, ast.Constant) and key.value in fixed_keys
+                    )
+                ]
+                _seed_pack_binder(
+                    pattern.rest,
+                    _pack_from_items(remaining),
+                    active_classes=active_classes,
+                )
+            return
+        if isinstance(pattern, ast.MatchOr):
+            for alt in pattern.patterns:
+                _seed_match_binds(
+                    alt,
+                    items,
+                    active_classes=active_classes,
+                    on_class_alias=on_class_alias,
+                )
 
     def _base_is_namespace_projection(base: ast.AST) -> bool:
         """True for ``types.__dict__`` / ``vars(types)`` / ``getattr(..., "__dict__")``."""
 
         base = _peel_call_func(base)
         if isinstance(base, ast.Attribute) and base.attr == "__dict__":
+            return True
+        # Name-bound namespace carriers: ``ns = types.__dict__; ns.get(...)``.
+        if isinstance(base, ast.Name) and base.id in ns_dict_aliases:
             return True
         if isinstance(base, ast.Call):
             bfunc = _peel_call_func(base.func)
@@ -2760,6 +3616,8 @@ def _build_identity_scanner(
     def _seed_ns_key_aliases(name: str, key: str) -> None:
         if key == "MappingProxyType":
             adapter_aliases.add(name)
+        if key in _MAPPING_CTOR_NAMES:
+            dict_ctor_aliases.add(name)
         if key in _OPERATOR_PROJECTION_NAMES:
             operator_projection_aliases[name] = key
         if key in _EXEC_EVAL_COMPILE_NAMES:
@@ -2816,20 +3674,12 @@ def _build_identity_scanner(
             # Bound ``g = {}.get; m = g("missing", Mut)``.
             fpeeled = _peel_call_func(value.func)
             if isinstance(fpeeled, ast.Name) and fpeeled.id in dict_view_products:
-                view = dict_view_products[fpeeled.id]
-                if view in {"dict.get", "dict.__getitem__", "dict.pop"}:
-                    if view == "dict.get" and len(value.args) >= 3:
-                        names.extend(_packed_names(value.args[2]))
-                    elif len(value.args) >= 2:
-                        key = _static_str(value.args[1])
-                        if key is not None:
-                            names.append(key)
-                elif view == "get" and len(value.args) >= 2:
-                    names.extend(_packed_names(value.args[1]))
-                elif value.args:
-                    key = _static_str(value.args[0])
-                    if key is not None:
-                        names.append(key)
+                exprs, keys = _dict_view_applied_parts(
+                    dict_view_products[fpeeled.id], value.args
+                )
+                for expr in exprs:
+                    names.extend(_packed_names_deep(expr))
+                names.extend(keys)
             if names:
                 class_projection_products[name] = list(dict.fromkeys(names))
             else:
@@ -2841,16 +3691,30 @@ def _build_identity_scanner(
         """Install exec/new_class/type/getattr aliases from an Assign/walrus RHS."""
 
         value = _peel_call_func(value)
-        # Type protocol products first (``tn = type.__new__`` / getattr).
+        # Type protocol products first (``tn = type.__new__`` / getattr /
+        # nested ``tc.__call__`` / ``type.__call__.__call__``).
         tproto = _type_protocol_attr_from_value(
-            value, getattr_aliases=frozenset(getattr_aliases)
+            value,
+            getattr_aliases=frozenset(getattr_aliases),
+            protocol_products=type_protocol_products,
+            type_aliases=frozenset(type_aliases),
         )
         if tproto is not None:
             type_protocol_products[name] = tproto
-        elif isinstance(value, ast.Name) and value.id in type_protocol_products:
-            type_protocol_products[name] = type_protocol_products[value.id]
         else:
             type_protocol_products.pop(name, None)
+        # Name-bound mapping constructors and namespace carriers (shared
+        # across Name / Attribute / Subscript / Call RHS forms).
+        if _is_dict_constructor(
+            value,
+            dict_ctor_aliases=frozenset(dict_ctor_aliases),
+            getattr_aliases=frozenset(getattr_aliases),
+        ):
+            dict_ctor_aliases.add(name)
+        if _base_is_namespace_projection(value):
+            ns_dict_aliases.add(name)
+        else:
+            ns_dict_aliases.discard(name)
         if isinstance(value, ast.Name):
             if value.id in _EXEC_EVAL_COMPILE_NAMES or value.id in exec_eval_compile_aliases:
                 exec_eval_compile_aliases.add(name)
@@ -2900,8 +3764,9 @@ def _build_identity_scanner(
                 dict_ctor_aliases.add(name)
             if value.attr in _OPERATOR_PROJECTION_NAMES:
                 operator_projection_aliases[name] = value.attr
-            # ``d = oc.__call__`` / ``d = tc.__call__`` — operator.call / type
-            # protocol products (``tc = type.__call__; d = tc.__call__; d(Mut)``).
+            # ``d = oc.__call__`` / ``d = tc.__call__`` / ``e = d["e"].__call__``
+            # — operator.call / type / exec products through transparent
+            # ``__call__`` (``tc = type.__call__; d = tc.__call__; d(Mut)``).
             if value.attr == "__call__":
                 if _expr_is_operator_call_receiver(
                     value.value,
@@ -2909,11 +3774,33 @@ def _build_identity_scanner(
                     getattr_aliases=frozenset(getattr_aliases),
                     partial_aliases=frozenset(partial_aliases),
                     adapter_aliases=frozenset(adapter_aliases),
+                    container_packs=container_packs,
+                    factory_products=projection_factory_products,
+                    dict_view_products=dict_view_products,
                 ):
                     operator_projection_aliases[name] = "call"
                 recv = _peel_call_func(value.value)
                 if isinstance(recv, ast.Name) and recv.id in type_protocol_products:
                     type_protocol_products[name] = type_protocol_products[recv.id]
+                # Packed receivers: ``e = rest["e"].__call__`` / ``d["e"].__call__``.
+                for pname in _packed_names(value.value):
+                    if (
+                        pname in _EXEC_EVAL_COMPILE_NAMES
+                        or pname in exec_eval_compile_aliases
+                    ):
+                        exec_eval_compile_aliases.add(name)
+                    if pname in operator_projection_aliases:
+                        operator_projection_aliases[name] = (
+                            operator_projection_aliases[pname]
+                        )
+                    elif _name_is_operator_call_alias(
+                        pname, projection_aliases=operator_projection_aliases
+                    ):
+                        operator_projection_aliases[name] = "call"
+                    if pname in type_protocol_products:
+                        type_protocol_products[name] = type_protocol_products[pname]
+                    if pname in new_class_aliases or pname == _TYPES_NEW_CLASS_NAME:
+                        new_class_aliases.add(name)
             if value.attr in _NS_DICT_VIEW_ATTRS:
                 if _is_dict_constructor(
                     value.value,
@@ -4295,15 +5182,26 @@ def _build_identity_scanner(
                 return True
             return False
 
+        def _follow_accounted_candidates(callee: ast.AST) -> bool:
+            """Follow accounted ``module.export`` bodies reachable from ``callee``.
+
+            One shared peel for ``getattr(n, "install")(…)``,
+            ``n.install.__call__(…)``, ``getattr(n, "install").__call__(…)``,
+            ``[n.install][0](…)`` and ``next(iter([n.install]))(…)``.
+            """
+
+            followed = False
+            for cand in _callee_candidate_exprs(callee):
+                for recv, attr in _accounted_attr_refs(cand):
+                    if _follow_accounted_module_attr(recv, attr):
+                        followed = True
+            return followed
+
         if isinstance(func, ast.Call):
-            # ``getattr(n, "install")(evil)`` — follow accounted export body
-            # before generic Call.func fallthrough returns.
-            gname_mod = _getattr_static_name(
-                func, getattr_aliases=frozenset(getattr_aliases)
-            )
-            if gname_mod is not None and func.args:
-                if _follow_accounted_module_attr(func.args[0], gname_mod):
-                    return
+            # ``getattr(n, "install")(evil)`` / ``next(iter([n.install]))(evil)``
+            # — follow accounted export body before generic Call.func fallthrough.
+            if _follow_accounted_candidates(func):
+                return
             packed_func_names = _packed_names(func)
             # Shared packing/projection peel: .get/.pop/getattr/attrgetter/
             # itemgetter/getitem/methodcaller/partial/next(iter)/…
@@ -4353,21 +5251,12 @@ def _build_identity_scanner(
             # ``g = dict.get; g({}, "missing", Mut)()``.
             fpeeled = _peel_call_func(func.func)
             if isinstance(fpeeled, ast.Name) and fpeeled.id in dict_view_products:
-                view = dict_view_products[fpeeled.id]
-                names: list[str] = []
-                if view in {"dict.get", "dict.__getitem__", "dict.pop"}:
-                    if view == "dict.get" and len(func.args) >= 3:
-                        names.extend(_packed_names(func.args[2]))
-                    elif len(func.args) >= 2:
-                        key = _static_str(func.args[1])
-                        if key is not None:
-                            names.append(key)
-                elif view == "get" and len(func.args) >= 2:
-                    names.extend(_packed_names(func.args[1]))
-                if func.args:
-                    key = _static_str(func.args[0])
-                    if key is not None:
-                        names.append(key)
+                view_exprs, view_keys = _dict_view_applied_parts(
+                    dict_view_products[fpeeled.id], func.args
+                )
+                names: list[str] = list(view_keys)
+                for view_expr in view_exprs:
+                    names.extend(_packed_names_deep(view_expr))
                 if _observe_classes_from_names(names):
                     return
                 if names:
@@ -4689,6 +5578,11 @@ def _build_identity_scanner(
             # ``object.__class__.__call__(Mut)`` construct instances.
             if func.attr == "__call__":
                 type_call_recv = False
+                # ``n.install.__call__(evil)`` / ``getattr(n, "install").__call__(evil)``
+                # / ``[n.install][0].__call__(evil)`` — follow the accounted export
+                # before any registry-wide ``__call__`` may-follow can mask it.
+                if _follow_accounted_candidates(func):
+                    return
                 # Walrus product bind: ``(p := pf(Mut)).__call__()``.
                 if isinstance(func.value, ast.NamedExpr) and isinstance(
                     func.value.target, ast.Name
@@ -4782,6 +5676,28 @@ def _build_identity_scanner(
                                     type_call_recv = True
                     else:
                         type_call_recv = True
+                elif isinstance(recv, (ast.Subscript, ast.IfExp, ast.BoolOp)):
+                    # ``rest["c"].__call__()`` / ``(Mut if x else int).__call__()``:
+                    # packed Name receivers construct their classes; packed
+                    # type-protocol products keep their protocol.
+                    packed_recv_names = _packed_names_deep(recv)
+                    if _observe_classes_from_names(packed_recv_names):
+                        return
+                    for packed_recv in packed_recv_names:
+                        tproto_packed = type_protocol_products.get(packed_recv)
+                        if tproto_packed == "__new__":
+                            for arg in call.args:
+                                _eval_expr(arg, env, path=path)
+                            for kw in call.keywords:
+                                _eval_expr(kw.value, env, path=path)
+                            _observe_type_new_from_args()
+                            return
+                        if (
+                            tproto_packed == "__call__"
+                            or packed_recv == _TYPE_BUILTIN_NAME
+                            or packed_recv in type_aliases
+                        ):
+                            type_call_recv = True
                 elif isinstance(func.value, ast.Attribute) and func.value.attr in {
                     "__class__",
                     _TYPE_BUILTIN_NAME,
@@ -4900,27 +5816,14 @@ def _build_identity_scanner(
                     _escape_identity(points)
             return
         if not isinstance(func, ast.Name):
-            # ``getattr(n, "install")(evil)`` / ``[n.install][0](evil)``.
-            if isinstance(func, ast.Call):
-                gname = _getattr_static_name(
-                    func, getattr_aliases=frozenset(getattr_aliases)
-                )
-                if gname is not None and func.args:
-                    if _follow_accounted_module_attr(func.args[0], gname):
-                        return
+            # ``getattr(n, "install")(evil)`` / ``[n.install][0](evil)`` /
+            # ``next(iter([n.install]))(evil)`` — shared candidate peel.
+            if _follow_accounted_candidates(func):
+                return
             if isinstance(func, ast.Subscript):
                 # Packed Attribute / Name callable: ``[n.install][0]``.
                 if _follow_callable_points(_eval_expr(func, env, path=path)):
                     return
-                base = func.value
-                if isinstance(base, (ast.List, ast.Tuple)) and base.elts:
-                    for elt in base.elts:
-                        nested = elt.value if isinstance(elt, ast.Starred) else elt
-                        if isinstance(nested, ast.Attribute):
-                            if _follow_accounted_module_attr(
-                                nested.value, nested.attr
-                            ):
-                                return
             # BoolOp/IfExp/NamedExpr/Subscript/List/Dict packing as callee must
             # still execute (``(poison() or len)("x")``, ``[lambda: poison()][0]()``,
             # ``(Mut if True else int)()``).
@@ -5391,6 +6294,9 @@ def _build_identity_scanner(
     ) -> None:
         if visited_fns is None:
             visited_fns = set()
+        # ``d.update(e=exec)`` / ``d.setdefault("e", exec)`` / ``xs.append(exec)``
+        # grow the Name-bound pack before any later peel (shared mutation seed).
+        _note_container_mutation(call)
 
         def _name_is_exec_eval_compile(name: str) -> bool:
             if name in _EXEC_EVAL_COMPILE_NAMES or name in exec_eval_compile_aliases:
@@ -6030,10 +6936,21 @@ def _build_identity_scanner(
                                     class_registry[target.id] = src_cls
                                     break
                     elif isinstance(target, (ast.Tuple, ast.List)):
-                        # ``C, = [Cls]`` / ``[C] = [Cls]`` / ``*xs, = [Mut]``.
+                        # ``C, = [Cls]`` / ``[C] = {Cls: 1}.keys()`` / ``*xs, = [Mut]``.
                         _seed_assign_unpack_aliases(
                             target, stmt.value, active_classes=active_classes
                         )
+                    elif isinstance(target, ast.Subscript) and isinstance(
+                        _peel_call_func(target.value), ast.Name
+                    ):
+                        # ``d["e"] = exec`` grows the Name-bound pack.
+                        base_name = _peel_call_func(target.value).id  # type: ignore[union-attr]
+                        grown = _pack_union(
+                            container_packs.get(base_name),
+                            _pack_from_items([(target.slice, stmt.value)]),
+                        )
+                        if grown:
+                            container_packs[base_name] = grown
                 # Walrus bindings inside RHS are applied by _eval_expr (#173).
                 continue
             if isinstance(stmt, ast.AnnAssign):
@@ -6417,170 +7334,21 @@ def _build_identity_scanner(
                         env_c[name] = _IdentityPointsTo.unknown_only()
                     # Class / instance aliases through MatchAs and seq/map peels
                     # so ``match (Mut,): case (C,): C()`` observes construction.
-                    def _bind_match_class_aliases(
-                        pat: ast.AST, matched: ast.AST
+                    def _env_class_alias(
+                        bound_name: str, matched_name: ast.AST
                     ) -> None:
-                        if isinstance(pat, ast.MatchAs):
-                            if pat.name:
-                                # Protocol / exec / type / operator.call identity
-                                # products through Match Name binds.
-                                _note_protocol_alias_from_value(pat.name, matched)
-                                if isinstance(matched, ast.Name):
-                                    src_cls = _lookup_class(
-                                        matched.id, active_classes
-                                    )
-                                    if src_cls is not None:
-                                        active_classes[pat.name] = src_cls
-                                        class_registry[pat.name] = src_cls
-                                        env_c[pat.name] = _eval_expr(
-                                            matched, env_c, path=path
-                                        )
-                                else:
-                                    # Packed class Name peels: ``match {"c": Mut}``.
-                                    for cname in _packed_names(matched):
-                                        src_cls = _lookup_class(
-                                            cname, active_classes
-                                        )
-                                        if src_cls is not None:
-                                            active_classes[pat.name] = src_cls
-                                            class_registry[pat.name] = src_cls
-                                            break
-                                packed_inst = None
-                                if (
-                                    isinstance(matched, ast.Call)
-                                    and isinstance(matched.func, ast.Name)
-                                ):
-                                    packed_inst = matched.func.id
-                                elif isinstance(matched, ast.Name):
-                                    packed_inst = instance_class_of.get(
-                                        matched.id
-                                    )
-                                if packed_inst is not None and _lookup_class(
-                                    packed_inst, active_classes
-                                ) is not None:
-                                    instance_class_of[pat.name] = packed_inst
-                            if pat.pattern is not None:
-                                _bind_match_class_aliases(pat.pattern, matched)
-                            return
-                        if isinstance(pat, ast.MatchSequence) and isinstance(
-                            matched, (ast.List, ast.Tuple)
-                        ):
-                            has_star = any(
-                                isinstance(item, ast.MatchStar)
-                                for item in pat.patterns
-                            )
-                            # Star binders pack element peels so
-                            # ``case (*xs,): xs[0]()`` / ``case [*xs]:`` observe.
-                            if has_star:
-                                pack: dict[object, tuple[str, ...]] = {}
-                                for index, elt in enumerate(matched.elts):
-                                    nested = (
-                                        elt.value
-                                        if isinstance(elt, ast.Starred)
-                                        else elt
-                                    )
-                                    names = tuple(_packed_names(nested))
-                                    if names:
-                                        pack[index] = names
-                                for item in pat.patterns:
-                                    if (
-                                        isinstance(item, ast.MatchStar)
-                                        and item.name
-                                        and pack
-                                    ):
-                                        container_packs[item.name] = dict(pack)
-                                        # Also seed class aliases for star binders
-                                        # when a unique class is packed, so
-                                        # ``xs[0]()`` observes construction even
-                                        # if subscript peels race empty packs.
-                                        for cname in {
-                                            n for vs in pack.values() for n in vs
-                                        }:
-                                            src = _lookup_class(cname, active_classes)
-                                            if src is not None:
-                                                active_classes[item.name] = src
-                                                class_registry[item.name] = src
-                                        # Unique class peel → class projection.
-                                        flat = list(
-                                            dict.fromkeys(
-                                                n for vs in pack.values() for n in vs
-                                            )
-                                        )
-                                        if flat:
-                                            class_projection_products[item.name] = flat
-                                for sub_pat, elt in zip(pat.patterns, matched.elts):
-                                    if isinstance(sub_pat, ast.MatchStar):
-                                        continue
-                                    nested = (
-                                        elt.value
-                                        if isinstance(elt, ast.Starred)
-                                        else elt
-                                    )
-                                    _bind_match_class_aliases(sub_pat, nested)
-                                return
-                            if len(pat.patterns) != len(matched.elts):
-                                return
-                            for sub_pat, elt in zip(pat.patterns, matched.elts):
-                                nested = (
-                                    elt.value
-                                    if isinstance(elt, ast.Starred)
-                                    else elt
-                                )
-                                _bind_match_class_aliases(sub_pat, nested)
-                            return
-                        if isinstance(pat, ast.MatchMapping) and isinstance(
-                            matched, ast.Dict
-                        ):
-                            # ``**rest`` must not abandon fixed key peels.
-                            value_by_key: dict[object, ast.AST] = {}
-                            for map_key, map_val in zip(
-                                matched.keys, matched.values
-                            ):
-                                if (
-                                    map_key is not None
-                                    and map_val is not None
-                                    and isinstance(map_key, ast.Constant)
-                                ):
-                                    value_by_key[map_key.value] = map_val
-                            fixed_keys: set[object] = set()
-                            for map_key, sub_pat in zip(pat.keys, pat.patterns):
-                                if not isinstance(map_key, ast.Constant):
-                                    continue
-                                fixed_keys.add(map_key.value)
-                                nested = value_by_key.get(map_key.value)
-                                if nested is not None:
-                                    _bind_match_class_aliases(sub_pat, nested)
-                            # ``case {**rest}: rest["c"]()`` — seed remaining /
-                            # all keys as a container pack (shared with star).
-                            if pat.rest is not None:
-                                pack = {}
-                                for key, map_val in value_by_key.items():
-                                    if key in fixed_keys:
-                                        continue
-                                    names = tuple(_packed_names(map_val))
-                                    if names:
-                                        pack[key] = names
-                                if pack:
-                                    container_packs[pat.rest] = dict(pack)
-                                    flat = list(
-                                        dict.fromkeys(
-                                            n for vs in pack.values() for n in vs
-                                        )
-                                    )
-                                    if flat:
-                                        class_projection_products[pat.rest] = flat
-                                    for cname in flat:
-                                        src = _lookup_class(cname, active_classes)
-                                        if src is not None:
-                                            active_classes[pat.rest] = src
-                                            class_registry[pat.rest] = src
-                                            break
-                            return
-                        if isinstance(pat, ast.MatchOr):
-                            for alt in pat.patterns:
-                                _bind_match_class_aliases(alt, matched)
+                        env_c[bound_name] = _eval_expr(
+                            matched_name, env_c, path=path
+                        )
 
-                    _bind_match_class_aliases(case.pattern, stmt.subject)
+                    # Shared Match seed (walrus / Name-bound / dict() subjects,
+                    # ``**rest`` packs, star binders, protocol products).
+                    _seed_match_binds(
+                        case.pattern,
+                        [stmt.subject],
+                        active_classes=active_classes,
+                        on_class_alias=_env_class_alias,
+                    )
                     # MatchValue Attribute patterns: fail-closed export rebind
                     # (``match (evil,): case (helpers.write_state,):``).
                     for attr_target in _match_pattern_attribute_targets(case.pattern):
@@ -6728,10 +7496,75 @@ def _build_identity_scanner(
         _scan_ctx["local_classes"] = active_classes
         _eval_expr(expr, env, path=path)
 
+    def _enter_session_ctx(
+        visited_fns: set[int],
+        local_fns: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None,
+        local_classes: Mapping[str, ast.ClassDef] | None,
+    ) -> dict[str, ast.ClassDef]:
+        active_classes: dict[str, ast.ClassDef] = dict(local_classes or {})
+        _scan_ctx["index"] = 0
+        _scan_ctx["visited_fns"] = visited_fns
+        _scan_ctx["local_fns"] = dict(local_fns or {})
+        _scan_ctx["local_classes"] = active_classes
+        return active_classes
+
+    def seed_for_binding(
+        target: ast.AST,
+        iter_expr: ast.AST,
+        *,
+        path: str,
+        env: dict[str, _IdentityPointsTo],
+        visited_fns: set[int],
+        local_fns: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None = None,
+        local_classes: Mapping[str, ast.ClassDef] | None = None,
+    ) -> None:
+        """Seed a For / AsyncFor target for CF walkers that own the loop.
+
+        Same seed path as ``_scan_stmts`` For: the iterated element union flows
+        through the shared resolver into class / protocol / container aliases,
+        then the target severs precise identity (Unknown > false PASS).
+        """
+
+        active_classes = _enter_session_ctx(visited_fns, local_fns, local_classes)
+        _seed_for_iter_class_aliases(target, iter_expr, active_classes=active_classes)
+        _scan_assign_target(
+            target,
+            path=path,
+            index=0,
+            env=env,
+            value_points=_IdentityPointsTo.unknown_only(),
+        )
+
+    def seed_match_binding(
+        pattern: ast.AST,
+        subject: ast.AST,
+        *,
+        path: str,
+        env: dict[str, _IdentityPointsTo],
+        visited_fns: set[int],
+        local_fns: Mapping[str, ast.FunctionDef | ast.AsyncFunctionDef] | None = None,
+        local_classes: Mapping[str, ast.ClassDef] | None = None,
+    ) -> None:
+        """Seed one Match case pattern for CF walkers that own the Match."""
+
+        active_classes = _enter_session_ctx(visited_fns, local_fns, local_classes)
+
+        def _env_class_alias(bound_name: str, matched_name: ast.AST) -> None:
+            env[bound_name] = _eval_expr(matched_name, env, path=path)
+
+        _seed_match_binds(
+            pattern,
+            [subject],
+            active_classes=active_classes,
+            on_class_alias=_env_class_alias,
+        )
+
     class _IdentityScanner:
         pass
 
     scanner = _IdentityScanner()
+    scanner.seed_for_binding = seed_for_binding  # type: ignore[method-assign]
+    scanner.seed_match_binding = seed_match_binding  # type: ignore[method-assign]
     scanner.scan_stmts = _scan_stmts  # type: ignore[method-assign]
     scanner.observe_expr = observe_expr  # type: ignore[method-assign]
     scanner.scan_module_init = scan_module_init  # type: ignore[method-assign]
@@ -6804,6 +7637,8 @@ def begin_request_time_identity_session(
         visited_fns=set(),
         _scan_stmts=scanner.scan_stmts,
         _observe_expr=scanner.observe_expr,
+        _seed_for=scanner.seed_for_binding,  # type: ignore[attr-defined]
+        _seed_match=scanner.seed_match_binding,  # type: ignore[attr-defined]
         _resolver=resolver,
         _reestablished_exports={},
         _reestablished_behaviors=set(),

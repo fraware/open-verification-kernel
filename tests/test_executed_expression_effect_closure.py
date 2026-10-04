@@ -4196,7 +4196,371 @@ def handler(request, bypass_filter=False):
         assert findings[0].reason != "source_proved_server_authority_write"
 
 
+def _ninth_src(body: str, *, imports: str = "") -> str:
+    """Build a handler source around ``body`` (indented one level by callers).
+
+    ``Mut`` / ``Base`` are defined only when referenced; ``Mut()`` rebinds
+    ``helpers.write_state`` to an attacker-controlled writer and ``Base``
+    does the same from ``__init_subclass__``.
+    """
+
+    lines = ["import helpers", *([imports] if imports else [])]
+    lines += [
+        "def evil(state, value):",
+        "    state.bypass_filter = value",
+        "def handler(request, bypass_filter=False):",
+    ]
+    if "Mut" in body:
+        lines += [
+            "    class Mut:",
+            "        def __init__(self):",
+            "            helpers.write_state = evil",
+        ]
+    if "Base" in body:
+        lines += [
+            "    class Base:",
+            "        def __init_subclass__(cls, **kw):",
+            "            helpers.write_state = evil",
+        ]
+    lines += [f"    {ln}" if ln else ln for ln in body.strip("\n").split("\n")]
+    lines += [
+        "    helpers.write_state(request.state, bypass_filter)",
+        "    return request.state.bypass_filter",
+    ]
+    return "\n".join(lines)
+
+
+_NINTH_EXEC = '"helpers.write_state = evil"'
+
+
+def _assert_ninth_not_authorized(cases: tuple[tuple[str, str], ...]) -> None:
+    leaked: list[str] = []
+    for body, imports in cases:
+        findings = _unit(_ninth_src(body, imports=imports))
+        if (
+            findings[0].status == "authorized"
+            or findings[0].reason == "source_proved_server_authority_write"
+        ):
+            leaked.append(body)
+    assert not leaked, "false PASS for:\n" + "\n---\n".join(leaked)
+
+
+def test_ninth_pass_match_subject_peel_class_and_protocol() -> None:
+    """Match subjects (Name/walrus/dict()/``**``/non-constant keys) seed rest."""
+
+    _assert_ninth_not_authorized(
+        (
+            ('d = {"c": Mut}\nmatch d:\n    case {**rest}:\n        rest["c"]()', ""),
+            (
+                'match (d := {"c": Mut}):\n    case {**rest}:\n        rest["c"]()',
+                "",
+            ),
+            ('match dict(c=Mut):\n    case {**rest}:\n        rest["c"]()', ""),
+            (
+                'match {**{"c": Mut}}:\n    case {**rest}:\n        rest["c"]()',
+                "",
+            ),
+            (
+                'k = "c"\nmatch {k: Mut}:\n    case {**rest}:\n        rest["c"]()',
+                "",
+            ),
+            (
+                'match {"c": Mut}:\n    case {**rest}:\n        rest["c"].__call__()',
+                "",
+            ),
+            (
+                'extra = {"c": Mut}\nmatch {**extra}:\n    case {**rest}:\n'
+                '        rest["c"]()',
+                "",
+            ),
+            (
+                'match {"a": 1, **{"c": Mut}}:\n    case {**rest}:\n'
+                '        rest["c"]()',
+                "",
+            ),
+            (
+                'd = {"e": exec}\nmatch d:\n    case {**rest}:\n'
+                f"        rest[\"e\"]({_NINTH_EXEC})",
+                "",
+            ),
+            (
+                'd = {"e": exec}\nmatch d:\n    case {**rest}:\n'
+                f"        rest[\"e\"].__call__({_NINTH_EXEC})",
+                "",
+            ),
+            (
+                'match (d := {"e": exec}):\n    case {**rest}:\n'
+                f"        rest[\"e\"]({_NINTH_EXEC})",
+                "",
+            ),
+            (
+                '{"e": exec}["e"].__call__(' + _NINTH_EXEC + ")",
+                "",
+            ),
+            (
+                'tn = type.__new__\nd = {"t": tn}\nmatch d:\n    case {**rest}:\n'
+                '        rest["t"](type, "C", (Base,), {})',
+                "",
+            ),
+            (
+                'oc = operator.call\nmatch dict(o=oc):\n    case {**rest}:\n'
+                f"        rest[\"o\"](exec, {_NINTH_EXEC})",
+                "import operator",
+            ),
+            (
+                'oc = operator.call\nmatch dict(o=oc):\n    case {**rest}:\n'
+                f"        rest[\"o\"].__call__(exec, {_NINTH_EXEC})",
+                "import operator",
+            ),
+            (
+                f'xs = (exec,)\nmatch xs:\n    case (*r,):\n        r[0]({_NINTH_EXEC})',
+                "",
+            ),
+        )
+    )
+
+
+def test_ninth_pass_alias_ns_name_bound_and_setdefault() -> None:
+    """Name-bound namespace projections and ``setdefault`` view attr."""
+
+    tail = (
+        'Proxy = {proxy}\ns = Proxy({{"s": request.state}})["s"]\n'
+        "s.bypass_filter = bypass_filter"
+    )
+    cases = (
+        'ns = types.__dict__\nProxy = ns.get("MappingProxyType")\n'
+        's = Proxy({"s": request.state})["s"]\ns.bypass_filter = bypass_filter',
+        'ns = vars(types)\nProxy = ns.get("MappingProxyType")\n'
+        's = Proxy({"s": request.state})["s"]\ns.bypass_filter = bypass_filter',
+        'ns = types.__dict__\nProxy = ns["MappingProxyType"]\n'
+        's = Proxy({"s": request.state})["s"]\ns.bypass_filter = bypass_filter',
+        'ns = types.__dict__\nProxy = getattr(ns, "get")("MappingProxyType")\n'
+        's = Proxy({"s": request.state})["s"]\ns.bypass_filter = bypass_filter',
+        'ns = types.__dict__\n'
+        'Proxy = getattr(ns, "__getitem__")("MappingProxyType")\n'
+        's = Proxy({"s": request.state})["s"]\ns.bypass_filter = bypass_filter',
+        'ns = vars(types)\nProxy = getattr(ns, "pop")("MappingProxyType")\n'
+        's = Proxy({"s": request.state})["s"]\ns.bypass_filter = bypass_filter',
+        tail.format(proxy='types.__dict__.setdefault("MappingProxyType")'),
+        tail.format(proxy='vars(types).setdefault("MappingProxyType")'),
+        tail.format(
+            proxy='getattr(types.__dict__, "setdefault")("MappingProxyType")'
+        ),
+        'ns = types.__dict__\nProxy = ns.setdefault("MappingProxyType")\n'
+        's = Proxy({"s": request.state})["s"]\ns.bypass_filter = bypass_filter',
+    )
+    _assert_ninth_not_authorized(tuple((c, "import types") for c in cases))
+
+
+def test_ninth_pass_dict_ctor_merge_and_adapters_never_authorized() -> None:
+    """defaultdict/ChainMap/Name-bound merge/operator or_/ior/comps/zip/update."""
+
+    ex = _NINTH_EXEC
+    plain = (
+        f'defaultdict(None, {{"e": exec}})["e"]({ex})',
+        f'defaultdict(e=exec)["e"]({ex})',
+        f'ChainMap({{"e": exec}})["e"]({ex})',
+        f'd = {{"e": exec}}\n(d | {{}})["e"]({ex})',
+        f'd = {{"e": exec}}\n({{}} | d)["e"]({ex})',
+        f'd = {{"e": exec}}\ne = d | {{}}\ne["e"]({ex})',
+        f'd = {{"e": exec}}\ne = {{}} | d\ne["e"]({ex})',
+        f'operator.or_({{}}, {{"e": exec}})["e"]({ex})',
+        f'operator.ior({{}}, {{"e": exec}})["e"]({ex})',
+        f'{{}}.__or__({{"e": exec}})["e"]({ex})',
+        f'{{}}.__ior__({{"e": exec}})["e"]({ex})',
+        f'd = {{"e": exec}}\nd.__or__({{}})["e"]({ex})',
+        f'd = {{}}\nd.__ior__({{"e": exec}})["e"]({ex})',
+        f'D = dict.__call__\nD(e=exec)["e"]({ex})',
+        f'D = dict\nE = D.__call__\nE(e=exec)["e"]({ex})',
+        f'd = {{"e": exec}}\ne = d["e"].__call__\ne({ex})',
+        f'next(x for x in [exec])({ex})',
+        f'[x for x in [exec]][0]({ex})',
+        f'next(iter([x for x in [exec]]))({ex})',
+        f'for _, f in enumerate([exec]):\n    f({ex})',
+        f'for f, in zip([exec]):\n    f({ex})',
+        f'next(zip([exec]))[0]({ex})',
+        f'next(enumerate([exec]))[1]({ex})',
+        f'd = {{}}\nd.update(e=exec)\nd["e"]({ex})',
+        f'd = {{}}\nd.update({{"e": exec}})\nd["e"]({ex})',
+        f'd = {{}}\nd.setdefault("e", exec)\nd["e"]({ex})',
+        f'd = {{"e": exec}}\nd.copy()["e"]({ex})',
+        f'd = {{"e": exec}}\nc = d.copy()\nc["e"]({ex})',
+        f'd = {{"e": exec}}\ndict(d)["e"]({ex})',
+        f'{{"e": exec}}.copy()["e"]({ex})',
+    )
+    cases = [(c, "from collections import ChainMap, defaultdict\nimport operator") for c in plain]
+    _assert_ninth_not_authorized(tuple(cases))
+    oc_cases = (
+        f'oc = operator.call\nfor f in zip([oc]):\n    f[0](exec, {ex})',
+        f'oc = operator.call\nfor _, f in enumerate([oc]):\n    f(exec, {ex})',
+    )
+    _assert_ninth_not_authorized(tuple((c, "import operator") for c in oc_cases))
+
+
+def test_ninth_pass_interproc_for_dict_view_seeds_never_authorized() -> None:
+    """Name/walrus/getattr/DictComp dict-view For seeds + class construction."""
+
+    _assert_ninth_not_authorized(
+        (
+            ('d = {"c": Mut}\nfor C in d.values():\n    C()', ""),
+            ('for C in (d := {"c": Mut}).values():\n    C()', ""),
+            ('d = {Mut: 1}\nfor C in d.keys():\n    C()', ""),
+            ('d = {"c": Mut}\nfor k, C in d.items():\n    C()', ""),
+            ('for C in getattr({"c": Mut}, "values")():\n    C()', ""),
+            ('d = {"c": Mut}\nfor C in getattr(d, "values")():\n    C()', ""),
+            ('for k, C in {k: Mut for k in ["c"]}.items():\n    C()', ""),
+            ('for C in {k: Mut for k in ["c"]}.values():\n    C()', ""),
+            ('for C in dict(c=Mut).values():\n    C()', ""),
+            ('for C in {"c": Mut}.copy().values():\n    C()', ""),
+        )
+    )
+
+
+def test_ninth_pass_nested_import_install_peels_never_authorized() -> None:
+    """``n.install.__call__`` / getattr.__call__ / packed install peels."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "n.install.__call__(evil)",
+        'getattr(n, "install").__call__(evil)',
+        '[getattr(n, "install")][0](evil)',
+        "next(iter([n.install]))(evil)",
+        "next(iter([n.install])).__call__(evil)",
+        "(f := n.install)(evil)",
+        "{'i': n.install}['i'](evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_ninth_pass_type_protocol_nested_call_and_dict_view_products() -> None:
+    """Nested ``tc.__call__`` / match-rest / for / map; setdefault; vars(builtins)."""
+
+    cases = (
+        'tc = type.__call__\n(d := tc.__call__)(Mut)',
+        'd = (tc := type.__call__).__call__\nd(Mut)',
+        'tc = type.__call__\nd = (e := tc.__call__)\nd(Mut)',
+        'type.__call__.__call__(Mut)',
+        'tc = type.__call__\ngetattr(tc, "__call__")(Mut)',
+        'getattr(type.__call__, "__call__")(Mut)',
+        'tc = type.__call__\nd = getattr(tc, "__call__")\nd(Mut)',
+        'tc = type.__call__\nfor f in [tc.__call__]:\n    f(Mut)',
+        'tc = type.__call__\nfor f in [tc]:\n    f.__call__(Mut)',
+        'tc = type.__call__\nnext(map(lambda x: x, [tc.__call__]))(Mut)',
+        'tc = type.__call__\nmatch {"t": tc}:\n    case {**rest}:\n        rest["t"].__call__(Mut)',
+        'tc = type.__call__\nmatch {"t": tc.__call__}:\n    case {"t": t}:\n        t(Mut)',
+        'tc = type.__call__\nmatch {"t": tc.__call__}:\n    case {**rest}:\n        rest["t"](Mut)',
+        'tn = type.__new__\ntn.__call__.__call__(type, "C", (Base,), {})',
+        'tn = type.__new__\nfor f in [tn.__call__]:\n    f(type, "C", (Base,), {})',
+        'D = dict\ng = D.setdefault\ng({}, "m", Mut)()',
+        'g = dict.setdefault\ng({}, "m", Mut)()',
+        'g = builtins.dict.setdefault\ng({}, "m", Mut)()',
+        'g = vars(builtins)["dict"].get\ng({}, "missing", Mut)()',
+        'g = builtins.__dict__["dict"].get\ng({}, "missing", Mut)()',
+        'g = vars(builtins).get("dict").get\ng({}, "missing", Mut)()',
+        'g = vars(builtins)["dict"].setdefault\ng({}, "m", Mut)()',
+        'ns = vars(builtins)\ng = ns["dict"].get\ng({}, "missing", Mut)()',
+    )
+    _assert_ninth_not_authorized(tuple((c, "import builtins") for c in cases))
+
+
+def test_ninth_pass_lexical_keys_values_unpack_never_authorized() -> None:
+    """Assign/star unpack from ``.keys()``/``.values()``/``.items()`` + match rest."""
+
+    _assert_ninth_not_authorized(
+        (
+            ('C, = {Mut: 1}.keys()\nC()', ""),
+            ('[C] = {Mut: 1}.keys()\nC()', ""),
+            ('C, = {"c": Mut}.values()\nC()', ""),
+            ('*xs, = {Mut: 1}.keys()\nxs[0]()', ""),
+            ('*xs, = {"c": Mut}.values()\nxs[0]()', ""),
+            ('(k, C), = {"c": Mut}.items()\nC()', ""),
+            ('C, = {Mut: 1}\nC()', ""),
+            ('d = {Mut: 1}\nC, = d.keys()\nC()', ""),
+            ('C, = list({Mut: 1}.keys())\nC()', ""),
+            ('C, = ({} | {Mut: 1}).keys()\nC()', ""),
+            (
+                "class CM:\n"
+                "    def __enter__(self):\n"
+                "        return {Mut: 1}.keys()\n"
+                "    def __exit__(self, *a):\n"
+                "        return False\n"
+                "with CM() as ks:\n"
+                "    C, = ks\n"
+                "    C()",
+                "",
+            ),
+            (
+                "class CM:\n"
+                "    def __enter__(self):\n"
+                "        return {Mut: 1}\n"
+                "    def __exit__(self, *a):\n"
+                "        return False\n"
+                "with CM() as d:\n"
+                "    C, = d.keys()\n"
+                "    C()",
+                "",
+            ),
+            ('match {"c": Mut}:\n    case {**rest}:\n        for C in rest.values():\n            C()', ""),
+            ('match {"c": Mut}:\n    case {**rest}:\n        for k, C in rest.items():\n            C()', ""),
+            ('match {"c": Mut}:\n    case {**rest}:\n        C, = rest.values()\n        C()', ""),
+            ('match {Mut: 1}:\n    case {**rest}:\n        C, = rest.keys()\n        C()', ""),
+            ('match {Mut: 1}:\n    case {**rest}:\n        for C in rest.keys():\n            C()', ""),
+            ('match {"c": Mut}:\n    case {**rest}:\n        (k, C), = rest.items()\n        C()', ""),
+        )
+    )
+
+
+def test_ninth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of the ninth-pass shapes remain authorized."""
+
+    for body in (
+        'd = {"c": int}\nmatch d:\n    case {**rest}:\n        rest["c"]()',
+        'ns = types.__dict__\nProxy = ns.get("MappingProxyType")\nProxy({})',
+        'D = dict.__call__\nD(e=len)["e"]("x")',
+        'C, = {int: 1}.keys()\nC()',
+    ):
+        src = (
+            "import helpers\nimport types\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
 def test_persistent_version_bumped_for_executed_expr_closure() -> None:
     """Cache / semantic versions bump with PASS-semantics change."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.60.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.61.0"
