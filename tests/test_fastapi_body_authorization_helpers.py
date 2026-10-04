@@ -147,7 +147,7 @@ async def handler(request, user = Depends(get_current_user)):
         {"app/routes.py": source},
         profile=_body_helper_profile(),
     )
-    assert ir.extractor.extractor_version == "0.58.0"
+    assert ir.extractor.extractor_version == "0.59.0"
     assert len(ir.guards) == 1
     assert ir.guards[0].origin.source_range is not None
     assert ir.guards[0].effectiveness == "unproved"

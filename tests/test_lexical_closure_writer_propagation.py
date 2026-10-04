@@ -2391,5 +2391,85 @@ def handler(request, bypass_filter=False):
         _never_authorized(_unit(routes))
 
 
+def test_seventh_pass_packed_class_constructor_seeds_never_authorized() -> None:
+    """Packed class aliases + For/with constructor seeds observe ``__call__``."""
+
+    for routes in (
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Cls:
+        def __call__(self):
+            helpers.write_state = evil
+    C = [Cls][0]
+    C()()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Cls:
+        def __call__(self):
+            helpers.write_state = evil
+    tmp = [Cls][0]
+    C = tmp
+    C()()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Cls:
+        def __call__(self):
+            helpers.write_state = evil
+    for C in [Cls]:
+        C()()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Cls:
+        def __call__(self):
+            helpers.write_state = evil
+    class CM:
+        def __enter__(self):
+            return Cls
+        def __exit__(self, *a):
+            return False
+    with CM() as C:
+        C()()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    match (Mut,):
+        case (*xs,):
+            xs[0]()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        _never_authorized(_unit(routes))
+
+
 def test_persistent_version_bumped_for_lexical_closure() -> None:
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.58.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.59.0"

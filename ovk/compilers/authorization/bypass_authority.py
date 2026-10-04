@@ -111,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.37.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.38.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -341,6 +341,10 @@ class _RequestStateAliasEnv:
     may_state_names: set[str] = dc_field(default_factory=set)
     # ``from types import MappingProxyType as MPT`` / ``from operator import getitem as gi``.
     adapter_aliases: set[str] = dc_field(default_factory=set)
+    # Name-bound container packs projecting adapters: ``d = {"p": Proxy}``.
+    container_adapter_packs: dict[str, dict[object, tuple[str, ...]]] = dc_field(
+        default_factory=dict
+    )
     operator_projection_aliases: dict[str, str] = dc_field(default_factory=dict)
     # Renamed ``vars`` / ``globals`` / ``locals`` namespace projectors.
     ns_projection_aliases: set[str] = dc_field(default_factory=set)
@@ -499,7 +503,8 @@ class _RequestStateAliasEnv:
                 if attr in _OPERATOR_PROJECTION_NAMES:
                     self.operator_projection_aliases[name] = attr
             # ``Proxy = types.__dict__.get("MappingProxyType")`` /
-            # ``v(types).get("MappingProxyType")``.
+            # ``v(types).get("MappingProxyType")`` /
+            # ``getattr(types.__dict__, "get")("MappingProxyType")``.
             if (
                 isinstance(func, ast.Attribute)
                 and func.attr == "get"
@@ -515,6 +520,88 @@ class _RequestStateAliasEnv:
                         self.adapter_aliases.add(name)
                     if key in _OPERATOR_PROJECTION_NAMES:
                         self.operator_projection_aliases[name] = key
+            elif isinstance(func, ast.Call) and value.args:
+                g_func = func.func
+                while isinstance(g_func, ast.NamedExpr):
+                    g_func = g_func.value
+                is_g = (
+                    isinstance(g_func, ast.Name) and g_func.id in g_aliases
+                ) or (isinstance(g_func, ast.Attribute) and g_func.attr == "getattr")
+                if (
+                    is_g
+                    and len(func.args) >= 2
+                    and isinstance(func.args[1], ast.Constant)
+                    and func.args[1].value == "get"
+                    and isinstance(value.args[0], ast.Constant)
+                    and isinstance(value.args[0].value, str)
+                    and func.args
+                    and self._base_is_namespace_projection(
+                        func.args[0], getattr_aliases=g_aliases
+                    )
+                ):
+                    key = value.args[0].value
+                    if key == "MappingProxyType":
+                        self.adapter_aliases.add(name)
+                    if key in _OPERATOR_PROJECTION_NAMES:
+                        self.operator_projection_aliases[name] = key
+        # Name-bound adapter container packs: ``d = {"p": Proxy}``.
+        pack: dict[object, tuple[str, ...]] = {}
+        peeled = value
+        while isinstance(peeled, ast.NamedExpr):
+            peeled = peeled.value
+        if isinstance(peeled, ast.Dict):
+            for map_key, map_val in zip(peeled.keys, peeled.values):
+                if map_val is None or not isinstance(map_key, ast.Constant):
+                    continue
+                names: list[str] = []
+                walk = map_val
+                while isinstance(walk, ast.NamedExpr):
+                    walk = walk.value
+                if isinstance(walk, ast.Name):
+                    names.append(walk.id)
+                elif isinstance(walk, ast.Attribute):
+                    names.append(walk.attr)
+                if names:
+                    pack[map_key.value] = tuple(names)
+        elif (
+            isinstance(peeled, ast.Call)
+            and isinstance(peeled.func, ast.Name)
+            and peeled.func.id == "dict"
+        ):
+            for kw in peeled.keywords:
+                if kw.arg is None and isinstance(kw.value, ast.Dict):
+                    for map_key, map_val in zip(kw.value.keys, kw.value.values):
+                        if map_val is None or not isinstance(map_key, ast.Constant):
+                            continue
+                        names = []
+                        walk = map_val
+                        while isinstance(walk, ast.NamedExpr):
+                            walk = walk.value
+                        if isinstance(walk, ast.Name):
+                            names.append(walk.id)
+                        elif isinstance(walk, ast.Attribute):
+                            names.append(walk.attr)
+                        if names:
+                            pack[map_key.value] = tuple(names)
+                elif kw.arg is not None:
+                    names = []
+                    walk = kw.value
+                    while isinstance(walk, ast.NamedExpr):
+                        walk = walk.value
+                    if isinstance(walk, ast.Name):
+                        names.append(walk.id)
+                    elif isinstance(walk, ast.Attribute):
+                        names.append(walk.attr)
+                    if names:
+                        pack[kw.arg] = tuple(names)
+        elif isinstance(peeled, ast.Name) and peeled.id in self.container_adapter_packs:
+            pack = dict(self.container_adapter_packs[peeled.id])
+        if pack:
+            self.container_adapter_packs[name] = pack
+        elif name in self.container_adapter_packs and not isinstance(
+            peeled, (ast.Dict, ast.Call, ast.Name)
+        ):
+            self.container_adapter_packs.pop(name, None)
 
     def snapshot(self) -> "_RequestStateAliasEnv":
         """Deep-copy alias sets for control-flow fork."""
@@ -525,6 +612,9 @@ class _RequestStateAliasEnv:
             may_request_names=set(self.may_request_names),
             may_state_names=set(self.may_state_names),
             adapter_aliases=set(self.adapter_aliases),
+            container_adapter_packs={
+                k: dict(v) for k, v in self.container_adapter_packs.items()
+            },
             operator_projection_aliases=dict(self.operator_projection_aliases),
             ns_projection_aliases=set(self.ns_projection_aliases),
         )
@@ -537,6 +627,9 @@ class _RequestStateAliasEnv:
         self.may_request_names = set(other.may_request_names)
         self.may_state_names = set(other.may_state_names)
         self.adapter_aliases = set(other.adapter_aliases)
+        self.container_adapter_packs = {
+            k: dict(v) for k, v in other.container_adapter_packs.items()
+        }
         self.operator_projection_aliases = dict(other.operator_projection_aliases)
         self.ns_projection_aliases = set(other.ns_projection_aliases)
 
@@ -983,6 +1076,33 @@ class _RequestStateAliasEnv:
                                     and map_key.value == node.slice.value
                                 ):
                                     _peel_adapter_func(map_val)
+                        # Name-bound dict packs: ``d = {"p": Proxy}; d["p"]``.
+                        if (
+                            isinstance(node.value, ast.Name)
+                            and node.value.id in self.container_adapter_packs
+                        ):
+                            pack = self.container_adapter_packs[node.value.id]
+                            for n in pack.get(node.slice.value, ()):
+                                func_names.append(n)
+                        # ``dict(p=Proxy)["p"]`` / ``dict(**{"e": exec})["e"]``.
+                        if (
+                            isinstance(node.value, ast.Call)
+                            and isinstance(node.value.func, ast.Name)
+                            and node.value.func.id == "dict"
+                        ):
+                            for kw in node.value.keywords:
+                                if kw.arg is None and isinstance(kw.value, ast.Dict):
+                                    for map_key, map_val in zip(
+                                        kw.value.keys, kw.value.values
+                                    ):
+                                        if (
+                                            map_val is not None
+                                            and isinstance(map_key, ast.Constant)
+                                            and map_key.value == node.slice.value
+                                        ):
+                                            _peel_adapter_func(map_val)
+                                elif kw.arg == node.slice.value:
+                                    _peel_adapter_func(kw.value)
                     return
                 if isinstance(node, ast.Dict):
                     for map_val in node.values:
@@ -1000,6 +1120,9 @@ class _RequestStateAliasEnv:
                     for arg in node.args:
                         nested = arg.value if isinstance(arg, ast.Starred) else arg
                         _peel_adapter_func(nested)
+                    for kw in node.keywords:
+                        if kw.value is not None:
+                            _peel_adapter_func(kw.value)
 
             _peel_adapter_func(value.func)
             is_adapter = any(
@@ -1220,10 +1343,16 @@ def join_request_state_alias_envs(
     may_request -= must_request
     may_state -= must_state
     adapter_aliases: set[str] = set()
+    container_adapter_packs: dict[str, dict[object, tuple[str, ...]]] = {}
     operator_projection_aliases: dict[str, str] = {}
     ns_projection_aliases: set[str] = set()
     for state in states:
         adapter_aliases |= state.adapter_aliases
+        for name, pack in state.container_adapter_packs.items():
+            bucket = container_adapter_packs.setdefault(name, {})
+            for key, names in pack.items():
+                prev = bucket.get(key, ())
+                bucket[key] = tuple(dict.fromkeys([*prev, *names]))
         operator_projection_aliases.update(state.operator_projection_aliases)
         ns_projection_aliases |= state.ns_projection_aliases
     return _RequestStateAliasEnv(
@@ -1232,6 +1361,7 @@ def join_request_state_alias_envs(
         may_request_names=may_request,
         may_state_names=may_state,
         adapter_aliases=adapter_aliases,
+        container_adapter_packs=container_adapter_packs,
         operator_projection_aliases=operator_projection_aliases,
         ns_projection_aliases=ns_projection_aliases,
     )
@@ -2158,7 +2288,8 @@ def _collect_writes_in_function(
 
         Nested ``return Cls()`` / ``obj = Cls(); obj()`` / ``Cls()()`` must see
         governed ``__call__`` even when the constructor is not a followed
-        function frame (Unknown > false PASS).
+        function frame. Also peels packed constructors ``xs[0]()`` after
+        match-star / container class seeds (Unknown > false PASS).
         """
 
         returned = list(call_returned_closures.get(id(call), []))
@@ -2168,21 +2299,32 @@ def _collect_writes_in_function(
         func = call.func
         while isinstance(func, ast.NamedExpr):
             func = func.value
+        cls: ast.ClassDef | None = None
         if isinstance(func, ast.Name):
             cls = _lookup_local_class(func.id)
-            if cls is not None:
-                method = _governed_class_method(cls, "__call__")
-                if method is not None:
-                    closure = _snapshot_returned_closure(method)
-                    call_returned_closures[id(call)] = [closure]
-                    nested_free_vars[id(closure.node)] = closure.free_vars
-                    nested_default_captures[id(closure.node)] = dict(
-                        closure.default_captures
-                    )
-                    returned_closure_captures[id(closure.node)] = dict(
-                        closure.free_classifications
-                    )
-                    return [closure], False
+        else:
+            # Shared constructor peel: ``[Cls][0]()`` / ``xs[0]()`` after
+            # star-bind seeds ``local_classes[xs] = Cls``.
+            cls = _resolve_class_constructor_alias(func)
+            if cls is None and isinstance(func, ast.Subscript):
+                base = func.value
+                while isinstance(base, ast.NamedExpr):
+                    base = base.value
+                if isinstance(base, ast.Name):
+                    cls = _lookup_local_class(base.id)
+        if cls is not None:
+            method = _governed_class_method(cls, "__call__")
+            if method is not None:
+                closure = _snapshot_returned_closure(method)
+                call_returned_closures[id(call)] = [closure]
+                nested_free_vars[id(closure.node)] = closure.free_vars
+                nested_default_captures[id(closure.node)] = dict(
+                    closure.default_captures
+                )
+                returned_closure_captures[id(closure.node)] = dict(
+                    closure.free_classifications
+                )
+                return [closure], False
         return [], False
 
     def _bind_call_product_to_name(name: str, call: ast.Call) -> bool:
@@ -2387,9 +2529,155 @@ def _collect_writes_in_function(
             return cls.name
         return None
 
+    def _resolve_class_constructor_alias(
+        value: ast.AST,
+    ) -> ast.ClassDef | None:
+        """Peel packing to a bare class constructor (not ``Cls()`` instance).
+
+        Shared path for ``C = [Cls][0]`` / ``dict``/``set``/``next(iter)`` /
+        walrus / ``ns.get`` packs so ``C()()`` observes ``__call__`` the same
+        as bare ``C = Cls`` (Unknown > false PASS).
+        """
+
+        value = value.value if isinstance(value, ast.NamedExpr) else value
+        if isinstance(value, ast.Name):
+            return _lookup_local_class(value.id)
+        if isinstance(value, ast.Call):
+            # ``Cls()`` is instance construction — not a constructor alias.
+            # Adapter peels: ``next(iter([Cls]))`` / ``list([Cls])[0]`` path
+            # via packing of args, not the Call itself as construction.
+            func = value.func
+            while isinstance(func, ast.NamedExpr):
+                func = func.value
+            adapter = False
+            if isinstance(func, ast.Name) and func.id in {
+                "next",
+                "iter",
+                "list",
+                "tuple",
+                "set",
+                "frozenset",
+                "sorted",
+                "reversed",
+            }:
+                adapter = True
+            elif isinstance(func, ast.Attribute) and func.attr in {
+                "get",
+                "pop",
+                "__getitem__",
+            }:
+                # ``ns.get("C")`` / ``d["C"]`` style peels.
+                resolved: ast.ClassDef | None = None
+                for arg in value.args:
+                    nested = arg.value if isinstance(arg, ast.Starred) else arg
+                    cls = _resolve_class_constructor_alias(nested)
+                    if cls is None:
+                        continue
+                    if resolved is None:
+                        resolved = cls
+                    elif resolved is not cls:
+                        return None
+                if (
+                    func.attr == "get"
+                    and len(value.args) >= 2
+                    and resolved is None
+                ):
+                    return _resolve_class_constructor_alias(value.args[1])
+                if resolved is not None:
+                    return resolved
+                return _resolve_class_constructor_alias(func.value)
+            if adapter:
+                resolved = None
+                for arg in value.args:
+                    nested = arg.value if isinstance(arg, ast.Starred) else arg
+                    cls = _resolve_class_constructor_alias(nested)
+                    if cls is None:
+                        continue
+                    if resolved is None:
+                        resolved = cls
+                    elif resolved is not cls:
+                        return None
+                return resolved
+            return None
+        if isinstance(value, ast.IfExp):
+            left = _resolve_class_constructor_alias(value.body)
+            right = _resolve_class_constructor_alias(value.orelse)
+            if left is not None and (right is None or left is right):
+                return left
+            if right is not None and left is None:
+                return right
+            return None
+        if isinstance(value, ast.BoolOp):
+            resolved = None
+            for operand in value.values:
+                cls = _resolve_class_constructor_alias(operand)
+                if cls is None:
+                    continue
+                if resolved is None:
+                    resolved = cls
+                elif resolved is not cls:
+                    return None
+            return resolved
+        if isinstance(value, (ast.List, ast.Tuple, ast.Set)):
+            resolved = None
+            for elt in value.elts:
+                nested = elt.value if isinstance(elt, ast.Starred) else elt
+                cls = _resolve_class_constructor_alias(nested)
+                if cls is None:
+                    continue
+                if resolved is None:
+                    resolved = cls
+                elif resolved is not cls:
+                    return None
+            return resolved
+        if isinstance(value, ast.Dict):
+            resolved = None
+            for map_val in value.values:
+                if map_val is None:
+                    continue
+                cls = _resolve_class_constructor_alias(map_val)
+                if cls is None:
+                    continue
+                if resolved is None:
+                    resolved = cls
+                elif resolved is not cls:
+                    return None
+            return resolved
+        if isinstance(value, ast.Subscript):
+            if isinstance(value.value, ast.Dict) and isinstance(
+                value.slice, ast.Constant
+            ):
+                for map_key, map_val in zip(value.value.keys, value.value.values):
+                    if (
+                        map_val is not None
+                        and isinstance(map_key, ast.Constant)
+                        and map_key.value == value.slice.value
+                    ):
+                        return _resolve_class_constructor_alias(map_val)
+            return _resolve_class_constructor_alias(value.value)
+        if isinstance(value, ast.BinOp) and isinstance(value.op, ast.BitOr):
+            left = _resolve_class_constructor_alias(value.left)
+            right = _resolve_class_constructor_alias(value.right)
+            return left or right
+        return None
+
     def _seed_name_instance_or_class(name: str, value: ast.AST) -> None:
         """Shared seed for instance carriers and class constructor aliases."""
 
+        # Class constructor aliases first (packed ``[Cls][0]`` / bare ``Cls``).
+        src_cls = _resolve_class_constructor_alias(value)
+        if src_cls is not None:
+            local_classes[name] = src_cls
+            if identity_session is not None:
+                identity_session.observe_statement(
+                    ast.Assign(
+                        targets=[ast.Name(id=name, ctx=ast.Store())],
+                        value=ast.Name(id=src_cls.name, ctx=ast.Load()),
+                    )
+                )
+            # Constructor alias is not an instance carrier.
+            instance_class_of.pop(name, None)
+            return
         packed_cls = _instance_class_name_from_expr(value)
         if packed_cls is not None:
             instance_class_of[name] = packed_cls
@@ -2447,30 +2735,33 @@ def _collect_writes_in_function(
             if isinstance(pat, ast.MatchSequence) and isinstance(
                 value, (ast.List, ast.Tuple)
             ):
-                if any(isinstance(item, ast.MatchStar) for item in pat.patterns):
-                    # Star binders still seed fixed prefix peels when lengths allow.
-                    packed_cls = _instance_class_name_from_expr(value)
-                    if packed_cls is not None:
+                has_star = any(
+                    isinstance(item, ast.MatchStar) for item in pat.patterns
+                )
+                if has_star or len(pat.patterns) != len(value.elts):
+                    # Star / length-mismatch: still peel elements into binders
+                    # so ``case (*xs,): xs[0]()`` / ``case [*xs]:`` seed.
+                    for elt in value.elts:
+                        nested = elt.value if isinstance(elt, ast.Starred) else elt
+                        ctor = _resolve_class_constructor_alias(nested)
+                        inst = _instance_class_name_from_expr(nested)
                         for name in _match_pattern_bound_names(pat):
-                            instance_class_of[name] = packed_cls
-                    return
-                if len(pat.patterns) != len(value.elts):
-                    packed_cls = _instance_class_name_from_expr(value)
-                    if packed_cls is not None:
-                        for name in _match_pattern_bound_names(pat):
-                            instance_class_of[name] = packed_cls
+                            if ctor is not None:
+                                local_classes[name] = ctor
+                            elif inst is not None:
+                                instance_class_of[name] = inst
+                    for sub_pat, elt in zip(pat.patterns, value.elts):
+                        if isinstance(sub_pat, ast.MatchStar):
+                            continue
+                        nested = elt.value if isinstance(elt, ast.Starred) else elt
+                        _apply(sub_pat, nested)
                     return
                 for sub_pat, elt in zip(pat.patterns, value.elts):
                     nested = elt.value if isinstance(elt, ast.Starred) else elt
                     _apply(sub_pat, nested)
                 return
             if isinstance(pat, ast.MatchMapping) and isinstance(value, ast.Dict):
-                if pat.rest is not None:
-                    packed_cls = _instance_class_name_from_expr(value)
-                    if packed_cls is not None:
-                        for name in _match_pattern_bound_names(pat):
-                            instance_class_of[name] = packed_cls
-                    return
+                # ``**rest`` must not abandon fixed key class peels.
                 value_by_key: dict[object, ast.AST] = {}
                 for map_key, map_val in zip(value.keys, value.values):
                     if (
@@ -2679,10 +2970,9 @@ def _collect_writes_in_function(
             request_aliases.note_projection_name_alias(
                 target.id, value, getattr_aliases=frozenset(getattr_aliases)
             )
-            # Instance pack: ``x = Box() if c else Box()`` / nested walrus.
-            packed_cls = _instance_class_name_from_expr(value)
-            if packed_cls is not None:
-                instance_class_of[target.id] = packed_cls
+            # Shared constructor/instance peel before callable-product join.
+            _seed_name_instance_or_class(target.id, value)
+            packed_cls = instance_class_of.get(target.id)
             # Dual-may precise join when both arms are known nested/returned
             # closures; unknown callable arm → fail closed on later call.
             closures, unknown = _callable_products_from_expr(value)
@@ -2695,13 +2985,13 @@ def _collect_writes_in_function(
                 # the may-set is still an unresolved callable (Unknown > PASS).
                 unknown = True
             if closures or unknown:
-                if packed_cls is None:
+                if packed_cls is None and target.id not in local_classes:
                     instance_class_of.pop(target.id, None)
                 _install_returned_closures(
                     target.id, closures, unknown=unknown
                 )
                 return
-            if packed_cls is not None:
+            if packed_cls is not None or target.id in local_classes:
                 return
         if isinstance(value, ast.Call):
             _clear_callable_name(target.id)
@@ -2709,17 +2999,8 @@ def _collect_writes_in_function(
             request_aliases.note_projection_name_alias(
                 target.id, value, getattr_aliases=frozenset(getattr_aliases)
             )
-            # Instance alias: ``b = Box()`` for later ``b.fn()`` packing peel.
-            if isinstance(value.func, ast.Name) and _lookup_local_class(
-                value.func.id
-            ) is not None:
-                instance_class_of[target.id] = value.func.id
-            else:
-                packed_cls = _instance_class_name_from_expr(value)
-                if packed_cls is not None:
-                    instance_class_of[target.id] = packed_cls
-                else:
-                    instance_class_of.pop(target.id, None)
+            # Shared peel: ``b = Box()`` instances and ``C = next(iter([Cls]))``.
+            _seed_name_instance_or_class(target.id, value)
             if _bind_call_product_to_name(target.id, value):
                 return
         else:
@@ -2727,12 +3008,9 @@ def _collect_writes_in_function(
             request_aliases.note_projection_name_alias(
                 target.id, value, getattr_aliases=frozenset(getattr_aliases)
             )
-            # Container instance pack: ``xs = [Box()]`` for ``xs[0].fn()``.
-            packed_cls = _instance_class_name_from_expr(value)
-            if packed_cls is not None:
-                instance_class_of[target.id] = packed_cls
-            else:
-                instance_class_of.pop(target.id, None)
+            # Shared peel: class constructor packs (``C = [Cls][0]``) and
+            # instance packs (``xs = [Box()]``) — Unknown > false PASS.
+            _seed_name_instance_or_class(target.id, value)
         # Container packing of governed closures into a Name carrier: the
         # Name is not itself callable under the theorem → residual escape so
         # later ``bucket[0]()`` cannot omit the writer (Unknown > false PASS).
@@ -3844,6 +4122,39 @@ def _collect_writes_in_function(
                             followed_any = True
                     return followed_any
 
+        # Packed constructor peels (non-Name): ``[Cls][0]()`` / ``xs[0]()``
+        # after match-star / container seeds. Bare ``Cls()`` stays on the
+        # identity / Name theorem so ``with CM() as …`` enter products remain.
+        if not isinstance(call.func, ast.Name):
+            ctor_cls = _resolve_class_constructor_alias(call.func)
+            if ctor_cls is None and isinstance(call.func, ast.Subscript):
+                base = call.func.value
+                while isinstance(base, ast.NamedExpr):
+                    base = base.value
+                if isinstance(base, ast.Name):
+                    ctor_cls = _lookup_local_class(base.id)
+            if ctor_cls is not None:
+                followed_any = False
+                for proto in ("__new__", "__init__", "__call__"):
+                    method = _governed_class_method(ctor_cls, proto)
+                    if method is None:
+                        continue
+                    if _follow_local_callable_node(
+                        method,
+                        call=call,
+                        control_dependent=control_dependent,
+                        execute_async_body=execute_async_body,
+                    ):
+                        followed_any = True
+                if followed_any:
+                    return True
+                _record_escape(
+                    call,
+                    ast.unparse(call),
+                    control_dependent=control_dependent,
+                )
+                return True
+
         # Chained call products: ``outer()()`` / ``Cls()()`` where the inner
         # Call yielded a nested callable or governed ``__call__``.
         if isinstance(call.func, ast.Call):
@@ -4430,6 +4741,17 @@ def _collect_writes_in_function(
                 isinstance(node.func, ast.Name)
                 and node.func.id in name_unknown_callables
             )
+            # Packed class construction peels: ``xs[0]()`` after match-star seeds.
+            packed_ctor = False
+            if not isinstance(node.func, ast.Name):
+                ctor_peel = _resolve_class_constructor_alias(node.func)
+                if ctor_peel is None and isinstance(node.func, ast.Subscript):
+                    base = node.func.value
+                    while isinstance(base, ast.NamedExpr):
+                        base = base.value
+                    if isinstance(base, ast.Name):
+                        ctor_peel = _lookup_local_class(base.id)
+                packed_ctor = ctor_peel is not None
             local_closure_call = (
                 (
                     isinstance(node.func, ast.Name)
@@ -4443,6 +4765,7 @@ def _collect_writes_in_function(
                 or bool(chained_func_callees)
                 or attr_governed
                 or getattr_governed
+                or packed_ctor
             )
             # Higher-order: governed local callable flows as an actual into an
             # unresolved callee (``bucket.append(poison)``, ``mc(poison)``).
@@ -4999,13 +5322,41 @@ def _collect_writes_in_function(
                         classification = direct.as_may_only()
                     else:
                         classification = AliasClassification()
-                    # Instance carriers from ``__enter__`` return / context expr.
+                    # Instance / class-constructor carriers from ``__enter__``
+                    # return / context expr (``with CM() as C: C()()``).
                     enter_cls = _enter_return_instance_class(
                         item.context_expr, async_enter=is_async_with
                     )
                     if enter_cls is not None:
+                        enter_ctor = None
+                        if (
+                            isinstance(item.context_expr, ast.Call)
+                            and isinstance(item.context_expr.func, ast.Name)
+                        ):
+                            cm_cls = _lookup_local_class(item.context_expr.func.id)
+                            if cm_cls is not None:
+                                method_name = (
+                                    "__aenter__" if is_async_with else "__enter__"
+                                )
+                                method = _governed_class_method(cm_cls, method_name)
+                                if method is not None:
+                                    for stmt in method.body:
+                                        if (
+                                            isinstance(stmt, ast.Return)
+                                            and stmt.value is not None
+                                        ):
+                                            enter_ctor = (
+                                                _resolve_class_constructor_alias(
+                                                    stmt.value
+                                                )
+                                            )
+                                            break
                         for name in as_names:
-                            instance_class_of[name] = enter_cls
+                            if enter_ctor is not None:
+                                local_classes[name] = enter_ctor
+                                instance_class_of.pop(name, None)
+                            else:
+                                instance_class_of[name] = enter_cls
                     else:
                         _seed_assign_target_instance_bindings(
                             item.optional_vars, item.context_expr
