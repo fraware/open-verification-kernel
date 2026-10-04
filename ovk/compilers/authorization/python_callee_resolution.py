@@ -47,7 +47,7 @@ from ovk.compilers.authorization.python_import_space import (
     normalize_path,
 )
 
-_IMPLEMENTATION_VERSION = "0.22.0"
+_IMPLEMENTATION_VERSION = "0.23.0"
 _MAX_IMPORT_FOLLOW_DEPTH = 8
 
 BindingKind = Literal["function", "import_name", "import_module", "rebound"]
@@ -868,7 +868,7 @@ def _attrsetter_static_name(
     """Return the static attribute name for ``operator.attrsetter("x")``."""
 
     aliases = projection_aliases or {}
-    func = call.func
+    func = _peel_call_func(call.func)
     if isinstance(func, ast.Name) and call.args:
         if func.id == "attrsetter" or aliases.get(func.id) == "attrsetter":
             return _static_str(call.args[0])
@@ -889,7 +889,7 @@ def _methodcaller_static_name(
     """Return the static method name for ``operator.methodcaller("x")``."""
 
     aliases = projection_aliases or {}
-    func = call.func
+    func = _peel_call_func(call.func)
     if isinstance(func, ast.Name) and call.args:
         if func.id == "methodcaller" or aliases.get(func.id) == "methodcaller":
             return _static_str(call.args[0])
@@ -910,7 +910,7 @@ def _itemgetter_static_key(
     """Return the static key for ``operator.itemgetter("x")`` / aliases."""
 
     aliases = projection_aliases or {}
-    func = call.func
+    func = _peel_call_func(call.func)
     if isinstance(func, ast.Name) and call.args:
         if func.id == "itemgetter" or aliases.get(func.id) == "itemgetter":
             return _static_str(call.args[0])
@@ -927,7 +927,7 @@ def _attrgetter_static_name(
     """Return the static attribute name for ``operator.attrgetter("x")`` / aliases."""
 
     aliases = projection_aliases or {}
-    func = call.func
+    func = _peel_call_func(call.func)
     if isinstance(func, ast.Name) and call.args:
         if func.id == "attrgetter" or aliases.get(func.id) == "attrgetter":
             return _static_str(call.args[0])
@@ -944,7 +944,7 @@ def _projection_factory_name(
     """Canonical operator projection name for a factory Call, if any."""
 
     aliases = projection_aliases or {}
-    func = call.func
+    func = _peel_call_func(call.func)
     if isinstance(func, ast.Name):
         if func.id in _OPERATOR_PROJECTION_NAMES:
             return func.id
@@ -962,7 +962,7 @@ def _is_partial_factory(
     """True for ``functools.partial(...)`` / ``partial(...)`` / aliases."""
 
     aliases = partial_aliases or frozenset({"partial"})
-    func = call.func
+    func = _peel_call_func(call.func)
     if isinstance(func, ast.Name) and func.id in aliases:
         return True
     if isinstance(func, ast.Attribute) and func.attr == "partial":
@@ -974,14 +974,34 @@ def _is_operator_call_factory(
     call: ast.Call,
     *,
     projection_aliases: Mapping[str, str] | None = None,
+    getattr_aliases: frozenset[str] | None = None,
 ) -> bool:
-    """True for ``operator.call(...)`` / renamed ``call`` imports."""
+    """True for ``operator.call(...)`` / renamed ``call`` / getattr projections.
+
+    Peels NamedExpr so ``(oc := operator.call)(...)`` and Name aliases of
+    ``call`` (``from operator import call as oc``) are recognized before any
+    bare-Name short-circuit (Unknown > false PASS).
+    """
 
     aliases = projection_aliases or {}
-    func = call.func
+    func = _peel_call_func(call.func)
     if isinstance(func, ast.Name):
         return func.id == "call" or aliases.get(func.id) == "call"
-    return isinstance(func, ast.Attribute) and func.attr == "call"
+    if isinstance(func, ast.Attribute) and func.attr == "call":
+        return True
+    # ``getattr(operator, "call")`` / renamed getattr.
+    if isinstance(func, ast.Call):
+        return _getattr_static_name(func, getattr_aliases=getattr_aliases) == "call"
+    return False
+
+
+def _peel_call_func(func: ast.AST) -> ast.AST:
+    """Unwrap NamedExpr / trivial Await layers from a Call.func expression."""
+
+    func = _unwrap_await(func)
+    while isinstance(func, ast.NamedExpr):
+        func = _unwrap_await(func.value)
+    return func
 
 
 def _getattr_static_name(
@@ -989,15 +1009,18 @@ def _getattr_static_name(
     *,
     getattr_aliases: frozenset[str] | None = None,
 ) -> str | None:
-    """Return the static attribute name for ``getattr(obj, "x")`` / aliases."""
+    """Return the static attribute name for ``getattr(obj, "x")`` / aliases.
+
+    Also accepts ``builtins.getattr`` / ``x.getattr`` Attribute forms so renamed
+    module projections cannot skip protocol peels (Unknown > false PASS).
+    """
 
     aliases = getattr_aliases or frozenset({"getattr"})
-    if not (
-        isinstance(call.func, ast.Name)
-        and call.func.id in aliases
-        and len(call.args) >= 2
-        and not call.keywords
-    ):
+    func = _peel_call_func(call.func)
+    is_getattr = (
+        isinstance(func, ast.Name) and func.id in aliases
+    ) or (isinstance(func, ast.Attribute) and func.attr == "getattr")
+    if not is_getattr or len(call.args) < 2 or call.keywords:
         return None
     return _static_str(call.args[1])
 
@@ -1923,6 +1946,12 @@ def _build_identity_scanner(
     partial_aliases: set[str] = {"partial"}
     # ``from types import MappingProxyType as MPT`` / adapter Name aliases.
     adapter_aliases: set[str] = set()
+    # Name-bound factory products: ``ag = attrgetter("Mut")`` / ``p = partial(Mut)``.
+    # Maps local name → (kind, static_payload) where kind is attrgetter/
+    # itemgetter/methodcaller/partial and payload is the static attr/key/method
+    # (None for partial — see partial_product_names).
+    projection_factory_products: dict[str, tuple[str, str | None]] = {}
+    partial_product_names: dict[str, list[str]] = {}
 
     def _packed_names(expr: ast.AST) -> list[str]:
         """Shared packing/projection peel with live protocol aliases."""
@@ -1935,9 +1964,96 @@ def _build_identity_scanner(
             adapter_aliases=frozenset(adapter_aliases),
         )
 
+    def _note_factory_product_from_value(name: str, value: ast.AST) -> None:
+        """Track Name-bound attrgetter/itemgetter/methodcaller/partial products."""
+
+        value = _peel_call_func(value)
+        if not isinstance(value, ast.Call):
+            # Double alias of a product: ``ag2 = ag``.
+            if isinstance(value, ast.Name) and value.id in projection_factory_products:
+                projection_factory_products[name] = projection_factory_products[
+                    value.id
+                ]
+                if value.id in partial_product_names:
+                    partial_product_names[name] = list(partial_product_names[value.id])
+            elif isinstance(value, ast.Name):
+                projection_factory_products.pop(name, None)
+                partial_product_names.pop(name, None)
+            return
+        ag = _attrgetter_static_name(
+            value, projection_aliases=operator_projection_aliases
+        )
+        if ag is not None:
+            projection_factory_products[name] = ("attrgetter", ag)
+            partial_product_names.pop(name, None)
+            return
+        ig = _itemgetter_static_key(
+            value, projection_aliases=operator_projection_aliases
+        )
+        if ig is not None:
+            projection_factory_products[name] = ("itemgetter", ig)
+            partial_product_names.pop(name, None)
+            return
+        mc = _methodcaller_static_name(
+            value, projection_aliases=operator_projection_aliases
+        )
+        if mc is not None:
+            projection_factory_products[name] = ("methodcaller", mc)
+            partial_product_names.pop(name, None)
+            return
+        if _is_partial_factory(value, partial_aliases=frozenset(partial_aliases)):
+            packed = _packed_names(value.args[0]) if value.args else []
+            projection_factory_products[name] = ("partial", None)
+            partial_product_names[name] = packed
+            return
+        projection_factory_products.pop(name, None)
+        partial_product_names.pop(name, None)
+
+    def _note_adapter_from_subscript(name: str, value: ast.AST) -> None:
+        """``Proxy = vars(types)["MappingProxyType"]`` / ``types.__dict__[…]``."""
+
+        if not isinstance(value, ast.Subscript):
+            return
+        key = _static_str(value.slice)
+        if key is None:
+            return
+        base = value.value
+        ns_proj = False
+        if isinstance(base, ast.Attribute) and base.attr == "__dict__":
+            ns_proj = True
+        elif isinstance(base, ast.Call):
+            bfunc = _peel_call_func(base.func)
+            if isinstance(bfunc, ast.Name) and bfunc.id in {
+                "vars",
+                "globals",
+                "locals",
+            }:
+                ns_proj = True
+            elif isinstance(bfunc, ast.Attribute) and bfunc.attr in {
+                "vars",
+                "globals",
+                "locals",
+            }:
+                ns_proj = True
+        if not ns_proj:
+            return
+        if key == "MappingProxyType":
+            adapter_aliases.add(name)
+        if key in _OPERATOR_PROJECTION_NAMES:
+            operator_projection_aliases[name] = key
+        if key in _EXEC_EVAL_COMPILE_NAMES:
+            exec_eval_compile_aliases.add(name)
+        if key == _TYPE_BUILTIN_NAME:
+            type_aliases.add(name)
+        if key == "partial":
+            partial_aliases.add(name)
+        if key == "getattr":
+            getattr_aliases.add(name)
+
     def _note_protocol_alias_from_value(name: str, value: ast.AST) -> None:
         """Install exec/new_class/type/getattr aliases from an Assign/walrus RHS."""
 
+        value = _peel_call_func(value)
         if isinstance(value, ast.Name):
             if value.id in _EXEC_EVAL_COMPILE_NAMES or value.id in exec_eval_compile_aliases:
                 exec_eval_compile_aliases.add(name)
@@ -1956,6 +2072,7 @@ def _build_identity_scanner(
                 operator_projection_aliases[name] = value.id
             elif value.id in operator_projection_aliases:
                 operator_projection_aliases[name] = operator_projection_aliases[value.id]
+            _note_factory_product_from_value(name, value)
             return
         if isinstance(value, ast.Attribute):
             if value.attr in _EXEC_EVAL_COMPILE_NAMES:
@@ -1966,10 +2083,15 @@ def _build_identity_scanner(
                 type_aliases.add(name)
             if value.attr == "partial":
                 partial_aliases.add(name)
+            if value.attr == "getattr":
+                getattr_aliases.add(name)
             if value.attr == "MappingProxyType":
                 adapter_aliases.add(name)
             if value.attr in _OPERATOR_PROJECTION_NAMES:
                 operator_projection_aliases[name] = value.attr
+            return
+        if isinstance(value, ast.Subscript):
+            _note_adapter_from_subscript(name, value)
             return
         if isinstance(value, ast.Call):
             attr = _getattr_static_name(
@@ -1983,10 +2105,13 @@ def _build_identity_scanner(
                 type_aliases.add(name)
             if attr == "partial":
                 partial_aliases.add(name)
+            if attr == "getattr":
+                getattr_aliases.add(name)
             if attr == "MappingProxyType":
                 adapter_aliases.add(name)
             if attr in _OPERATOR_PROJECTION_NAMES:
                 operator_projection_aliases[name] = attr
+            _note_factory_product_from_value(name, value)
 
     def _note_export(module_path: str, name: str) -> None:
         accum.export_mutations.setdefault(module_path, set()).add(name)
@@ -2584,6 +2709,8 @@ def _build_identity_scanner(
                     partial_aliases.add(local)
                 elif alias.name == "MappingProxyType":
                     adapter_aliases.add(local)
+                elif alias.name == "getattr":
+                    getattr_aliases.add(local)
                 if module_path is None:
                     env[local] = _IdentityPointsTo.unknown_only()
                 else:
@@ -3089,6 +3216,122 @@ def _build_identity_scanner(
                 observed = True
             return observed
 
+        def _observe_type_new_from_args() -> bool:
+            """Observe ``type.__new__(type, name, bases, dict)``-shaped args."""
+
+            bases_expr: ast.AST | None = None
+            if len(call.args) >= 3:
+                bases_expr = call.args[2]
+            for kw in call.keywords:
+                if kw.arg == "bases":
+                    bases_expr = kw.value
+            if bases_expr is None:
+                accum.unsupported = True
+                return True
+            base_names = _packed_names(bases_expr)
+            if isinstance(bases_expr, (ast.Tuple, ast.List)):
+                base_names = []
+                for elt in bases_expr.elts:
+                    nested = elt.value if isinstance(elt, ast.Starred) else elt
+                    base_names.extend(_packed_names(nested))
+            observed = False
+            for name in base_names:
+                base_cls = _lookup_class(name, local_classes)
+                if base_cls is not None:
+                    if _scan_named_methods_on_class(
+                        base_cls,
+                        frozenset({"__init_subclass__"}),
+                        path=path,
+                        index=index,
+                        env=env,
+                        visited_fns=visited_fns,
+                        local_fns=local_fns,
+                        local_classes=local_classes,
+                    ):
+                        observed = True
+                else:
+                    accum.unsupported = True
+            if not observed:
+                accum.unsupported = True
+            return True
+
+        def _receiver_is_type_builtin(recv: ast.AST) -> bool:
+            for name in _packed_names(recv):
+                if (
+                    name == _TYPE_BUILTIN_NAME
+                    or name in type_aliases
+                    or name == "object"
+                ):
+                    return True
+            peeled = _peel_call_func(recv)
+            if isinstance(peeled, ast.Attribute) and peeled.attr in {
+                "__class__",
+                _TYPE_BUILTIN_NAME,
+            }:
+                return True
+            return False
+
+        def _observe_name_bound_factory_product(product_name: str) -> bool:
+            """Apply Name-bound attrgetter/itemgetter/methodcaller/partial product."""
+
+            product = projection_factory_products.get(product_name)
+            if product is None:
+                return False
+            kind, static = product
+            if kind == "attrgetter" and static is not None:
+                if static == "__call__" and call.args:
+                    if _observe_classes_from_names(_packed_names(call.args[0])):
+                        return True
+                holder_cls = None
+                if call.args and isinstance(call.args[0], ast.Name):
+                    holder_cls = _lookup_class(call.args[0].id, local_classes)
+                nested = _resolve_nested_or_local_class(static, holder_cls)
+                if nested is not None:
+                    _observe_class_construction(
+                        nested,
+                        call,
+                        path=path,
+                        index=index,
+                        env=env,
+                        visited_fns=visited_fns,
+                        local_fns=local_fns,
+                        local_classes=local_classes,
+                    )
+                    return True
+                if _observe_classes_from_names([static]):
+                    return True
+                accum.unsupported = True
+                return True
+            if kind == "itemgetter" and static is not None:
+                if _observe_classes_from_names([static]):
+                    return True
+                accum.unsupported = True
+                return True
+            if kind == "methodcaller" and static is not None:
+                if static == "__call__" and call.args:
+                    if _observe_classes_from_names(_packed_names(call.args[0])):
+                        return True
+                if _follow_methods_named(
+                    static,
+                    call,
+                    path=path,
+                    index=index,
+                    env=env,
+                    visited_fns=visited_fns,
+                    local_fns=local_fns,
+                    local_classes=local_classes,
+                ):
+                    return True
+                accum.unsupported = True
+                return True
+            if kind == "partial":
+                names = partial_product_names.get(product_name, [])
+                if _observe_classes_from_names(names):
+                    return True
+                accum.unsupported = True
+                return True
+            return False
+
         if isinstance(func, ast.Call):
             # Shared packing/projection peel: .get/.pop/getattr/attrgetter/
             # itemgetter/getitem/methodcaller/partial/next(iter)/…
@@ -3106,6 +3349,22 @@ def _build_identity_scanner(
                 # ``getattr(Mut, "__call__")()`` constructs Mut.
                 if getattr_name == "__call__" and func.args:
                     if _observe_classes_from_names(_packed_names(func.args[0])):
+                        return
+                    # ``getattr(type, "__call__")(Mut)``.
+                    if _receiver_is_type_builtin(func.args[0]):
+                        for arg in call.args:
+                            if _observe_classes_from_names(_packed_names(arg)):
+                                return
+                        accum.unsupported = True
+                        return
+                # ``getattr(type, "__new__")(type, name, bases, dict)``.
+                if getattr_name == "__new__" and func.args:
+                    if _receiver_is_type_builtin(func.args[0]):
+                        for arg in call.args:
+                            _eval_expr(arg, env, path=path)
+                        for kw in call.keywords:
+                            _eval_expr(kw.value, env, path=path)
+                        _observe_type_new_from_args()
                         return
                 # ``getattr(Holder, "Mut")()`` nested / local class construction.
                 holder_cls: ast.ClassDef | None = None
@@ -3150,6 +3409,12 @@ def _build_identity_scanner(
                     local_classes=local_classes,
                 ):
                     return
+            # Name-bound factory product applied: ``ag(Holder)()`` where
+            # ``ag = attrgetter("Mut")`` — func.func is the product Name.
+            if isinstance(func.func, ast.Name) and _observe_name_bound_factory_product(
+                func.func.id
+            ):
+                return
             # ``operator.attrgetter("Mut")(Holder)()`` / ``ag("Mut")(Holder)()``.
             if isinstance(func.func, ast.Call):
                 ag = _attrgetter_static_name(
@@ -3379,39 +3644,56 @@ def _build_identity_scanner(
                     if not observed:
                         accum.unsupported = True
                     return
-            # ``Mut.__call__()`` / ``type.__call__(Mut)`` construct instances.
+            # ``Mut.__call__()`` / ``type.__call__(Mut)`` /
+            # ``object.__class__.__call__(Mut)`` construct instances.
             if func.attr == "__call__":
+                type_call_recv = False
                 if isinstance(func.value, ast.Name):
-                    if func.value.id == _TYPE_BUILTIN_NAME or func.value.id in type_aliases:
-                        # ``type.__call__(Mut)`` / ``type.__call__(Mut, ...)``.
-                        for arg in call.args:
-                            for name in _packed_names(arg):
-                                cls_node = _lookup_class(name, local_classes)
-                                if cls_node is not None:
-                                    _observe_class_construction(
-                                        cls_node,
-                                        call,
-                                        path=path,
-                                        index=index,
-                                        env=env,
-                                        visited_fns=visited_fns,
-                                        local_fns=local_fns,
-                                        local_classes=local_classes,
-                                    )
-                        if call.args:
+                    if (
+                        func.value.id == _TYPE_BUILTIN_NAME
+                        or func.value.id in type_aliases
+                    ):
+                        type_call_recv = True
+                    else:
+                        cls_node = _lookup_class(func.value.id, local_classes)
+                        if cls_node is not None:
+                            _observe_class_construction(
+                                cls_node,
+                                call,
+                                path=path,
+                                index=index,
+                                env=env,
+                                visited_fns=visited_fns,
+                                local_fns=local_fns,
+                                local_classes=local_classes,
+                            )
                             return
-                    cls_node = _lookup_class(func.value.id, local_classes)
-                    if cls_node is not None:
-                        _observe_class_construction(
-                            cls_node,
-                            call,
-                            path=path,
-                            index=index,
-                            env=env,
-                            visited_fns=visited_fns,
-                            local_fns=local_fns,
-                            local_classes=local_classes,
-                        )
+                elif isinstance(func.value, ast.Attribute) and func.value.attr in {
+                    "__class__",
+                    _TYPE_BUILTIN_NAME,
+                }:
+                    # ``object.__class__.__call__(Mut)`` / ``x.type.__call__(…)``.
+                    type_call_recv = True
+                if type_call_recv:
+                    observed = False
+                    for arg in call.args:
+                        for name in _packed_names(arg):
+                            cls_node = _lookup_class(name, local_classes)
+                            if cls_node is not None:
+                                _observe_class_construction(
+                                    cls_node,
+                                    call,
+                                    path=path,
+                                    index=index,
+                                    env=env,
+                                    visited_fns=visited_fns,
+                                    local_fns=local_fns,
+                                    local_classes=local_classes,
+                                )
+                                observed = True
+                    if call.args:
+                        if not observed:
+                            accum.unsupported = True
                         return
             # Method calls: Mut().poison() / Mut.poison() / instance.poison().
             method = _resolve_attribute_method(
@@ -3510,6 +3792,30 @@ def _build_identity_scanner(
                         local_fns=local_fns,
                         local_classes=local_classes,
                     )
+                # Name-bound factory product packed into Call.func.
+                if name in projection_factory_products:
+                    if _observe_name_bound_factory_product(name):
+                        return
+            # Packed ``getattr(type, "__new__")`` / ``__call__`` protocol.
+            packed_func_names = _packed_names(func)
+            if "__new__" in packed_func_names:
+                for arg in call.args:
+                    _eval_expr(arg, env, path=path)
+                for kw in call.keywords:
+                    _eval_expr(kw.value, env, path=path)
+                _observe_type_new_from_args()
+                return
+            if "__call__" in packed_func_names:
+                observed = False
+                for arg in call.args:
+                    if _observe_classes_from_names(_packed_names(arg)):
+                        observed = True
+                for name in packed_func_names:
+                    if _observe_classes_from_names([name]):
+                        observed = True
+                if not observed:
+                    accum.unsupported = True
+                return
             # ``vars(Holder)["Mut"]()`` / ``globals()["Mut"]()`` key projection.
             if isinstance(func, ast.Subscript):
                 key = _static_str(func.slice)
@@ -3552,6 +3858,10 @@ def _build_identity_scanner(
                     for a in points.known
                 ):
                     _escape_identity(points)
+            return
+        # Name-bound factory product: ``p = partial(Mut); p()`` /
+        # ``mc = methodcaller("poison"); mc(obj)``.
+        if _observe_name_bound_factory_product(func.id):
             return
         if func.id in _BENIGN_BUILTINS:
             # Container / higher-order builtins must still evaluate arguments so
@@ -3889,25 +4199,30 @@ def _build_identity_scanner(
             for name in _packed_names(func):
                 if _name_is_exec_eval_compile(name):
                     return True
-            if isinstance(func, ast.Name):
-                return _name_is_exec_eval_compile(func.id)
-            if isinstance(func, ast.Attribute) and func.attr in _EXEC_EVAL_COMPILE_NAMES:
-                return True
-            # ``operator.call(exec, ...)`` / renamed ``call`` — peel first arg.
+            # ``operator.call(exec, ...)`` / Name aliases of ``call`` MUST be
+            # checked before the bare-Name short-circuit — otherwise
+            # ``from operator import call as oc; oc(exec, ...)`` false-PASSes.
             if _is_operator_call_factory(
-                call, projection_aliases=operator_projection_aliases
+                call,
+                projection_aliases=operator_projection_aliases,
+                getattr_aliases=frozenset(getattr_aliases),
             ):
                 if call.args:
                     for name in _packed_names(call.args[0]):
                         if _name_is_exec_eval_compile(name):
                             return True
                 return True
+            peeled = _peel_call_func(func)
+            if isinstance(peeled, ast.Name):
+                return _name_is_exec_eval_compile(peeled.id)
+            if isinstance(peeled, ast.Attribute) and peeled.attr in _EXEC_EVAL_COMPILE_NAMES:
+                return True
             # Fail-closed namespace projections including MappingProxy wrappers:
             # ``vars(builtins)["exec"]``, ``MappingProxyType(vars(builtins))["exec"]``.
-            if isinstance(func, ast.Subscript):
-                key = _static_str(func.slice)
+            if isinstance(peeled, ast.Subscript):
+                key = _static_str(peeled.slice)
                 if key in _EXEC_EVAL_COMPILE_NAMES:
-                    base = func.value
+                    base = peeled.value
                     if isinstance(base, ast.Attribute) and base.attr == "__dict__":
                         return True
                     if isinstance(base, ast.Call):
@@ -3931,6 +4246,11 @@ def _build_identity_scanner(
                         ):
                             return True
                     return True
+            # IfExp/BoolOp Call.func with an operator.call arm.
+            if isinstance(peeled, (ast.IfExp, ast.BoolOp)):
+                for name in _packed_names(peeled):
+                    if name == "call" or operator_projection_aliases.get(name) == "call":
+                        return True
             return False
 
         def _call_targets_types_new_class() -> bool:
@@ -4425,11 +4745,29 @@ def _build_identity_scanner(
                     env=env,
                     value_points=value_points,
                 )
-                if isinstance(stmt.target, ast.Name):
+                if isinstance(stmt.target, ast.Name) and stmt.value is not None:
+                    _note_protocol_alias_from_value(stmt.target.id, stmt.value)
                     if isinstance(stmt.value, ast.Lambda):
                         lambda_bindings[stmt.target.id] = stmt.value
                     else:
                         lambda_bindings.pop(stmt.target.id, None)
+                    # Class / instance alias through AnnAssign (parity with Assign).
+                    if isinstance(stmt.value, ast.Name):
+                        if stmt.value.id in instance_class_of:
+                            instance_class_of[stmt.target.id] = instance_class_of[
+                                stmt.value.id
+                            ]
+                        src_cls = _lookup_class(stmt.value.id, active_classes)
+                        if src_cls is not None:
+                            active_classes[stmt.target.id] = src_cls
+                            class_registry[stmt.target.id] = src_cls
+                    elif (
+                        isinstance(stmt.value, ast.Call)
+                        and isinstance(stmt.value.func, ast.Name)
+                        and _lookup_class(stmt.value.func.id, active_classes)
+                        is not None
+                    ):
+                        instance_class_of[stmt.target.id] = stmt.value.func.id
                 continue
             if isinstance(stmt, ast.AugAssign):
                 # RHS executes (``x += poison()``) before the store.
@@ -4854,6 +5192,33 @@ def _build_identity_scanner(
         for path in trees:
             _register_module_classes(path)
 
+    def seed_module_protocol_aliases(path: str) -> None:
+        """Seed module-level ImportFrom/Assign/AnnAssign into protocol aliases.
+
+        Request-time sessions previously only saw function-body binds, so
+        ``from operator import call as oc`` / ``partial as p`` at module scope
+        false-PASSed Name-alias peels (Unknown > false PASS).
+        """
+
+        tree = trees.get(path)
+        if tree is None:
+            return
+        for node in getattr(tree, "body", ()):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                _apply_import_identities(node, {}, path=path)
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        _note_protocol_alias_from_value(target.id, node.value)
+            elif isinstance(node, ast.AnnAssign):
+                if isinstance(node.target, ast.Name) and node.value is not None:
+                    _note_protocol_alias_from_value(node.target.id, node.value)
+            elif isinstance(node, ast.Expr) and isinstance(node.value, ast.NamedExpr):
+                if isinstance(node.value.target, ast.Name):
+                    _note_protocol_alias_from_value(
+                        node.value.target.id, node.value.value
+                    )
+
     def observe_expr(
         expr: ast.AST,
         *,
@@ -4885,6 +5250,7 @@ def _build_identity_scanner(
     scanner.seed_env_for_path = seed_env_for_path  # type: ignore[method-assign]
     scanner.local_fns_for_path = local_fns_for_path  # type: ignore[method-assign]
     scanner.seed_class_registry = seed_class_registry  # type: ignore[method-assign]
+    scanner.seed_module_protocol_aliases = seed_module_protocol_aliases  # type: ignore[method-assign]
     return scanner
 
 
@@ -4939,6 +5305,7 @@ def begin_request_time_identity_session(
         accum=accum,
     )
     scanner.seed_class_registry()
+    scanner.seed_module_protocol_aliases(path_n)  # type: ignore[attr-defined]
     env = scanner.seed_env_for_path(path_n)
     local_fns = dict(scanner.local_fns_for_path(path_n))
     return RequestTimeIdentitySession(

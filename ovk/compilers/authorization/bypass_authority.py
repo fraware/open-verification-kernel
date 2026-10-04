@@ -111,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.35.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.36.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -380,9 +380,23 @@ class _RequestStateAliasEnv:
         elif isinstance(node, ast.Import):
             return
 
-    def note_projection_name_alias(self, name: str, value: ast.AST) -> None:
-        """``MPT = MappingProxyType`` / ``gi = getitem`` local aliases."""
+    def note_projection_name_alias(
+        self,
+        name: str,
+        value: ast.AST,
+        *,
+        getattr_aliases: frozenset[str] | None = None,
+    ) -> None:
+        """``MPT = MappingProxyType`` / ``gi = getitem`` local aliases.
 
+        Also seeds ``Proxy = g(types, \"MappingProxyType\")`` (renamed getattr),
+        ``builtins.getattr(...)``, ``vars(types)[...]``, and ``types.__dict__[…]``.
+        """
+
+        g_aliases = getattr_aliases or frozenset({"getattr"})
+        # Peel walrus so ``(Proxy := MappingProxyType)`` seeds adapters.
+        while isinstance(value, ast.NamedExpr):
+            value = value.value
         if isinstance(value, ast.Name):
             if value.id in _CONTAINER_ADAPTER_NAMES or value.id in self.adapter_aliases:
                 if value.id == "MappingProxyType" or value.id in self.adapter_aliases:
@@ -398,11 +412,51 @@ class _RequestStateAliasEnv:
                 self.adapter_aliases.add(name)
             if value.attr in _OPERATOR_PROJECTION_NAMES:
                 self.operator_projection_aliases[name] = value.attr
+        elif isinstance(value, ast.Subscript):
+            key = (
+                value.slice.value
+                if isinstance(value.slice, ast.Constant)
+                and isinstance(value.slice.value, str)
+                else None
+            )
+            if key is None:
+                return
+            base = value.value
+            ns_proj = False
+            if isinstance(base, ast.Attribute) and base.attr == "__dict__":
+                ns_proj = True
+            elif isinstance(base, ast.Call):
+                bfunc = base.func
+                while isinstance(bfunc, ast.NamedExpr):
+                    bfunc = bfunc.value
+                if isinstance(bfunc, ast.Name) and bfunc.id in {
+                    "vars",
+                    "globals",
+                    "locals",
+                }:
+                    ns_proj = True
+                elif isinstance(bfunc, ast.Attribute) and bfunc.attr in {
+                    "vars",
+                    "globals",
+                    "locals",
+                }:
+                    ns_proj = True
+            if ns_proj:
+                if key == "MappingProxyType":
+                    self.adapter_aliases.add(name)
+                if key in _OPERATOR_PROJECTION_NAMES:
+                    self.operator_projection_aliases[name] = key
         elif isinstance(value, ast.Call):
-            # ``Proxy = getattr(types, "MappingProxyType")`` / operator getattr.
+            # ``Proxy = getattr(types, "MappingProxyType")`` /
+            # ``g = getattr; Proxy = g(types, …)`` / ``builtins.getattr(...)``.
+            func = value.func
+            while isinstance(func, ast.NamedExpr):
+                func = func.value
+            is_getattr = (
+                isinstance(func, ast.Name) and func.id in g_aliases
+            ) or (isinstance(func, ast.Attribute) and func.attr == "getattr")
             if (
-                isinstance(value.func, ast.Name)
-                and value.func.id == "getattr"
+                is_getattr
                 and len(value.args) >= 2
                 and isinstance(value.args[1], ast.Constant)
                 and isinstance(value.args[1].value, str)
@@ -832,18 +886,46 @@ class _RequestStateAliasEnv:
                         return True
             # Builtin / types adapters: ``list({request.state})``,
             # ``MappingProxyType({…})``, ``types.MappingProxyType``,
-            # ``MPT = MappingProxyType`` / ``next(iter(...))``.
-            func_name: str | None = None
-            if isinstance(value.func, ast.Name):
-                func_name = value.func.id
-            elif (
-                isinstance(value.func, ast.Attribute)
-                and value.func.attr in _CONTAINER_ADAPTER_NAMES
-            ):
-                func_name = value.func.attr
-            is_adapter = (
-                func_name in _CONTAINER_ADAPTER_NAMES
-                or (func_name is not None and func_name in self.adapter_aliases)
+            # ``MPT = MappingProxyType`` / ``next(iter(...))``, and Call.func
+            # peels ``(Proxy if c else dict)(...)`` / ``(False or Proxy)(...)`` /
+            # ``(Proxy := MappingProxyType)(...)`` / ``[Proxy][0](...)``.
+            func_names: list[str] = []
+
+            def _peel_adapter_func(node: ast.AST) -> None:
+                while isinstance(node, ast.NamedExpr):
+                    if isinstance(node.target, ast.Name):
+                        func_names.append(node.target.id)
+                    node = node.value
+                if isinstance(node, ast.Name):
+                    func_names.append(node.id)
+                    return
+                if isinstance(node, ast.Attribute):
+                    func_names.append(node.attr)
+                    return
+                if isinstance(node, ast.IfExp):
+                    _peel_adapter_func(node.body)
+                    _peel_adapter_func(node.orelse)
+                    return
+                if isinstance(node, ast.BoolOp):
+                    for operand in node.values:
+                        _peel_adapter_func(operand)
+                    return
+                if isinstance(node, ast.Subscript):
+                    _peel_adapter_func(node.value)
+                    if isinstance(node.slice, ast.Constant) and isinstance(
+                        node.slice.value, str
+                    ):
+                        func_names.append(node.slice.value)
+                    return
+                if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+                    for elt in node.elts:
+                        nested = elt.value if isinstance(elt, ast.Starred) else elt
+                        _peel_adapter_func(nested)
+
+            _peel_adapter_func(value.func)
+            is_adapter = any(
+                n in _CONTAINER_ADAPTER_NAMES or n in self.adapter_aliases
+                for n in func_names
             )
             if is_adapter:
                 for arg in value.args:
@@ -2245,7 +2327,9 @@ def _collect_writes_in_function(
                 instance_class_of.pop(target.id, None)
             if value.id in getattr_aliases:
                 getattr_aliases.add(target.id)
-            request_aliases.note_projection_name_alias(target.id, value)
+            request_aliases.note_projection_name_alias(
+                target.id, value, getattr_aliases=frozenset(getattr_aliases)
+            )
             if value.id in name_unknown_callables:
                 name_unknown_callables.add(target.id)
             if value.id in name_returned_closures:
@@ -2279,7 +2363,9 @@ def _collect_writes_in_function(
             _register_nested_callable(value, name=target.id)
             return
         if isinstance(value, ast.Attribute):
-            request_aliases.note_projection_name_alias(target.id, value)
+            request_aliases.note_projection_name_alias(
+                target.id, value, getattr_aliases=frozenset(getattr_aliases)
+            )
             # Property Name-bind: ``f = Box().fn; f()`` installs getter product.
             cls = _resolve_instance_or_class(value.value)
             if cls is not None:
@@ -2355,6 +2441,9 @@ def _collect_writes_in_function(
                     return
             instance_class_of.pop(target.id, None)
         if isinstance(value, (ast.IfExp, ast.BoolOp, ast.NamedExpr)):
+            request_aliases.note_projection_name_alias(
+                target.id, value, getattr_aliases=frozenset(getattr_aliases)
+            )
             # Instance pack: ``x = Box() if c else Box()`` / nested walrus.
             packed_cls = _instance_class_name_from_expr(value)
             if packed_cls is not None:
@@ -2382,7 +2471,9 @@ def _collect_writes_in_function(
         if isinstance(value, ast.Call):
             _clear_callable_name(target.id)
             # ``Proxy = getattr(types, "MappingProxyType")`` / operator peels.
-            request_aliases.note_projection_name_alias(target.id, value)
+            request_aliases.note_projection_name_alias(
+                target.id, value, getattr_aliases=frozenset(getattr_aliases)
+            )
             # Instance alias: ``b = Box()`` for later ``b.fn()`` packing peel.
             if isinstance(value.func, ast.Name) and _lookup_local_class(
                 value.func.id
@@ -2397,6 +2488,10 @@ def _collect_writes_in_function(
             if _bind_call_product_to_name(target.id, value):
                 return
         else:
+            # ``Proxy = vars(types)["MappingProxyType"]`` / container packs.
+            request_aliases.note_projection_name_alias(
+                target.id, value, getattr_aliases=frozenset(getattr_aliases)
+            )
             # Container instance pack: ``xs = [Box()]`` for ``xs[0].fn()``.
             packed_cls = _instance_class_name_from_expr(value)
             if packed_cls is not None:
@@ -4315,7 +4410,11 @@ def _collect_writes_in_function(
             packed_cls = _instance_class_name_from_expr(child.value)
             if packed_cls is not None:
                 instance_class_of[child.target.id] = packed_cls
-            request_aliases.note_projection_name_alias(child.target.id, child.value)
+            request_aliases.note_projection_name_alias(
+                child.target.id,
+                child.value,
+                getattr_aliases=frozenset(getattr_aliases),
+            )
 
     def _visit_statement(
         statement: ast.stmt,
@@ -4836,6 +4935,8 @@ def _collect_writes_in_function(
                     if identity_session is not None:
                         identity_session.bind_name_unknown(name)
                 # Precise class alias through MatchAs subject capture.
+                # ``match Mut: case C: C()`` — bind C in PE local_classes and
+                # identity class_registry so construction observes __init__.
                 if (
                     isinstance(case.pattern, ast.MatchAs)
                     and case.pattern.name
@@ -4845,6 +4946,21 @@ def _collect_writes_in_function(
                     src_cls = _lookup_local_class(statement.subject.id)
                     if src_cls is not None:
                         local_classes[case.pattern.name] = src_cls
+                        if identity_session is not None:
+                            # Synthetic Assign seeds identity class_registry
+                            # (observe_statement Match does not run whole-stmt).
+                            identity_session.observe_statement(
+                                ast.Assign(
+                                    targets=[
+                                        ast.Name(
+                                            id=case.pattern.name, ctx=ast.Store()
+                                        )
+                                    ],
+                                    value=ast.Name(
+                                        id=statement.subject.id, ctx=ast.Load()
+                                    ),
+                                )
+                            )
                 # Instance alias: ``match Box(): case b: b.fn()``.
                 if (
                     isinstance(case.pattern, ast.MatchAs)
