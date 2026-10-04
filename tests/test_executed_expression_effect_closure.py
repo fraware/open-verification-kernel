@@ -4772,7 +4772,291 @@ def test_tenth_pass_positive_authorized_smoke() -> None:
         assert findings[0].reason == "source_proved_server_authority_write", body
 
 
+def test_eleventh_pass_identity_higher_order_apply_never_authorized() -> None:
+    """filter/comp/genexp/any/all/sum/map/reduce/starmap/key= type.__call__."""
+
+    _assert_ninth_not_authorized(
+        (
+            ("list(filter(lambda f: f(Mut) or True, [type.__call__]))", ""),
+            ("any(f(Mut) for f in [type.__call__])", ""),
+            ("all(f(Mut) or True for f in [type.__call__])", ""),
+            ("sum(1 for f in [type.__call__] if f(Mut) or True)", ""),
+            ("[f(Mut) for f in [type.__call__]]", ""),
+            ("{f(Mut) for f in [type.__call__]}", ""),
+            ("{i: f(Mut) for i, f in enumerate([type.__call__])}", ""),
+            ("(lambda f: f(Mut))(type.__call__)", ""),
+            (
+                'getattr(type, "__new__").__call__(type, "C", (Base,), {})',
+                "",
+            ),
+            ("list(map(lambda t: t(Mut), [type]))", ""),
+            ('list(map(lambda t: t(Mut), {"c": type}.values()))', ""),
+            (
+                "from functools import reduce\n"
+                "reduce(lambda a, f: f(Mut) or a, [type.__call__], 0)",
+                "from functools import reduce",
+            ),
+            (
+                "import itertools\n"
+                "list(itertools.starmap(lambda f: f(Mut), [(type.__call__,)]))",
+                "import itertools",
+            ),
+            ("sorted([type.__call__], key=lambda f: f(Mut) or 0)", ""),
+            ("max([type.__call__], key=lambda f: f(Mut) or 0)", ""),
+            ("min([type.__call__], key=lambda f: f(Mut) or 0)", ""),
+        )
+    )
+
+
+def test_eleventh_pass_class_method_call_peel_never_authorized() -> None:
+    """``Mut.make.__call__()`` / getattr / next(iter) / match-rest peels."""
+
+    cases = (
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+Mut.make.__call__()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @staticmethod
+    def smake():
+        helpers.write_state = evil
+Mut.smake.__call__()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    def poke(self):
+        helpers.write_state = evil
+m = Mut.__new__(Mut)
+m.poke.__call__()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+next(iter([Mut.make])).__call__()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+match {"m": Mut.make}:
+    case {**rest}:
+        rest["m"].__call__()
+""".strip(),
+    )
+    for body in cases:
+        src = (
+            "import helpers\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            + "\n".join(f"    {ln}" if ln else ln for ln in body.split("\n"))
+            + "\n    helpers.write_state(request.state, bypass_filter)\n"
+            "    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_eleventh_pass_lexical_name_views_and_fromkeys_never_authorized() -> None:
+    """Dict-literal items Name, fromkeys Name, next(iter), copy.keys, popitem."""
+
+    _assert_ninth_not_authorized(
+        (
+            ('g={"c":Mut}.items; (k,C),=g(); C()', ""),
+            ("fk=dict.fromkeys; C,=fk([Mut]); C()", ""),
+            ("C=next(iter({Mut:1})); C()", ""),
+            ('d={Mut:1}; d|={}; C,=copy.copy(d).keys(); C()', "import copy"),
+            ('k,C=dict.popitem({"c":Mut}); C()', ""),
+            ('k,C=getattr(dict,"popitem")({"c":Mut}); C()', ""),
+            (
+                'match {"c":Mut}:\n    case {**rest}:\n'
+                "        C=list(rest.items())[0][1]; C()",
+                "",
+            ),
+        )
+    )
+
+
+def test_eleventh_pass_alias_ns_bound_view_trusted_write_first() -> None:
+    """Trusted-write-first ns get/Name-key/walrus/itemgetter must not authorize."""
+
+    alias_imports = "import types"
+    cases = (
+        'ns=types.__dict__\n'
+        'Proxy=getattr(ns,"get").__call__((k:="MappingProxyType"))\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'g=getattr(ns,"get")\n'
+        'Proxy=g("MappingProxyType")\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        "g=ns.get\n"
+        'Proxy=g("MappingProxyType")\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'k="MappingProxyType"\n'
+        "Proxy=ns[k]\n"
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'keys=["MappingProxyType"]\n'
+        'Proxy=getattr(ns,"get")(keys[0])\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'Proxy=getattr(getattr(ns,"get"),"__call__")("MappingProxyType")\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        src = (
+            "import helpers\n"
+            f"{alias_imports}\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_eleventh_pass_cf_itertools_and_packs_never_authorized() -> None:
+    """Expanded itertools adapters, getattr copy/setitem, ChainMap, packs."""
+
+    ex = _NINTH_EXEC
+    imp = (
+        "from collections import ChainMap, deque\n"
+        "import copy, operator, itertools, types"
+    )
+    plain = (
+        f"ch=itertools.chain\nfor f in ch([exec]):\n    f({ex})",
+        f"for f in itertools.chain_from_iterable([[exec]]):\n    f({ex})",
+        f"for f in itertools.starmap(lambda x: x, [(exec,)]):\n    f({ex})",
+        f"for f in itertools.compress([exec], [1]):\n    f({ex})",
+        f"for f in itertools.filterfalse(lambda x: False, [exec]):\n    f({ex})",
+        f"for f in itertools.dropwhile(lambda x: False, [exec]):\n    f({ex})",
+        f"for f in itertools.takewhile(lambda x: True, [exec]):\n    f({ex})",
+        f"a,b=itertools.tee([exec])\nfor f in a:\n    f({ex})",
+        f"for f in itertools.zip_longest([exec]):\n    f[0]({ex})",
+        f"for f in itertools.cycle([exec]):\n    f({ex})\n    break",
+        f"for f in itertools.repeat(exec, 1):\n    f({ex})",
+        f"for t in itertools.permutations([exec], 1):\n    t[0]({ex})",
+        f"for t in itertools.combinations([exec], 1):\n    t[0]({ex})",
+        f"for t in itertools.product([exec]):\n    t[0]({ex})",
+        f'getattr(operator,"setitem")({{}}, "e", exec)["e"]({ex})',
+        f'd={{"e":exec}}\ngetattr(copy,"copy")(d)["e"]({ex})',
+        f'd={{"e":exec}}\ngetattr(copy,"deepcopy")(d)["e"]({ex})',
+        f'cm=ChainMap({{"e":exec}})\ncm.parents[0]["e"]({ex})',
+        f'cm=ChainMap()\ncm.maps.append({{"e":exec}})\ncm["e"]({ex})',
+        f'ns=types.SimpleNamespace(e=exec)\nns.e({ex})',
+        f"xs=[]\nxs+=[exec]\nxs[0]({ex})",
+        f"s=set()\ns.update([exec])\nlist(s)[0]({ex})",
+        f"for f in deque([exec]):\n    f({ex})",
+    )
+    _assert_ninth_not_authorized(tuple((c, imp) for c in plain))
+
+
+def test_eleventh_pass_interproc_name_view_and_install_never_authorized() -> None:
+    """Name-bound keys with/for, packed BoundMethod views, install packs."""
+
+    _assert_ninth_not_authorized(
+        (
+            ("d={Mut:1}\nk=d.keys; C=next(iter(k())); C()", ""),
+            (
+                'd={"c":Mut}\nk=d.values\nwith k() as ks:\n    C,=ks\n    C()',
+                "",
+            ),
+            ("d={Mut:1}\nviews=[d.keys]\nfor C in views[0]():\n    C()", ""),
+        )
+    )
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "fns={0:n.install}\n    fns[0](evil)",
+        "fns={0:n.install}\n    xs=list(fns.values())\n    xs[0](evil)",
+        "for f in [n.install]:\n        f(evil)",
+        "match [n.install]:\n        case [f]:\n            f(evil)",
+        "(lambda f: f(evil))(n.install)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_eleventh_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of the eleventh-pass shapes remain authorized."""
+
+    for body in (
+        "list(map(lambda t: t(int), [type]))",
+        "C=next(iter({int:1})); C()",
+        "fk=dict.fromkeys; C,=fk([int]); C()",
+        'd={}\nd|={"e": len}\nd["e"]("x")',
+        'ns=types.__dict__\ng=getattr(ns,"get")\nProxy=g("MappingProxyType")\nProxy({})',
+    ):
+        src = (
+            "import helpers\nimport types\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
 def test_persistent_version_bumped_for_executed_expr_closure() -> None:
     """Cache / semantic versions bump with PASS-semantics change."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.62.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.63.0"
