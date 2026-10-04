@@ -1911,6 +1911,58 @@ class _RequestStateAliasEnv:
                         ):
                             copy_src = peeled.args[0]
                             break
+                        # Packed / BoolOp / IfExp ``[partial(copy.copy)][0](keys)`` /
+                        # ``(0 or partial(copy.copy))(keys)`` /
+                        # ``[partial(keys.copy)][0]()`` (Unknown > false PASS).
+                        from ovk.compilers.authorization.python_callee_resolution import (
+                            _is_partial_factory as _is_partial_pack2,
+                            _peel_call_func as _peel_pack2,
+                        )
+
+                        if _is_partial_pack2(
+                            nested,
+                            getattr_aliases=frozenset(g_aliases),
+                        ) and nested.args:
+                            b0 = _peel_pack2(nested.args[0])
+                            is_copy_inline = (
+                                (
+                                    isinstance(b0, ast.Attribute)
+                                    and b0.attr in {"copy", "deepcopy"}
+                                )
+                                or (
+                                    isinstance(b0, ast.Name)
+                                    and (
+                                        b0.id in {"copy", "deepcopy"}
+                                        or self.operator_projection_aliases.get(
+                                            b0.id
+                                        )
+                                        in {"copy", "deepcopy"}
+                                    )
+                                )
+                                or (
+                                    isinstance(b0, ast.Call)
+                                    and _g_static2(
+                                        b0,
+                                        getattr_aliases=frozenset(g_aliases),
+                                    )
+                                    in {"copy", "deepcopy"}
+                                )
+                            )
+                            if is_copy_inline:
+                                if len(nested.args) >= 2 and not peeled.args:
+                                    copy_src = nested.args[1]
+                                    break
+                                if (
+                                    len(nested.args) == 1
+                                    and isinstance(b0, ast.Attribute)
+                                    and b0.attr == "copy"
+                                    and not peeled.args
+                                ):
+                                    copy_src = b0.value
+                                    break
+                                if len(nested.args) == 1 and peeled.args:
+                                    copy_src = peeled.args[0]
+                                    break
             if copy_src is not None:
                 src = copy_src
                 while isinstance(src, ast.NamedExpr):
