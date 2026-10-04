@@ -1150,19 +1150,7 @@ def _shallow_packed_callee_exprs(expr: ast.AST, *, depth: int = 0) -> list[ast.A
                 if g in {"getitem", "itemgetter", "pop"}:
                     proj = g
             if proj in {"getitem", "itemgetter", "pop"}:
-                carrier = (
-                    expr.args[0]
-                    if proj in {"getitem", "pop"}
-                    else (
-                        expr.args[0]
-                        if proj == "itemgetter" and len(expr.args) >= 1
-                        else None
-                    )
-                )
-                # ``itemgetter(0)([p])`` — factory Call is the func; carrier
-                # is the applied arg of the outer Call (handled by caller
-                # via Subscript-like peel of args[0] when func is itemgetter
-                # product). Here peel getitem/pop carriers and set.pop recv.
+                # Peel getitem/pop carriers and set.pop recv for list0 packs.
                 if proj == "getitem" and expr.args:
                     out.extend(
                         _shallow_packed_callee_exprs(expr.args[0], depth=nxt)
