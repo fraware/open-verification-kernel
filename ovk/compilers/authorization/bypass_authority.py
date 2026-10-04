@@ -111,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.36.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.37.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -342,6 +342,8 @@ class _RequestStateAliasEnv:
     # ``from types import MappingProxyType as MPT`` / ``from operator import getitem as gi``.
     adapter_aliases: set[str] = dc_field(default_factory=set)
     operator_projection_aliases: dict[str, str] = dc_field(default_factory=dict)
+    # Renamed ``vars`` / ``globals`` / ``locals`` namespace projectors.
+    ns_projection_aliases: set[str] = dc_field(default_factory=set)
 
     @classmethod
     def seed(cls, *, param_names: frozenset[str]) -> "_RequestStateAliasEnv":
@@ -377,8 +379,49 @@ class _RequestStateAliasEnv:
                     self.adapter_aliases.add(local)
                 elif alias.name in _OPERATOR_PROJECTION_NAMES:
                     self.operator_projection_aliases[local] = alias.name
+                elif alias.name in {"vars", "globals", "locals"}:
+                    self.ns_projection_aliases.add(local)
         elif isinstance(node, ast.Import):
             return
+
+    def _base_is_namespace_projection(
+        self,
+        base: ast.AST,
+        *,
+        getattr_aliases: frozenset[str],
+    ) -> bool:
+        """True for ``types.__dict__`` / ``vars(types)`` / ``getattr(..., "__dict__")``."""
+
+        while isinstance(base, ast.NamedExpr):
+            base = base.value
+        if isinstance(base, ast.Attribute) and base.attr == "__dict__":
+            return True
+        if isinstance(base, ast.Call):
+            bfunc = base.func
+            while isinstance(bfunc, ast.NamedExpr):
+                bfunc = bfunc.value
+            if isinstance(bfunc, ast.Name) and (
+                bfunc.id in {"vars", "globals", "locals"}
+                or bfunc.id in self.ns_projection_aliases
+            ):
+                return True
+            if isinstance(bfunc, ast.Attribute) and bfunc.attr in {
+                "vars",
+                "globals",
+                "locals",
+            }:
+                return True
+            is_getattr = (
+                isinstance(bfunc, ast.Name) and bfunc.id in getattr_aliases
+            ) or (isinstance(bfunc, ast.Attribute) and bfunc.attr == "getattr")
+            if (
+                is_getattr
+                and len(base.args) >= 2
+                and isinstance(base.args[1], ast.Constant)
+                and base.args[1].value == "__dict__"
+            ):
+                return True
+        return False
 
     def note_projection_name_alias(
         self,
@@ -390,7 +433,8 @@ class _RequestStateAliasEnv:
         """``MPT = MappingProxyType`` / ``gi = getitem`` local aliases.
 
         Also seeds ``Proxy = g(types, \"MappingProxyType\")`` (renamed getattr),
-        ``builtins.getattr(...)``, ``vars(types)[...]``, and ``types.__dict__[…]``.
+        ``builtins.getattr(...)``, ``vars(types)[...]``, ``getattr(..., "__dict__")``,
+        renamed ``vars`` / ``.get("MappingProxyType")``, and ``types.__dict__[…]``.
         """
 
         g_aliases = getattr_aliases or frozenset({"getattr"})
@@ -401,6 +445,8 @@ class _RequestStateAliasEnv:
             if value.id in _CONTAINER_ADAPTER_NAMES or value.id in self.adapter_aliases:
                 if value.id == "MappingProxyType" or value.id in self.adapter_aliases:
                     self.adapter_aliases.add(name)
+            if value.id in {"vars", "globals", "locals"} or value.id in self.ns_projection_aliases:
+                self.ns_projection_aliases.add(name)
             if value.id in _OPERATOR_PROJECTION_NAMES:
                 self.operator_projection_aliases[name] = value.id
             elif value.id in self.operator_projection_aliases:
@@ -410,6 +456,8 @@ class _RequestStateAliasEnv:
         elif isinstance(value, ast.Attribute):
             if value.attr == "MappingProxyType":
                 self.adapter_aliases.add(name)
+            if value.attr in {"vars", "globals", "locals"}:
+                self.ns_projection_aliases.add(name)
             if value.attr in _OPERATOR_PROJECTION_NAMES:
                 self.operator_projection_aliases[name] = value.attr
         elif isinstance(value, ast.Subscript):
@@ -421,27 +469,9 @@ class _RequestStateAliasEnv:
             )
             if key is None:
                 return
-            base = value.value
-            ns_proj = False
-            if isinstance(base, ast.Attribute) and base.attr == "__dict__":
-                ns_proj = True
-            elif isinstance(base, ast.Call):
-                bfunc = base.func
-                while isinstance(bfunc, ast.NamedExpr):
-                    bfunc = bfunc.value
-                if isinstance(bfunc, ast.Name) and bfunc.id in {
-                    "vars",
-                    "globals",
-                    "locals",
-                }:
-                    ns_proj = True
-                elif isinstance(bfunc, ast.Attribute) and bfunc.attr in {
-                    "vars",
-                    "globals",
-                    "locals",
-                }:
-                    ns_proj = True
-            if ns_proj:
+            if self._base_is_namespace_projection(
+                value.value, getattr_aliases=g_aliases
+            ):
                 if key == "MappingProxyType":
                     self.adapter_aliases.add(name)
                 if key in _OPERATOR_PROJECTION_NAMES:
@@ -464,8 +494,27 @@ class _RequestStateAliasEnv:
                 attr = value.args[1].value
                 if attr == "MappingProxyType":
                     self.adapter_aliases.add(name)
+                if attr in {"vars", "globals", "locals"}:
+                    self.ns_projection_aliases.add(name)
                 if attr in _OPERATOR_PROJECTION_NAMES:
                     self.operator_projection_aliases[name] = attr
+            # ``Proxy = types.__dict__.get("MappingProxyType")`` /
+            # ``v(types).get("MappingProxyType")``.
+            if (
+                isinstance(func, ast.Attribute)
+                and func.attr == "get"
+                and value.args
+                and isinstance(value.args[0], ast.Constant)
+                and isinstance(value.args[0].value, str)
+            ):
+                key = value.args[0].value
+                if self._base_is_namespace_projection(
+                    func.value, getattr_aliases=g_aliases
+                ):
+                    if key == "MappingProxyType":
+                        self.adapter_aliases.add(name)
+                    if key in _OPERATOR_PROJECTION_NAMES:
+                        self.operator_projection_aliases[name] = key
 
     def snapshot(self) -> "_RequestStateAliasEnv":
         """Deep-copy alias sets for control-flow fork."""
@@ -477,6 +526,7 @@ class _RequestStateAliasEnv:
             may_state_names=set(self.may_state_names),
             adapter_aliases=set(self.adapter_aliases),
             operator_projection_aliases=dict(self.operator_projection_aliases),
+            ns_projection_aliases=set(self.ns_projection_aliases),
         )
 
     def restore(self, other: "_RequestStateAliasEnv") -> None:
@@ -488,6 +538,7 @@ class _RequestStateAliasEnv:
         self.may_state_names = set(other.may_state_names)
         self.adapter_aliases = set(other.adapter_aliases)
         self.operator_projection_aliases = dict(other.operator_projection_aliases)
+        self.ns_projection_aliases = set(other.ns_projection_aliases)
 
     def install_join(self, states: Sequence["_RequestStateAliasEnv"]) -> None:
         """Install the sound must/may join of feasible predecessor alias envs."""
@@ -910,16 +961,44 @@ class _RequestStateAliasEnv:
                     for operand in node.values:
                         _peel_adapter_func(operand)
                     return
+                if isinstance(node, ast.BinOp):
+                    # ``({}|{"p": Proxy})["p"]`` dict-merge packs.
+                    _peel_adapter_func(node.left)
+                    _peel_adapter_func(node.right)
+                    return
                 if isinstance(node, ast.Subscript):
                     _peel_adapter_func(node.value)
-                    if isinstance(node.slice, ast.Constant) and isinstance(
-                        node.slice.value, str
-                    ):
-                        func_names.append(node.slice.value)
+                    if isinstance(node.slice, ast.Constant):
+                        if isinstance(node.slice.value, str):
+                            func_names.append(node.slice.value)
+                        # Dict-keyed Call.func: ``{"p": Proxy}["p"]`` /
+                        # ``{0: Proxy}[0]`` — peel matching values.
+                        if isinstance(node.value, ast.Dict):
+                            for map_key, map_val in zip(
+                                node.value.keys, node.value.values
+                            ):
+                                if (
+                                    map_val is not None
+                                    and isinstance(map_key, ast.Constant)
+                                    and map_key.value == node.slice.value
+                                ):
+                                    _peel_adapter_func(map_val)
+                    return
+                if isinstance(node, ast.Dict):
+                    for map_val in node.values:
+                        if map_val is not None:
+                            _peel_adapter_func(map_val)
                     return
                 if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
                     for elt in node.elts:
                         nested = elt.value if isinstance(elt, ast.Starred) else elt
+                        _peel_adapter_func(nested)
+                    return
+                if isinstance(node, ast.Call):
+                    # ``list(d.values())[0]`` / adapter peels of Call.func packs.
+                    _peel_adapter_func(node.func)
+                    for arg in node.args:
+                        nested = arg.value if isinstance(arg, ast.Starred) else arg
                         _peel_adapter_func(nested)
 
             _peel_adapter_func(value.func)
@@ -1142,9 +1221,11 @@ def join_request_state_alias_envs(
     may_state -= must_state
     adapter_aliases: set[str] = set()
     operator_projection_aliases: dict[str, str] = {}
+    ns_projection_aliases: set[str] = set()
     for state in states:
         adapter_aliases |= state.adapter_aliases
         operator_projection_aliases.update(state.operator_projection_aliases)
+        ns_projection_aliases |= state.ns_projection_aliases
     return _RequestStateAliasEnv(
         request_names=must_request,
         state_names=must_state,
@@ -1152,6 +1233,7 @@ def join_request_state_alias_envs(
         may_state_names=may_state,
         adapter_aliases=adapter_aliases,
         operator_projection_aliases=operator_projection_aliases,
+        ns_projection_aliases=ns_projection_aliases,
     )
 
 
@@ -2083,8 +2165,11 @@ def _collect_writes_in_function(
         unknown = id(call) in call_returned_unknown
         if returned or unknown:
             return returned, unknown
-        if isinstance(call.func, ast.Name):
-            cls = _lookup_local_class(call.func.id)
+        func = call.func
+        while isinstance(func, ast.NamedExpr):
+            func = func.value
+        if isinstance(func, ast.Name):
+            cls = _lookup_local_class(func.id)
             if cls is not None:
                 method = _governed_class_method(cls, "__call__")
                 if method is not None:
@@ -2266,6 +2351,24 @@ def _collect_writes_in_function(
                     nested = elt.value if isinstance(elt, ast.Starred) else elt
                     _apply(sub_pat, nested)
                 return
+            if isinstance(pat, ast.MatchMapping) and isinstance(value, ast.Dict):
+                if pat.rest is not None:
+                    return
+                value_by_key: dict[object, ast.AST] = {}
+                for map_key, map_val in zip(value.keys, value.values):
+                    if (
+                        map_key is not None
+                        and map_val is not None
+                        and isinstance(map_key, ast.Constant)
+                    ):
+                        value_by_key[map_key.value] = map_val
+                for map_key, sub_pat in zip(pat.keys, pat.patterns):
+                    if not isinstance(map_key, ast.Constant):
+                        continue
+                    nested = value_by_key.get(map_key.value)
+                    if nested is not None:
+                        _apply(sub_pat, nested)
+                return
             if isinstance(pat, ast.MatchOr):
                 for alt in pat.patterns:
                     _apply(alt, value)
@@ -2283,6 +2386,134 @@ def _collect_writes_in_function(
         if cls is not None:
             return cls.name
         return None
+
+    def _seed_name_instance_or_class(name: str, value: ast.AST) -> None:
+        """Shared seed for instance carriers and class constructor aliases."""
+
+        packed_cls = _instance_class_name_from_expr(value)
+        if packed_cls is not None:
+            instance_class_of[name] = packed_cls
+        if isinstance(value, ast.Name):
+            src_cls = _lookup_local_class(value.id)
+            if src_cls is not None:
+                local_classes[name] = src_cls
+                if identity_session is not None:
+                    identity_session.observe_statement(
+                        ast.Assign(
+                            targets=[ast.Name(id=name, ctx=ast.Store())],
+                            value=ast.Name(id=value.id, ctx=ast.Load()),
+                        )
+                    )
+
+    def _seed_assign_target_instance_bindings(
+        target: ast.AST, value: ast.AST
+    ) -> None:
+        """Seed For/with/comp targets from packed Box/class carriers."""
+
+        if isinstance(target, ast.Name):
+            _seed_name_instance_or_class(target.id, value)
+            return
+        if isinstance(target, ast.Starred):
+            _seed_assign_target_instance_bindings(target.value, value)
+            return
+        if isinstance(target, (ast.Tuple, ast.List)):
+            if isinstance(value, (ast.Tuple, ast.List)) and len(target.elts) == len(
+                value.elts
+            ):
+                for elt_t, elt_v in zip(target.elts, value.elts):
+                    nested_t = elt_t.value if isinstance(elt_t, ast.Starred) else elt_t
+                    nested_v = elt_v.value if isinstance(elt_v, ast.Starred) else elt_v
+                    _seed_assign_target_instance_bindings(nested_t, nested_v)
+                return
+            # ``for (x,) in [(Box(),)]`` / starred packs: peel iter class once.
+            packed_cls = _instance_class_name_from_expr(value)
+            if packed_cls is not None:
+                for name in _collect_assign_target_names(target):
+                    instance_class_of[name] = packed_cls
+
+    def _apply_match_pattern_instance_class_bindings(
+        pattern: ast.AST,
+        matched: ast.AST,
+    ) -> None:
+        """Seed instance_class_of / local_classes through match peels."""
+
+        def _apply(pat: ast.AST, value: ast.AST) -> None:
+            if isinstance(pat, ast.MatchAs):
+                if pat.name:
+                    _seed_name_instance_or_class(pat.name, value)
+                if pat.pattern is not None:
+                    _apply(pat.pattern, value)
+                return
+            if isinstance(pat, ast.MatchSequence) and isinstance(
+                value, (ast.List, ast.Tuple)
+            ):
+                if any(isinstance(item, ast.MatchStar) for item in pat.patterns):
+                    # Star binders still seed fixed prefix peels when lengths allow.
+                    packed_cls = _instance_class_name_from_expr(value)
+                    if packed_cls is not None:
+                        for name in _match_pattern_bound_names(pat):
+                            instance_class_of[name] = packed_cls
+                    return
+                if len(pat.patterns) != len(value.elts):
+                    packed_cls = _instance_class_name_from_expr(value)
+                    if packed_cls is not None:
+                        for name in _match_pattern_bound_names(pat):
+                            instance_class_of[name] = packed_cls
+                    return
+                for sub_pat, elt in zip(pat.patterns, value.elts):
+                    nested = elt.value if isinstance(elt, ast.Starred) else elt
+                    _apply(sub_pat, nested)
+                return
+            if isinstance(pat, ast.MatchMapping) and isinstance(value, ast.Dict):
+                if pat.rest is not None:
+                    packed_cls = _instance_class_name_from_expr(value)
+                    if packed_cls is not None:
+                        for name in _match_pattern_bound_names(pat):
+                            instance_class_of[name] = packed_cls
+                    return
+                value_by_key: dict[object, ast.AST] = {}
+                for map_key, map_val in zip(value.keys, value.values):
+                    if (
+                        map_key is not None
+                        and map_val is not None
+                        and isinstance(map_key, ast.Constant)
+                    ):
+                        value_by_key[map_key.value] = map_val
+                for map_key, sub_pat in zip(pat.keys, pat.patterns):
+                    if not isinstance(map_key, ast.Constant):
+                        continue
+                    nested = value_by_key.get(map_key.value)
+                    if nested is not None:
+                        _apply(sub_pat, nested)
+                return
+            if isinstance(pat, ast.MatchOr):
+                for alt in pat.patterns:
+                    _apply(alt, value)
+
+        _apply(pattern, matched)
+
+    def _enter_return_instance_class(
+        context_expr: ast.AST, *, async_enter: bool
+    ) -> str | None:
+        """Class name returned by local ``__enter__`` / ``__aenter__``, if any."""
+
+        if not isinstance(context_expr, ast.Call) or not isinstance(
+            context_expr.func, ast.Name
+        ):
+            return _instance_class_name_from_expr(context_expr)
+        cls = _lookup_local_class(context_expr.func.id)
+        if cls is None:
+            return _instance_class_name_from_expr(context_expr)
+        method_name = "__aenter__" if async_enter else "__enter__"
+        method = _governed_class_method(cls, method_name)
+        if method is None:
+            return _instance_class_name_from_expr(context_expr)
+        for stmt in method.body:
+            if isinstance(stmt, ast.Return) and stmt.value is not None:
+                packed = _instance_class_name_from_expr(stmt.value)
+                if packed is not None:
+                    return packed
+        return _instance_class_name_from_expr(context_expr)
 
     def _note_callable_name_alias(
         target: ast.AST,
@@ -2321,10 +2552,14 @@ def _collect_writes_in_function(
             # so ``fn = mid(); fn = noop; fn()`` cannot keep following poison.
             _clear_callable_name(target.id)
             # Double instance alias: ``b = Box(); c = b`` transfers class peel.
+            # Class constructor alias: ``C = Cls; C()()`` observes ``__call__``.
             if value.id in instance_class_of:
                 instance_class_of[target.id] = instance_class_of[value.id]
             else:
                 instance_class_of.pop(target.id, None)
+            src_cls = _lookup_local_class(value.id)
+            if src_cls is not None:
+                local_classes[target.id] = src_cls
             if value.id in getattr_aliases:
                 getattr_aliases.add(target.id)
             request_aliases.note_projection_name_alias(
@@ -4374,10 +4609,22 @@ def _collect_writes_in_function(
                     identity_session.observe_statement(
                         ast.Assign(targets=[gen.target], value=gen.iter)
                     )
-                if isinstance(gen.target, ast.Name):
-                    packed_cls = _instance_class_name_from_expr(gen.iter)
-                    if packed_cls is not None:
-                        instance_class_of[gen.target.id] = packed_cls
+                _seed_assign_target_instance_bindings(gen.target, gen.iter)
+        # Seed walrus class/instance aliases before Call follow so
+        # ``(C := Cls)()()`` observes ``__call__`` (Unknown > false PASS).
+        for child in ast.walk(expr):
+            if not isinstance(child, ast.NamedExpr):
+                continue
+            if not isinstance(child.target, ast.Name):
+                continue
+            if isinstance(child.value, ast.Name) and child.value.id in getattr_aliases:
+                getattr_aliases.add(child.target.id)
+            _seed_name_instance_or_class(child.target.id, child.value)
+            request_aliases.note_projection_name_alias(
+                child.target.id,
+                child.value,
+                getattr_aliases=frozenset(getattr_aliases),
+            )
         # Identity first: arg-order mutators (``write_state(..., poison())``)
         # must poison resolve before interprocedural write inlining.
         if identity_session is not None:
@@ -4404,17 +4651,6 @@ def _collect_writes_in_function(
                 )
             elif isinstance(child.value, ast.Call):
                 _bind_call_product_to_name(child.target.id, child.value)
-            # Instance / getattr / projection aliases through walrus.
-            if isinstance(child.value, ast.Name) and child.value.id in getattr_aliases:
-                getattr_aliases.add(child.target.id)
-            packed_cls = _instance_class_name_from_expr(child.value)
-            if packed_cls is not None:
-                instance_class_of[child.target.id] = packed_cls
-            request_aliases.note_projection_name_alias(
-                child.target.id,
-                child.value,
-                getattr_aliases=frozenset(getattr_aliases),
-            )
 
     def _visit_statement(
         statement: ast.stmt,
@@ -4644,6 +4880,8 @@ def _collect_writes_in_function(
                         value=statement.iter,
                     )
                 )
+            # Instance carriers: ``for x in [Box()]: x.fn()`` (comp parity).
+            _seed_assign_target_instance_bindings(statement.target, statement.iter)
             # ``for s in [request.state]: s.field = client`` must not authorize.
             # IfExp/BoolOp packing, container adapters/views, and Call iters that
             # receive identity (module-level generators) are residual escapes.
@@ -4761,6 +4999,17 @@ def _collect_writes_in_function(
                         classification = direct.as_may_only()
                     else:
                         classification = AliasClassification()
+                    # Instance carriers from ``__enter__`` return / context expr.
+                    enter_cls = _enter_return_instance_class(
+                        item.context_expr, async_enter=is_async_with
+                    )
+                    if enter_cls is not None:
+                        for name in as_names:
+                            instance_class_of[name] = enter_cls
+                    else:
+                        _seed_assign_target_instance_bindings(
+                            item.optional_vars, item.context_expr
+                        )
                     for name in as_names:
                         request_aliases.apply_classification(name, classification)
                         if not classification.any_alias:
@@ -4934,42 +5183,11 @@ def _collect_writes_in_function(
                     # unresolved bases via env membership (#173).
                     if identity_session is not None:
                         identity_session.bind_name_unknown(name)
-                # Precise class alias through MatchAs subject capture.
-                # ``match Mut: case C: C()`` — bind C in PE local_classes and
-                # identity class_registry so construction observes __init__.
-                if (
-                    isinstance(case.pattern, ast.MatchAs)
-                    and case.pattern.name
-                    and case.pattern.pattern is None
-                    and isinstance(statement.subject, ast.Name)
-                ):
-                    src_cls = _lookup_local_class(statement.subject.id)
-                    if src_cls is not None:
-                        local_classes[case.pattern.name] = src_cls
-                        if identity_session is not None:
-                            # Synthetic Assign seeds identity class_registry
-                            # (observe_statement Match does not run whole-stmt).
-                            identity_session.observe_statement(
-                                ast.Assign(
-                                    targets=[
-                                        ast.Name(
-                                            id=case.pattern.name, ctx=ast.Store()
-                                        )
-                                    ],
-                                    value=ast.Name(
-                                        id=statement.subject.id, ctx=ast.Load()
-                                    ),
-                                )
-                            )
-                # Instance alias: ``match Box(): case b: b.fn()``.
-                if (
-                    isinstance(case.pattern, ast.MatchAs)
-                    and case.pattern.name
-                    and case.pattern.pattern is None
-                ):
-                    packed_cls = _instance_class_name_from_expr(statement.subject)
-                    if packed_cls is not None:
-                        instance_class_of[case.pattern.name] = packed_cls
+                # Class / instance aliases through MatchAs and seq/map/or peels
+                # (``match [Box()]: case [b]: b.fn()`` / ``match (Mut,): case (C,):``).
+                _apply_match_pattern_instance_class_bindings(
+                    case.pattern, statement.subject
+                )
                 # MatchValue Attribute: fail-closed export rebind
                 # (``match (evil,): case (helpers.write_state,):``).
                 for attr_target in _match_pattern_attribute_targets(case.pattern):
@@ -5305,10 +5523,7 @@ def _collect_writes_in_function(
                 ):
                     continue
                 for gen in child.generators:
-                    if isinstance(gen.target, ast.Name):
-                        packed_cls = _instance_class_name_from_expr(gen.iter)
-                        if packed_cls is not None:
-                            instance_class_of[gen.target.id] = packed_cls
+                    _seed_assign_target_instance_bindings(gen.target, gen.iter)
 
         # Identity before write inlining (same-statement arg-order mutators).
         if identity_session is not None:

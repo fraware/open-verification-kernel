@@ -47,7 +47,7 @@ from ovk.compilers.authorization.python_import_space import (
     normalize_path,
 )
 
-_IMPLEMENTATION_VERSION = "0.23.0"
+_IMPLEMENTATION_VERSION = "0.24.0"
 _MAX_IMPORT_FOLLOW_DEPTH = 8
 
 BindingKind = Literal["function", "import_name", "import_module", "rebound"]
@@ -975,24 +975,92 @@ def _is_operator_call_factory(
     *,
     projection_aliases: Mapping[str, str] | None = None,
     getattr_aliases: frozenset[str] | None = None,
+    partial_aliases: frozenset[str] | None = None,
+    adapter_aliases: frozenset[str] | None = None,
 ) -> bool:
-    """True for ``operator.call(...)`` / renamed ``call`` / getattr projections.
+    """True for ``operator.call(...)`` / renamed ``call`` / packed projections.
 
     Peels NamedExpr so ``(oc := operator.call)(...)`` and Name aliases of
     ``call`` (``from operator import call as oc``) are recognized before any
-    bare-Name short-circuit (Unknown > false PASS).
+    bare-Name short-circuit. Also peels container / ``next(iter)`` / subscript
+    packs so ``[oc][0](exec, …)`` / ``next(iter([oc]))(…)`` cannot authorize
+    beside a trusted write (Unknown > false PASS).
     """
 
     aliases = projection_aliases or {}
     func = _peel_call_func(call.func)
     if isinstance(func, ast.Name):
-        return func.id == "call" or aliases.get(func.id) == "call"
-    if isinstance(func, ast.Attribute) and func.attr == "call":
+        if func.id == "call" or aliases.get(func.id) == "call":
+            return True
+    elif isinstance(func, ast.Attribute) and func.attr == "call":
         return True
-    # ``getattr(operator, "call")`` / renamed getattr.
-    if isinstance(func, ast.Call):
-        return _getattr_static_name(func, getattr_aliases=getattr_aliases) == "call"
+    elif isinstance(func, ast.Call):
+        # ``getattr(operator, "call")`` / renamed getattr.
+        if _getattr_static_name(func, getattr_aliases=getattr_aliases) == "call":
+            return True
+    # Shared packing peel: ``[oc][0]`` / ``next(iter([oc]))`` / walrus packs.
+    for name in _names_packed_as_callee(
+        call.func,
+        projection_aliases=aliases,
+        getattr_aliases=getattr_aliases,
+        partial_aliases=partial_aliases,
+        adapter_aliases=adapter_aliases,
+    ):
+        if name == "call" or aliases.get(name) == "call":
+            return True
     return False
+
+
+def _methodcaller_call_bound_args(
+    call: ast.Call,
+    *,
+    projection_aliases: Mapping[str, str] | None = None,
+) -> list[ast.AST] | None:
+    """Bound args of ``methodcaller("__call__", *bound)(receiver)``, if any."""
+
+    func = _peel_call_func(call.func)
+    if not isinstance(func, ast.Call):
+        return None
+    if _methodcaller_static_name(func, projection_aliases=projection_aliases) != "__call__":
+        return None
+    return list(func.args[1:])
+
+
+def _receiver_looks_like_type_builtin(recv: ast.AST) -> bool:
+    """True for ``type`` / ``object`` / ``object.__class__`` receivers."""
+
+    recv = _peel_call_func(recv)
+    if isinstance(recv, ast.Name) and recv.id in {_TYPE_BUILTIN_NAME, "object"}:
+        return True
+    if isinstance(recv, ast.Attribute) and recv.attr in {
+        "__class__",
+        _TYPE_BUILTIN_NAME,
+    }:
+        return True
+    return False
+
+
+def _type_protocol_attr_from_value(
+    value: ast.AST,
+    *,
+    getattr_aliases: frozenset[str] | None = None,
+) -> str | None:
+    """``type.__new__`` / ``getattr(type, "__call__")`` → protocol attr name."""
+
+    value = _peel_call_func(value)
+    if isinstance(value, ast.Attribute) and value.attr in {"__new__", "__call__"}:
+        if _receiver_looks_like_type_builtin(value.value):
+            return value.attr
+        return None
+    if isinstance(value, ast.Call):
+        attr = _getattr_static_name(value, getattr_aliases=getattr_aliases)
+        if (
+            attr in {"__new__", "__call__"}
+            and value.args
+            and _receiver_looks_like_type_builtin(value.args[0])
+        ):
+            return attr
+    return None
 
 
 def _peel_call_func(func: ast.AST) -> ast.AST:
@@ -1952,6 +2020,14 @@ def _build_identity_scanner(
     # (None for partial — see partial_product_names).
     projection_factory_products: dict[str, tuple[str, str | None]] = {}
     partial_product_names: dict[str, list[str]] = {}
+    # Name-bound ``type.__new__`` / ``type.__call__`` / getattr projections.
+    type_protocol_products: dict[str, str] = {}
+    # Intermediate class projection products: ``m = gi({"Mut": Mut}, "Mut")``.
+    class_projection_products: dict[str, list[str]] = {}
+    # Bound dict views: ``g = {}.get`` / ``g = d.__getitem__``.
+    dict_view_products: dict[str, str] = {}
+    # Renamed ``vars`` / ``globals`` / ``locals`` for namespace adapter seeds.
+    ns_projection_aliases: set[str] = set()
 
     def _packed_names(expr: ast.AST) -> list[str]:
         """Shared packing/projection peel with live protocol aliases."""
@@ -2009,34 +2085,33 @@ def _build_identity_scanner(
         projection_factory_products.pop(name, None)
         partial_product_names.pop(name, None)
 
-    def _note_adapter_from_subscript(name: str, value: ast.AST) -> None:
-        """``Proxy = vars(types)["MappingProxyType"]`` / ``types.__dict__[…]``."""
+    def _base_is_namespace_projection(base: ast.AST) -> bool:
+        """True for ``types.__dict__`` / ``vars(types)`` / ``getattr(..., "__dict__")``."""
 
-        if not isinstance(value, ast.Subscript):
-            return
-        key = _static_str(value.slice)
-        if key is None:
-            return
-        base = value.value
-        ns_proj = False
+        base = _peel_call_func(base)
         if isinstance(base, ast.Attribute) and base.attr == "__dict__":
-            ns_proj = True
-        elif isinstance(base, ast.Call):
+            return True
+        if isinstance(base, ast.Call):
             bfunc = _peel_call_func(base.func)
-            if isinstance(bfunc, ast.Name) and bfunc.id in {
+            if isinstance(bfunc, ast.Name) and (
+                bfunc.id in {"vars", "globals", "locals"}
+                or bfunc.id in ns_projection_aliases
+            ):
+                return True
+            if isinstance(bfunc, ast.Attribute) and bfunc.attr in {
                 "vars",
                 "globals",
                 "locals",
             }:
-                ns_proj = True
-            elif isinstance(bfunc, ast.Attribute) and bfunc.attr in {
-                "vars",
-                "globals",
-                "locals",
-            }:
-                ns_proj = True
-        if not ns_proj:
-            return
+                return True
+            if (
+                _getattr_static_name(base, getattr_aliases=frozenset(getattr_aliases))
+                == "__dict__"
+            ):
+                return True
+        return False
+
+    def _seed_ns_key_aliases(name: str, key: str) -> None:
         if key == "MappingProxyType":
             adapter_aliases.add(name)
         if key in _OPERATOR_PROJECTION_NAMES:
@@ -2050,10 +2125,79 @@ def _build_identity_scanner(
         if key == "getattr":
             getattr_aliases.add(name)
 
+    def _note_adapter_from_subscript(name: str, value: ast.AST) -> None:
+        """``Proxy = vars(types)["MappingProxyType"]`` / ``types.__dict__[…]``."""
+
+        if not isinstance(value, ast.Subscript):
+            return
+        key = _static_str(value.slice)
+        if key is None:
+            return
+        if not _base_is_namespace_projection(value.value):
+            # Ordinary dict key projection of a class: ``m = d["Mut"]``.
+            class_projection_products[name] = list(
+                dict.fromkeys([key, *_packed_names(value.value)])
+            )
+            return
+        _seed_ns_key_aliases(name, key)
+
+    def _note_class_product_from_value(name: str, value: ast.AST) -> None:
+        """Track intermediate class carriers: ``m = gi({"Mut": Mut}, "Mut")``."""
+
+        value = _peel_call_func(value)
+        if isinstance(value, ast.Name):
+            if value.id in class_projection_products:
+                class_projection_products[name] = list(
+                    class_projection_products[value.id]
+                )
+            elif value.id in class_registry:
+                class_projection_products[name] = [value.id]
+            else:
+                class_projection_products.pop(name, None)
+            return
+        if isinstance(value, ast.Subscript):
+            key = _static_str(value.slice)
+            names = list(_packed_names(value))
+            if key is not None and key not in names:
+                names.insert(0, key)
+            if names:
+                class_projection_products[name] = names
+            else:
+                class_projection_products.pop(name, None)
+            return
+        if isinstance(value, ast.Call):
+            names = list(_packed_names(value))
+            # Bound ``g = {}.get; m = g("missing", Mut)``.
+            fpeeled = _peel_call_func(value.func)
+            if isinstance(fpeeled, ast.Name) and fpeeled.id in dict_view_products:
+                view = dict_view_products[fpeeled.id]
+                if view == "get" and len(value.args) >= 2:
+                    names.extend(_packed_names(value.args[1]))
+                elif value.args:
+                    key = _static_str(value.args[0])
+                    if key is not None:
+                        names.append(key)
+            if names:
+                class_projection_products[name] = list(dict.fromkeys(names))
+            else:
+                class_projection_products.pop(name, None)
+            return
+        class_projection_products.pop(name, None)
+
     def _note_protocol_alias_from_value(name: str, value: ast.AST) -> None:
         """Install exec/new_class/type/getattr aliases from an Assign/walrus RHS."""
 
         value = _peel_call_func(value)
+        # Type protocol products first (``tn = type.__new__`` / getattr).
+        tproto = _type_protocol_attr_from_value(
+            value, getattr_aliases=frozenset(getattr_aliases)
+        )
+        if tproto is not None:
+            type_protocol_products[name] = tproto
+        elif isinstance(value, ast.Name) and value.id in type_protocol_products:
+            type_protocol_products[name] = type_protocol_products[value.id]
+        else:
+            type_protocol_products.pop(name, None)
         if isinstance(value, ast.Name):
             if value.id in _EXEC_EVAL_COMPILE_NAMES or value.id in exec_eval_compile_aliases:
                 exec_eval_compile_aliases.add(name)
@@ -2065,6 +2209,8 @@ def _build_identity_scanner(
                 getattr_aliases.add(name)
             if value.id in partial_aliases:
                 partial_aliases.add(name)
+            if value.id in {"vars", "globals", "locals"} or value.id in ns_projection_aliases:
+                ns_projection_aliases.add(name)
             if value.id in _CALLEE_ADAPTER_NAMES or value.id in adapter_aliases:
                 if value.id == "MappingProxyType" or value.id in adapter_aliases:
                     adapter_aliases.add(name)
@@ -2072,7 +2218,12 @@ def _build_identity_scanner(
                 operator_projection_aliases[name] = value.id
             elif value.id in operator_projection_aliases:
                 operator_projection_aliases[name] = operator_projection_aliases[value.id]
+            if value.id in dict_view_products:
+                dict_view_products[name] = dict_view_products[value.id]
+            else:
+                dict_view_products.pop(name, None)
             _note_factory_product_from_value(name, value)
+            _note_class_product_from_value(name, value)
             return
         if isinstance(value, ast.Attribute):
             if value.attr in _EXEC_EVAL_COMPILE_NAMES:
@@ -2085,13 +2236,21 @@ def _build_identity_scanner(
                 partial_aliases.add(name)
             if value.attr == "getattr":
                 getattr_aliases.add(name)
+            if value.attr in {"vars", "globals", "locals"}:
+                ns_projection_aliases.add(name)
             if value.attr == "MappingProxyType":
                 adapter_aliases.add(name)
             if value.attr in _OPERATOR_PROJECTION_NAMES:
                 operator_projection_aliases[name] = value.attr
+            if value.attr in {"get", "pop", "__getitem__"}:
+                dict_view_products[name] = value.attr
+            else:
+                dict_view_products.pop(name, None)
+            _note_class_product_from_value(name, value)
             return
         if isinstance(value, ast.Subscript):
             _note_adapter_from_subscript(name, value)
+            _note_class_product_from_value(name, value)
             return
         if isinstance(value, ast.Call):
             attr = _getattr_static_name(
@@ -2109,9 +2268,24 @@ def _build_identity_scanner(
                 getattr_aliases.add(name)
             if attr == "MappingProxyType":
                 adapter_aliases.add(name)
+            if attr in {"vars", "globals", "locals"}:
+                ns_projection_aliases.add(name)
             if attr in _OPERATOR_PROJECTION_NAMES:
                 operator_projection_aliases[name] = attr
+            # ``Proxy = types.__dict__.get("MappingProxyType")`` /
+            # ``vars(types).get("MappingProxyType")``.
+            fpeeled = _peel_call_func(value.func)
+            if (
+                isinstance(fpeeled, ast.Attribute)
+                and fpeeled.attr == "get"
+                and value.args
+            ):
+                key = _static_str(value.args[0])
+                if key is not None and _base_is_namespace_projection(fpeeled.value):
+                    _seed_ns_key_aliases(name, key)
+            dict_view_products.pop(name, None)
             _note_factory_product_from_value(name, value)
+            _note_class_product_from_value(name, value)
 
     def _note_export(module_path: str, name: str) -> None:
         accum.export_mutations.setdefault(module_path, set()).add(name)
@@ -2711,6 +2885,8 @@ def _build_identity_scanner(
                     adapter_aliases.add(local)
                 elif alias.name == "getattr":
                     getattr_aliases.add(local)
+                elif alias.name in {"vars", "globals", "locals"}:
+                    ns_projection_aliases.add(local)
                 if module_path is None:
                     env[local] = _IdentityPointsTo.unknown_only()
                 else:
@@ -3341,6 +3517,22 @@ def _build_identity_scanner(
                 for kw in call.keywords:
                     _escape_if_tracked(_eval_expr(kw.value, env, path=path))
                 return
+            # Bound dict view: ``g = {}.get; g("missing", Mut)()``.
+            fpeeled = _peel_call_func(func.func)
+            if isinstance(fpeeled, ast.Name) and fpeeled.id in dict_view_products:
+                view = dict_view_products[fpeeled.id]
+                names: list[str] = []
+                if view == "get" and len(func.args) >= 2:
+                    names.extend(_packed_names(func.args[1]))
+                if func.args:
+                    key = _static_str(func.args[0])
+                    if key is not None:
+                        names.append(key)
+                if _observe_classes_from_names(names):
+                    return
+                if names:
+                    accum.unsupported = True
+                    return
             # getattr(obj, "poison")() — follow the named method when static.
             getattr_name = _getattr_static_name(
                 func, getattr_aliases=frozenset(getattr_aliases)
@@ -3350,6 +3542,15 @@ def _build_identity_scanner(
                 if getattr_name == "__call__" and func.args:
                     if _observe_classes_from_names(_packed_names(func.args[0])):
                         return
+                    # ``getattr(p, "__call__")()`` when p is a factory product.
+                    for recv_name in _packed_names(func.args[0]):
+                        if _observe_name_bound_factory_product(recv_name):
+                            return
+                        if recv_name in class_projection_products:
+                            if _observe_classes_from_names(
+                                class_projection_products[recv_name]
+                            ):
+                                return
                     # ``getattr(type, "__call__")(Mut)``.
                     if _receiver_is_type_builtin(func.args[0]):
                         for arg in call.args:
@@ -3649,6 +3850,16 @@ def _build_identity_scanner(
             if func.attr == "__call__":
                 type_call_recv = False
                 if isinstance(func.value, ast.Name):
+                    # ``p = partial(Mut); p.__call__()`` / factory products.
+                    if _observe_name_bound_factory_product(func.value.id):
+                        return
+                    if func.value.id in class_projection_products:
+                        if _observe_classes_from_names(
+                            class_projection_products[func.value.id]
+                        ):
+                            return
+                        accum.unsupported = True
+                        return
                     if (
                         func.value.id == _TYPE_BUILTIN_NAME
                         or func.value.id in type_aliases
@@ -3863,6 +4074,33 @@ def _build_identity_scanner(
         # ``mc = methodcaller("poison"); mc(obj)``.
         if _observe_name_bound_factory_product(func.id):
             return
+        # Name-bound type protocol: ``tn = type.__new__; tn(...)`` /
+        # ``tc = getattr(type, "__call__); tc(Mut)``.
+        tproto = type_protocol_products.get(func.id)
+        if tproto == "__new__":
+            for arg in call.args:
+                _eval_expr(arg, env, path=path)
+            for kw in call.keywords:
+                _eval_expr(kw.value, env, path=path)
+            _observe_type_new_from_args()
+            return
+        if tproto == "__call__":
+            observed = False
+            for arg in call.args:
+                if _observe_classes_from_names(_packed_names(arg)):
+                    observed = True
+            if not observed:
+                accum.unsupported = True
+            return
+        # Intermediate class projection: ``m = gi({"Mut": Mut}, "Mut"); m()``.
+        if func.id in class_projection_products:
+            if _observe_classes_from_names(class_projection_products[func.id]):
+                return
+            accum.unsupported = True
+            return
+        # Bound dict view applied then called: ``g = {}.get; g("missing", Mut)()``
+        # is handled when Call.func is itself that Call (below). Bare ``g(...)``
+        # peels defaults into class_projection_products via assign.
         if func.id in _BENIGN_BUILTINS:
             # Container / higher-order builtins must still evaluate arguments so
             # ``list(genexp)``, ``map(fn, …)`` cannot hide request-time mutations.
@@ -4199,19 +4437,29 @@ def _build_identity_scanner(
             for name in _packed_names(func):
                 if _name_is_exec_eval_compile(name):
                     return True
-            # ``operator.call(exec, ...)`` / Name aliases of ``call`` MUST be
-            # checked before the bare-Name short-circuit — otherwise
-            # ``from operator import call as oc; oc(exec, ...)`` false-PASSes.
+            # ``operator.call(exec, ...)`` / Name aliases / packed ``[oc][0]`` /
+            # ``next(iter([oc]))`` MUST be checked before bare-Name short-circuit.
             if _is_operator_call_factory(
                 call,
                 projection_aliases=operator_projection_aliases,
                 getattr_aliases=frozenset(getattr_aliases),
+                partial_aliases=frozenset(partial_aliases),
+                adapter_aliases=frozenset(adapter_aliases),
             ):
                 if call.args:
                     for name in _packed_names(call.args[0]):
                         if _name_is_exec_eval_compile(name):
                             return True
                 return True
+            # ``methodcaller("__call__", exec, "…")(oc)`` binds exec into __call__.
+            bound = _methodcaller_call_bound_args(
+                call, projection_aliases=operator_projection_aliases
+            )
+            if bound is not None:
+                for arg in bound:
+                    for name in _packed_names(arg):
+                        if _name_is_exec_eval_compile(name):
+                            return True
             peeled = _peel_call_func(func)
             if isinstance(peeled, ast.Name):
                 return _name_is_exec_eval_compile(peeled.id)
@@ -4230,11 +4478,13 @@ def _build_identity_scanner(
                         if any(
                             n in {"vars", "globals", "locals", "MappingProxyType"}
                             or n in adapter_aliases
+                            or n in ns_projection_aliases
                             for n in base_names
                         ):
                             return True
                         if isinstance(base.func, ast.Name) and (
                             base.func.id in {"vars", "globals", "locals"}
+                            or base.func.id in ns_projection_aliases
                             or base.func.id in _CALLEE_ADAPTER_NAMES
                             or base.func.id in adapter_aliases
                         ):
@@ -4277,6 +4527,26 @@ def _build_identity_scanner(
             for name in _packed_names(func):
                 if _name_is_type_builtin(name):
                     return True
+            # ``operator.call(type, name, bases, dict)`` / packed call aliases.
+            if _is_operator_call_factory(
+                call,
+                projection_aliases=operator_projection_aliases,
+                getattr_aliases=frozenset(getattr_aliases),
+                partial_aliases=frozenset(partial_aliases),
+                adapter_aliases=frozenset(adapter_aliases),
+            ):
+                if call.args:
+                    for name in _packed_names(call.args[0]):
+                        if _name_is_type_builtin(name):
+                            return True
+            bound = _methodcaller_call_bound_args(
+                call, projection_aliases=operator_projection_aliases
+            )
+            if bound is not None:
+                for arg in bound:
+                    for name in _packed_names(arg):
+                        if _name_is_type_builtin(name):
+                            return True
             if isinstance(func, ast.Name):
                 return _name_is_type_builtin(func.id)
             if isinstance(func, ast.Attribute) and func.attr == _TYPE_BUILTIN_NAME:
@@ -5080,19 +5350,85 @@ def _build_identity_scanner(
                         _escape_if_tracked(subject)
                     for name in pattern_names:
                         env_c[name] = _IdentityPointsTo.unknown_only()
-                    # ``match Base: case x: class C(x)`` — identity-bind class
-                    # aliases through MatchAs so ``__init_subclass__`` observes.
-                    if (
-                        isinstance(case.pattern, ast.MatchAs)
-                        and case.pattern.name
-                        and case.pattern.pattern is None
-                        and isinstance(stmt.subject, ast.Name)
-                    ):
-                        src_cls = _lookup_class(stmt.subject.id, active_classes)
-                        if src_cls is not None:
-                            active_classes[case.pattern.name] = src_cls
-                            class_registry[case.pattern.name] = src_cls
-                            env_c[case.pattern.name] = subject
+                    # Class / instance aliases through MatchAs and seq/map peels
+                    # so ``match (Mut,): case (C,): C()`` observes construction.
+                    def _bind_match_class_aliases(
+                        pat: ast.AST, matched: ast.AST
+                    ) -> None:
+                        if isinstance(pat, ast.MatchAs):
+                            if pat.name:
+                                if isinstance(matched, ast.Name):
+                                    src_cls = _lookup_class(
+                                        matched.id, active_classes
+                                    )
+                                    if src_cls is not None:
+                                        active_classes[pat.name] = src_cls
+                                        class_registry[pat.name] = src_cls
+                                        env_c[pat.name] = _eval_expr(
+                                            matched, env_c, path=path
+                                        )
+                                packed_inst = None
+                                if (
+                                    isinstance(matched, ast.Call)
+                                    and isinstance(matched.func, ast.Name)
+                                ):
+                                    packed_inst = matched.func.id
+                                elif isinstance(matched, ast.Name):
+                                    packed_inst = instance_class_of.get(
+                                        matched.id
+                                    )
+                                if packed_inst is not None and _lookup_class(
+                                    packed_inst, active_classes
+                                ) is not None:
+                                    instance_class_of[pat.name] = packed_inst
+                            if pat.pattern is not None:
+                                _bind_match_class_aliases(pat.pattern, matched)
+                            return
+                        if isinstance(pat, ast.MatchSequence) and isinstance(
+                            matched, (ast.List, ast.Tuple)
+                        ):
+                            if any(
+                                isinstance(item, ast.MatchStar)
+                                for item in pat.patterns
+                            ):
+                                return
+                            if len(pat.patterns) != len(matched.elts):
+                                return
+                            for sub_pat, elt in zip(pat.patterns, matched.elts):
+                                nested = (
+                                    elt.value
+                                    if isinstance(elt, ast.Starred)
+                                    else elt
+                                )
+                                _bind_match_class_aliases(sub_pat, nested)
+                            return
+                        if isinstance(pat, ast.MatchMapping) and isinstance(
+                            matched, ast.Dict
+                        ):
+                            if pat.rest is not None:
+                                return
+                            value_by_key: dict[object, ast.AST] = {}
+                            for map_key, map_val in zip(
+                                matched.keys, matched.values
+                            ):
+                                if (
+                                    map_key is not None
+                                    and map_val is not None
+                                    and isinstance(map_key, ast.Constant)
+                                ):
+                                    value_by_key[map_key.value] = map_val
+                            for map_key, sub_pat in zip(pat.keys, pat.patterns):
+                                if not isinstance(map_key, ast.Constant):
+                                    continue
+                                nested = value_by_key.get(map_key.value)
+                                if nested is not None:
+                                    _bind_match_class_aliases(sub_pat, nested)
+                            return
+                        if isinstance(pat, ast.MatchOr):
+                            for alt in pat.patterns:
+                                _bind_match_class_aliases(alt, matched)
+
+                    _bind_match_class_aliases(case.pattern, stmt.subject)
                     # MatchValue Attribute patterns: fail-closed export rebind
                     # (``match (evil,): case (helpers.write_state,):``).
                     for attr_target in _match_pattern_attribute_targets(case.pattern):
