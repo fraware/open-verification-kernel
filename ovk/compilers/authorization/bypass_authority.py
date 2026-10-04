@@ -1508,6 +1508,90 @@ class _RequestStateAliasEnv:
             f = peeled.func
             while isinstance(f, ast.NamedExpr):
                 f = f.value
+
+            def _resolve_call_proj(func_expr: ast.AST) -> str | None:
+                if isinstance(func_expr, ast.Name):
+                    return self.operator_projection_aliases.get(
+                        func_expr.id, func_expr.id
+                    )
+                if isinstance(func_expr, ast.Attribute) and func_expr.attr == "call":
+                    return "call"
+                if isinstance(func_expr, ast.Call):
+                    from ovk.compilers.authorization.python_callee_resolution import (
+                        _getattr_static_name as _g_call_proj,
+                    )
+
+                    if (
+                        _g_call_proj(
+                            func_expr, getattr_aliases=frozenset(g_aliases)
+                        )
+                        == "call"
+                    ):
+                        return "call"
+                return None
+
+            # ``ig([partial(copy.copy)])(keys)`` /
+            # ``getattr([partial],"pop")(0)(keys)`` /
+            # ``[operator.call].pop(0)(partial, keys)`` /
+            # ``next(iter([partial(*IfExp)]))()`` /
+            # ``[partial(*IfExp)].pop(0)()`` — list0 / itemgetter / getattr /
+            # next(iter) peels project the callable before copy / operator.call
+            # peels (Unknown > false PASS).
+            for _ in range(4):
+                progressed = False
+                if isinstance(f, ast.Call):
+                    from ovk.compilers.authorization.python_callee_resolution import (
+                        _is_partial_factory as _is_partial_proj,
+                        _shallow_packed_callee_exprs as _shallow_proj,
+                    )
+
+                    for cand in _shallow_proj(f):
+                        nested = cand
+                        while isinstance(nested, ast.NamedExpr):
+                            nested = nested.value
+                        if (
+                            isinstance(nested, ast.Call)
+                            and _is_partial_proj(
+                                nested,
+                                getattr_aliases=frozenset(g_aliases),
+                            )
+                            and nested is not f
+                        ):
+                            f = nested
+                            progressed = True
+                            break
+                    projected_fn = _call_projected_value(f)
+                    if projected_fn is not None:
+                        f = projected_fn
+                        while isinstance(f, ast.NamedExpr):
+                            f = f.value
+                        progressed = True
+                # ``operator.call(partial(copy.copy), keys)`` /
+                # ``operator.call(*(args if True else ()))`` packed call.
+                if _resolve_call_proj(f) == "call":
+                    from ovk.compilers.authorization.python_callee_resolution import (
+                        _flatten_starred_args as _flat_call_args,
+                    )
+
+                    flat_call_args = _flat_call_args(
+                        peeled.args,
+                        sequence_aliases=self.sequence_literal_aliases,
+                    )
+                    if len(flat_call_args) >= 2:
+                        call_fn = flat_call_args[0]
+                        while isinstance(call_fn, ast.NamedExpr):
+                            call_fn = call_fn.value
+                        peeled = ast.Call(
+                            func=call_fn,
+                            args=list(flat_call_args[1:]),
+                            keywords=list(peeled.keywords),
+                        )
+                        f = peeled.func
+                        while isinstance(f, ast.NamedExpr):
+                            f = f.value
+                        progressed = True
+                if not progressed:
+                    break
             if isinstance(f, ast.Attribute) and f.attr == "copy" and not peeled.args:
                 copy_src = f.value
             elif (
@@ -1653,12 +1737,15 @@ class _RequestStateAliasEnv:
                 elif _is_partial_copy(
                     f,
                     getattr_aliases=frozenset(g_aliases),
-                ) and f.args and not peeled.args:
+                ) and f.args:
                     # ``partial(copy.copy, keys)()`` /
+                    # ``partial(copy.copy)(keys)`` /
                     # ``partial(*((copy.copy, keys) if True else ()))()`` /
                     # ``partial(*(0 or (copy.copy, keys)))()`` /
                     # ``partial(keys.copy)()`` /
-                    # ``partial(getattr(keys,"copy"))()``.
+                    # ``partial(getattr(keys,"copy"))()`` /
+                    # Name-itemgetter / operator.call projected partials
+                    # (Unknown > false PASS).
                     from ovk.compilers.authorization.python_callee_resolution import (
                         _flatten_starred_args as _flat_partial_copy,
                         _peel_call_func as _peel_partial_copy_args,
@@ -1668,19 +1755,55 @@ class _RequestStateAliasEnv:
                         f.args,
                         sequence_aliases=self.sequence_literal_aliases,
                     )
-                    if len(flat_f_args) >= 2:
-                        copy_src = flat_f_args[1]
-                    elif flat_f_args:
+                    if flat_f_args:
                         b0 = _peel_partial_copy_args(flat_f_args[0])
                         while isinstance(b0, ast.NamedExpr):
                             b0 = b0.value
-                        if isinstance(b0, ast.Attribute) and b0.attr == "copy":
-                            copy_src = b0.value
-                        else:
-                            g_b = _g_static(
-                                b0, getattr_aliases=frozenset(g_aliases)
-                            ) if isinstance(b0, ast.Call) else None
-                            if g_b == "copy" and isinstance(b0, ast.Call) and b0.args:
+                        is_copy_b0 = (
+                            (
+                                isinstance(b0, ast.Attribute)
+                                and b0.attr in {"copy", "deepcopy"}
+                            )
+                            or (
+                                isinstance(b0, ast.Name)
+                                and (
+                                    b0.id in {"copy", "deepcopy"}
+                                    or self.operator_projection_aliases.get(
+                                        b0.id
+                                    )
+                                    in {"copy", "deepcopy"}
+                                )
+                            )
+                            or (
+                                isinstance(b0, ast.Call)
+                                and _g_static(
+                                    b0, getattr_aliases=frozenset(g_aliases)
+                                )
+                                in {"copy", "deepcopy"}
+                            )
+                        )
+                        if is_copy_b0:
+                            if len(flat_f_args) >= 2 and not peeled.args:
+                                copy_src = flat_f_args[1]
+                            elif len(flat_f_args) == 1 and peeled.args:
+                                copy_src = peeled.args[0]
+                            elif (
+                                len(flat_f_args) == 1
+                                and not peeled.args
+                                and isinstance(b0, ast.Attribute)
+                                and b0.attr == "copy"
+                            ):
+                                copy_src = b0.value
+                            elif (
+                                len(flat_f_args) == 1
+                                and not peeled.args
+                                and isinstance(b0, ast.Call)
+                                and _g_static(
+                                    b0, getattr_aliases=frozenset(g_aliases)
+                                )
+                                == "copy"
+                                and b0.args
+                            ):
                                 copy_src = b0.args[0]
                 else:
                     for cand in _shallow_copy(f):
@@ -7893,11 +8016,15 @@ def _collect_writes_in_function(
                     # ``with ({Mut:1}.keys()) as ks: C, = ks``.
                     # ``nullcontext(n.install)`` — enter returns the argument
                     # (shared peel with identity scanner; Unknown > false PASS).
+                    # Pass sequence_literal_aliases so Name star packs
+                    # ``with nullcontext(*args) as f`` share Assign/``__enter__()``
+                    # peels (Unknown > false PASS).
                     nc_enter = _nullcontext_enter_arg(
                         item.context_expr,
                         nullcontext_aliases=frozenset(
                             request_aliases.nullcontext_aliases
                         ),
+                        sequence_aliases=request_aliases.sequence_literal_aliases,
                     )
                     if nc_enter is not None:
                         from ovk.compilers.authorization.python_callee_resolution import (
