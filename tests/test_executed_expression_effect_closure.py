@@ -13183,7 +13183,7 @@ def test_twenty_eighth_pass_identity_copy_star_never_authorized() -> None:
 
 
 def test_twenty_eighth_pass_lexical_packed_partial_star_never_authorized() -> None:
-    """Lexical packed/BoolOp Name-bound nested-partial star."""
+    """Lexical packed/BoolOp Name-bound nested-partial star and lambda relaunch."""
 
     lex_imp = "import operator\nfrom functools import partial"
     sc = "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
@@ -13215,6 +13215,100 @@ def test_twenty_eighth_pass_lexical_packed_partial_star_never_authorized() -> No
                 sc
                 + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
                 + "e=[partial([lambda: mc][0](), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                # Relaunch: lambda-body BoolOp/IfExp, Name-bound packed lambda,
+                # getattr/list.__getitem__, trailing *[xs].
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial((lambda: (0 or mc))(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial((lambda: mc or 0)(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial((lambda: (mc if True else None))(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial((lambda: mc and mc)(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "ig=operator.itemgetter(slice(0,1))\n"
+                + "e=[partial((lambda: (0 or ig))(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "pack=[lambda: mc]\n"
+                + "e=[partial(pack[0](), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "f,=[lambda: mc]\n"
+                + "e=[partial(f(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "f=[lambda: mc][0]\n"
+                + "e=[partial(f(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "pack=(lambda: mc,)\n"
+                + "e=[partial(pack[0](), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "pack=[lambda: mc]\n"
+                + "e=[partial(next(iter(pack))(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "pack: list = [lambda: mc]\n"
+                + "e=[partial(pack[0](), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial(*((0 or (lambda: mc)(), xs)))][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial(*(((lambda: mc)() or 0, xs)))][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial(*(((lambda: mc)() if True else None, xs)))][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial(getattr([lambda: mc],'__getitem__')(0)(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial(list.__getitem__([lambda: mc], 0)(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial((lambda: mc)(), *[xs])][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "f=lambda: mc\n"
+                + "e=[partial(f(), *[xs])][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "ig=operator.itemgetter(slice(0,1))\n"
+                + "p=partial(partial(ig))\n"
+                + "e=[partial(*(p,), *[xs])][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial([lambda: mc].__getitem__(0)(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial(operator.getitem([lambda: mc], 0)(), xs)][0]()[0](d)\n"
                 + "e|={}\nC,=e.keys()\nC()",
             )
         )
@@ -13549,4 +13643,4 @@ def test_twenty_eighth_pass_positive_authorized_smoke() -> None:
 def test_persistent_version_bumped_for_executed_expr_closure() -> None:
     """Cache / semantic versions bump with PASS-semantics change."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.85.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.86.0"

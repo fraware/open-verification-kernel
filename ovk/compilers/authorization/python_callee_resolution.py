@@ -1363,8 +1363,15 @@ def _shallow_packed_callee_exprs(expr: ast.AST, *, depth: int = 0) -> list[ast.A
             if proj in {"getitem", "itemgetter", "pop"}:
                 # Peel getitem/pop carriers and set.pop recv for list0 packs.
                 if proj == "getitem" and expr.args:
+                    gi_carrier = expr.args[0]
+                    # ``getattr([lambda: mc], "__getitem__")(0)`` — carrier is
+                    # getattr arg0, not the applied index (same as pop).
+                    if isinstance(f, ast.Call):
+                        g_flat = _flatten_starred_args(f.args)
+                        if g_flat:
+                            gi_carrier = g_flat[0]
                     out.extend(
-                        _shallow_packed_callee_exprs(expr.args[0], depth=nxt)
+                        _shallow_packed_callee_exprs(gi_carrier, depth=nxt)
                     )
                 elif proj == "pop":
                     if isinstance(expr.func, ast.Attribute):
@@ -7227,6 +7234,28 @@ def _build_identity_scanner(
                 and cand.args
             ):
                 continue
+            # ``partial(head, *[xs])`` / ``partial(*(p,), *[xs])`` share bare
+            # ``partial(head, xs)`` peels. A sole ``*pack`` keeps the star-only
+            # path so ``partial(*(operator.call, ig, xs))`` still drops call
+            # (Unknown > false PASS).
+            n_star = sum(isinstance(a, ast.Starred) for a in cand.args)
+            n_pos = len(cand.args) - n_star
+            if n_star and n_pos + n_star > 1:
+                flat_partial_args = _flatten_starred_args(
+                    cand.args,
+                    sequence_aliases=sequence_view_aliases,
+                    slice_aliases=frozenset(slice_aliases),
+                    bound_callees=bound_callee_exprs,
+                    projection_aliases=operator_projection_aliases,
+                )
+                if flat_partial_args != list(cand.args):
+                    cand = ast.Call(
+                        func=cand.func,
+                        args=list(flat_partial_args),
+                        keywords=list(cand.keywords),
+                    )
+            if not cand.args:
+                continue
             bound0 = _peel_call_func(cand.args[0])
             is_gi = False
             is_list_gi = False
@@ -7252,6 +7281,36 @@ def _build_identity_scanner(
                         seen.add(aid)
                         out.append(arm)
                 return out or [_peel_call_func(head)]
+
+            def _lambda_from_func(func_expr: ast.AST) -> ast.Lambda | None:
+                """Lambda denoted by ``func`` of an empty apply.
+
+                Shared peel for ``(lambda: mc)()`` / ``f()`` / ``pack[0]()`` /
+                ``next(iter(pack))()`` / ``getattr([lambda: mc],"__getitem__")(0)()``
+                (Unknown > false PASS).
+                """
+
+                func_expr = _peel_call_func(func_expr)
+                if isinstance(func_expr, ast.Lambda):
+                    return func_expr
+                if (
+                    isinstance(func_expr, ast.Name)
+                    and func_expr.id in lambda_bindings
+                ):
+                    return lambda_bindings[func_expr.id]
+                for cand_lam in (
+                    *_callee_candidate_exprs(func_expr),
+                    *_shallow_packed_callee_exprs(func_expr),
+                ):
+                    cand_lam = _peel_call_func(cand_lam)
+                    if isinstance(cand_lam, ast.Lambda):
+                        return cand_lam
+                    if (
+                        isinstance(cand_lam, ast.Name)
+                        and cand_lam.id in lambda_bindings
+                    ):
+                        return lambda_bindings[cand_lam.id]
+                return None
 
             def _head_is_getitem(head: ast.AST) -> bool:
                 """Unbound ``operator.getitem`` / ``list.__getitem__`` factory.
@@ -7394,43 +7453,13 @@ def _build_identity_scanner(
                     # ``(lambda: mc)()`` methodcaller mid-bind /
                     # double-nested ``(lambda: (lambda: ig)())()``
                     # (Unknown > false PASS).
-                    lam_func = _peel_call_func(b0_arm.func)
-                    if not isinstance(lam_func, ast.Lambda):
-                        for cand_lam in _shallow_packed_callee_exprs(
-                            b0_arm.func
-                        ):
-                            cand_lam = _peel_call_func(cand_lam)
-                            if isinstance(cand_lam, ast.Lambda):
-                                lam_func = cand_lam
-                                break
-                            if (
-                                isinstance(cand_lam, ast.Name)
-                                and cand_lam.id in lambda_bindings
-                            ):
-                                lam_func = lambda_bindings[cand_lam.id]
-                                break
+                    lam_func = _lambda_from_func(b0_arm.func)
                     if isinstance(lam_func, ast.Lambda):
                         body = _peel_call_func(lam_func.body)
                         # Peel nested zero-arg lambda applies.
                         nest_lam = 0
                         while nest_lam < 6 and isinstance(body, ast.Call):
-                            inner_lam = _peel_call_func(body.func)
-                            if not isinstance(inner_lam, ast.Lambda):
-                                for cand_inner in _shallow_packed_callee_exprs(
-                                    body.func
-                                ):
-                                    cand_inner = _peel_call_func(cand_inner)
-                                    if isinstance(cand_inner, ast.Lambda):
-                                        inner_lam = cand_inner
-                                        break
-                                    if (
-                                        isinstance(cand_inner, ast.Name)
-                                        and cand_inner.id in lambda_bindings
-                                    ):
-                                        inner_lam = lambda_bindings[
-                                            cand_inner.id
-                                        ]
-                                        break
+                            inner_lam = _lambda_from_func(body.func)
                             if (
                                 isinstance(inner_lam, ast.Lambda)
                                 and _call_is_empty_apply(
@@ -7493,35 +7522,38 @@ def _build_identity_scanner(
                                         return True
                             return False
 
-                        if isinstance(body, ast.Name):
-                            if _seed_gi_from_product_name(body.id):
-                                break
-                        if isinstance(body, ast.Call):
-                            ig_key_node = _itemgetter_key_node(
-                                body,
-                                projection_aliases=operator_projection_aliases,
-                                getattr_aliases=frozenset(getattr_aliases),
-                                sequence_aliases=sequence_view_aliases,
-                                slice_aliases=frozenset(slice_aliases),
-                            )
-                            if ig_key_node is not None:
-                                is_gi = True
-                                mc_gi_key = ig_key_node
-                                bound0 = body
-                                break
-                            mc_key = _methodcaller_getitem_key(
-                                body,
-                                projection_aliases=operator_projection_aliases,
-                                getattr_aliases=frozenset(getattr_aliases),
-                                sequence_aliases=sequence_view_aliases,
-                                slice_aliases=frozenset(slice_aliases),
-                                str_resolver=_resolve_static_str,
-                            )
-                            if mc_key is not None:
-                                is_gi = True
-                                mc_gi_key = mc_key
-                                bound0 = body
-                                break
+                        for body_arm in _iter_packed_seed_arms(body):
+                            if isinstance(body_arm, ast.Name):
+                                if _seed_gi_from_product_name(body_arm.id):
+                                    break
+                            if isinstance(body_arm, ast.Call):
+                                ig_key_node = _itemgetter_key_node(
+                                    body_arm,
+                                    projection_aliases=operator_projection_aliases,
+                                    getattr_aliases=frozenset(getattr_aliases),
+                                    sequence_aliases=sequence_view_aliases,
+                                    slice_aliases=frozenset(slice_aliases),
+                                )
+                                if ig_key_node is not None:
+                                    is_gi = True
+                                    mc_gi_key = ig_key_node
+                                    bound0 = body_arm
+                                    break
+                                mc_key = _methodcaller_getitem_key(
+                                    body_arm,
+                                    projection_aliases=operator_projection_aliases,
+                                    getattr_aliases=frozenset(getattr_aliases),
+                                    sequence_aliases=sequence_view_aliases,
+                                    slice_aliases=frozenset(slice_aliases),
+                                    str_resolver=_resolve_static_str,
+                                )
+                                if mc_key is not None:
+                                    is_gi = True
+                                    mc_gi_key = mc_key
+                                    bound0 = body_arm
+                                    break
+                        if is_gi:
+                            break
                         # Default-arg ``(lambda ig=ig: ig)()`` — seed from
                         # lambda defaults when body is the default Name.
                         if (
@@ -7666,25 +7698,11 @@ def _build_identity_scanner(
                         if idle is not None:
                             head = idle[0]
                             star_elts = [head, *idle[1], *star_elts[1:]]
-                        lam_head = _peel_call_func(
-                            head.func if isinstance(head, ast.Call) else head
+                        lam_head = (
+                            _lambda_from_func(head.func)
+                            if isinstance(head, ast.Call)
+                            else None
                         )
-                        if not isinstance(lam_head, ast.Lambda) and isinstance(
-                            head, ast.Call
-                        ):
-                            for cand_lh in _shallow_packed_callee_exprs(
-                                head.func
-                            ):
-                                cand_lh = _peel_call_func(cand_lh)
-                                if isinstance(cand_lh, ast.Lambda):
-                                    lam_head = cand_lh
-                                    break
-                                if (
-                                    isinstance(cand_lh, ast.Name)
-                                    and cand_lh.id in lambda_bindings
-                                ):
-                                    lam_head = lambda_bindings[cand_lh.id]
-                                    break
                         nest_lam = 0
                         while (
                             nest_lam < 6
@@ -7696,27 +7714,36 @@ def _build_identity_scanner(
                             )
                         ):
                             body = _peel_call_func(lam_head.body)
-                            if isinstance(body, ast.Name):
-                                product = projection_factory_products.get(
-                                    body.id
-                                )
-                                if product is not None and product[0] in {
-                                    "itemgetter",
-                                    "methodcaller",
-                                }:
-                                    bound = bound_callee_exprs.get(body.id)
-                                    if isinstance(bound, ast.Call):
-                                        head = bound
+                            nest_again = False
+                            for body_arm in _iter_packed_seed_arms(body):
+                                if isinstance(body_arm, ast.Name):
+                                    product = projection_factory_products.get(
+                                        body_arm.id
+                                    )
+                                    if product is not None and product[0] in {
+                                        "itemgetter",
+                                        "methodcaller",
+                                    }:
+                                        bound = bound_callee_exprs.get(
+                                            body_arm.id
+                                        )
+                                        if isinstance(bound, ast.Call):
+                                            head = bound
+                                            lam_head = None
+                                            break
+                                if isinstance(body_arm, ast.Call):
+                                    inner_lam = _lambda_from_func(body_arm.func)
+                                    if isinstance(inner_lam, ast.Lambda):
+                                        head = body_arm
+                                        lam_head = inner_lam
+                                        nest_lam += 1
+                                        nest_again = True
                                         break
-                            if isinstance(body, ast.Call):
-                                inner_lam = _peel_call_func(body.func)
-                                if isinstance(inner_lam, ast.Lambda):
-                                    head = body
-                                    lam_head = inner_lam
-                                    nest_lam += 1
-                                    continue
-                                head = body
-                                break
+                                    head = body_arm
+                                    lam_head = None
+                                    break
+                            if nest_again:
+                                continue
                             break
                     head_gi = _head_is_getitem(head)
                     head_bound_recv = (
@@ -12019,6 +12046,26 @@ def _build_identity_scanner(
         if not isinstance(value, ast.Name):
             nullcontext_enter_products.pop(name, None)
             nullcontext_enter_callables.pop(name, None)
+
+        def _lambda_from_value(node: ast.AST) -> ast.Lambda | None:
+            """Packed / subscript / Name-bound lambda RHS peels."""
+
+            node = _peel_call_func(node)
+            if isinstance(node, ast.Lambda):
+                return node
+            if isinstance(node, ast.Name) and node.id in lambda_bindings:
+                return lambda_bindings[node.id]
+            for cand in _callee_candidate_exprs(node):
+                cand = _peel_call_func(cand)
+                if isinstance(cand, ast.Lambda):
+                    return cand
+                if isinstance(cand, ast.Name) and cand.id in lambda_bindings:
+                    return lambda_bindings[cand.id]
+            return None
+
+        lam_rhs = _lambda_from_value(value)
+        if lam_rhs is not None:
+            lambda_bindings[name] = lam_rhs
 
         def _seed_enter_callable_from_recv(recv_expr: ast.AST) -> bool:
             for arm in _shallow_packed_callee_exprs(recv_expr):
@@ -19078,7 +19125,10 @@ def _build_identity_scanner(
                             else:
                                 method_bindings.pop(target.id, None)
                         elif isinstance(stmt.value, ast.Call):
-                            lambda_bindings.pop(target.id, None)
+                            if not isinstance(
+                                lambda_bindings.get(target.id), ast.Lambda
+                            ):
+                                lambda_bindings.pop(target.id, None)
                             # ``m = Mut()`` / ``m = Mut.__new__(Mut)`` instance alias.
                             inst_cls: str | None = None
                             fpeeled = _peel_call_func(stmt.value.func)
@@ -19157,7 +19207,10 @@ def _build_identity_scanner(
                                 active_classes[target.id] = src_cls
                                 class_registry[target.id] = src_cls
                         else:
-                            lambda_bindings.pop(target.id, None)
+                            if not isinstance(
+                                lambda_bindings.get(target.id), ast.Lambda
+                            ):
+                                lambda_bindings.pop(target.id, None)
                             method_bindings.pop(target.id, None)
                             instance_class_of.pop(target.id, None)
                             # Packed class/protocol peels: ``C = [Cls][0]``.
@@ -19249,7 +19302,9 @@ def _build_identity_scanner(
                     _note_protocol_alias_from_value(stmt.target.id, stmt.value)
                     if isinstance(stmt.value, ast.Lambda):
                         lambda_bindings[stmt.target.id] = stmt.value
-                    else:
+                    elif not isinstance(
+                        lambda_bindings.get(stmt.target.id), ast.Lambda
+                    ):
                         lambda_bindings.pop(stmt.target.id, None)
                     # Class / instance alias through AnnAssign (parity with Assign).
                     if isinstance(stmt.value, ast.Name):
