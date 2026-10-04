@@ -3836,9 +3836,6 @@ def _namespace_projection_key(
                 func, getattr_aliases=getattr_aliases
             )
         if proj in {"getitem", "__getitem__"} | _NS_DICT_VIEW_ATTRS and len(flat) >= 1:
-            ns_base = flat[0] if proj in _NS_DICT_VIEW_ATTRS and isinstance(func, ast.Call) else (
-                flat[0] if proj in {"getitem", "__getitem__"} else None
-            )
             if proj in {"getitem", "__getitem__"} and len(flat) >= 2:
                 if _base_looks_like_namespace_mapping(
                     flat[0],
