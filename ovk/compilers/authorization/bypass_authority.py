@@ -7456,7 +7456,10 @@ def _collect_writes_in_function(
                 bound_call_p = request_aliases.partial_factories.get(func.id)
                 if bound_call_p is not None:
                     call_factory = bound_call_p
-            elif not isinstance(func, ast.Call):
+            else:
+                # ``[partial(operator.call, p)][0]`` / ``.pop(0)`` /
+                # ``next(iter([partial(operator.call, p)]))`` share the
+                # packed factory apply (Unknown > false PASS).
                 for cand in _shallow_packed_callee_exprs(func):
                     nested = cand
                     while isinstance(nested, ast.NamedExpr):
