@@ -816,38 +816,136 @@ class _RequestStateAliasEnv:
             return None
 
         def _methodcaller_get_key(func: ast.AST) -> object | None:
-            """``methodcaller("get"|"__getitem__"|…, key)`` static key, if any."""
+            """``methodcaller("get"|"__getitem__"|…, key)`` static key, if any.
+
+            Also Name-bound ``mc=methodcaller("pop",0)`` / star packs
+            ``methodcaller(*args)`` (Unknown > false PASS).
+            """
 
             while isinstance(func, ast.NamedExpr):
                 func = func.value
-            candidates = [func]
+            candidates: list[ast.AST] = [func]
             from ovk.compilers.authorization.python_callee_resolution import (
+                _flatten_starred_args as _flat_mc_key,
                 _methodcaller_static_name,
                 _shallow_packed_callee_exprs,
             )
 
             candidates.extend(_shallow_packed_callee_exprs(func))
+            if isinstance(func, ast.Name) and func.id in self.methodcaller_factories:
+                candidates.append(self.methodcaller_factories[func.id])
             for cand in candidates:
+                if isinstance(cand, ast.Name) and cand.id in self.methodcaller_factories:
+                    cand = self.methodcaller_factories[cand.id]
                 if not isinstance(cand, ast.Call):
                     continue
                 mc = _methodcaller_static_name(
                     cand,
                     projection_aliases=self.operator_projection_aliases,
                     getattr_aliases=g_aliases,
+                    sequence_aliases=self.sequence_literal_aliases,
+                    str_resolver=lambda n: (
+                        n.value
+                        if isinstance(n, ast.Constant)
+                        and isinstance(n.value, str)
+                        else self.string_constant_names.get(n.id)
+                        if isinstance(n, ast.Name)
+                        else None
+                    ),
+                )
+                flat_mc = _flat_mc_key(
+                    cand.args,
+                    sequence_aliases=self.sequence_literal_aliases,
                 )
                 if (
                     mc in {"get", "pop", "__getitem__", "setdefault"}
-                    and len(cand.args) >= 2
+                    and len(flat_mc) >= 2
                 ):
-                    return _static_key_value(cand.args[1])
+                    return _static_key_value(flat_mc[1])
             return None
 
         def _call_projected_value(node: ast.Call) -> ast.AST | None:
             """Concrete List/Dict/Constant value projected by a view/getitem Call."""
 
+            from ovk.compilers.authorization.python_callee_resolution import (
+                _attrgetter_static_name as _ag_proj_view,
+                _getattr_static_name as _g_proj_view,
+                _flatten_starred_args as _flat_proj_view,
+                _is_partial_factory as _partial_proj_view,
+                _peel_call_func as _peel_proj_view,
+                _shallow_packed_callee_exprs as _shallow_ag,
+            )
+
+            def _resolve_str_key(expr: ast.AST) -> str | None:
+                if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+                    return expr.value
+                if isinstance(expr, ast.Name):
+                    return self.string_constant_names.get(expr.id)
+                return None
+
             func = node.func
             while isinstance(func, ast.NamedExpr):
                 func = func.value
+            # Nested ``attrgetter("pop")(xs)(0)`` — peel applied attrgetter
+            # Attribute before the outer index. Skip factories themselves
+            # (``attrgetter("pop")``) so args are not misread as the carrier
+            # (Unknown > false PASS).
+            if (
+                isinstance(func, ast.Call)
+                and _ag_proj_view(
+                    func,
+                    projection_aliases=self.operator_projection_aliases,
+                )
+                is None
+            ):
+                inner_proj = _call_projected_value(func)
+                if inner_proj is not None and not isinstance(
+                    inner_proj, ast.Call
+                ):
+                    func = inner_proj
+            # ``partial(getattr, xs, "pop")()`` / ``partial(getattr, xs)("pop")``
+            # share the getattr Attribute peel (Unknown > false PASS).
+            if isinstance(func, ast.Call) and _partial_proj_view(
+                func,
+                getattr_aliases=frozenset(g_aliases),
+            ):
+                p_flat = _flat_proj_view(
+                    func.args,
+                    sequence_aliases=self.sequence_literal_aliases,
+                )
+                if p_flat:
+                    head = _peel_proj_view(p_flat[0])
+                    head_is_getattr = (
+                        isinstance(head, ast.Name)
+                        and (
+                            head.id == "getattr"
+                            or head.id in g_aliases
+                        )
+                    ) or (
+                        isinstance(head, ast.Attribute)
+                        and head.attr == "getattr"
+                    )
+                    if not head_is_getattr and isinstance(head, ast.Call):
+                        head_is_getattr = (
+                            _g_proj_view(
+                                head, getattr_aliases=frozenset(g_aliases)
+                            )
+                            == "getattr"
+                        )
+                    combined = [*p_flat[1:], *node.args]
+                    if head_is_getattr and len(combined) >= 2:
+                        ag_attr = _resolve_str_key(combined[1])
+                        if ag_attr in {
+                            "get",
+                            "pop",
+                            "__getitem__",
+                            "setdefault",
+                        }:
+                            return ast.Attribute(
+                                value=combined[0],
+                                attr=ag_attr,
+                                ctx=ast.Load(),
+                            )
             # ``itemgetter("x")(keys)`` / packed / getattr / Name-bound ``ig(keys)``.
             ig_key = _factory_itemgetter_key(func)
             if ig_key is not None and node.args:
@@ -856,34 +954,58 @@ class _RequestStateAliasEnv:
             mc_key = _methodcaller_get_key(func)
             if mc_key is not None and node.args:
                 return _carrier_element_ast(node.args[0], mc_key)
+
             proj = None
             if isinstance(func, ast.Name):
                 proj = self.operator_projection_aliases.get(func.id, func.id)
             elif isinstance(func, ast.Attribute):
                 proj = func.attr
             elif isinstance(func, ast.Call):
-                g_func = func.func
-                while isinstance(g_func, ast.NamedExpr):
-                    g_func = g_func.value
-                is_g = (
-                    isinstance(g_func, ast.Name) and g_func.id in g_aliases
-                ) or (
-                    isinstance(g_func, ast.Attribute) and g_func.attr == "getattr"
+                # Packed / BoolOp / Name-attr getattr factories:
+                # ``[getattr][0](…,"pop")`` / ``(0 or getattr)(…,"pop")`` /
+                # ``getattr(builtins,"getattr")(…,"pop")`` / ``n="pop"``.
+                g_proj = _g_proj_view(
+                    func, getattr_aliases=frozenset(g_aliases)
                 )
-                if (
-                    is_g
-                    and len(func.args) >= 2
-                    and isinstance(func.args[1], ast.Constant)
-                    and isinstance(func.args[1].value, str)
-                ):
-                    proj = func.args[1].value
+                if g_proj is None:
+                    g_flat = _flat_proj_view(
+                        func.args,
+                        sequence_aliases=self.sequence_literal_aliases,
+                    )
+                    if len(g_flat) >= 2:
+                        g_proj = _resolve_str_key(g_flat[1])
+                if g_proj is not None:
+                    proj = g_proj
             if proj == "getitem" and len(node.args) >= 2:
                 return _carrier_element_ast(
                     node.args[0], _static_key_value(node.args[1])
                 )
             view_attr: str | None = None
             recv: ast.AST | None = None
-            if isinstance(func, ast.Attribute) and func.attr in {
+            # ``attrgetter("pop")([partial…])`` ≡ getattr(carrier, "pop").
+            ag_name = None
+            if isinstance(func, ast.Call):
+                ag_name = _ag_proj_view(
+                    func,
+                    projection_aliases=self.operator_projection_aliases,
+                )
+            if ag_name is None:
+                for cand in _shallow_ag(func):
+                    if isinstance(cand, ast.Call):
+                        ag_name = _ag_proj_view(
+                            cand,
+                            projection_aliases=self.operator_projection_aliases,
+                        )
+                        if ag_name is not None:
+                            break
+            if (
+                ag_name in {"get", "pop", "__getitem__", "setdefault"}
+                and node.args
+                and not node.keywords
+            ):
+                view_attr = ag_name
+                recv = node.args[0]
+            if view_attr is None and isinstance(func, ast.Attribute) and func.attr in {
                 "get",
                 "pop",
                 "__getitem__",
@@ -891,31 +1013,43 @@ class _RequestStateAliasEnv:
             }:
                 view_attr = func.attr
                 recv = func.value
-            elif isinstance(func, ast.Call):
-                g_func = func.func
-                while isinstance(g_func, ast.NamedExpr):
-                    g_func = g_func.value
-                is_g = (
-                    isinstance(g_func, ast.Name) and g_func.id in g_aliases
-                ) or (
-                    isinstance(g_func, ast.Attribute) and g_func.attr == "getattr"
+            elif view_attr is None and isinstance(func, ast.Call):
+                g_view = _g_proj_view(
+                    func, getattr_aliases=frozenset(g_aliases)
                 )
+                g_flat = _flat_proj_view(
+                    func.args,
+                    sequence_aliases=self.sequence_literal_aliases,
+                )
+                if g_view is None and len(g_flat) >= 2:
+                    g_view = _resolve_str_key(g_flat[1])
                 if (
-                    is_g
-                    and len(func.args) >= 2
-                    and isinstance(func.args[1], ast.Constant)
-                    and isinstance(func.args[1].value, str)
-                    and func.args[1].value
+                    g_view
                     in {"get", "pop", "__getitem__", "setdefault"}
+                    and g_flat
                 ):
-                    view_attr = func.args[1].value
-                    recv = func.args[0]
-            elif isinstance(func, ast.Name) and func.id in self.dict_view_products:
+                    view_attr = g_view
+                    recv = g_flat[0]
+            elif (
+                view_attr is None
+                and isinstance(func, ast.Name)
+                and func.id in self.dict_view_products
+            ):
                 view = self.dict_view_products[func.id]
                 view_attr = view.split(".")[-1]
                 recv_name = self.bound_view_receivers.get(func.id)
                 if recv_name is not None:
                     recv = ast.Name(id=recv_name, ctx=ast.Load())
+            # ``attrgetter("pop")(xs)`` selects the method — return Attribute
+            # so the next Call ``(…)(0)`` peels via Attribute.pop / list0.
+            if (
+                ag_name is not None
+                and view_attr in {"get", "pop", "__getitem__", "setdefault"}
+                and recv is not None
+            ):
+                return ast.Attribute(
+                    value=recv, attr=view_attr, ctx=ast.Load()
+                )
             if (
                 view_attr in {"get", "pop", "__getitem__", "setdefault"}
                 and recv is not None
@@ -1510,41 +1644,66 @@ class _RequestStateAliasEnv:
                 f = f.value
 
             def _resolve_call_proj(func_expr: ast.AST) -> str | None:
-                if isinstance(func_expr, ast.Name):
-                    return self.operator_projection_aliases.get(
-                        func_expr.id, func_expr.id
-                    )
-                if isinstance(func_expr, ast.Attribute) and func_expr.attr == "call":
-                    return "call"
-                if isinstance(func_expr, ast.Call):
-                    from ovk.compilers.authorization.python_callee_resolution import (
-                        _getattr_static_name as _g_call_proj,
-                    )
+                from ovk.compilers.authorization.python_callee_resolution import (
+                    _getattr_static_name as _g_call_proj,
+                    _shallow_packed_callee_exprs as _shallow_call_proj,
+                )
 
-                    if (
-                        _g_call_proj(
-                            func_expr, getattr_aliases=frozenset(g_aliases)
+                for cand in _shallow_call_proj(func_expr):
+                    nested = cand
+                    while isinstance(nested, ast.NamedExpr):
+                        nested = nested.value
+                    if isinstance(nested, ast.Name):
+                        proj = self.operator_projection_aliases.get(
+                            nested.id, nested.id
                         )
-                        == "call"
+                        if proj == "call":
+                            return "call"
+                    if (
+                        isinstance(nested, ast.Attribute)
+                        and nested.attr == "call"
                     ):
                         return "call"
+                    if isinstance(nested, ast.Call):
+                        if (
+                            _g_call_proj(
+                                nested, getattr_aliases=frozenset(g_aliases)
+                            )
+                            == "call"
+                        ):
+                            return "call"
                 return None
 
             # ``ig([partial(copy.copy)])(keys)`` /
             # ``getattr([partial],"pop")(0)(keys)`` /
             # ``[operator.call].pop(0)(partial, keys)`` /
+            # ``[operator.call][0](partial, keys)`` /
+            # ``(0 or operator.call)(partial, keys)`` /
             # ``next(iter([partial(*IfExp)]))()`` /
             # ``[partial(*IfExp)].pop(0)()`` — list0 / itemgetter / getattr /
             # next(iter) peels project the callable before copy / operator.call
             # peels (Unknown > false PASS).
             for _ in range(4):
                 progressed = False
-                if isinstance(f, ast.Call):
-                    from ovk.compilers.authorization.python_callee_resolution import (
-                        _is_partial_factory as _is_partial_proj,
-                        _shallow_packed_callee_exprs as _shallow_proj,
-                    )
+                from ovk.compilers.authorization.python_callee_resolution import (
+                    _is_partial_factory as _is_partial_proj,
+                    _shallow_packed_callee_exprs as _shallow_proj,
+                )
 
+                # Peel Subscript / BoolOp / next carriers onto Attribute/Call
+                # heads before Call-only projection (Unknown > false PASS).
+                if not isinstance(f, ast.Call):
+                    for cand in _shallow_proj(f):
+                        nested = cand
+                        while isinstance(nested, ast.NamedExpr):
+                            nested = nested.value
+                        if nested is not f and isinstance(
+                            nested, (ast.Attribute, ast.Name, ast.Call)
+                        ):
+                            f = nested
+                            progressed = True
+                            break
+                if isinstance(f, ast.Call):
                     for cand in _shallow_proj(f):
                         nested = cand
                         while isinstance(nested, ast.NamedExpr):
