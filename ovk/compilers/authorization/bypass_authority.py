@@ -111,7 +111,7 @@ class StateAttributeWrite:
     control_dependent: bool = False
 
 
-_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.41.0"
+_BYPASS_AUTHORITY_EXTRACTOR_VERSION = "0.42.0"
 _MAX_INTERPROCEDURAL_WRITER_DEPTH = 4
 _STATE_DICT_ATTRS = frozenset({"__dict__", "__slots__"})
 
@@ -357,6 +357,8 @@ class _RequestStateAliasEnv:
     ns_dict_names: set[str] = dc_field(default_factory=set)
     # Name-bound static string keys: ``k = "MappingProxyType"``.
     string_constant_names: dict[str, str] = dc_field(default_factory=dict)
+    # Name-bound static Constant keys (int/str/…): ``idx = 0`` / ``xk = "x"``.
+    static_constant_names: dict[str, object] = dc_field(default_factory=dict)
     # Bound ns/dict views: ``g = getattr(ns, "get")`` / ``g = ns.get``.
     dict_view_products: dict[str, str] = dc_field(default_factory=dict)
     bound_view_receivers: dict[str, str] = dc_field(default_factory=dict)
@@ -364,6 +366,8 @@ class _RequestStateAliasEnv:
     sequence_string_lists: dict[str, tuple[str, ...]] = dc_field(
         default_factory=dict
     )
+    # Name-bound List/Tuple/Dict literals for nested / Call key peels.
+    sequence_literal_aliases: dict[str, ast.AST] = dc_field(default_factory=dict)
 
     @classmethod
     def seed(cls, *, param_names: frozenset[str]) -> "_RequestStateAliasEnv":
@@ -463,44 +467,148 @@ class _RequestStateAliasEnv:
         # Peel walrus so ``(Proxy := MappingProxyType)`` seeds adapters.
         while isinstance(value, ast.NamedExpr):
             value = value.value
-        # Static string keys for later Name-bound ns view application.
-        # Also ``k = keys[0]`` / ``k = keys["x"]`` after container projection.
-        # ``_static_or_bound_key`` is defined below; use a local peel first for
-        # Constant/Name, then Subscript after helpers exist.
-        if isinstance(value, ast.Constant) and isinstance(value.value, str):
-            self.string_constant_names[name] = value.value
-        elif isinstance(value, ast.Name) and value.id in self.string_constant_names:
-            self.string_constant_names[name] = self.string_constant_names[value.id]
+        # Static string / int keys for later Name-bound ns view application.
+        # Also ``k = keys[0]`` / ``k = keys.get("x")`` after container projection.
+        if isinstance(value, ast.Constant) and isinstance(
+            value.value, (str, int, float, bytes, bool)
+        ):
+            if isinstance(value.value, str):
+                self.string_constant_names[name] = value.value
+            else:
+                self.string_constant_names.pop(name, None)
+            self.static_constant_names[name] = value.value
+        elif isinstance(value, ast.Name) and value.id in self.static_constant_names:
+            self.static_constant_names[name] = self.static_constant_names[value.id]
+            if value.id in self.string_constant_names:
+                self.string_constant_names[name] = self.string_constant_names[
+                    value.id
+                ]
+            else:
+                self.string_constant_names.pop(name, None)
         else:
-            # Defer Subscript / container peels until helpers are defined.
+            # Defer Subscript / Call / container peels until helpers exist.
             self.string_constant_names.pop(name, None)
-        # ``keys=["MappingProxyType"]`` / ``keys={"x": "MappingProxyType"}``
-        # for later ``keys[0]`` / ``keys["x"]`` peels.
-        if isinstance(value, (ast.List, ast.Tuple)):
-            strs: list[str] = []
-            for elt in value.elts:
-                walk = elt
-                while isinstance(walk, ast.NamedExpr):
-                    walk = walk.value
-                if isinstance(walk, ast.Constant) and isinstance(walk.value, str):
-                    strs.append(walk.value)
+            self.static_constant_names.pop(name, None)
+        # ``keys=["MappingProxyType"]`` / nested / Dict literals for peels.
+        if isinstance(value, (ast.List, ast.Tuple, ast.Dict)):
+            self.sequence_literal_aliases[name] = value
+            if isinstance(value, (ast.List, ast.Tuple)):
+                strs: list[str] = []
+                for elt in value.elts:
+                    walk = elt
+                    while isinstance(walk, ast.NamedExpr):
+                        walk = walk.value
+                    if isinstance(walk, ast.Constant) and isinstance(
+                        walk.value, str
+                    ):
+                        strs.append(walk.value)
+                    else:
+                        strs = []
+                        break
+                if strs:
+                    self.sequence_string_lists[name] = tuple(strs)
                 else:
-                    strs = []
-                    break
-            if strs:
-                self.sequence_string_lists[name] = tuple(strs)
+                    self.sequence_string_lists.pop(name, None)
             else:
                 self.sequence_string_lists.pop(name, None)
-        elif isinstance(value, ast.Name) and value.id in self.sequence_string_lists:
-            self.sequence_string_lists[name] = self.sequence_string_lists[value.id]
+        elif isinstance(value, ast.Name) and value.id in self.sequence_literal_aliases:
+            self.sequence_literal_aliases[name] = self.sequence_literal_aliases[
+                value.id
+            ]
+            if value.id in self.sequence_string_lists:
+                self.sequence_string_lists[name] = self.sequence_string_lists[
+                    value.id
+                ]
         else:
             self.sequence_string_lists.pop(name, None)
+            if not isinstance(value, ast.Name):
+                self.sequence_literal_aliases.pop(name, None)
         # ``ns = types.__dict__`` / ``ns = vars(types)`` / ``ns2 = ns``: later
         # ``ns.get(...)`` / ``getattr(ns, "get")(...)`` project like the literal.
         if self._base_is_namespace_projection(value, getattr_aliases=g_aliases):
             self.ns_dict_names.add(name)
         else:
             self.ns_dict_names.discard(name)
+
+        def _static_key_value(node: ast.AST) -> object | None:
+            while isinstance(node, ast.NamedExpr):
+                node = node.value
+            if isinstance(node, ast.Constant):
+                return node.value
+            if isinstance(node, ast.Name):
+                if node.id in self.static_constant_names:
+                    return self.static_constant_names[node.id]
+                return self.string_constant_names.get(node.id)
+            return None
+
+        def _project_from_carrier(
+            carrier: ast.AST, key: object | None
+        ) -> str | None:
+            while isinstance(carrier, ast.NamedExpr):
+                carrier = carrier.value
+            if isinstance(carrier, ast.Name):
+                if carrier.id in self.sequence_literal_aliases:
+                    return _project_from_carrier(
+                        self.sequence_literal_aliases[carrier.id], key
+                    )
+                lit = self.sequence_string_lists.get(carrier.id)
+                if lit is not None and isinstance(key, int) and 0 <= key < len(lit):
+                    return lit[key]
+                pack = self.container_adapter_packs.get(carrier.id)
+                if pack is not None and key in pack:
+                    for pname in pack[key]:
+                        bound = self.string_constant_names.get(pname)
+                        if bound is not None:
+                            return bound
+                        if isinstance(pname, str) and pname in {
+                            "MappingProxyType",
+                        } | _OPERATOR_PROJECTION_NAMES:
+                            return pname
+                return None
+            if isinstance(carrier, (ast.List, ast.Tuple)) and isinstance(key, int):
+                if 0 <= key < len(carrier.elts):
+                    return _static_or_bound_key(carrier.elts[key])
+                return None
+            if isinstance(carrier, ast.Dict) and key is not None:
+                for map_key, map_val in zip(carrier.keys, carrier.values):
+                    if (
+                        map_val is not None
+                        and isinstance(map_key, ast.Constant)
+                        and map_key.value == key
+                    ):
+                        return _static_or_bound_key(map_val)
+                return None
+            if isinstance(carrier, ast.Subscript):
+                inner = _project_from_carrier(
+                    carrier.value, _static_key_value(carrier.slice)
+                )
+                # Nested container: resolve carrier element then project key.
+                # When carrier projects a str already, only accept key is None.
+                if key is None:
+                    return inner
+                # Re-resolve via literal aliases when carrier is Name-bound nest.
+                base = carrier.value
+                while isinstance(base, ast.NamedExpr):
+                    base = base.value
+                if isinstance(base, ast.Name) and base.id in self.sequence_literal_aliases:
+                    aliased = self.sequence_literal_aliases[base.id]
+                    okey = _static_key_value(carrier.slice)
+                    if isinstance(aliased, (ast.List, ast.Tuple)) and isinstance(
+                        okey, int
+                    ):
+                        if 0 <= okey < len(aliased.elts):
+                            return _project_from_carrier(aliased.elts[okey], key)
+                    if isinstance(aliased, ast.Dict) and okey is not None:
+                        for map_key, map_val in zip(aliased.keys, aliased.values):
+                            if (
+                                map_val is not None
+                                and isinstance(map_key, ast.Constant)
+                                and map_key.value == okey
+                            ):
+                                return _project_from_carrier(map_val, key)
+                return None
+            return None
+
         def _static_or_bound_key(node: ast.AST) -> str | None:
             while isinstance(node, ast.NamedExpr):
                 node = node.value
@@ -508,56 +616,92 @@ class _RequestStateAliasEnv:
                 return node.value
             if isinstance(node, ast.Name):
                 return self.string_constant_names.get(node.id)
-            # ``keys[0]`` / ``{"k": "MappingProxyType"}["k"]`` /
-            # Name-bound ``keys=["MappingProxyType"]; keys[0]``.
+            # ``keys[0]`` / ``keys[idx]`` / ``keys["x"]`` / nested ``keys[0][0]``.
             if isinstance(node, ast.Subscript):
-                base = node.value
-                while isinstance(base, ast.NamedExpr):
-                    base = base.value
-                key_node = node.slice
-                while isinstance(key_node, ast.NamedExpr):
-                    key_node = key_node.value
-                if isinstance(base, (ast.List, ast.Tuple)) and isinstance(
-                    key_node, ast.Constant
-                ) and isinstance(key_node.value, int):
-                    idx = key_node.value
-                    if 0 <= idx < len(base.elts):
-                        return _static_or_bound_key(base.elts[idx])
-                if isinstance(base, ast.Dict) and isinstance(
-                    key_node, ast.Constant
+                return _project_from_carrier(
+                    node.value, _static_key_value(node.slice)
+                )
+            # ``keys.get("x")`` / ``keys.__getitem__(0)`` / ``keys.pop("x")`` /
+            # ``operator.getitem(keys, 0)`` / ``itemgetter("x")(keys)`` /
+            # ``getattr(keys, "get"|"__getitem__")(...)``.
+            if isinstance(node, ast.Call):
+                func = node.func
+                while isinstance(func, ast.NamedExpr):
+                    func = func.value
+                # ``itemgetter("x")(keys)``.
+                if isinstance(func, ast.Call):
+                    ig_func = func.func
+                    while isinstance(ig_func, ast.NamedExpr):
+                        ig_func = ig_func.value
+                    is_ig = (
+                        isinstance(ig_func, ast.Name)
+                        and (
+                            ig_func.id == "itemgetter"
+                            or self.operator_projection_aliases.get(ig_func.id)
+                            == "itemgetter"
+                        )
+                    ) or (
+                        isinstance(ig_func, ast.Attribute)
+                        and ig_func.attr == "itemgetter"
+                    )
+                    if is_ig and func.args and node.args:
+                        ig_key = _static_key_value(func.args[0])
+                        return _project_from_carrier(node.args[0], ig_key)
+                # ``operator.getitem(keys, 0|"x")``.
+                proj = None
+                if isinstance(func, ast.Name):
+                    proj = self.operator_projection_aliases.get(func.id, func.id)
+                elif isinstance(func, ast.Attribute):
+                    proj = func.attr
+                if proj == "getitem" and len(node.args) >= 2:
+                    return _project_from_carrier(
+                        node.args[0], _static_key_value(node.args[1])
+                    )
+                # Bound / getattr view: ``keys.get`` / ``getattr(keys,"get")``.
+                view_attr: str | None = None
+                recv: ast.AST | None = None
+                if isinstance(func, ast.Attribute) and func.attr in {
+                    "get",
+                    "pop",
+                    "__getitem__",
+                    "setdefault",
+                }:
+                    view_attr = func.attr
+                    recv = func.value
+                elif isinstance(func, ast.Call):
+                    g_func = func.func
+                    while isinstance(g_func, ast.NamedExpr):
+                        g_func = g_func.value
+                    is_g = (
+                        isinstance(g_func, ast.Name) and g_func.id in g_aliases
+                    ) or (
+                        isinstance(g_func, ast.Attribute)
+                        and g_func.attr == "getattr"
+                    )
+                    if (
+                        is_g
+                        and len(func.args) >= 2
+                        and isinstance(func.args[1], ast.Constant)
+                        and isinstance(func.args[1].value, str)
+                        and func.args[1].value
+                        in {"get", "pop", "__getitem__", "setdefault"}
+                    ):
+                        view_attr = func.args[1].value
+                        recv = func.args[0]
+                elif isinstance(func, ast.Name) and func.id in self.dict_view_products:
+                    view = self.dict_view_products[func.id]
+                    view_attr = view.split(".")[-1]
+                    recv_name = self.bound_view_receivers.get(func.id)
+                    if recv_name is not None:
+                        recv = ast.Name(id=recv_name, ctx=ast.Load())
+                if (
+                    view_attr in {"get", "pop", "__getitem__", "setdefault"}
+                    and recv is not None
+                    and node.args
                 ):
-                    for map_key, map_val in zip(base.keys, base.values):
-                        if (
-                            map_val is not None
-                            and isinstance(map_key, ast.Constant)
-                            and map_key.value == key_node.value
-                        ):
-                            return _static_or_bound_key(map_val)
-                if isinstance(base, ast.Name):
-                    lit = self.sequence_string_lists.get(base.id)
-                    if (
-                        lit is not None
-                        and isinstance(key_node, ast.Constant)
-                        and isinstance(key_node.value, int)
-                    ):
-                        idx = key_node.value
-                        if 0 <= idx < len(lit):
-                            return lit[idx]
-                    # Name-bound Dict: ``keys={"x": "MappingProxyType"}; keys["x"]``.
-                    pack = self.container_adapter_packs.get(base.id)
-                    if (
-                        pack is not None
-                        and isinstance(key_node, ast.Constant)
-                        and key_node.value in pack
-                    ):
-                        for pname in pack[key_node.value]:
-                            bound = self.string_constant_names.get(pname)
-                            if bound is not None:
-                                return bound
-                            if isinstance(pname, str) and pname in {
-                                "MappingProxyType",
-                            } | _OPERATOR_PROJECTION_NAMES:
-                                return pname
+                    return _project_from_carrier(
+                        recv, _static_key_value(node.args[0])
+                    )
             return None
 
         def _seed_ns_key(alias_name: str, key: str) -> None:
@@ -848,9 +992,11 @@ class _RequestStateAliasEnv:
             ns_projection_aliases=set(self.ns_projection_aliases),
             ns_dict_names=set(self.ns_dict_names),
             string_constant_names=dict(self.string_constant_names),
+            static_constant_names=dict(self.static_constant_names),
             dict_view_products=dict(self.dict_view_products),
             bound_view_receivers=dict(self.bound_view_receivers),
             sequence_string_lists=dict(self.sequence_string_lists),
+            sequence_literal_aliases=dict(self.sequence_literal_aliases),
         )
 
     def restore(self, other: "_RequestStateAliasEnv") -> None:
@@ -868,9 +1014,11 @@ class _RequestStateAliasEnv:
         self.ns_projection_aliases = set(other.ns_projection_aliases)
         self.ns_dict_names = set(other.ns_dict_names)
         self.string_constant_names = dict(other.string_constant_names)
+        self.static_constant_names = dict(other.static_constant_names)
         self.dict_view_products = dict(other.dict_view_products)
         self.bound_view_receivers = dict(other.bound_view_receivers)
         self.sequence_string_lists = dict(other.sequence_string_lists)
+        self.sequence_literal_aliases = dict(other.sequence_literal_aliases)
 
     def install_join(self, states: Sequence["_RequestStateAliasEnv"]) -> None:
         """Install the sound must/may join of feasible predecessor alias envs."""
@@ -1587,9 +1735,11 @@ def join_request_state_alias_envs(
     ns_projection_aliases: set[str] = set()
     ns_dict_names: set[str] = set()
     string_constant_names: dict[str, str] = {}
+    static_constant_names: dict[str, object] = {}
     dict_view_products: dict[str, str] = {}
     bound_view_receivers: dict[str, str] = {}
     sequence_string_lists: dict[str, tuple[str, ...]] = {}
+    sequence_literal_aliases: dict[str, ast.AST] = {}
     for state in states:
         adapter_aliases |= state.adapter_aliases
         for name, pack in state.container_adapter_packs.items():
@@ -1601,9 +1751,11 @@ def join_request_state_alias_envs(
         ns_projection_aliases |= state.ns_projection_aliases
         ns_dict_names |= state.ns_dict_names
         string_constant_names.update(state.string_constant_names)
+        static_constant_names.update(state.static_constant_names)
         dict_view_products.update(state.dict_view_products)
         bound_view_receivers.update(state.bound_view_receivers)
         sequence_string_lists.update(state.sequence_string_lists)
+        sequence_literal_aliases.update(state.sequence_literal_aliases)
     return _RequestStateAliasEnv(
         request_names=must_request,
         state_names=must_state,
@@ -1615,9 +1767,11 @@ def join_request_state_alias_envs(
         ns_projection_aliases=ns_projection_aliases,
         ns_dict_names=ns_dict_names,
         string_constant_names=string_constant_names,
+        static_constant_names=static_constant_names,
         dict_view_products=dict_view_products,
         bound_view_receivers=bound_view_receivers,
         sequence_string_lists=sequence_string_lists,
+        sequence_literal_aliases=sequence_literal_aliases,
     )
 
 
