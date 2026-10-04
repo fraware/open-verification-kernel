@@ -1283,14 +1283,22 @@ class _RequestStateAliasEnv:
                 self.bound_view_receivers.pop(name, None)
                 self.bound_view_expr_receivers.pop(name, None)
         elif isinstance(value, ast.Attribute):
-            # ``g = getattr([partial(copy.copy)], "pop").__call__`` — peel
-            # transparent ``__call__`` so Name apply shares bare getattr seed
-            # (Unknown > false PASS).
+            # ``g = getattr([partial(copy.copy)], "pop").__call__`` /
+            # ``g = view.__call__`` — peel transparent ``__call__`` only for
+            # getattr/view products (not ``type.__call__`` / ``operator.call``
+            # protocol seeds — Unknown > false PASS).
             if value.attr == "__call__":
-                self.note_projection_name_alias(
-                    name, value.value, getattr_aliases=getattr_aliases
-                )
-                return
+                inner = value.value
+                while isinstance(inner, ast.NamedExpr):
+                    inner = inner.value
+                if isinstance(inner, ast.Call) or (
+                    isinstance(inner, ast.Name)
+                    and inner.id in self.dict_view_products
+                ):
+                    self.note_projection_name_alias(
+                        name, inner, getattr_aliases=getattr_aliases
+                    )
+                    return
             if value.attr == "MappingProxyType":
                 self.adapter_aliases.add(name)
             if value.attr == "nullcontext":

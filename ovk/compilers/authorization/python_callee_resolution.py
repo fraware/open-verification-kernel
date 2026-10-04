@@ -3178,10 +3178,17 @@ def _copy_wrapper_operand(expr: ast.AST) -> ast.AST | None:
 
 
 def _rewrite_applied_dunder_call(call: ast.Call) -> ast.Call | None:
-    """``X.__call__(*args)`` / ``getattr(X, "__call__")(*args)`` → ``X(*args)``."""
+    """``X.__call__(*args)`` / ``getattr(X, "__call__")(*args)`` → ``X(*args)``.
+
+    Does not rewrite ``type.__call__`` / ``object.__class__.__call__`` /
+    ``getattr(type, "__call__")`` — ``type(C)`` is not ``type.__call__(C)``
+    (Unknown > false PASS).
+    """
 
     func = _peel_call_func(call.func)
     if isinstance(func, ast.Attribute) and func.attr == "__call__":
+        if _receiver_looks_like_type_builtin(func.value):
+            return None
         return ast.Call(
             func=func.value,
             args=list(call.args),
@@ -3190,6 +3197,8 @@ def _rewrite_applied_dunder_call(call: ast.Call) -> ast.Call | None:
     if isinstance(func, ast.Call):
         gname = _getattr_static_name(func)
         if gname == "__call__" and func.args:
+            if _receiver_looks_like_type_builtin(func.args[0]):
+                return None
             return ast.Call(
                 func=func.args[0],
                 args=list(call.args),
