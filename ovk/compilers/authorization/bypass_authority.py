@@ -148,12 +148,48 @@ _CONTAINER_ADAPTER_NAMES = frozenset(
 _NS_DICT_VIEW_ATTRS = frozenset({"get", "pop", "__getitem__", "setdefault"})
 _DICT_ITER_VIEW_ATTRS = frozenset({"keys", "values", "items", "popitem"})
 # operator.* / unbound projection names that yield packed request/state identity.
+# Includes mutation / merge factories so Assign-RHS / packed peels share one
+# path with bare ``operator.setitem`` / ``operator.ior`` (Unknown > false PASS).
 _OPERATOR_PROJECTION_ATTRS = frozenset(
-    {"getitem", "itemgetter", "attrgetter", "methodcaller", "call"}
+    {
+        "getitem",
+        "setitem",
+        "itemgetter",
+        "attrgetter",
+        "methodcaller",
+        "call",
+        "ior",
+        "or_",
+        "iadd",
+        "iconcat",
+        "copy",
+        "deepcopy",
+    }
 )
 _OPERATOR_PROJECTION_NAMES = frozenset(
-    {"getitem", "itemgetter", "attrgetter", "methodcaller", "call"}
+    {
+        "getitem",
+        "setitem",
+        "itemgetter",
+        "attrgetter",
+        "methodcaller",
+        "call",
+        "ior",
+        "or_",
+        "iadd",
+        "iconcat",
+        "copy",
+        "deepcopy",
+    }
 )
+_PROJECTION_DUNDER_ALIASES = {
+    "__ior__": "ior",
+    "__or__": "or_",
+    "__iadd__": "iadd",
+    "__iconcat__": "iconcat",
+    "__setitem__": "setitem",
+    "__getitem__": "getitem",
+}
 
 
 def _match_pattern_attribute_targets(pattern: ast.AST) -> list[ast.Attribute]:
@@ -654,12 +690,67 @@ class _RequestStateAliasEnv:
                     and func.args[1].value == "itemgetter"
                 ):
                     is_ig = True
+            if not is_ig and call.args and _is_itemgetter_factory_expr(func):
+                # Packed ``[getattr(operator,"itemgetter")][0]("x")`` /
+                # ``(0 or getattr(...))("x")`` / IfExp / next(iter).
+                is_ig = True
             if is_ig and call.args:
                 return _static_key_value(call.args[0])
             return None
 
-        def _factory_itemgetter_key(func: ast.AST) -> object | None:
-            """itemgetter key from a Call.func that may be packed/conditional."""
+        def _is_itemgetter_factory_expr(expr: ast.AST) -> bool:
+            """Bare itemgetter factory (not yet applied to a key)."""
+
+            from ovk.compilers.authorization.python_callee_resolution import (
+                _shallow_packed_callee_exprs,
+            )
+
+            for cand in _shallow_packed_callee_exprs(expr):
+                nested = cand
+                while isinstance(nested, ast.NamedExpr):
+                    nested = nested.value
+                while isinstance(nested, ast.Attribute) and nested.attr == "__call__":
+                    nested = nested.value
+                    while isinstance(nested, ast.NamedExpr):
+                        nested = nested.value
+                if isinstance(nested, ast.Name) and (
+                    nested.id == "itemgetter"
+                    or self.operator_projection_aliases.get(nested.id)
+                    == "itemgetter"
+                ):
+                    return True
+                if isinstance(nested, ast.Attribute) and nested.attr == "itemgetter":
+                    return True
+                if isinstance(nested, ast.Call):
+                    g_func = nested.func
+                    while isinstance(g_func, ast.NamedExpr):
+                        g_func = g_func.value
+                    is_g = (
+                        isinstance(g_func, ast.Name) and g_func.id in g_aliases
+                    ) or (
+                        isinstance(g_func, ast.Attribute)
+                        and g_func.attr == "getattr"
+                    )
+                    if (
+                        is_g
+                        and len(nested.args) >= 2
+                        and isinstance(nested.args[1], ast.Constant)
+                        and nested.args[1].value == "itemgetter"
+                    ):
+                        return True
+            return False
+
+        def _factory_itemgetter_key(
+            func: ast.AST,
+            *,
+            applied_args: list[ast.AST] | None = None,
+        ) -> object | None:
+            """itemgetter key from a Call.func that may be packed/conditional.
+
+            Also ``[getattr(operator,"itemgetter")][0]("x")`` /
+            ``(0 or getattr(...))("x")`` where packing yields the bare factory
+            and the key lives on the outer Call args (Unknown > false PASS).
+            """
 
             while isinstance(func, ast.NamedExpr):
                 func = func.value
@@ -683,6 +774,9 @@ class _RequestStateAliasEnv:
                         return ig_key
                 if isinstance(nested, ast.Name) and nested.id in self.itemgetter_products:
                     return self.itemgetter_products[nested.id]
+            # Packed bare factory: key from the applied outer Call.
+            if applied_args and _is_itemgetter_factory_expr(func):
+                return _static_key_value(applied_args[0])
             return None
 
         def _methodcaller_get_key(func: ast.AST) -> object | None:
@@ -1228,9 +1322,10 @@ class _RequestStateAliasEnv:
         # nested path (Unknown > false PASS).
         if isinstance(peeled, ast.Call):
             element = _call_projected_value(peeled)
-            # Bound ``keys.copy()`` / ``dict.copy(keys)`` — shallow copy of the
-            # Name-bound Dict carrier (mutation on ``c`` must not rewrite
-            # ``keys`` unless they still share the same AST object).
+            # Bound ``keys.copy()`` / ``dict.copy(keys)`` / ``copy.copy(keys)``
+            # / ``copy.deepcopy(keys)`` — shallow copy of the Name-bound Dict
+            # carrier (mutation on ``c`` must not rewrite ``keys`` unless they
+            # still share the same AST object).
             copy_src: ast.AST | None = None
             f = peeled.func
             while isinstance(f, ast.NamedExpr):
@@ -1253,6 +1348,17 @@ class _RequestStateAliasEnv:
                 )
             ):
                 copy_src = peeled.args[0]
+            elif (
+                isinstance(f, ast.Attribute)
+                and f.attr in {"copy", "deepcopy"}
+                and peeled.args
+            ):
+                # ``copy.copy(keys)`` / ``copy.deepcopy(keys)`` module peels.
+                copy_src = peeled.args[0]
+            elif isinstance(f, ast.Name) and peeled.args:
+                proj = self.operator_projection_aliases.get(f.id, f.id)
+                if proj in {"copy", "deepcopy"}:
+                    copy_src = peeled.args[0]
             if copy_src is not None:
                 src = copy_src
                 while isinstance(src, ast.NamedExpr):
@@ -6042,30 +6148,63 @@ def _collect_writes_in_function(
             func = child.func
             while isinstance(func, ast.NamedExpr):
                 func = func.value
-            # ``operator.setitem(keys, "z", val)`` / getattr setitem.
-            proj = None
-            if isinstance(func, ast.Name):
-                proj = request_aliases.operator_projection_aliases.get(
-                    func.id, func.id
-                )
-            elif isinstance(func, ast.Attribute):
-                proj = func.attr
-            elif isinstance(func, ast.Call):
-                g_func = func.func
-                while isinstance(g_func, ast.NamedExpr):
-                    g_func = g_func.value
-                is_g = (
-                    isinstance(g_func, ast.Name) and g_func.id in getattr_aliases
-                ) or (
-                    isinstance(g_func, ast.Attribute) and g_func.attr == "getattr"
-                )
-                if (
-                    is_g
-                    and len(func.args) >= 2
-                    and isinstance(func.args[1], ast.Constant)
-                    and isinstance(func.args[1].value, str)
-                ):
-                    proj = func.args[1].value
+            # ``operator.setitem(keys, "z", val)`` / getattr setitem /
+            # packed ``[operator.setitem][0]`` / Name-bound /
+            # ``operator.ior(keys, {…})`` / ``operator.__ior__`` /
+            # ``methodcaller("__setitem__", …)(keys)``.
+            from ovk.compilers.authorization.python_callee_resolution import (
+                _projection_factory_name,
+                _methodcaller_static_name,
+                _shallow_packed_callee_exprs,
+            )
+
+            proj = _projection_factory_name(
+                child,
+                projection_aliases=request_aliases.operator_projection_aliases,
+                getattr_aliases=frozenset(getattr_aliases),
+            )
+            if proj is None:
+                if isinstance(func, ast.Name):
+                    proj = request_aliases.operator_projection_aliases.get(
+                        func.id, func.id
+                    )
+                elif isinstance(func, ast.Attribute):
+                    proj = _PROJECTION_DUNDER_ALIASES.get(func.attr, func.attr)
+                elif isinstance(func, ast.Call):
+                    g_func = func.func
+                    while isinstance(g_func, ast.NamedExpr):
+                        g_func = g_func.value
+                    is_g = (
+                        isinstance(g_func, ast.Name)
+                        and g_func.id in getattr_aliases
+                    ) or (
+                        isinstance(g_func, ast.Attribute)
+                        and g_func.attr == "getattr"
+                    )
+                    if (
+                        is_g
+                        and len(func.args) >= 2
+                        and isinstance(func.args[1], ast.Constant)
+                        and isinstance(func.args[1].value, str)
+                    ):
+                        raw = func.args[1].value
+                        proj = _PROJECTION_DUNDER_ALIASES.get(raw, raw)
+                if proj is None:
+                    for cand in _shallow_packed_callee_exprs(func):
+                        nested = cand
+                        while isinstance(nested, ast.NamedExpr):
+                            nested = nested.value
+                        if isinstance(nested, ast.Name):
+                            proj = request_aliases.operator_projection_aliases.get(
+                                nested.id, nested.id
+                            )
+                        elif isinstance(nested, ast.Attribute):
+                            proj = _PROJECTION_DUNDER_ALIASES.get(
+                                nested.attr, nested.attr
+                            )
+                        if proj in {"setitem", "ior", "or_"}:
+                            break
+                        proj = None
             if proj == "setitem" and len(child.args) >= 3:
                 base = child.args[0]
                 while isinstance(base, ast.NamedExpr):
@@ -6081,6 +6220,138 @@ def _collect_writes_in_function(
                         set_key=_static_key_for_mutation(child.args[1]),
                         set_val=set_val,
                     )
+                continue
+            if proj in {"ior", "or_"} and len(child.args) >= 2:
+                base = child.args[0]
+                while isinstance(base, ast.NamedExpr):
+                    base = base.value
+                rhs = child.args[1]
+                while isinstance(rhs, ast.NamedExpr):
+                    rhs = rhs.value
+                if isinstance(base, ast.Name) and isinstance(rhs, ast.Dict):
+                    for map_key, map_val in zip(rhs.keys, rhs.values):
+                        if (
+                            map_val is None
+                            or not isinstance(map_key, ast.Constant)
+                        ):
+                            continue
+                        set_val = map_val
+                        if isinstance(set_val, ast.Call):
+                            pending = _pending_pop_values.get(id(set_val))
+                            if pending is not None:
+                                set_val = pending
+                        _rewrite_sequence_dict(
+                            base.id,
+                            set_key=map_key.value,
+                            set_val=set_val,
+                        )
+                elif isinstance(base, ast.Name):
+                    request_aliases.sequence_literal_aliases.pop(base.id, None)
+                    request_aliases.sequence_string_lists.pop(base.id, None)
+                    request_aliases.container_adapter_packs.pop(base.id, None)
+                continue
+            # ``methodcaller("__setitem__"|"update", …)(keys)``.
+            mc_name = None
+            mc_factory = None
+            if isinstance(func, ast.Call):
+                mc_name = _methodcaller_static_name(
+                    func,
+                    projection_aliases=request_aliases.operator_projection_aliases,
+                    getattr_aliases=frozenset(getattr_aliases),
+                )
+                if mc_name is not None:
+                    mc_factory = func
+            if mc_name is None:
+                for cand in _shallow_packed_callee_exprs(func):
+                    if isinstance(cand, ast.Call):
+                        mc_name = _methodcaller_static_name(
+                            cand,
+                            projection_aliases=(
+                                request_aliases.operator_projection_aliases
+                            ),
+                            getattr_aliases=frozenset(getattr_aliases),
+                        )
+                        if mc_name is not None:
+                            mc_factory = cand
+                            break
+            if (
+                mc_name in {"__setitem__", "setdefault", "update"}
+                and mc_factory is not None
+                and child.args
+            ):
+                base = child.args[0]
+                while isinstance(base, ast.NamedExpr):
+                    base = base.value
+                if isinstance(base, ast.Name):
+                    bound_args = list(mc_factory.args[1:]) + list(child.args[1:])
+                    bound_keywords = list(mc_factory.keywords) + list(
+                        child.keywords
+                    )
+                    if mc_name in {"__setitem__", "setdefault"} and len(
+                        bound_args
+                    ) >= 2:
+                        set_val = bound_args[1]
+                        if isinstance(set_val, ast.Call):
+                            pending = _pending_pop_values.get(id(set_val))
+                            if pending is not None:
+                                set_val = pending
+                        _rewrite_sequence_dict(
+                            base.id,
+                            set_key=_static_key_for_mutation(bound_args[0]),
+                            set_val=set_val,
+                        )
+                    elif mc_name == "update":
+                        rewritten = False
+                        if bound_args:
+                            rhs = bound_args[0]
+                            while isinstance(rhs, ast.NamedExpr):
+                                rhs = rhs.value
+                            if isinstance(rhs, ast.Dict):
+                                for map_key, map_val in zip(
+                                    rhs.keys, rhs.values
+                                ):
+                                    if (
+                                        map_val is None
+                                        or not isinstance(map_key, ast.Constant)
+                                    ):
+                                        continue
+                                    set_val = map_val
+                                    if isinstance(set_val, ast.Call):
+                                        pending = _pending_pop_values.get(
+                                            id(set_val)
+                                        )
+                                        if pending is not None:
+                                            set_val = pending
+                                    _rewrite_sequence_dict(
+                                        base.id,
+                                        set_key=map_key.value,
+                                        set_val=set_val,
+                                    )
+                                    rewritten = True
+                        for kw in bound_keywords:
+                            if kw.arg is None:
+                                continue
+                            set_val = kw.value
+                            if isinstance(set_val, ast.Call):
+                                pending = _pending_pop_values.get(id(set_val))
+                                if pending is not None:
+                                    set_val = pending
+                            _rewrite_sequence_dict(
+                                base.id,
+                                set_key=kw.arg,
+                                set_val=set_val,
+                            )
+                            rewritten = True
+                        if not rewritten:
+                            request_aliases.sequence_literal_aliases.pop(
+                                base.id, None
+                            )
+                            request_aliases.sequence_string_lists.pop(
+                                base.id, None
+                            )
+                            request_aliases.container_adapter_packs.pop(
+                                base.id, None
+                            )
                 continue
             if not isinstance(func, ast.Attribute):
                 continue
