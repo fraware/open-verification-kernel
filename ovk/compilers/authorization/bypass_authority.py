@@ -354,6 +354,8 @@ class _RequestStateAliasEnv:
     ns_projection_aliases: set[str] = dc_field(default_factory=set)
     # Name-bound namespace projections: ``ns = types.__dict__`` / ``ns = vars(types)``.
     ns_dict_names: set[str] = dc_field(default_factory=set)
+    # Name-bound static string keys: ``k = "MappingProxyType"``.
+    string_constant_names: dict[str, str] = dc_field(default_factory=dict)
 
     @classmethod
     def seed(cls, *, param_names: frozenset[str]) -> "_RequestStateAliasEnv":
@@ -453,6 +455,13 @@ class _RequestStateAliasEnv:
         # Peel walrus so ``(Proxy := MappingProxyType)`` seeds adapters.
         while isinstance(value, ast.NamedExpr):
             value = value.value
+        # Static string keys for later Name-bound ns view application.
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            self.string_constant_names[name] = value.value
+        elif isinstance(value, ast.Name) and value.id in self.string_constant_names:
+            self.string_constant_names[name] = self.string_constant_names[value.id]
+        else:
+            self.string_constant_names.pop(name, None)
         # ``ns = types.__dict__`` / ``ns = vars(types)`` / ``ns2 = ns``: later
         # ``ns.get(...)`` / ``getattr(ns, "get")(...)`` project like the literal.
         if self._base_is_namespace_projection(value, getattr_aliases=g_aliases):
@@ -518,24 +527,41 @@ class _RequestStateAliasEnv:
                     self.operator_projection_aliases[name] = attr
             # ``Proxy = types.__dict__.get("MappingProxyType")`` /
             # ``v(types).get("MappingProxyType")`` /
-            # ``getattr(types.__dict__, "get"|"__getitem__"|"pop")("MappingProxyType")``.
-            if (
-                isinstance(func, ast.Attribute)
-                and func.attr in _NS_DICT_VIEW_ATTRS
-                and value.args
-                and isinstance(value.args[0], ast.Constant)
-                and isinstance(value.args[0].value, str)
+            # ``getattr(types.__dict__, "get"|"__getitem__"|"pop")("MappingProxyType")`` /
+            # ``getattr(ns, "setdefault").__call__("MappingProxyType")`` /
+            # Name-bound keys: ``k = "MappingProxyType"; getattr(ns,"get")(k)``.
+            view_func = func
+            while isinstance(view_func, ast.NamedExpr):
+                view_func = view_func.value
+            while (
+                isinstance(view_func, ast.Attribute) and view_func.attr == "__call__"
             ):
-                key = value.args[0].value
-                if self._base_is_namespace_projection(
-                    func.value, getattr_aliases=g_aliases
+                view_func = view_func.value
+                while isinstance(view_func, ast.NamedExpr):
+                    view_func = view_func.value
+
+            def _static_or_bound_key(node: ast.AST) -> str | None:
+                if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    return node.value
+                if isinstance(node, ast.Name):
+                    return self.string_constant_names.get(node.id)
+                return None
+
+            if (
+                isinstance(view_func, ast.Attribute)
+                and view_func.attr in _NS_DICT_VIEW_ATTRS
+                and value.args
+            ):
+                key = _static_or_bound_key(value.args[0])
+                if key is not None and self._base_is_namespace_projection(
+                    view_func.value, getattr_aliases=g_aliases
                 ):
                     if key == "MappingProxyType":
                         self.adapter_aliases.add(name)
                     if key in _OPERATOR_PROJECTION_NAMES:
                         self.operator_projection_aliases[name] = key
-            elif isinstance(func, ast.Call) and value.args:
-                g_func = func.func
+            elif isinstance(view_func, ast.Call) and value.args:
+                g_func = view_func.func
                 while isinstance(g_func, ast.NamedExpr):
                     g_func = g_func.value
                 is_g = (
@@ -543,21 +569,20 @@ class _RequestStateAliasEnv:
                 ) or (isinstance(g_func, ast.Attribute) and g_func.attr == "getattr")
                 if (
                     is_g
-                    and len(func.args) >= 2
-                    and isinstance(func.args[1], ast.Constant)
-                    and func.args[1].value in _NS_DICT_VIEW_ATTRS
-                    and isinstance(value.args[0], ast.Constant)
-                    and isinstance(value.args[0].value, str)
-                    and func.args
+                    and len(view_func.args) >= 2
+                    and isinstance(view_func.args[1], ast.Constant)
+                    and view_func.args[1].value in _NS_DICT_VIEW_ATTRS
+                    and view_func.args
                     and self._base_is_namespace_projection(
-                        func.args[0], getattr_aliases=g_aliases
+                        view_func.args[0], getattr_aliases=g_aliases
                     )
                 ):
-                    key = value.args[0].value
-                    if key == "MappingProxyType":
-                        self.adapter_aliases.add(name)
-                    if key in _OPERATOR_PROJECTION_NAMES:
-                        self.operator_projection_aliases[name] = key
+                    key = _static_or_bound_key(value.args[0])
+                    if key is not None:
+                        if key == "MappingProxyType":
+                            self.adapter_aliases.add(name)
+                        if key in _OPERATOR_PROJECTION_NAMES:
+                            self.operator_projection_aliases[name] = key
         # Name-bound adapter container packs: ``d = {"p": Proxy}``.
         pack: dict[object, tuple[str, ...]] = {}
         peeled = value
@@ -632,6 +657,7 @@ class _RequestStateAliasEnv:
             operator_projection_aliases=dict(self.operator_projection_aliases),
             ns_projection_aliases=set(self.ns_projection_aliases),
             ns_dict_names=set(self.ns_dict_names),
+            string_constant_names=dict(self.string_constant_names),
         )
 
     def restore(self, other: "_RequestStateAliasEnv") -> None:
@@ -648,6 +674,7 @@ class _RequestStateAliasEnv:
         self.operator_projection_aliases = dict(other.operator_projection_aliases)
         self.ns_projection_aliases = set(other.ns_projection_aliases)
         self.ns_dict_names = set(other.ns_dict_names)
+        self.string_constant_names = dict(other.string_constant_names)
 
     def install_join(self, states: Sequence["_RequestStateAliasEnv"]) -> None:
         """Install the sound must/may join of feasible predecessor alias envs."""
@@ -1363,6 +1390,7 @@ def join_request_state_alias_envs(
     operator_projection_aliases: dict[str, str] = {}
     ns_projection_aliases: set[str] = set()
     ns_dict_names: set[str] = set()
+    string_constant_names: dict[str, str] = {}
     for state in states:
         adapter_aliases |= state.adapter_aliases
         for name, pack in state.container_adapter_packs.items():
@@ -1373,6 +1401,7 @@ def join_request_state_alias_envs(
         operator_projection_aliases.update(state.operator_projection_aliases)
         ns_projection_aliases |= state.ns_projection_aliases
         ns_dict_names |= state.ns_dict_names
+        string_constant_names.update(state.string_constant_names)
     return _RequestStateAliasEnv(
         request_names=must_request,
         state_names=must_state,
@@ -1383,6 +1412,7 @@ def join_request_state_alias_envs(
         operator_projection_aliases=operator_projection_aliases,
         ns_projection_aliases=ns_projection_aliases,
         ns_dict_names=ns_dict_names,
+        string_constant_names=string_constant_names,
     )
 
 
@@ -2897,12 +2927,36 @@ def _collect_writes_in_function(
                     nested = value_by_key.get(map_key.value)
                     if nested is not None:
                         _apply(sub_pat, nested)
-                # ``case {**rest}: rest["c"]()`` — seed remaining keys.
+                # ``case {**rest}: rest["c"]()`` — seed remaining keys /
+                # ``rest["p"]`` MappingProxyType adapter packs (do not alias
+                # ``rest`` itself as MappingProxyType — only the packed key).
                 if pat.rest is not None:
+                    rest_pack: dict[object, tuple[str, ...]] = {}
                     for key, map_val in value_by_key.items():
                         if key in fixed_keys:
                             continue
                         _seed_name_instance_or_class(pat.rest, map_val)
+                        names: list[str] = []
+                        walk = map_val
+                        while isinstance(walk, ast.NamedExpr):
+                            walk = walk.value
+                        if isinstance(walk, ast.Name):
+                            names.append(walk.id)
+                            if walk.id in request_aliases.adapter_aliases:
+                                names.append("MappingProxyType")
+                        elif isinstance(walk, ast.Attribute):
+                            names.append(walk.attr)
+                        if names:
+                            rest_pack[key] = tuple(dict.fromkeys(names))
+                    if rest_pack:
+                        existing = request_aliases.container_adapter_packs.get(
+                            pat.rest, {}
+                        )
+                        merged = dict(existing)
+                        for key, names in rest_pack.items():
+                            prev = merged.get(key, ())
+                            merged[key] = tuple(dict.fromkeys((*prev, *names)))
+                        request_aliases.container_adapter_packs[pat.rest] = merged
                 return
             if isinstance(pat, ast.MatchOr):
                 for alt in pat.patterns:
@@ -5525,17 +5579,38 @@ def _collect_writes_in_function(
                                         break
                     # Prefer ``__enter__`` return as the as-target seed so
                     # ``return {Mut:1}.keys()`` / dict packs share Assign peel.
+                    # Also seed bare view carriers:
+                    # ``with ({Mut:1}.keys()) as ks: C, = ks``.
                     seed_value = (
                         enter_return
                         if enter_return is not None
                         else item.context_expr
                     )
                     seeded_enter_identity = False
-                    if identity_session is not None and enter_return is not None:
+
+                    def _context_is_dict_view(expr: ast.AST) -> bool:
+                        peeled = expr
+                        while isinstance(peeled, ast.NamedExpr):
+                            peeled = peeled.value
+                        if not isinstance(peeled, ast.Call):
+                            return False
+                        func = peeled.func
+                        while isinstance(func, ast.NamedExpr):
+                            func = func.value
+                        return isinstance(func, ast.Attribute) and func.attr in {
+                            "keys",
+                            "values",
+                            "items",
+                        }
+
+                    if identity_session is not None and (
+                        enter_return is not None
+                        or _context_is_dict_view(item.context_expr)
+                    ):
                         identity_session.observe_statement(
                             ast.Assign(
                                 targets=[item.optional_vars],
-                                value=enter_return,
+                                value=seed_value,
                             )
                         )
                         seeded_enter_identity = True
