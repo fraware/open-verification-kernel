@@ -541,6 +541,7 @@ class _RequestStateAliasEnv:
             self.string_constant_names.pop(name, None)
             self.static_constant_names.pop(name, None)
         # ``keys=["MappingProxyType"]`` / nested / Dict literals for peels.
+        # Also ``star=(args if True else ())`` / ``star=(0 or args)`` packs.
         if isinstance(value, (ast.List, ast.Tuple, ast.Dict)):
             self.sequence_literal_aliases[name] = value
             if isinstance(value, (ast.List, ast.Tuple)):
@@ -561,6 +562,23 @@ class _RequestStateAliasEnv:
                 else:
                     self.sequence_string_lists.pop(name, None)
             else:
+                self.sequence_string_lists.pop(name, None)
+        elif isinstance(value, (ast.BoolOp, ast.IfExp)):
+            from ovk.compilers.authorization.python_callee_resolution import (
+                _sequence_pack_elts as _seq_pack_alias,
+            )
+
+            seq_elts = _seq_pack_alias(
+                value,
+                sequence_aliases=self.sequence_literal_aliases,
+            )
+            if seq_elts is not None:
+                self.sequence_literal_aliases[name] = ast.Tuple(
+                    elts=list(seq_elts), ctx=ast.Load()
+                )
+                self.sequence_string_lists.pop(name, None)
+            else:
+                self.sequence_literal_aliases.pop(name, None)
                 self.sequence_string_lists.pop(name, None)
         elif isinstance(value, ast.Name) and value.id in self.sequence_literal_aliases:
             self.sequence_literal_aliases[name] = self.sequence_literal_aliases[
@@ -1125,6 +1143,21 @@ class _RequestStateAliasEnv:
                 value.value, getattr_aliases=g_aliases
             ):
                 _seed_ns_key(name, key)
+            # ``p=[partial(operator.setitem)][0]`` / list0 partial peels.
+            from ovk.compilers.authorization.python_callee_resolution import (
+                _is_partial_factory as _is_partial_sub,
+                _peel_call_func as _peel_partial_sub,
+                _shallow_packed_callee_exprs as _shallow_partial_sub,
+            )
+
+            for cand in _shallow_partial_sub(value):
+                nested = _peel_partial_sub(cand)
+                if isinstance(nested, ast.Call) and _is_partial_sub(
+                    nested,
+                    getattr_aliases=frozenset(g_aliases),
+                ):
+                    self.partial_factories[name] = nested
+                    break
             # Do not return early: pack seeding below still applies.
         elif isinstance(value, ast.Call):
             # ``Proxy = getattr(types, "MappingProxyType")`` /
@@ -1241,7 +1274,10 @@ class _RequestStateAliasEnv:
                 self.partial_factories[name] = value
             else:
                 partial_seed: ast.Call | None = None
-                for cand in _shallow_mc(value.func):
+                for cand in (
+                    *_shallow_mc(value.func),
+                    *_shallow_mc(value),
+                ):
                     nested = cand
                     while isinstance(nested, ast.NamedExpr):
                         nested = nested.value
@@ -1619,12 +1655,23 @@ class _RequestStateAliasEnv:
                     getattr_aliases=frozenset(g_aliases),
                 ) and f.args and not peeled.args:
                     # ``partial(copy.copy, keys)()`` /
+                    # ``partial(*((copy.copy, keys) if True else ()))()`` /
+                    # ``partial(*(0 or (copy.copy, keys)))()`` /
                     # ``partial(keys.copy)()`` /
                     # ``partial(getattr(keys,"copy"))()``.
-                    if len(f.args) >= 2:
-                        copy_src = f.args[1]
-                    else:
-                        b0 = f.args[0]
+                    from ovk.compilers.authorization.python_callee_resolution import (
+                        _flatten_starred_args as _flat_partial_copy,
+                        _peel_call_func as _peel_partial_copy_args,
+                    )
+
+                    flat_f_args = _flat_partial_copy(
+                        f.args,
+                        sequence_aliases=self.sequence_literal_aliases,
+                    )
+                    if len(flat_f_args) >= 2:
+                        copy_src = flat_f_args[1]
+                    elif flat_f_args:
+                        b0 = _peel_partial_copy_args(flat_f_args[0])
                         while isinstance(b0, ast.NamedExpr):
                             b0 = b0.value
                         if isinstance(b0, ast.Attribute) and b0.attr == "copy":
@@ -1891,6 +1938,29 @@ class _RequestStateAliasEnv:
                                 if len(bound_partial.args) == 1 and peeled.args:
                                     copy_src = peeled.args[0]
                                     break
+                                if (
+                                    len(bound_partial.args) == 1
+                                    and not peeled.args
+                                    and isinstance(b0, ast.Attribute)
+                                    and b0.attr == "copy"
+                                ):
+                                    # ``p=partial(keys.copy); [p][0]()``.
+                                    copy_src = b0.value
+                                    break
+                                if (
+                                    len(bound_partial.args) == 1
+                                    and not peeled.args
+                                    and isinstance(b0, ast.Call)
+                                    and _g_pack_partial(
+                                        b0,
+                                        getattr_aliases=frozenset(g_aliases),
+                                    )
+                                    == "copy"
+                                    and b0.args
+                                ):
+                                    # ``p=partial(getattr(keys,"copy")); [p][0]()``.
+                                    copy_src = b0.args[0]
+                                    break
                     if isinstance(nested, ast.Call):
                         gn = _g_static2(
                             nested, getattr_aliases=frozenset(g_aliases)
@@ -1913,7 +1983,9 @@ class _RequestStateAliasEnv:
                             break
                         # Packed / BoolOp / IfExp ``[partial(copy.copy)][0](keys)`` /
                         # ``(0 or partial(copy.copy))(keys)`` /
-                        # ``[partial(keys.copy)][0]()`` (Unknown > false PASS).
+                        # ``[partial(keys.copy)][0]()`` /
+                        # ``[partial(getattr(keys,"copy"))][0]()`` /
+                        # ``[partial(copy.copy)].pop(0)(keys)`` (Unknown > false PASS).
                         from ovk.compilers.authorization.python_callee_resolution import (
                             _is_partial_factory as _is_partial_pack2,
                             _peel_call_func as _peel_pack2,
@@ -1923,7 +1995,17 @@ class _RequestStateAliasEnv:
                             nested,
                             getattr_aliases=frozenset(g_aliases),
                         ) and nested.args:
-                            b0 = _peel_pack2(nested.args[0])
+                            from ovk.compilers.authorization.python_callee_resolution import (
+                                _flatten_starred_args as _flat_pack2,
+                            )
+
+                            flat_nested = _flat_pack2(
+                                nested.args,
+                                sequence_aliases=self.sequence_literal_aliases,
+                            )
+                            if not flat_nested:
+                                continue
+                            b0 = _peel_pack2(flat_nested[0])
                             is_copy_inline = (
                                 (
                                     isinstance(b0, ast.Attribute)
@@ -1949,18 +2031,32 @@ class _RequestStateAliasEnv:
                                 )
                             )
                             if is_copy_inline:
-                                if len(nested.args) >= 2 and not peeled.args:
-                                    copy_src = nested.args[1]
+                                if len(flat_nested) >= 2 and not peeled.args:
+                                    copy_src = flat_nested[1]
                                     break
                                 if (
-                                    len(nested.args) == 1
+                                    len(flat_nested) == 1
                                     and isinstance(b0, ast.Attribute)
                                     and b0.attr == "copy"
                                     and not peeled.args
                                 ):
                                     copy_src = b0.value
                                     break
-                                if len(nested.args) == 1 and peeled.args:
+                                if (
+                                    len(flat_nested) == 1
+                                    and isinstance(b0, ast.Call)
+                                    and _g_static2(
+                                        b0,
+                                        getattr_aliases=frozenset(g_aliases),
+                                    )
+                                    == "copy"
+                                    and b0.args
+                                    and not peeled.args
+                                ):
+                                    # ``partial(getattr(keys,"copy"))()``.
+                                    copy_src = b0.args[0]
+                                    break
+                                if len(flat_nested) == 1 and peeled.args:
                                     copy_src = peeled.args[0]
                                     break
             if copy_src is not None:
