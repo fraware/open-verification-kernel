@@ -102,3 +102,14 @@ def wrap_adapter(adapter: str, expr: str) -> str:
         left, right = adapter.split("+", 1)
         return wrap_adapter(right, wrap_adapter(left, expr))
     return expr
+
+
+# Non-material / held-out OOS (do not "close" — TypeError empties / FormalPR).
+# These must remain unknown rather than authorized; they are not false-PASS digs.
+NON_MATERIAL_OOS: tuple[str, ...] = (
+    "binascii.b2a_uu / a2b_uu empty codec packs that raise at runtime",
+    "itertools.product() arity / empty-product one-tuple yield",
+    "itertools.partition / combinations*(..., 0) non-material empties",
+    "next(tee(...)) arity / tee half misuse that TypeErrors",
+    "FormalPR freeze / #87 held-out until human gate",
+)
