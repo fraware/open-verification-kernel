@@ -19503,6 +19503,54 @@ def test_fortieth_pass_alias_never_authorized() -> None:
         'c["z"]=c.pop("x"); k=c.get("z")\n'
         'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
         "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\nfrom operator import itemgetter\n"
+        'ig=itemgetter("__getitem__"); gi=ig(list.__dict__); '
+        "c=oc(gi,[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\nfrom operator import attrgetter\n"
+        'p=partial(attrgetter("getitem")(operator)); '
+        "c=oc(p.__call__,[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\nimport builtins\nfrom operator import itemgetter\n"
+        'ga=itemgetter("getattr")(builtins.__dict__); '
+        'c=oc(partial(ga,list,"__getitem__"),[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\nimport builtins\nfrom operator import itemgetter\n"
+        'ga=itemgetter("getattr")(vars(builtins)); '
+        'c=oc(partial(ga,list,"__getitem__"),[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'd={}; d.update({"gi":operator.getitem}); '
+        'c=oc(d["gi"],[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(dict.copy({"gi":operator.getitem})["gi"],'
+        "[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
     )
     for body in cases:
         findings = _unit(
@@ -19594,6 +19642,9 @@ def write_state(state, value):
         "    cm=nullcontext(*args); e=cm.__enter__; "
         "xs=[]; f=e(*getattr(xs,'__iadd__')(())); f(evil)",
         "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "xs=[]; g=getattr; f=e(*g(xs,'__iadd__')(())); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
         "    from operator import methodcaller\n"
         "    cm=nullcontext(*args); e=cm.__enter__; "
         "xs=[]; f=e(*methodcaller('__iadd__',())(xs)); f(evil)",
@@ -19601,6 +19652,10 @@ def write_state(state, value):
         "    from contextlib import nullcontext; args=(n.install,)\n"
         "    cm=nullcontext(*args); e=cm.__enter__; "
         "f=e(*getattr(it.chain,'from_iterable')(())); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(it.chain,'from_iterable')(())); f(evil)",
     ):
         routes = f"""
 import pkg.nested as n
@@ -19659,4 +19714,4 @@ def test_fortieth_pass_positive_authorized_smoke() -> None:
 def test_persistent_version_bumped_for_executed_expr_closure() -> None:
     """Cache / semantic versions bump with PASS-semantics change."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "1.3.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "1.4.0"

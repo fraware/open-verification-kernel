@@ -599,17 +599,9 @@ _ITERTOOLS_ADAPTER_NAMES = frozenset(
 _ITERTOOLS_FLATTEN_ADAPTERS = frozenset({"chain_from_iterable", "from_iterable"})
 # In-place merge / grow methods shared by AugAssign, operator, and dunders.
 _INPLACE_MERGE_METHODS = frozenset(
-    {
-        "__iadd__",
-        "__iconcat__",
-        "__ior__",
-        "iadd",
-        "iconcat",
-        "ior",
-        "extend",
-    }
+    {"__iadd__", "__iconcat__", "__ior__", "iadd", "iconcat", "ior"}
 )
-_INPLACE_MERGE_FUNCS = frozenset({"iadd", "iconcat", "ior", "or_", "extend"})
+_INPLACE_MERGE_FUNCS = frozenset({"iadd", "iconcat", "ior", "or_"})
 # Shared key=/reduce applicator Names (import-as / getattr peels).
 _KEY_APPLICATOR_NAMES = frozenset({"sorted", "max", "min", "reduce"})
 # heapq sole-element identity selectors (n=1 packing, import-as / getattr).
@@ -1443,66 +1435,6 @@ def _is_setattr_call(
         ):
             return True
     return False
-
-
-def _peel_adapter_pipeline(
-    expr: ast.AST,
-    *,
-    budget: int = 8,
-    projection_aliases: Mapping[str, str] | None = None,
-    getattr_aliases: frozenset[str] | None = None,
-    partial_aliases: frozenset[str] | None = None,
-    sequence_aliases: Mapping[str, ast.AST] | None = None,
-    slice_aliases: frozenset[str] | None = None,
-    bound_partials: Mapping[str, ast.AST] | None = None,
-    copy_aliases: frozenset[str] | None = None,
-) -> ast.AST:
-    """Bounded shared peel: carrier → choice → factory → materialize → copy.
-
-    Phase-1 adapter normalizer used by packing / identity / ChainMap /
-    executed-expr observe so Name-bind / list0 / BoolOp / getattr /
-    partial / zip materialize / list.copy share one fail-closed path
-    (Unknown > false PASS). Exhausted budget returns the last peeled node.
-    """
-
-    projs = projection_aliases or {}
-    cur: ast.AST = expr
-    for _ in range(max(1, budget)):
-        nxt = _peel_call_func(cur)
-        # Choice: preferred BoolOp / IfExp arm.
-        if isinstance(nxt, (ast.BoolOp, ast.IfExp)):
-            nxt = _preferred_seed_arm(nxt)
-        # Copy wrappers.
-        copied = _copy_wrapper_operand(
-            nxt,
-            copy_aliases=copy_aliases,
-            projection_aliases=projs,
-            partial_aliases=partial_aliases,
-            getattr_aliases=getattr_aliases,
-            sequence_aliases=sequence_aliases,
-            slice_aliases=slice_aliases,
-            bound_partials=bound_partials,
-        )
-        if copied is not None:
-            nxt = copied
-        # Factory: trailing __call__ / getattr / methodcaller peel.
-        nxt = _peel_transparent_callee(nxt)
-        # Carrier: sole list0 / next(iter) / star pack.
-        packed = _shallow_packed_callee_exprs(nxt)
-        if packed:
-            nxt = packed[0]
-        # Materialize: list|tuple|iter|filter|map around zip streams.
-        if isinstance(nxt, ast.Call):
-            mat = _peel_iter_zip_adapters(
-                nxt,
-                projection_aliases=projs,
-            )
-            if mat is not None:
-                nxt = mat
-        if nxt is cur:
-            break
-        cur = nxt
-    return cur
 
 
 def _shallow_packed_callee_exprs(expr: ast.AST, *, depth: int = 0) -> list[ast.AST]:
@@ -3331,6 +3263,7 @@ def _static_truthiness(node: ast.AST) -> bool | None:
             "__irshift__": "irshift",
             "__ipow__": "ipow",
             "__truediv__": "truediv",
+            "__itruediv__": "itruediv",
             "__floordiv__": "floordiv",
             "__mul__": "mul",
             "__add__": "add",
@@ -5651,8 +5584,10 @@ def _expr_is_empty_pack(
             return True
         # ``json.loads('[]')`` / ``ast.literal_eval('[]')`` empty packs /
         # ``json.loads(b'[]')`` / ``json.JSONDecoder().decode('[]')`` /
+        # unbound ``json.JSONDecoder.decode(json.JSONDecoder(),'[]')`` /
         # ``json.loads('{}').keys()`` via keys peel above.
         loads_name = None
+        unbound_decode = False
         if isinstance(func, ast.Attribute) and func.attr in {
             "loads",
             "literal_eval",
@@ -5670,8 +5605,6 @@ def _expr_is_empty_pack(
                 and recv_ld.attr in {"json", "ast"}
             )
             # ``json.JSONDecoder().decode('[]')`` — recv is JSONDecoder Call.
-            # Also unbound ``json.JSONDecoder.decode(JSONDecoder(), '[]')`` /
-            # Name-bound ``dec=json.JSONDecoder.decode; dec(…)``.
             is_decoder = False
             if isinstance(recv_ld, ast.Call):
                 df = _peel_transparent_callee(recv_ld.func)
@@ -5684,23 +5617,31 @@ def _expr_is_empty_pack(
                         or projections.get(df.id) == "JSONDecoder"
                     )
                 )
-            elif isinstance(recv_ld, ast.Attribute) and recv_ld.attr == "JSONDecoder":
-                is_decoder = True
-            elif isinstance(recv_ld, ast.Name) and (
-                recv_ld.id == "JSONDecoder"
-                or projections.get(recv_ld.id) == "JSONDecoder"
+            # Unbound ``json.JSONDecoder.decode(inst, '[]')``.
+            if (
+                isinstance(recv_ld, ast.Attribute)
+                and recv_ld.attr == "JSONDecoder"
+            ) or (
+                isinstance(recv_ld, ast.Name)
+                and (
+                    recv_ld.id == "JSONDecoder"
+                    or projections.get(recv_ld.id) == "JSONDecoder"
+                )
             ):
                 is_decoder = True
+                unbound_decode = func.attr == "decode"
             if is_json_ast or is_decoder or func.attr == "literal_eval":
                 loads_name = func.attr
         elif isinstance(func, ast.Name):
             loads_name = projections.get(func.id, func.id)
             if loads_name not in {"loads", "literal_eval", "decode"}:
                 loads_name = None
+            elif loads_name == "decode" and len(call_flat) >= 2:
+                # Name-bound ``dec=json.JSONDecoder.decode; dec(inst,'[]')``.
+                unbound_decode = True
         elif isinstance(func, ast.Call):
             # Packed ``[json.loads][0]('[]')`` via shallow packing already
             # peels; getattr handled above. Name-str ``getattr(json,nm)``.
-            # Also unbound ``getattr``-style ``JSONDecoder.decode`` mid.
             g_ld = _getattr_static_name(
                 func,
                 sequence_aliases=aliases,
@@ -5708,7 +5649,9 @@ def _expr_is_empty_pack(
             )
             if g_ld in {"loads", "literal_eval", "decode"}:
                 loads_name = g_ld
-            # ``getattr(it.chain, 'from_iterable')`` handled in itertools block.
+                if g_ld == "decode" and len(call_flat) >= 2:
+                    # ``getattr(json.JSONDecoder,'decode')(inst,'[]')``.
+                    unbound_decode = True
         if loads_name is None:
             # ``[json.loads][0]('[]')`` / ``(0 or json.loads)('[]')`` packed
             # Attribute peels (Unknown > false PASS).
@@ -5727,25 +5670,19 @@ def _expr_is_empty_pack(
                         loads_name = proj
                         break
         if loads_name in {"loads", "literal_eval", "decode"} and call_flat:
-            # Bound ``.decode('[]')`` / ``loads('[]')`` — payload is arg0.
-            # Unbound ``JSONDecoder.decode(JSONDecoder(), '[]')`` /
-            # Name-bound ``dec(JSONDecoder(), '[]')`` — payload is arg1
-            # (Unknown > false PASS).
-            payload_candidates = [call_flat[0]]
-            if loads_name == "decode" and len(call_flat) >= 2:
-                payload_candidates.append(call_flat[1])
-            for payload_raw in payload_candidates:
-                payload = _peel_call_func(payload_raw)
-                if isinstance(payload, ast.Constant) and isinstance(
-                    payload.value, (str, bytes, bytearray)
-                ):
-                    text = (
-                        payload.value.decode()
-                        if isinstance(payload.value, (bytes, bytearray))
-                        else payload.value
-                    ).strip()
-                    if text in {"[]", "()", "{}"}:
-                        return True
+            # Unbound decode takes (inst, payload); bound takes (payload,).
+            payload_i = 1 if unbound_decode and len(call_flat) >= 2 else 0
+            payload = _peel_call_func(call_flat[payload_i])
+            if isinstance(payload, ast.Constant) and isinstance(
+                payload.value, (str, bytes, bytearray)
+            ):
+                text = (
+                    payload.value.decode()
+                    if isinstance(payload.value, (bytes, bytearray))
+                    else payload.value
+                ).strip()
+                if text in {"[]", "()", "{}"}:
+                    return True
         # ``bytes.__new__(bytes)`` / ``bytearray.__new__(bytearray)``.
         if (
             isinstance(func, ast.Attribute)
@@ -5783,6 +5720,12 @@ def _expr_is_empty_pack(
                 sequence_aliases=aliases,
                 slice_aliases=slice_aliases,
             )
+            if mul_name is None:
+                mul_name = _methodcaller_static_name(
+                    func,
+                    projection_aliases=projections,
+                    getattr_aliases=ga_mul,
+                )
         if mul_name in {"mul", "__mul__", "imul", "__imul__"} and call_flat:
             if any(_empty(a) for a in call_flat):
                 return True
@@ -5845,62 +5788,91 @@ def _expr_is_empty_pack(
                     )
                 ):
                     return True
-        # ``getattr(xs, '__iadd__')(())`` / ``methodcaller('__iadd__', ())(xs)``.
+            elif (
+                len(call_flat) == 1
+                and isinstance(func, ast.Call)
+            ):
+                # ``getattr(xs,'__iadd__')(())`` / Name ``g=getattr; g(xs,'__iadd__')(())`` /
+                # ``methodcaller('__iadd__',())(xs)`` empty rhs
+                # (Unknown > false PASS).
+                live_ga = _live_peel_aliases()
+                ga_set = (
+                    frozenset(live_ga.getattr_aliases)
+                    if live_ga is not None
+                    else None
+                )
+                g_ia = _getattr_static_name(
+                    func,
+                    getattr_aliases=ga_set,
+                    sequence_aliases=aliases,
+                    slice_aliases=slice_aliases,
+                )
+                if g_ia in {"__iadd__", "__iconcat__", "extend"} and _empty(
+                    call_flat[0]
+                ):
+                    gflat_ia = _flatten_starred_args(
+                        func.args,
+                        sequence_aliases=aliases,
+                        slice_aliases=slice_aliases,
+                    )
+                    if gflat_ia and (
+                        _empty(gflat_ia[0])
+                        or isinstance(_peel_call_func(gflat_ia[0]), ast.Name)
+                    ):
+                        return True
+                mc_ia = _methodcaller_static_name(
+                    func,
+                    projection_aliases=projections,
+                )
+                if mc_ia in {"__iadd__", "__iconcat__", "extend"}:
+                    mc_flat_ia = _flatten_starred_args(
+                        func.args,
+                        sequence_aliases=aliases,
+                        slice_aliases=slice_aliases,
+                    )
+                    # ``methodcaller('__iadd__',())(xs)`` — empty bound on product.
+                    if (
+                        len(mc_flat_ia) >= 2
+                        and _empty(mc_flat_ia[1])
+                        and call_flat
+                        and (
+                            _empty(call_flat[0])
+                            or isinstance(
+                                _peel_call_func(call_flat[0]), ast.Name
+                            )
+                        )
+                    ):
+                        return True
+                    if (
+                        len(mc_flat_ia) >= 1
+                        and call_flat
+                        and _empty(call_flat[0])
+                        and (
+                            isinstance(_peel_call_func(call_flat[0]), ast.Name)
+                            or _empty(call_flat[0])
+                        )
+                    ):
+                        # ``methodcaller('__iadd__')(xs)(())`` — rare; empty apply.
+                        return True
+        # ``getattr(it.chain,'from_iterable')(())`` / Name ``g=getattr`` empty
+        # flatten (Unknown > false PASS).
         if isinstance(func, ast.Call):
-            g_ia = _getattr_static_name(
-                func,
-                sequence_aliases=aliases,
-                slice_aliases=slice_aliases,
+            live_fi = _live_peel_aliases()
+            ga_fi = (
+                frozenset(live_fi.getattr_aliases)
+                if live_fi is not None
+                else None
             )
-            mc_ia = _methodcaller_static_name(
-                func,
-                projection_aliases=projections,
-            )
-            if g_ia in {"__iadd__", "__iconcat__", "extend"}:
-                gflat_ia = _flatten_starred_args(
-                    func.args,
-                    sequence_aliases=aliases,
-                    slice_aliases=slice_aliases,
-                )
-                # ``getattr(xs,'__iadd__')(())`` — empty applied arg.
-                if (
-                    call_flat
-                    and _empty(call_flat[0])
-                    and gflat_ia
-                    and isinstance(_peel_call_func(gflat_ia[0]), ast.Name)
-                ):
-                    return True
-            if mc_ia in {"__iadd__", "__iconcat__", "extend"}:
-                mc_flat_ia = _flatten_starred_args(
-                    func.args,
-                    sequence_aliases=aliases,
-                    slice_aliases=slice_aliases,
-                )
-                # ``methodcaller('__iadd__', ())(xs)`` — empty in mc args.
-                if (
-                    len(mc_flat_ia) >= 2
-                    and _empty(mc_flat_ia[1])
-                    and call_flat
-                    and isinstance(_peel_call_func(call_flat[0]), ast.Name)
-                ):
-                    return True
-                if (
-                    len(mc_flat_ia) >= 1
-                    and _empty(mc_flat_ia[0])
-                    and call_flat
-                    and isinstance(_peel_call_func(call_flat[0]), ast.Name)
-                ):
-                    # ``methodcaller('__iadd__')(())`` unusual; keep fail-closed.
-                    return True
-            # ``getattr(it.chain, 'from_iterable')(())``.
             g_fi = _getattr_static_name(
                 func,
+                getattr_aliases=ga_fi,
                 sequence_aliases=aliases,
                 slice_aliases=slice_aliases,
             )
-            if g_fi in {"from_iterable", "chain.from_iterable"}:
-                if not call_flat or all(_empty(a) for a in call_flat):
-                    return True
+            if g_fi in {"from_iterable", "chain.from_iterable"} and (
+                not call_flat or all(_empty(a) for a in call_flat)
+            ):
+                return True
         # Bound ``memoryview(b'').tobytes`` via getattr / Name mid.
         if isinstance(func, ast.Attribute) and func.attr in {
             "tobytes",
@@ -7083,84 +7055,106 @@ def _rewrite_applied_dunder_call(
                         )
                         pack_key = _static_str_expr(gi_target.slice)
                         pack_base = _peel_call_func(gi_target.value)
-                        # Name-bound ``d={"gi":operator.getitem}; d["gi"]``.
+                        # Name-bound ``d={"gi":operator.getitem}; d["gi"]`` /
+                        # mutate-then-subscript packs (Unknown > false PASS).
                         if isinstance(pack_base, ast.Name) and seq_aliases:
-                            aliased = seq_aliases.get(pack_base.id)
-                            if aliased is not None:
-                                pack_base = _peel_call_func(aliased)
-                        # ``copy.copy|deepcopy({…})`` / ``MappingProxyType({…})``.
-                        copy_pack = _copy_wrapper_operand(
-                            pack_base,
-                            projection_aliases=projs,
-                            getattr_aliases=(
-                                frozenset(live_g.getattr_aliases)
-                                if (live_g := _live_peel_aliases()) is not None
-                                else None
-                            ),
-                            sequence_aliases=seq_aliases,
-                            slice_aliases=slice_aliases,
-                        )
-                        if copy_pack is not None:
-                            pack_base = copy_pack
-                        if isinstance(pack_base, ast.Call):
-                            pbf = _peel_transparent_callee(pack_base.func)
-                            is_mpt = (
-                                (
-                                    isinstance(pbf, ast.Name)
-                                    and (
-                                        pbf.id == "MappingProxyType"
-                                        or projs.get(pbf.id)
-                                        == "MappingProxyType"
-                                    )
-                                )
-                                or (
-                                    isinstance(pbf, ast.Attribute)
-                                    and pbf.attr == "MappingProxyType"
-                                )
-                            )
-                            if is_mpt and pack_base.args:
-                                pack_base = _peel_call_func(pack_base.args[0])
-                        # ``dict(**{"0":operator.getitem})`` ctor unwrap.
-                        # Also positional ``dict({"gi":operator.getitem})``.
-                        if isinstance(pack_base, ast.Call):
+                            aliased_pb = seq_aliases.get(pack_base.id)
+                            if aliased_pb is not None:
+                                pack_base = _peel_call_func(aliased_pb)
+                        # ``dict(**{"0":operator.getitem})`` /
+                        # ``dict({"gi":operator.getitem})`` /
+                        # ``MappingProxyType({…})`` / ``dict.copy({…})`` ctor unwrap.
+                        for _ in range(4):
+                            pack_base = _peel_call_func(pack_base)
+                            if not isinstance(pack_base, ast.Call):
+                                break
                             pbf = _peel_transparent_callee(pack_base.func)
                             is_dict_ctor = (
-                                isinstance(pbf, ast.Name) and pbf.id == "dict"
+                                isinstance(pbf, ast.Name)
+                                and pbf.id in {"dict", "MappingProxyType"}
                             ) or (
                                 isinstance(pbf, ast.Attribute)
-                                and pbf.attr == "dict"
+                                and pbf.attr in {"dict", "MappingProxyType"}
+                            )
+                            # ``dict.copy({…})`` / ``copy.copy({…})``.
+                            is_copy_ctor = (
+                                isinstance(pbf, ast.Attribute)
+                                and pbf.attr in _MAPPING_COPY_FUNCS
+                            ) or (
+                                isinstance(pbf, ast.Name)
+                                and (
+                                    pbf.id in _MAPPING_COPY_FUNCS
+                                    or projs.get(pbf.id) in _MAPPING_COPY_FUNCS
+                                )
                             )
                             if is_dict_ctor:
+                                # Positional ``dict({…})`` / ``MPT({…})``.
                                 if pack_base.args:
                                     arg0 = _peel_call_func(pack_base.args[0])
                                     if isinstance(arg0, ast.Dict):
                                         pack_base = arg0
-                                if isinstance(pack_base, ast.Call):
-                                    for kw in pack_base.keywords:
-                                        if kw.arg is None and kw.value is not None:
-                                            kw_v = _peel_call_func(kw.value)
-                                            if isinstance(kw_v, ast.Dict):
-                                                pack_base = kw_v
-                                                break
-                                    else:
-                                        if pack_base.keywords and all(
-                                            kw.arg is not None
-                                            for kw in pack_base.keywords
-                                        ):
-                                            # ``dict(gi=operator.getitem)`` —
-                                            # rebuild Dict from keywords.
-                                            pack_base = ast.Dict(
-                                                keys=[
-                                                    ast.Constant(value=kw.arg)
-                                                    for kw in pack_base.keywords
-                                                    if kw.arg is not None
-                                                ],
-                                                values=[
-                                                    kw.value
-                                                    for kw in pack_base.keywords
-                                                    if kw.arg is not None
-                                                ],
-                                            )
+                                        break
+                                for kw in pack_base.keywords:
+                                    if kw.arg is None and kw.value is not None:
+                                        kw_v = _peel_call_func(kw.value)
+                                        if isinstance(kw_v, ast.Dict):
+                                            pack_base = kw_v
+                                            break
+                                else:
+                                    if pack_base.keywords and all(
+                                        kw.arg is not None
+                                        for kw in pack_base.keywords
+                                    ):
+                                        # ``dict(gi=…)`` keyword rebuild.
+                                        pack_base = ast.Dict(
+                                            keys=[
+                                                ast.Constant(value=kw.arg)
+                                                for kw in pack_base.keywords
+                                                if kw.arg is not None
+                                            ],
+                                            values=[
+                                                kw.value
+                                                for kw in pack_base.keywords
+                                                if kw.arg is not None
+                                            ],
+                                        )
+                                        break
+                                    break
+                                break
+                            if is_copy_ctor and pack_base.args:
+                                pack_base = pack_base.args[0]
+                                continue
+                            break
+                        # ``{**{"gi":…}}`` merge Dict with sole starred mapping.
+                        if isinstance(pack_base, ast.Dict) and (
+                            pack_base.keys
+                            and pack_base.keys[0] is None
+                            and len(pack_base.keys) == 1
+                        ):
+                            spread = _peel_call_func(pack_base.values[0])
+                            if isinstance(spread, ast.Dict):
+                                pack_base = spread
+                        # ``[{"gi":…}][0]["gi"]`` — outer list pack then dict.
+                        if (
+                            isinstance(pack_base, ast.Subscript)
+                            and pack_key is not None
+                        ):
+                            outer_idx = _static_sequence_index(
+                                pack_base.slice,
+                                sequence_aliases=seq_aliases,
+                                slice_aliases=slice_aliases,
+                            )
+                            outer_base = _peel_call_func(pack_base.value)
+                            if (
+                                isinstance(outer_base, (ast.List, ast.Tuple))
+                                and outer_idx is not None
+                                and -len(outer_base.elts)
+                                <= outer_idx
+                                < len(outer_base.elts)
+                            ):
+                                pack_base = _peel_call_func(
+                                    outer_base.elts[outer_idx]
+                                )
                         if isinstance(pack_base, ast.Dict) and (
                             pack_idx is not None or pack_key is not None
                         ):
@@ -7305,6 +7299,19 @@ def _rewrite_applied_dunder_call(
                             or {"getattr"}
                         )
                         call_recv = _peel_call_func(gi_target.value)
+                        # Nested ``partial(...).__call__.__call__``.
+                        while (
+                            isinstance(call_recv, ast.Attribute)
+                            and call_recv.attr == "__call__"
+                        ):
+                            call_recv = _peel_call_func(call_recv.value)
+                        # Name-bound ``p=partial(...); oc(p.__call__,…)``.
+                        if isinstance(call_recv, ast.Name) and live_call is not None:
+                            bound_p = live_call.bound_callees.get(call_recv.id)
+                            if isinstance(bound_p, ast.Call):
+                                call_recv = _peel_call_func(bound_p)
+                            elif products.get(call_recv.id, (None,))[0] == "partial":
+                                unbound_gi = True
                         if (
                             isinstance(call_recv, ast.Attribute)
                             and call_recv.attr
@@ -7353,7 +7360,9 @@ def _rewrite_applied_dunder_call(
                                         unbound_gi = True
                                     elif isinstance(ih, ast.Call):
                                         # ``partial(getattr(builtins,"getattr"),
-                                        # list,"__getitem__").__call__``.
+                                        # list,"__getitem__").__call__`` /
+                                        # ``partial(attrgetter("getitem")(operator))`` /
+                                        # ``partial(ga,list,"__getitem__")`` Name ga.
                                         g_ih = _getattr_static_name(
                                             ih,
                                             getattr_aliases=g_call_aliases,
@@ -7361,8 +7370,13 @@ def _rewrite_applied_dunder_call(
                                             slice_aliases=slice_aliases,
                                         )
                                         if g_ih == "getattr" and len(ih.args) >= 2:
-                                            # Applied later; partial of getattr
-                                            # with list/__getitem__ prebound.
+                                            unbound_gi = True
+                                        if g_ih in {
+                                            "__getitem__",
+                                            "pop",
+                                            "getitem",
+                                            "getattr",
+                                        }:
                                             unbound_gi = True
                                         ag_ih = _attrgetter_static_name(
                                             ih, projection_aliases=projs
@@ -7374,29 +7388,111 @@ def _rewrite_applied_dunder_call(
                                             "getattr",
                                         }:
                                             unbound_gi = True
-                    # ``attrgetter("__call__")(operator.getitem)`` —
-                    # Call applying attrgetter of __call__ onto getitem.
-                    # Also Name-bound ``ag=attrgetter("__call__"); ag(…)`` /
-                    # ``(0 or ag)(operator.getitem)`` BoolOp mid
-                    # (Unknown > false PASS).
+                                        # Applied attrgetter/itemgetter seed.
+                                        if isinstance(ih.func, ast.Call) or (
+                                            isinstance(ih, ast.Call)
+                                        ):
+                                            ag_seed = _attrgetter_static_name(
+                                                ih.func
+                                                if isinstance(ih.func, ast.Call)
+                                                else ih,
+                                                projection_aliases=projs,
+                                            )
+                                            if ag_seed in {
+                                                "__getitem__",
+                                                "pop",
+                                                "getitem",
+                                                "getattr",
+                                            }:
+                                                unbound_gi = True
+                                            ig_seed = _itemgetter_static_key(
+                                                ih.func
+                                                if isinstance(ih.func, ast.Call)
+                                                else ih,
+                                                projection_aliases=projs,
+                                            )
+                                            if ig_seed in {
+                                                "__getitem__",
+                                                "pop",
+                                                "getitem",
+                                                "getattr",
+                                            }:
+                                                unbound_gi = True
+                                    elif isinstance(ih, ast.Subscript):
+                                        # ``partial(builtins.__dict__["getattr"],…)``.
+                                        if (
+                                            _static_str_expr(ih.slice)
+                                            in {
+                                                "getattr",
+                                                "__getitem__",
+                                                "pop",
+                                                "getitem",
+                                            }
+                                        ):
+                                            unbound_gi = True
+                                    # Name-bound ``ga=attrgetter("getattr")(builtins)``.
+                                    if isinstance(ih, ast.Name) and live_call is not None:
+                                        if products.get(ih.id, (None,))[0] in {
+                                            "getattr",
+                                            "__getitem__",
+                                            "pop",
+                                            "getitem",
+                                        } or projs.get(ih.id) in {
+                                            "getattr",
+                                            "__getitem__",
+                                            "pop",
+                                            "getitem",
+                                        }:
+                                            unbound_gi = True
+                    # ``attrgetter("__call__")(operator.getitem)`` /
+                    # Name ``ag=attrgetter("__call__"); ag(operator.getitem)`` /
+                    # ``methodcaller("__call__")(operator.getitem)`` /
+                    # ``getattr(operator.getitem,"__call__")``.
                     if not unbound_gi and isinstance(gi_target, ast.Call):
-                        ag_fn = _peel_call_func(gi_target.func)
-                        if isinstance(ag_fn, (ast.BoolOp, ast.IfExp)):
-                            ag_fn = _peel_call_func(_preferred_seed_arm(ag_fn))
+                        ag_func = _peel_call_func(gi_target.func)
+                        # Name-bound ``ag=attrgetter("__call__")``.
+                        if isinstance(ag_func, ast.Name):
+                            live_ag = _live_peel_aliases()
+                            bound_ag = (
+                                live_ag.bound_callees.get(ag_func.id)
+                                if live_ag is not None
+                                else None
+                            )
+                            if isinstance(bound_ag, ast.Call):
+                                ag_func = bound_ag
+                            prod_ag = products.get(ag_func.id if isinstance(ag_func, ast.Name) else "")
+                            if (
+                                isinstance(ag_func, ast.Name)
+                                and (
+                                    projs.get(ag_func.id) == "__call__"
+                                    or (
+                                        prod_ag is not None
+                                        and prod_ag[0] == "attrgetter"
+                                        and prod_ag[1] == "__call__"
+                                    )
+                                )
+                            ):
+                                # Projection / product names __call__.
+                                if gi_target.args:
+                                    ag_recv = _peel_call_func(gi_target.args[0])
+                                    if (
+                                        isinstance(ag_recv, ast.Attribute)
+                                        and ag_recv.attr
+                                        in {"__getitem__", "pop", "getitem"}
+                                    ):
+                                        unbound_gi = _recv_is_unbound_seq(
+                                            ag_recv.value
+                                        ) or _recv_is_operator(ag_recv.value)
                         ag_call = _attrgetter_static_name(
-                            ag_fn
-                            if isinstance(ag_fn, ast.Call)
+                            ag_func
+                            if isinstance(ag_func, ast.Call)
                             else gi_target,
                             projection_aliases=projs,
                         )
-                        if ag_call is None and isinstance(ag_fn, ast.Name):
-                            prod_ag = products.get(ag_fn.id)
-                            if (
-                                prod_ag is not None
-                                and prod_ag[0] == "attrgetter"
-                                and prod_ag[1] == "__call__"
-                            ):
-                                ag_call = "__call__"
+                        if ag_call is None and isinstance(ag_func, ast.Call):
+                            ag_call = _attrgetter_static_name(
+                                ag_func, projection_aliases=projs
+                            )
                         if ag_call == "__call__" and gi_target.args:
                             ag_recv = _peel_call_func(gi_target.args[0])
                             if (
@@ -7413,6 +7509,88 @@ def _rewrite_applied_dunder_call(
                                 or projs.get(ag_recv.id)
                                 in {"__getitem__", "pop", "getitem"}
                             ):
+                                unbound_gi = True
+                        mc_call = _methodcaller_static_name(
+                            ag_func
+                            if isinstance(ag_func, ast.Call)
+                            else gi_target,
+                            projection_aliases=projs,
+                        )
+                        if mc_call == "__call__" and gi_target.args:
+                            mc_recv = _peel_call_func(gi_target.args[0])
+                            if (
+                                isinstance(mc_recv, ast.Attribute)
+                                and mc_recv.attr
+                                in {"__getitem__", "pop", "getitem"}
+                            ):
+                                unbound_gi = _recv_is_unbound_seq(
+                                    mc_recv.value
+                                ) or _recv_is_operator(mc_recv.value)
+                        live_g_call = _live_peel_aliases()
+                        g_call_n = _getattr_static_name(
+                            gi_target,
+                            getattr_aliases=frozenset(
+                                (
+                                    live_g_call.getattr_aliases
+                                    if live_g_call is not None
+                                    else None
+                                )
+                                or {"getattr"}
+                            ),
+                            sequence_aliases=seq_aliases,
+                            slice_aliases=slice_aliases,
+                        )
+                        if g_call_n == "__call__" and gi_target.args:
+                            g_recv = _peel_call_func(gi_target.args[0])
+                            if (
+                                isinstance(g_recv, ast.Attribute)
+                                and g_recv.attr
+                                in {"__getitem__", "pop", "getitem"}
+                            ):
+                                unbound_gi = _recv_is_unbound_seq(
+                                    g_recv.value
+                                ) or _recv_is_operator(g_recv.value)
+                    # Name-bound ``gi=ig(list.__dict__)`` itemgetter product.
+                    if not unbound_gi and isinstance(gi_target, ast.Name):
+                        live_ig = _live_peel_aliases()
+                        if live_ig is not None:
+                            bound_gi = live_ig.bound_callees.get(gi_target.id)
+                            if isinstance(bound_gi, ast.Call):
+                                # Re-enter peel with the bound Call.
+                                ig_key = None
+                                bf = _peel_call_func(bound_gi.func)
+                                if isinstance(bf, ast.Name):
+                                    # ``ig=itemgetter("__getitem__"); ig(...)``.
+                                    bound_ig = live_ig.bound_callees.get(bf.id)
+                                    if isinstance(bound_ig, ast.Call):
+                                        ig_key = _itemgetter_static_key(
+                                            bound_ig, projection_aliases=projs
+                                        )
+                                    elif projs.get(bf.id) in {
+                                        "__getitem__",
+                                        "pop",
+                                        "getitem",
+                                    }:
+                                        ig_key = projs.get(bf.id)
+                                if ig_key is None:
+                                    ig_key = _itemgetter_static_key(
+                                        bound_gi.func
+                                        if isinstance(bound_gi.func, ast.Call)
+                                        else bound_gi,
+                                        projection_aliases=projs,
+                                    )
+                                if ig_key in {
+                                    "__getitem__",
+                                    "pop",
+                                    "getitem",
+                                }:
+                                    unbound_gi = True
+                            prod_gi = products.get(gi_target.id)
+                            if prod_gi is not None and prod_gi[0] in {
+                                "__getitem__",
+                                "pop",
+                                "getitem",
+                            }:
                                 unbound_gi = True
                     if not unbound_gi and isinstance(gi_target, ast.Call):
                         live_g = _live_peel_aliases()
@@ -7471,8 +7649,38 @@ def _rewrite_applied_dunder_call(
                                     unbound_gi = True
                                 elif isinstance(ihead_gi, ast.Name):
                                     # Name-bound ``ga=attrgetter("getattr")(
-                                    # builtins); partial(ga,list,"__getitem__")``.
+                                    # builtins); partial(ga,list,"__getitem__")`` /
+                                    # ``ga=itemgetter("getattr")(builtins.__dict__)``.
                                     prod_ga = products.get(ihead_gi.id)
+                                    live_ga_n = _live_peel_aliases()
+                                    # Recover applied itemgetter/attrgetter Bind.
+                                    if prod_ga is None and live_ga_n is not None:
+                                        bound_ga_n = live_ga_n.bound_callees.get(
+                                            ihead_gi.id
+                                        )
+                                        if isinstance(bound_ga_n, ast.Call):
+                                            bfn = _peel_call_func(bound_ga_n.func)
+                                            ag_b = _attrgetter_static_name(
+                                                bfn
+                                                if isinstance(bfn, ast.Call)
+                                                else bound_ga_n,
+                                                projection_aliases=projs,
+                                            )
+                                            ig_b = _itemgetter_static_key(
+                                                bfn
+                                                if isinstance(bfn, ast.Call)
+                                                else bound_ga_n,
+                                                projection_aliases=projs,
+                                                getattr_aliases=g_aliases,
+                                            )
+                                            if ag_b == "getattr" or ig_b == "getattr":
+                                                prod_ga = ("attrgetter", "getattr")
+                                            elif ig_b in {
+                                                "__getitem__",
+                                                "pop",
+                                                "getitem",
+                                            }:
+                                                prod_ga = (ig_b, None)
                                     if (
                                         prod_ga is not None
                                         and prod_ga[0] == "attrgetter"
@@ -7485,6 +7693,26 @@ def _rewrite_applied_dunder_call(
                                             "getitem",
                                         }
                                     ):
+                                        unbound_gi = _recv_is_unbound_seq(
+                                            irest_gi[0]
+                                        ) or _recv_is_operator(irest_gi[0])
+                                    elif (
+                                        (
+                                            (
+                                                prod_ga is not None
+                                                and prod_ga[0] == "getattr"
+                                            )
+                                            or projs.get(ihead_gi.id) == "getattr"
+                                        )
+                                        and len(irest_gi) >= 2
+                                        and _static_str_expr(irest_gi[1])
+                                        in {
+                                            "__getitem__",
+                                            "pop",
+                                            "getitem",
+                                        }
+                                    ):
+                                        # Applied itemgetter("getattr") Name product.
                                         unbound_gi = _recv_is_unbound_seq(
                                             irest_gi[0]
                                         ) or _recv_is_operator(irest_gi[0])
@@ -7590,7 +7818,9 @@ def _rewrite_applied_dunder_call(
                                             )
                                     # ``partial(itemgetter("__getitem__")(
                                     # list.__dict__))`` / listpack mid
-                                    # ``[partial(itemgetter(…))][0]``.
+                                    # ``[partial(itemgetter(…))][0]`` /
+                                    # ``partial(itemgetter("getattr")(
+                                    # builtins.__dict__), list, "__getitem__")``.
                                     if not unbound_gi:
                                         ig_ih = _itemgetter_static_key(
                                             ihead_gi.func
@@ -7621,6 +7851,75 @@ def _rewrite_applied_dunder_call(
                                                     ihead_gi.args[0]
                                                 )
                                             )
+                                        if (
+                                            not unbound_gi
+                                            and ig_ih == "getattr"
+                                            and len(irest_gi) >= 2
+                                            and _static_str_expr(irest_gi[1])
+                                            in {
+                                                "__getitem__",
+                                                "pop",
+                                                "getitem",
+                                            }
+                                        ):
+                                            # Applied itemgetter("getattr")(
+                                            # builtins.__dict__|vars) as
+                                            # partial head — share the
+                                            # attrgetter("getattr") peel
+                                            # (Unknown > false PASS).
+                                            unbound_gi = _recv_is_unbound_seq(
+                                                irest_gi[0]
+                                            ) or _recv_is_operator(
+                                                irest_gi[0]
+                                            )
+                                        # Name-bound factory mid
+                                        # ``ig=itemgetter("getattr");
+                                        # ga=ig(builtins.__dict__)`` —
+                                        # idle expands ga to ``ig(...)`` Call.
+                                        if (
+                                            not unbound_gi
+                                            and isinstance(
+                                                ihead_gi.func, ast.Name
+                                            )
+                                            and len(irest_gi) >= 2
+                                            and _static_str_expr(irest_gi[1])
+                                            in {
+                                                "__getitem__",
+                                                "pop",
+                                                "getitem",
+                                            }
+                                        ):
+                                            prod_ig = products.get(
+                                                ihead_gi.func.id
+                                            )
+                                            if (
+                                                prod_ig is not None
+                                                and (
+                                                    (
+                                                        prod_ig[0]
+                                                        == "itemgetter"
+                                                        and prod_ig[1]
+                                                        == "getattr"
+                                                    )
+                                                    or (
+                                                        prod_ig[0]
+                                                        == "attrgetter"
+                                                        and prod_ig[1]
+                                                        == "getattr"
+                                                    )
+                                                    or prod_ig[0] == "getattr"
+                                                )
+                                            ) or projs.get(
+                                                ihead_gi.func.id
+                                            ) == "getattr":
+                                                unbound_gi = (
+                                                    _recv_is_unbound_seq(
+                                                        irest_gi[0]
+                                                    )
+                                                    or _recv_is_operator(
+                                                        irest_gi[0]
+                                                    )
+                                                )
                                 elif isinstance(ihead_gi, ast.Subscript):
                                     if (
                                         _static_str_expr(ihead_gi.slice)
@@ -7672,32 +7971,6 @@ def _rewrite_applied_dunder_call(
                                 unbound_gi = _recv_is_unbound_seq(
                                     recv
                                 ) or _recv_is_operator(recv)
-                        # ``getattr(operator.getitem, "__call__")`` —
-                        # mid __call__ on unbound getitem
-                        # (Unknown > false PASS).
-                        if not unbound_gi and g_gi == "__call__":
-                            gflat_call = _flatten_starred_args(
-                                gi_target.args,
-                                sequence_aliases=seq_aliases,
-                                slice_aliases=slice_aliases,
-                            )
-                            if gflat_call:
-                                call_recv = _peel_call_func(gflat_call[0])
-                                if (
-                                    isinstance(call_recv, ast.Attribute)
-                                    and call_recv.attr
-                                    in {"__getitem__", "pop", "getitem"}
-                                ):
-                                    unbound_gi = _recv_is_unbound_seq(
-                                        call_recv.value
-                                    ) or _recv_is_operator(call_recv.value)
-                                elif isinstance(call_recv, ast.Name) and (
-                                    call_recv.id
-                                    in {"__getitem__", "pop", "getitem"}
-                                    or projs.get(call_recv.id)
-                                    in {"__getitem__", "pop", "getitem"}
-                                ):
-                                    unbound_gi = True
                         # ``list.__dict__.get|"__getitem__"("__getitem__")`` /
                         # ``vars(list).get("__getitem__")``.
                         if not unbound_gi:
@@ -8511,7 +8784,12 @@ def _next_iter_first_pack_elt(
     projs = projection_aliases or {}
 
     def _peel_zip_stream(node: ast.AST) -> ast.Call | None:
-        """Peel list|tuple|reversed|sorted|iter|star wrappers onto ``zip(...)``."""
+        """Peel list|tuple|reversed|sorted|iter|star wrappers onto ``zip(...)``.
+
+        Also identity ``filter(None, zip(...))`` / ``map(lambda t: t, zip(...))``
+        so ``list(filter(None, zip([x])))[0][0]`` shares bare zip peels
+        (Unknown > false PASS).
+        """
 
         cur: ast.AST = _peel_call_func(node)
         for _ in range(10):
@@ -8539,13 +8817,27 @@ def _next_iter_first_pack_elt(
                 "reversed",
                 "sorted",
                 "iter",
-                "filter",
-                "map",
-                "enumerate",
             } and cflat:
-                # ``filter|map`` take (pred, iterable); ``enumerate`` takes iterable.
-                cur = cflat[-1] if cname in {"filter", "map"} else cflat[0]
+                cur = cflat[0]
                 continue
+            if cname == "filter" and len(cflat) >= 2:
+                # ``filter(None, zip(...))`` — None predicate is identity.
+                pred = _peel_call_func(cflat[0])
+                if isinstance(pred, ast.Constant) and pred.value is None:
+                    cur = cflat[1]
+                    continue
+                return None
+            if cname == "map" and len(cflat) >= 2:
+                # ``map(lambda t: t, zip(...))`` / ``map(lambda t: t[0], …)``
+                # identity / sole-index lambdas peel onto the iterable.
+                mapper = _peel_call_func(cflat[0])
+                if isinstance(mapper, ast.Lambda) and len(mapper.args.args) == 1:
+                    body = _peel_call_func(mapper.body)
+                    arg_n = mapper.args.args[0].arg
+                    if isinstance(body, ast.Name) and body.id == arg_n:
+                        cur = cflat[1]
+                        continue
+                return None
             if cname == "zip":
                 return cur
             return None
@@ -8567,13 +8859,15 @@ def _next_iter_first_pack_elt(
         return None
 
     node = _peel_call_func(expr)
-    # Shared adapter pipeline before zip/star/materialize peels so
-    # Name-bind / BoolOp / getattr / copy / list0 share one path
-    # (Unknown > false PASS).
-    node = _peel_adapter_pipeline(
-        node,
-        projection_aliases=projs,
-    )
+    # Name-bound ``z=[*zip(...)]`` / ``f=filter(None, zip(...))`` carriers.
+    if isinstance(node, ast.Name):
+        live = _live_peel_aliases()
+        if live is not None:
+            aliased = live.sequence_aliases.get(node.id)
+            if aliased is not None and aliased is not node:
+                return _next_iter_first_pack_elt(
+                    aliased, projection_aliases=projs
+                )
     # ``sorted([x], …)[0]`` / ``next(enumerate([x]))[1]`` / ``next(zip([x]))[0]``
     # / ``list(zip([x]))[0][0]`` / ``max(zip([x]))[0]`` arrive as Subscript
     # over adapter Calls (Unknown > false PASS).
@@ -8584,16 +8878,20 @@ def _next_iter_first_pack_elt(
             return None
         idx = _static_sequence_index(node.slice)
         base = _peel_call_func(node.value)
-        # Name-bound ``xs=[*zip([x])]; xs[0][0]`` / ``getitem(xs,0)[0]`` —
-        # resolve sequence aliases before zip/star peels
-        # (Unknown > false PASS).
-        live_sub = _live_peel_aliases()
-        if (
-            isinstance(base, ast.Name)
-            and live_sub is not None
-            and base.id in live_sub.sequence_aliases
-        ):
-            base = _peel_call_func(live_sub.sequence_aliases[base.id])
+        # Name-bound ``f=filter(...); list(f)[0]`` / ``z=[*zip]; z[0]``.
+        if isinstance(base, ast.Name):
+            live_nb = _live_peel_aliases()
+            if live_nb is not None:
+                aliased_b = live_nb.sequence_aliases.get(base.id)
+                if aliased_b is not None and aliased_b is not base:
+                    return _next_iter_first_pack_elt(
+                        ast.Subscript(
+                            value=aliased_b,
+                            slice=node.slice,
+                            ctx=ast.Load(),
+                        ),
+                        projection_aliases=projs,
+                    )
         # Peel list|tuple|reversed|sorted|iter materializers around zip
         # so ``list(reversed(list(zip([x]))))[0][0]`` shares ``zip([x])[0]``.
         peel_base = base
@@ -8616,14 +8914,25 @@ def _next_iter_first_pack_elt(
                 "reversed",
                 "sorted",
                 "iter",
-                "filter",
-                "map",
-                "enumerate",
             } and pflat:
-                peel_base = (
-                    pflat[-1] if pname in {"filter", "map"} else pflat[0]
-                )
+                peel_base = pflat[0]
                 continue
+            # ``list(filter(None, zip(...)))`` / ``list(map(lambda t:t, zip))``.
+            if pname == "filter" and len(pflat) >= 2:
+                pred = _peel_call_func(pflat[0])
+                if isinstance(pred, ast.Constant) and pred.value is None:
+                    peel_base = pflat[1]
+                    continue
+                break
+            if pname == "map" and len(pflat) >= 2:
+                mapper = _peel_call_func(pflat[0])
+                if isinstance(mapper, ast.Lambda) and len(mapper.args.args) == 1:
+                    body = _peel_call_func(mapper.body)
+                    arg_n = mapper.args.args[0].arg
+                    if isinstance(body, ast.Name) and body.id == arg_n:
+                        peel_base = pflat[1]
+                        continue
+                break
             break
         if peel_base is not base and isinstance(peel_base, ast.Call):
             base = peel_base
@@ -8637,16 +8946,6 @@ def _next_iter_first_pack_elt(
             if isinstance(bfn, ast.Name):
                 bname = projs.get(bfn.id, bfn.id)
             flat = _flatten_starred_args(base.args)
-            if bname in {"filter", "map"} and flat and (
-                idx == 0 or idx is None
-            ):
-                # ``list(filter(None, zip([x])))[0][0]`` /
-                # ``list(map(lambda t:t, zip([x])))[0][0]``.
-                zcall = _peel_zip_stream(flat[-1])
-                if zcall is not None:
-                    zfirst = _zip_first_elt(zcall)
-                    if zfirst is not None:
-                        return zfirst
             if bname in {"sorted", "max", "min"} and flat and (
                 idx == 0 or idx is None
             ):
@@ -8702,7 +9001,9 @@ def _next_iter_first_pack_elt(
             ):
                 # ``list(zip([x]))[0]`` → zip pair; further ``[0]`` peels
                 # via nested Subscript recursion below.
-                # Also ``list(enumerate(zip([x])))[0]``.
+                # Also ``list(enumerate(zip([x])))[0]`` /
+                # ``list(filter(None, zip([x])))[0]`` /
+                # ``list(map(lambda t: t, zip([x])))[0]``.
                 nested_mat = _next_iter_first_pack_elt(
                     ast.Subscript(
                         value=flat[0],
@@ -8713,39 +9014,78 @@ def _next_iter_first_pack_elt(
                 )
                 if nested_mat is not None:
                     return nested_mat
-            # ``operator.getitem(list(zip([x])), 0)`` / ``getitem(max(zip),0)``.
-            # Also ``operator.getitem([*zip([x])],0)[0]`` — outer index peels
-            # the zip-pair Tuple (Unknown > false PASS).
+            # ``list(filter(None, zip([x])))[0]`` / ``filter`` / ``map`` as
+            # identity adapters onto zip (Unknown > false PASS).
+            if bname == "filter" and len(flat) >= 2 and (
+                idx == 0 or idx is None
+            ):
+                pred = _peel_call_func(flat[0])
+                if isinstance(pred, ast.Constant) and pred.value is None:
+                    nested_f = _next_iter_first_pack_elt(
+                        ast.Subscript(
+                            value=flat[1],
+                            slice=ast.Constant(value=0),
+                            ctx=ast.Load(),
+                        ),
+                        projection_aliases=projs,
+                    )
+                    if nested_f is not None:
+                        if (
+                            isinstance(nested_f, ast.Tuple)
+                            and nested_f.elts
+                            and (idx == 0 or idx is None)
+                        ):
+                            return _peel_call_func(nested_f.elts[0])
+                        return nested_f
+            if bname == "map" and len(flat) >= 2 and (
+                idx == 0 or idx is None
+            ):
+                mapper = _peel_call_func(flat[0])
+                if isinstance(mapper, ast.Lambda) and len(mapper.args.args) == 1:
+                    body = _peel_call_func(mapper.body)
+                    arg_n = mapper.args.args[0].arg
+                    if isinstance(body, ast.Name) and body.id == arg_n:
+                        nested_m = _next_iter_first_pack_elt(
+                            ast.Subscript(
+                                value=flat[1],
+                                slice=ast.Constant(value=0),
+                                ctx=ast.Load(),
+                            ),
+                            projection_aliases=projs,
+                        )
+                        if nested_m is not None:
+                            if (
+                                isinstance(nested_m, ast.Tuple)
+                                and nested_m.elts
+                                and (idx == 0 or idx is None)
+                            ):
+                                return _peel_call_func(nested_m.elts[0])
+                            return nested_m
+            # ``operator.getitem(list(zip([x])), 0)`` / ``getitem(max(zip),0)`` /
+            # ``operator.getitem([*zip([x])], 0)[0]`` star-zip pair peels
+            # (Unknown > false PASS).
             if bname in {"getitem", "__getitem__"} and len(flat) >= 2 and (
                 idx == 0 or idx is None
             ):
                 gi_idx = _static_sequence_index(flat[1])
                 if gi_idx == 0 or gi_idx is None:
-                    gi_carrier = flat[0]
-                    live_gi = _live_peel_aliases()
-                    gi_peeled = _peel_call_func(gi_carrier)
-                    if (
-                        isinstance(gi_peeled, ast.Name)
-                        and live_gi is not None
-                        and gi_peeled.id in live_gi.sequence_aliases
-                    ):
-                        gi_carrier = live_gi.sequence_aliases[gi_peeled.id]
                     nested_gi = _next_iter_first_pack_elt(
                         ast.Subscript(
-                            value=gi_carrier,
+                            value=flat[0],
                             slice=ast.Constant(value=0),
                             ctx=ast.Load(),
                         ),
                         projection_aliases=projs,
                     )
                     if nested_gi is not None:
+                        # ``getitem([*zip([x])],0)[0]`` — star-zip yields a
+                        # one-tuple pair; outer index peels into the pair.
                         if (
                             isinstance(nested_gi, ast.Tuple)
                             and nested_gi.elts
-                            and idx is not None
-                            and -len(nested_gi.elts) <= idx < len(nested_gi.elts)
+                            and (idx == 0 or idx is None)
                         ):
-                            return _peel_call_func(nested_gi.elts[idx])
+                            return _peel_call_func(nested_gi.elts[0])
                         return nested_gi
             # Idle ``partial(max|min|list|sorted, zip(...))()[0]``.
             if isinstance(bfn, ast.Call) or (
@@ -8796,13 +9136,14 @@ def _next_iter_first_pack_elt(
             )
             if nested_base is not None and (idx == 0 or idx is None):
                 return nested_base
-        # Plain ``[x][0]`` / ``(x,)[0]`` / ``[*zip([x])][0]`` star re-pack
-        # (Unknown > false PASS).
+        # Plain ``[x][0]`` / ``(x,)[0]`` / ``[*zip([x])][0]`` star re-pack /
+        # ``[*enumerate(zip([x]))][0]`` star enumerate (Unknown > false PASS).
         elts = _sequence_pack_elts(base)
         if elts is None and isinstance(base, (ast.List, ast.Tuple)):
             # ``[*zip([x])]`` — expand sole star zip into pair elts.
             if len(base.elts) == 1 and isinstance(base.elts[0], ast.Starred):
-                zcall = _peel_zip_stream(base.elts[0].value)
+                starred_v = _peel_call_func(base.elts[0].value)
+                zcall = _peel_zip_stream(starred_v)
                 if zcall is not None:
                     zfirst = _zip_first_elt(zcall)
                     if zfirst is not None:
@@ -8810,6 +9151,30 @@ def _next_iter_first_pack_elt(
                         elts = [
                             ast.Tuple(elts=[zfirst], ctx=ast.Load())
                         ]
+                elif isinstance(starred_v, ast.Call):
+                    # ``[*enumerate(zip([x]))]`` — expand to enumerate pair.
+                    sfn = _peel_transparent_callee(starred_v.func)
+                    sname = (
+                        sfn.id
+                        if isinstance(sfn, ast.Name)
+                        else (sfn.attr if isinstance(sfn, ast.Attribute) else None)
+                    )
+                    if isinstance(sfn, ast.Name):
+                        sname = projs.get(sfn.id, sname)
+                    if sname == "enumerate":
+                        sflat = _flatten_starred_args(starred_v.args)
+                        if sflat:
+                            # Reuse enumerate Subscript peel at idx 0.
+                            enum_pair = _next_iter_first_pack_elt(
+                                ast.Subscript(
+                                    value=starred_v,
+                                    slice=ast.Constant(value=0),
+                                    ctx=ast.Load(),
+                                ),
+                                projection_aliases=projs,
+                            )
+                            if enum_pair is not None:
+                                elts = [enum_pair]
         if (
             elts is not None
             and idx is not None
@@ -9230,35 +9595,19 @@ def _next_iter_first_pack_elt(
         ident = _getattr_static_name(fn, getattr_aliases=ga_aliases)
     # ``operator.getitem([x], 0)`` / Name-bound getitem list0 peels.
     if ident in {"getitem", "__getitem__"} and len(node.args) >= 2:
-        live_gi2 = _live_peel_aliases()
-        gi_seq = (
-            live_gi2.sequence_aliases if live_gi2 is not None else None
-        )
-        gi_carrier = node.args[0]
-        gi_peeled = _peel_call_func(gi_carrier)
-        if (
-            isinstance(gi_peeled, ast.Name)
-            and gi_seq is not None
-            and gi_peeled.id in gi_seq
-        ):
-            gi_carrier = gi_seq[gi_peeled.id]
         idx_gi = _static_sequence_index(node.args[1])
-        elts_gi = _sequence_pack_elts(
-            gi_carrier,
-            sequence_aliases=gi_seq,
-        )
+        elts_gi = _sequence_pack_elts(node.args[0])
         if (
             elts_gi is not None
             and idx_gi is not None
             and -len(elts_gi) <= idx_gi < len(elts_gi)
         ):
             return _peel_call_func(elts_gi[idx_gi])
-        # ``operator.getitem(list(zip([x])), 0)`` / ``getitem(max(zip), 0)`` /
-        # ``operator.getitem([*zip([x])], 0)`` star zip peels.
+        # ``operator.getitem(list(zip([x])), 0)`` / ``getitem(max(zip), 0)``.
         if idx_gi == 0 or idx_gi is None:
             nested_gi = _next_iter_first_pack_elt(
                 ast.Subscript(
-                    value=gi_carrier,
+                    value=node.args[0],
                     slice=ast.Constant(value=0),
                     ctx=ast.Load(),
                 ),
@@ -9977,16 +10326,6 @@ def _chainmap_maps_root(
     """
 
     node = _peel_call_func(maps_expr)
-    # Shared adapter pipeline: Name-bind / BoolOp / getattr / copy / list0
-    # before ChainMap maps/parents root recognition (Unknown > false PASS).
-    node = _peel_adapter_pipeline(
-        node,
-        projection_aliases=projection_aliases,
-        getattr_aliases=getattr_aliases,
-        sequence_aliases=sequence_aliases,
-        bound_partials=bound_partials,
-        copy_aliases=copy_aliases,
-    )
     # ``copy.copy|deepcopy(cm.parents.maps)`` / ``copy.copy(getattr(p,"maps"))``.
     copy_inner = _copy_wrapper_operand(
         node,
@@ -13039,6 +13378,9 @@ def _build_identity_scanner(
         )
         if ag is not None:
             projection_factory_products[name] = ("attrgetter", ag)
+            bound_callee_exprs[name] = value
+            if ag == "__call__":
+                operator_projection_aliases[name] = "__call__"
             partial_product_names.pop(name, None)
             partial_bound_mappings.pop(name, None)
             return
@@ -13061,6 +13403,67 @@ def _build_identity_scanner(
                     partial_product_names.pop(name, None)
                     partial_bound_mappings.pop(name, None)
                     return
+            # Name-bound ``ig=itemgetter("__getitem__"); gi=ig(list.__dict__)`` /
+            # ``ga=itemgetter("getattr")(builtins.__dict__)`` — seed applied
+            # itemgetter key as getitem/getattr product (Unknown > false PASS).
+            if isinstance(ag_fn, ast.Name) and ag_fn.id in projection_factory_products:
+                kind, static = projection_factory_products[ag_fn.id]
+                if kind == "itemgetter" and static in {
+                    "__getitem__",
+                    "pop",
+                    "getitem",
+                    "getattr",
+                }:
+                    projection_factory_products[name] = (static, None)
+                    bound_callee_exprs[name] = value
+                    operator_projection_aliases[name] = static
+                    partial_product_names.pop(name, None)
+                    partial_bound_mappings.pop(name, None)
+                    return
+                if kind == "attrgetter" and static in {
+                    "__getitem__",
+                    "pop",
+                    "getitem",
+                    "getattr",
+                    "__call__",
+                }:
+                    projection_factory_products[name] = ("attrgetter", static)
+                    bound_callee_exprs[name] = value
+                    if static == "__call__":
+                        operator_projection_aliases[name] = "__call__"
+                    partial_product_names.pop(name, None)
+                    partial_bound_mappings.pop(name, None)
+                    return
+            # Inline applied ``itemgetter("getattr")(builtins.__dict__)``.
+            if isinstance(ag_fn, ast.Call):
+                ig_app = _itemgetter_static_key(
+                    ag_fn,
+                    projection_aliases=operator_projection_aliases,
+                    getattr_aliases=frozenset(getattr_aliases),
+                    sequence_aliases=sequence_view_aliases,
+                    slice_aliases=frozenset(slice_aliases),
+                )
+                if ig_app in {
+                    "__getitem__",
+                    "pop",
+                    "getitem",
+                    "getattr",
+                }:
+                    # Seed as attrgetter-shaped getattr/getitem product so
+                    # ``partial(ga,list,"__getitem__")`` shares the Name peel
+                    # already closed for ``attrgetter("getattr")(builtins)``.
+                    if ig_app == "getattr":
+                        projection_factory_products[name] = (
+                            "attrgetter",
+                            "getattr",
+                        )
+                    else:
+                        projection_factory_products[name] = (ig_app, None)
+                        operator_projection_aliases[name] = ig_app
+                    bound_callee_exprs[name] = value
+                    partial_product_names.pop(name, None)
+                    partial_bound_mappings.pop(name, None)
+                    return
         ig = _itemgetter_static_key(
             value,
             projection_aliases=operator_projection_aliases,
@@ -13070,6 +13473,8 @@ def _build_identity_scanner(
         )
         if ig is not None:
             projection_factory_products[name] = ("itemgetter", ig)
+            # Also bind so ``ig=itemgetter("__getitem__"); ig(...)`` recovers.
+            bound_callee_exprs[name] = value
             partial_product_names.pop(name, None)
             partial_bound_mappings.pop(name, None)
             return
@@ -14900,6 +15305,21 @@ def _build_identity_scanner(
             return None
         expr = _peel_call_func(expr)
         nxt = depth + 1
+        # ``list.copy(cm.maps)`` / ``copy.copy(cm.parents.maps)`` /
+        # packed ``[list.copy][0](cm.maps)`` share bare maps peels so
+        # ``iconcat(xs, list.copy(cm.maps)); xs[2]`` hits ns
+        # (Unknown > false PASS).
+        copy_inner = _copy_wrapper_operand(
+            expr,
+            projection_aliases=operator_projection_aliases,
+            getattr_aliases=frozenset(getattr_aliases),
+            sequence_aliases=sequence_view_aliases,
+            slice_aliases=frozenset(slice_aliases),
+            bound_partials=bound_callee_exprs,
+            partial_aliases=frozenset(partial_aliases),
+        )
+        if copy_inner is not None:
+            return _iter_elements(copy_inner, nxt)
         # BoolOp/IfExp wrappers around iadd/iconcat / containers (CF For/Match).
         if isinstance(expr, ast.IfExp):
             left = _iter_elements(expr.body, nxt) or []
@@ -19745,22 +20165,7 @@ def _build_identity_scanner(
         if name is None:
             return
         left_pack = _container_pack_from_expr(left) or container_packs.get(name) or {}
-        # Peel ``list.copy|copy.copy|methodcaller("copy")`` wrappers on the
-        # RHS so ``iconcat(xs, list.copy(cm.maps))`` / ``xs.__iadd__(…)`` /
-        # ``xs.extend(list.copy(…))`` share raw-maps grow (Unknown > false PASS).
-        right_peeled = (
-            _copy_wrapper_operand(
-                right,
-                projection_aliases=operator_projection_aliases,
-                getattr_aliases=frozenset(getattr_aliases),
-                partial_aliases=frozenset(partial_aliases),
-                sequence_aliases=sequence_view_aliases,
-                slice_aliases=frozenset(slice_aliases),
-                bound_partials=bound_callee_exprs,
-            )
-            or right
-        )
-        right_pack = _container_pack_from_expr(right_peeled) or {}
+        right_pack = _container_pack_from_expr(right) or {}
         merged = _pack_union(left_pack, right_pack)
         if merged:
             container_packs[name] = merged
@@ -19769,8 +20174,8 @@ def _build_identity_scanner(
         left_items = (
             list(_mapping_items(saved_seq) or []) if saved_seq is not None else []
         )
-        rhs_items = _mapping_items(right_peeled)
-        rhs_elts = _iter_elements(right_peeled)
+        rhs_items = _mapping_items(right)
+        rhs_elts = _iter_elements(right)
         left_elts: list[ast.AST] | None = None
         if isinstance(saved_seq, (ast.List, ast.Tuple)):
             left_elts = list(saved_seq.elts)
@@ -21538,34 +21943,27 @@ def _build_identity_scanner(
         else:
             return
         it = _peel_call_func(iter_expr)
-        # Peel ``list|iter|tuple|sorted|reversed(vb|vb.keys())`` materializers
-        # so ``for k in list(vb): d.setdefault(k, vb.get(k))`` shares bare
-        # ``for k in vb`` (Unknown > false PASS).
+        # ``for k in list(vb)|iter(vb)|sorted(vb)|tuple(vb.keys())`` —
+        # peel materializers onto the ns mapping (Unknown > false PASS).
         for _ in range(6):
             it = _peel_call_func(it)
             if not isinstance(it, ast.Call):
                 break
-            itf_mat = _peel_transparent_callee(it.func)
-            mat_name = (
-                itf_mat.id
-                if isinstance(itf_mat, ast.Name)
-                else (
-                    itf_mat.attr if isinstance(itf_mat, ast.Attribute) else None
-                )
+            itf_w = _peel_transparent_callee(it.func)
+            wname = (
+                itf_w.id
+                if isinstance(itf_w, ast.Name)
+                else (itf_w.attr if isinstance(itf_w, ast.Attribute) else None)
             )
-            mat_flat = _flatten_starred_args(
+            if isinstance(itf_w, ast.Name):
+                wname = operator_projection_aliases.get(itf_w.id, wname)
+            wflat = _flatten_starred_args(
                 it.args,
                 sequence_aliases=sequence_view_aliases,
                 slice_aliases=frozenset(slice_aliases),
             )
-            if mat_name in {
-                "list",
-                "tuple",
-                "iter",
-                "sorted",
-                "reversed",
-            } and mat_flat:
-                it = mat_flat[0]
+            if wname in {"list", "tuple", "iter", "sorted", "reversed"} and wflat:
+                it = wflat[0]
                 continue
             break
         items_recv: ast.AST | None = None
@@ -21797,6 +22195,7 @@ def _build_identity_scanner(
             func = _peel_call_func(call.func)
             attr = None
             recv: ast.AST | None = None
+            unbound_dict_mut = False
             if isinstance(func, ast.Attribute) and func.attr in {
                 "setdefault",
                 "update",
@@ -21804,43 +22203,36 @@ def _build_identity_scanner(
                 "__ior__",
             }:
                 attr = func.attr
-                recv_cand = _peel_call_func(func.value)
-                # Unbound ``dict.setdefault(d, k, …)`` /
-                # ``builtins.dict.setdefault(…)`` — first arg is the dict.
-                is_dict_type = (
-                    isinstance(recv_cand, ast.Name)
-                    and recv_cand.id in {"dict"}
-                ) or (
-                    isinstance(recv_cand, ast.Attribute)
-                    and recv_cand.attr == "dict"
-                )
-                if is_dict_type and call.args:
-                    recv = call.args[0]
-                    # Shift so flat uses key/value from remaining args.
-                    call = ast.Call(
-                        func=call.func,
-                        args=list(call.args[1:]),
-                        keywords=list(call.keywords),
-                    )
-                else:
-                    recv = func.value
-            elif isinstance(func, ast.Name) and func.id in dict_view_products:
-                prod = dict_view_products[func.id]
-                if prod in {
-                    "setdefault",
-                    "update",
-                    "__setitem__",
-                    "__ior__",
-                    "setitem",
-                    "ior",
-                } or prod.endswith(
+                recv = func.value
+                # Unbound ``dict.setdefault(d,k,v)`` / ``builtins.dict.setdefault``.
+                recv_peel = _peel_call_func(recv)
+                if (
                     (
-                        ".setdefault",
-                        ".update",
-                        ".__setitem__",
-                        ".__ior__",
-                        ".setitem",
-                        ".ior",
+                        isinstance(recv_peel, ast.Name)
+                        and recv_peel.id in {"dict", "builtins"}
+                    )
+                    or (
+                        isinstance(recv_peel, ast.Attribute)
+                        and recv_peel.attr == "dict"
+                    )
+                ):
+                    unbound_dict_mut = True
+            elif isinstance(func, ast.Name) and (
+                func.id in dict_view_products
+                or operator_projection_aliases.get(func.id)
+                in {"setitem", "ior", "or_"}
+                or func.id in {"setitem", "ior", "or_"}
+            ):
+                prod = dict_view_products.get(func.id)
+                if prod is not None and (
+                    prod in {"setdefault", "update", "__setitem__", "__ior__"}
+                    or prod.endswith(
+                        (
+                            ".setdefault",
+                            ".update",
+                            ".__setitem__",
+                            ".__ior__",
+                        )
                     )
                 ):
                     attr = prod.split(".")[-1]
@@ -21851,80 +22243,72 @@ def _build_identity_scanner(
                         if func.id in bound_view_receivers
                         else None
                     )
-            # ``operator.setitem(d,k,…)`` / ``operator.ior(d, {k: …})``.
-            if attr is None and recv is None:
-                proj_si = _projection_factory_name(
-                    call,
-                    projection_aliases=operator_projection_aliases,
-                    getattr_aliases=frozenset(getattr_aliases),
-                )
-                if proj_si in {"setitem", "__setitem__"}:
-                    flat_si = _flatten_starred_args(
-                        call.args,
-                        sequence_aliases=sequence_view_aliases,
-                        slice_aliases=frozenset(slice_aliases),
-                    )
-                    if len(flat_si) >= 3:
-                        a0 = _peel_call_func(flat_si[0])
-                        a1 = _peel_call_func(flat_si[1])
-                        a2 = _peel_call_func(flat_si[2])
-                        if (
-                            isinstance(a0, ast.Name)
-                            and isinstance(a1, ast.Name)
-                            and a1.id == key_n
-                            and (
-                                (
-                                    not keys_only
-                                    and isinstance(a2, ast.Name)
-                                    and a2.id == val_n
-                                )
-                                or (keys_only and _value_is_ns_get(a2))
-                            )
-                        ):
-                            if _seed_recv(a0):
-                                break
-                    continue
-                if proj_si in {"ior", "__ior__"}:
-                    flat_ior = _flatten_starred_args(
-                        call.args,
-                        sequence_aliases=sequence_view_aliases,
-                        slice_aliases=frozenset(slice_aliases),
-                    )
-                    if len(flat_ior) >= 2:
-                        a0 = _peel_call_func(flat_ior[0])
-                        upd = _peel_call_func(flat_ior[1])
-                        if (
-                            isinstance(a0, ast.Name)
-                            and isinstance(upd, ast.Dict)
-                            and len(upd.keys) == 1
-                            and upd.keys[0] is not None
-                            and isinstance(_peel_call_func(upd.keys[0]), ast.Name)
-                            and _peel_call_func(upd.keys[0]).id == key_n  # type: ignore[union-attr]
-                            and upd.values
-                            and upd.values[0] is not None
-                            and (
-                                (
-                                    not keys_only
-                                    and isinstance(
-                                        _peel_call_func(upd.values[0]), ast.Name
-                                    )
-                                    and _peel_call_func(upd.values[0]).id == val_n
-                                )
-                                or (keys_only and _value_is_ns_get(upd.values[0]))
-                            )
-                        ):
-                            if _seed_recv(a0):
-                                break
-                    continue
-            # Dead branch removed — unbound dict.* handled above.
+                else:
+                    # ``operator.setitem(d,k,v)`` / ``si=operator.setitem`` /
+                    # ``operator.ior(d,{k:v})``.
+                    proj_n = operator_projection_aliases.get(func.id, func.id)
+                    if proj_n == "setitem":
+                        attr = "__setitem__"
+                        unbound_dict_mut = True
+                    elif proj_n in {"ior", "or_"}:
+                        attr = "__ior__"
+                        unbound_dict_mut = True
             # ``methodcaller("setdefault", k, vb.get(k))(d)``.
-            if isinstance(func, ast.Call):
+            elif isinstance(func, ast.Call):
+                # ``getattr(d,"setdefault")(k, vb.get(k))``.
+                g_sd = _getattr_static_name(
+                    func,
+                    getattr_aliases=frozenset(getattr_aliases),
+                    sequence_aliases=sequence_view_aliases,
+                    slice_aliases=frozenset(slice_aliases),
+                )
+                if g_sd in {
+                    "setdefault",
+                    "update",
+                    "__setitem__",
+                    "__ior__",
+                } and func.args:
+                    attr = g_sd
+                    recv = func.args[0]
+                    # Apply args are on the outer call.
+                    flat_g = _flatten_starred_args(
+                        call.args,
+                        sequence_aliases=sequence_view_aliases,
+                        slice_aliases=frozenset(slice_aliases),
+                    )
+                    uses_kv = False
+                    if attr in {"setdefault", "__setitem__"} and len(flat_g) >= 2:
+                        a0 = _peel_call_func(flat_g[0])
+                        a1 = _peel_call_func(flat_g[1])
+                        if keys_only:
+                            uses_kv = (
+                                isinstance(a0, ast.Name)
+                                and a0.id == key_n
+                                and _value_is_ns_get(a1)
+                            )
+                        else:
+                            uses_kv = (
+                                isinstance(a0, ast.Name)
+                                and a0.id == key_n
+                                and isinstance(a1, ast.Name)
+                                and a1.id == val_n
+                            )
+                    elif attr in {"update", "__ior__"}:
+                        uses_kv = True
+                    if uses_kv and _seed_recv(recv):
+                        break
+                    continue
                 mc_n = _methodcaller_static_name(
                     func,
                     projection_aliases=operator_projection_aliases,
                     getattr_aliases=frozenset(getattr_aliases),
                 )
-                if mc_n in {"setdefault", "update", "__setitem__"} and call.args:
+                if mc_n in {
+                    "setdefault",
+                    "update",
+                    "__setitem__",
+                    "__ior__",
+                } and call.args:
                     attr = mc_n
                     recv = call.args[0]
                     # Key/default live on methodcaller product args.
@@ -21951,53 +22335,10 @@ def _build_identity_scanner(
                                 and isinstance(a1, ast.Name)
                                 and a1.id == val_n
                             )
-                    elif attr == "update":
+                    elif attr in {"update", "__ior__"}:
                         uses_kv = True
                     if uses_kv and _seed_recv(recv):
                         break
-                    continue
-                # ``getattr(d, 'setdefault')(k, vb.get(k))``.
-                g_sd = _getattr_static_name(
-                    func,
-                    getattr_aliases=frozenset(getattr_aliases),
-                )
-                if g_sd in {"setdefault", "update", "__setitem__", "__ior__"}:
-                    gflat_sd = _flatten_starred_args(
-                        func.args,
-                        sequence_aliases=sequence_view_aliases,
-                        slice_aliases=frozenset(slice_aliases),
-                    )
-                    if gflat_sd:
-                        attr = g_sd
-                        recv = gflat_sd[0]
-                        flat = _flatten_starred_args(
-                            call.args,
-                            sequence_aliases=sequence_view_aliases,
-                            slice_aliases=frozenset(slice_aliases),
-                        )
-                        uses_kv = False
-                        if attr in {"setdefault", "__setitem__"} and len(
-                            flat
-                        ) >= 2:
-                            a0 = _peel_call_func(flat[0])
-                            a1 = _peel_call_func(flat[1])
-                            if keys_only:
-                                uses_kv = (
-                                    isinstance(a0, ast.Name)
-                                    and a0.id == key_n
-                                    and _value_is_ns_get(a1)
-                                )
-                            else:
-                                uses_kv = (
-                                    isinstance(a0, ast.Name)
-                                    and a0.id == key_n
-                                    and isinstance(a1, ast.Name)
-                                    and a1.id == val_n
-                                )
-                        elif attr in {"update", "__ior__", "ior"} and flat:
-                            uses_kv = True
-                        if uses_kv and _seed_recv(recv):
-                            break
                     continue
                 # ``partial(d.setdefault, k, vb.get(k))()``.
                 if _is_partial_factory(
@@ -22019,7 +22360,12 @@ def _build_identity_scanner(
                         ihead = _peel_call_func(ihead)
                         if (
                             isinstance(ihead, ast.Attribute)
-                            and ihead.attr in {"setdefault", "update", "__setitem__"}
+                            and ihead.attr in {
+                                "setdefault",
+                                "update",
+                                "__setitem__",
+                                "__ior__",
+                            }
                         ):
                             attr = ihead.attr
                             recv = ihead.value
@@ -22049,22 +22395,41 @@ def _build_identity_scanner(
                                         and isinstance(a1, ast.Name)
                                         and a1.id == val_n
                                     )
-                            elif attr == "update":
+                            elif attr in {"update", "__ior__"}:
                                 uses_kv = True
                             if uses_kv and _seed_recv(recv):
                                 break
                     continue
-            if attr is None or recv is None:
-                continue
-            recv = _peel_call_func(recv)
-            if not isinstance(recv, ast.Name):
+            # ``operator.setitem(d,k,v)`` Attribute form.
+            if attr is None and isinstance(func, ast.Attribute):
+                proj_a = _canonical_projection_name(func.attr)
+                if proj_a == "setitem":
+                    attr = "__setitem__"
+                    unbound_dict_mut = True
+                elif proj_a in {"ior", "or_"} or func.attr in {"ior", "__ior__"}:
+                    attr = "__ior__"
+                    unbound_dict_mut = True
+            if attr is None or (recv is None and not unbound_dict_mut):
                 continue
             flat = _flatten_starred_args(
                 call.args,
                 sequence_aliases=sequence_view_aliases,
                 slice_aliases=frozenset(slice_aliases),
             )
-            # `d.setdefault(k,v)` / `d.__setitem__(k,v)` / `d.update({k:v})`.
+            # Unbound ``dict.setdefault(d,k,v)`` / ``operator.setitem(d,k,v)`` /
+            # ``operator.ior(d,{k:v})`` — first arg is the receiver.
+            if unbound_dict_mut:
+                if not flat:
+                    continue
+                recv = flat[0]
+                flat = list(flat[1:])
+            if recv is None:
+                continue
+            recv = _peel_call_func(recv)
+            if not isinstance(recv, ast.Name):
+                continue
+            # `d.setdefault(k,v)` / `d.__setitem__(k,v)` / `d.update({k:v})` /
+            # `d.__ior__({k:v})` / `d.update([(k,v)])`.
             uses_kv = False
             if attr in {"setdefault", "__setitem__"} and len(flat) >= 2:
                 a0 = _peel_call_func(flat[0])
@@ -22082,7 +22447,7 @@ def _build_identity_scanner(
                         and isinstance(a1, ast.Name)
                         and a1.id == val_n
                     )
-            elif attr in {"update", "__ior__", "ior"}:
+            elif attr in {"update", "__ior__"}:
                 if keys_only and flat:
                     upd = _peel_call_func(flat[0])
                     if isinstance(upd, ast.Dict) and len(upd.keys) == 1:
@@ -22101,13 +22466,15 @@ def _build_identity_scanner(
                         # ``d.update([(k, vb.get(k))])``.
                         pair = _peel_call_func(upd.elts[0])
                         if (
-                            isinstance(pair, (ast.Tuple, ast.List))
+                            isinstance(pair, (ast.List, ast.Tuple))
                             and len(pair.elts) == 2
                         ):
+                            pk = _peel_call_func(pair.elts[0])
+                            pv = pair.elts[1]
                             uses_kv = (
-                                isinstance(_peel_call_func(pair.elts[0]), ast.Name)
-                                and _peel_call_func(pair.elts[0]).id == key_n  # type: ignore[union-attr]
-                                and _value_is_ns_get(pair.elts[1])
+                                isinstance(pk, ast.Name)
+                                and pk.id == key_n
+                                and _value_is_ns_get(pv)
                             )
                 else:
                     uses_kv = True
@@ -22119,44 +22486,39 @@ def _build_identity_scanner(
     def _seed_dictcomp_ns_rebuild(name: str, value: ast.AST) -> None:
         """``d={k: vb.get(k) for k in vb}`` / ``{k:v for k,v in vb.items()}``.
 
-        Also ``dict({k: vb.get(k) for k in vb})`` / ``for k in list(vb)``.
+        Also ``dict({k: vb.get(k) for k in vb})`` / ``for k in list(vb)``
+        (Unknown > false PASS).
         """
 
         node = _peel_call_func(value)
-        # Unwrap ``dict({k: … for k in …})``.
+        # ``dict({k: vb.get(k) for k in vb})`` ctor unwrap.
         if isinstance(node, ast.Call):
             df = _peel_transparent_callee(node.func)
-            is_dict_ctor = (
+            is_dict = (
                 isinstance(df, ast.Name) and df.id == "dict"
             ) or (isinstance(df, ast.Attribute) and df.attr == "dict")
-            if is_dict_ctor and node.args:
+            if is_dict and node.args:
                 node = _peel_call_func(node.args[0])
         if not isinstance(node, ast.DictComp) or len(node.generators) != 1:
             return
         gen = node.generators[0]
         it = _peel_call_func(gen.iter)
-        # Peel ``list|iter|tuple|sorted(vb)`` materializers.
+        # ``for k in list(vb)|iter(vb)|sorted(vb)``.
         for _ in range(6):
             it = _peel_call_func(it)
             if not isinstance(it, ast.Call):
                 break
-            itf_mat = _peel_transparent_callee(it.func)
-            mat_name = (
-                itf_mat.id
-                if isinstance(itf_mat, ast.Name)
-                else (
-                    itf_mat.attr if isinstance(itf_mat, ast.Attribute) else None
-                )
+            itf_w = _peel_transparent_callee(it.func)
+            wname = (
+                itf_w.id
+                if isinstance(itf_w, ast.Name)
+                else (itf_w.attr if isinstance(itf_w, ast.Attribute) else None)
             )
-            mat_flat = _flatten_starred_args(it.args)
-            if mat_name in {
-                "list",
-                "tuple",
-                "iter",
-                "sorted",
-                "reversed",
-            } and mat_flat:
-                it = mat_flat[0]
+            if isinstance(itf_w, ast.Name):
+                wname = operator_projection_aliases.get(itf_w.id, wname)
+            wflat = _flatten_starred_args(it.args)
+            if wname in {"list", "tuple", "iter", "sorted", "reversed"} and wflat:
+                it = wflat[0]
                 continue
             break
         items_recv: ast.AST | None = None
@@ -23259,59 +23621,65 @@ def _build_identity_scanner(
             sequence_view_aliases[name] = value
             _seed_dictcomp_ns_rebuild(name, value)
         elif isinstance(value, ast.Call):
-            # ``d=dict({k: vb.get(k) for k in vb})`` — seed before other
-            # Call packing so ns rebuild shares bare DictComp
-            # (Unknown > false PASS).
-            _seed_dictcomp_ns_rebuild(name, value)
-            if name in ns_dict_aliases:
-                # Seed already installed ns + sequence aliases; do not
-                # clobber with empty-pack / pop paths below.
-                pass
+            view = _view_call_parts(value)
+            if view is not None and view[0] in _DICT_ITER_VIEW_ATTRS | {
+                "keys",
+                "values",
+                "items",
+                "fromkeys",
+            } | _MAPPING_COPY_FUNCS:
+                # ``copy.copy([…])`` / ``deepcopy`` / items views — keep Call
+                # so later element peels share one path.
+                sequence_view_aliases[name] = value
+            elif _is_dict_fromkeys(
+                _peel_call_func(value.func),
+                dict_ctor_aliases=frozenset(dict_ctor_aliases),
+                dict_view_products=dict_view_products,
+            ):
+                # ``ks = fk([Mut])`` / ``ks = dict.fromkeys([Mut])``.
+                sequence_view_aliases[name] = value
+            elif (
+                isinstance(_peel_call_func(value.func), ast.Name)
+                and _peel_call_func(value.func).id  # type: ignore[union-attr]
+                in {
+                    "next",
+                    "iter",
+                    "list",
+                    "tuple",
+                    "reversed",
+                    "zip",
+                    "filter",
+                    "map",
+                    "enumerate",
+                    "sorted",
+                }
+            ):
+                # Also ``z=zip(ks,vs)`` mid-bind for ``dict(z)`` /
+                # ``f=filter(None, zip(...)); list(f)[0]`` /
+                # dictcomp zip rebuilds (Unknown > false PASS).
+                sequence_view_aliases[name] = value
             else:
-                view = _view_call_parts(value)
-                if view is not None and view[0] in _DICT_ITER_VIEW_ATTRS | {
-                    "keys",
-                    "values",
-                    "items",
-                    "fromkeys",
-                } | _MAPPING_COPY_FUNCS:
-                    # ``copy.copy([…])`` / ``deepcopy`` / items views — keep Call
-                    # so later element peels share one path.
-                    sequence_view_aliases[name] = value
-                elif _is_dict_fromkeys(
-                    _peel_call_func(value.func),
-                    dict_ctor_aliases=frozenset(dict_ctor_aliases),
-                    dict_view_products=dict_view_products,
-                ):
-                    # ``ks = fk([Mut])`` / ``ks = dict.fromkeys([Mut])``.
-                    sequence_view_aliases[name] = value
-                elif (
-                    isinstance(_peel_call_func(value.func), ast.Name)
-                    and _peel_call_func(value.func).id  # type: ignore[union-attr]
-                    in {"next", "iter", "list", "tuple", "reversed", "zip"}
-                ):
-                    # Also ``z=zip(ks,vs)`` mid-bind for ``dict(z)`` /
-                    # dictcomp zip rebuilds (Unknown > false PASS).
-                    sequence_view_aliases[name] = value
+                # ``d=dict({k: vb.get(k) for k in vb})`` ns rebuild.
+                _seed_dictcomp_ns_rebuild(name, value)
+                elems = _iter_elements(value)
+                if elems is not None:
+                    sequence_view_aliases[name] = ast.List(
+                        elts=list(elems), ctx=ast.Load()
+                    )
                 else:
-                    elems = _iter_elements(value)
-                    if elems is not None:
-                        sequence_view_aliases[name] = ast.List(
-                            elts=list(elems), ctx=ast.Load()
+                    if _expr_is_empty_pack(
+                        value,
+                        sequence_aliases=sequence_view_aliases,
+                        slice_aliases=frozenset(slice_aliases),
+                        projection_aliases=operator_projection_aliases,
+                    ):
+                        sequence_view_aliases[name] = ast.Dict(
+                            keys=[], values=[]
                         )
-                    else:
-                        if _expr_is_empty_pack(
-                            value,
-                            sequence_aliases=sequence_view_aliases,
-                            slice_aliases=frozenset(slice_aliases),
-                            projection_aliases=operator_projection_aliases,
-                        ):
-                            sequence_view_aliases[name] = ast.Dict(
-                                keys=[], values=[]
-                            )
-                        elif name not in chainmap_list_aliases:
-                            # Keep ``m=getattr(cm,"maps")`` Attribute seed from
-                            # ``maps_parts`` (Unknown > false PASS).
+                    elif name not in chainmap_list_aliases:
+                        # Keep ``m=getattr(cm,"maps")`` Attribute seed from
+                        # ``maps_parts`` (Unknown > false PASS).
+                        if name not in ns_dict_aliases:
                             sequence_view_aliases.pop(name, None)
         elif isinstance(value, ast.Constant) and isinstance(value.value, int):
             sequence_view_aliases[name] = value
@@ -25414,14 +25782,6 @@ def _build_identity_scanner(
                 )
                 if packed_get is not None:
                     sort_recv = _peel_call_func(packed_get)
-                    # ``operator.getitem([*zip([…])],0)[0]`` may still yield
-                    # a one-elt zip-pair Tuple — unwrap before sort match
-                    # (Unknown > false PASS).
-                    if (
-                        isinstance(sort_recv, ast.Tuple)
-                        and len(sort_recv.elts) == 1
-                    ):
-                        sort_recv = _peel_call_func(sort_recv.elts[0])
                 # ``u=dict.update.__get__(vars(ns))`` /
                 # ``si=dict.__setitem__.__get__(vars(ns))`` — bind mutator
                 # onto the instance (Unknown > false PASS).
@@ -26193,8 +26553,50 @@ def _build_identity_scanner(
             # Keep partial / methodcaller / itemgetter Call AST so Name-bound
             # ``next(iter([p|mc|ig]))`` / BinOp / concat / ``partial(ig, xs)``
             # peels recover the factory with bound args (Unknown > false PASS).
+            # Also applied ``itemgetter("getattr")(builtins.__dict__)`` /
+            # ``attrgetter("getattr")(builtins)`` mid-binds.
+            applied_ig_attr = False
+            if isinstance(value, ast.Call) and value.args:
+                vfn = _peel_call_func(value.func)
+                if isinstance(vfn, ast.Call):
+                    ig_keep = _itemgetter_static_key(
+                        vfn,
+                        projection_aliases=operator_projection_aliases,
+                        getattr_aliases=frozenset(getattr_aliases),
+                        sequence_aliases=sequence_view_aliases,
+                        slice_aliases=frozenset(slice_aliases),
+                    )
+                    ag_keep = _attrgetter_static_name(
+                        vfn,
+                        projection_aliases=operator_projection_aliases,
+                        getattr_aliases=frozenset(getattr_aliases),
+                    )
+                    if ig_keep is not None or ag_keep is not None:
+                        applied_ig_attr = True
+                        # Eagerly seed getattr/getitem products so
+                        # ``partial(ga,list,"__getitem__")`` Name peels
+                        # see the product before later Call analysis
+                        # (Unknown > false PASS).
+                        key_keep = ag_keep or ig_keep
+                        if key_keep == "getattr":
+                            projection_factory_products[name] = (
+                                "attrgetter",
+                                "getattr",
+                            )
+                            operator_projection_aliases[name] = "getattr"
+                        elif key_keep in {
+                            "__getitem__",
+                            "pop",
+                            "getitem",
+                        }:
+                            projection_factory_products[name] = (
+                                key_keep,
+                                None,
+                            )
+                            operator_projection_aliases[name] = key_keep
             if (
-                _is_partial_factory(
+                applied_ig_attr
+                or _is_partial_factory(
                     value,
                     partial_aliases=frozenset(partial_aliases),
                     getattr_aliases=frozenset(getattr_aliases),
@@ -26926,17 +27328,17 @@ def _build_identity_scanner(
                     # ``from base64 import b85encode`` / ``a85decode`` /
                     # ``from binascii import hexlify`` empty codec packs.
                     operator_projection_aliases[local] = alias.name
+                elif alias.name == "a2b_uu":
+                    operator_projection_aliases[local] = alias.name
                 elif alias.name in {
                     "loads",
                     "literal_eval",
                     "decode",
                     "JSONDecoder",
                 }:
-                    # ``from ast import literal_eval as le`` /
-                    # ``from json import loads as ld`` / ``JSONDecoder`` —
-                    # share empty-pack Name peels (Unknown > false PASS).
-                    operator_projection_aliases[local] = alias.name
-                elif alias.name == "a2b_uu":
+                    # ``from ast import literal_eval as le; le('[]')`` /
+                    # ``from json import loads as ld`` empty packs
+                    # (Unknown > false PASS).
                     operator_projection_aliases[local] = alias.name
                 if module_path is None:
                     env[local] = _IdentityPointsTo.unknown_only()
