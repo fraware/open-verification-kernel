@@ -3136,7 +3136,6 @@ def _static_truthiness(node: ast.AST) -> bool | None:
         # Non-empty literal packs are truthy (``all([1])`` / ``1 and […]``).
         return True
     if isinstance(node, ast.Call):
-        func = _peel_transparent_callee(node.func)
         fname = None
         for cand in _shallow_packed_callee_exprs(node.func):
             cand = _peel_transparent_callee(cand)
@@ -5660,7 +5659,6 @@ def _rewrite_applied_dunder_call(
                 if len(call_flat) >= 3:
                     gi_target = _peel_call_func(call_flat[0])
                     unbound_gi = False
-                    pop_gi = False
                     if (
                         isinstance(gi_target, ast.Attribute)
                         and gi_target.attr
@@ -5674,7 +5672,6 @@ def _rewrite_applied_dunder_call(
                             isinstance(recv, ast.Attribute)
                             and recv.attr in {"list", "tuple"}
                         )
-                        pop_gi = gi_target.attr == "pop"
                     elif isinstance(gi_target, ast.Name) and (
                         gi_target.id in {"__getitem__", "pop", "getitem"}
                         or projs.get(gi_target.id)
@@ -5687,11 +5684,6 @@ def _rewrite_applied_dunder_call(
                     ):
                         # Name-bound ``gi=list.__getitem__``.
                         unbound_gi = True
-                        resolved = projs.get(gi_target.id, gi_target.id)
-                        pop_gi = resolved == "pop" or (
-                            gi_target.id in products
-                            and products[gi_target.id][0] == "pop"
-                        )
                     elif isinstance(gi_target, ast.Call):
                         live_g = _live_peel_aliases()
                         g_aliases = frozenset(
@@ -5719,7 +5711,6 @@ def _rewrite_applied_dunder_call(
                                     isinstance(recv, ast.Attribute)
                                     and recv.attr in {"list", "tuple"}
                                 )
-                                pop_gi = g_gi == "pop"
                         else:
                             # ``attrgetter("__getitem__")(list)`` — apply
                             # Call; factory is Call.func (Unknown > false PASS).
@@ -5758,7 +5749,6 @@ def _rewrite_applied_dunder_call(
                                     isinstance(recv, ast.Attribute)
                                     and recv.attr in {"list", "tuple"}
                                 )
-                                pop_gi = ag == "pop"
                     if unbound_gi:
                         idx = _static_sequence_index(
                             call_flat[2],
