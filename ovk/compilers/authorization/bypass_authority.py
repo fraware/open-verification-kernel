@@ -659,6 +659,18 @@ class _RequestStateAliasEnv:
                 if node.id in self.static_constant_names:
                     return self.static_constant_names[node.id]
                 return self.string_constant_names.get(node.id)
+            # ``None or 0`` / ``0|0`` / ``int()`` star indexes share bare ``0``
+            # (``*[0 or 0]`` already collapses in flatten; these do not).
+            from ovk.compilers.authorization.python_callee_resolution import (
+                _static_sequence_index as _static_idx_key,
+            )
+
+            idx = _static_idx_key(
+                node,
+                sequence_aliases=self.sequence_literal_aliases,
+            )
+            if idx is not None:
+                return idx
             return None
 
         def _project_from_carrier(
@@ -1169,6 +1181,11 @@ class _RequestStateAliasEnv:
                 return _carrier_element_ast(
                     recv, _static_key_value(flat_apply[0])
                 )
+            # Zero-arg list.pop() → last element so
+            # ``[g].pop().__call__(*[0])`` shares ``g.__call__(*[0])`` /
+            # ``next(iter([g])).__call__(*[0])`` (Unknown > false PASS).
+            if view_attr == "pop" and recv is not None and not flat_apply:
+                return _carrier_element_ast(recv, -1)
             return None
 
         def _carrier_element_ast(
@@ -1185,7 +1202,7 @@ class _RequestStateAliasEnv:
                     )
                 return None
             if isinstance(carrier, (ast.List, ast.Tuple)) and isinstance(key, int):
-                if 0 <= key < len(carrier.elts):
+                if carrier.elts and -len(carrier.elts) <= key < len(carrier.elts):
                     return carrier.elts[key]
                 return None
             if isinstance(carrier, ast.Dict) and key is not None:
