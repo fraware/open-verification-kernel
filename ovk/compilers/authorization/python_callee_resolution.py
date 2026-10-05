@@ -7376,18 +7376,21 @@ def _rewrite_applied_dunder_call(
                                             unbound_gi = True
                     # ``attrgetter("__call__")(operator.getitem)`` —
                     # Call applying attrgetter of __call__ onto getitem.
-                    # Also Name-bound ``ag=attrgetter("__call__"); ag(…)``.
+                    # Also Name-bound ``ag=attrgetter("__call__"); ag(…)`` /
+                    # ``(0 or ag)(operator.getitem)`` BoolOp mid
+                    # (Unknown > false PASS).
                     if not unbound_gi and isinstance(gi_target, ast.Call):
+                        ag_fn = _peel_call_func(gi_target.func)
+                        if isinstance(ag_fn, (ast.BoolOp, ast.IfExp)):
+                            ag_fn = _peel_call_func(_preferred_seed_arm(ag_fn))
                         ag_call = _attrgetter_static_name(
-                            gi_target.func
-                            if isinstance(gi_target.func, ast.Call)
+                            ag_fn
+                            if isinstance(ag_fn, ast.Call)
                             else gi_target,
                             projection_aliases=projs,
                         )
-                        if ag_call is None and isinstance(
-                            gi_target.func, ast.Name
-                        ):
-                            prod_ag = products.get(gi_target.func.id)
+                        if ag_call is None and isinstance(ag_fn, ast.Name):
+                            prod_ag = products.get(ag_fn.id)
                             if (
                                 prod_ag is not None
                                 and prod_ag[0] == "attrgetter"
@@ -8564,6 +8567,13 @@ def _next_iter_first_pack_elt(
         return None
 
     node = _peel_call_func(expr)
+    # Shared adapter pipeline before zip/star/materialize peels so
+    # Name-bind / BoolOp / getattr / copy / list0 share one path
+    # (Unknown > false PASS).
+    node = _peel_adapter_pipeline(
+        node,
+        projection_aliases=projs,
+    )
     # ``sorted([x], …)[0]`` / ``next(enumerate([x]))[1]`` / ``next(zip([x]))[0]``
     # / ``list(zip([x]))[0][0]`` / ``max(zip([x]))[0]`` arrive as Subscript
     # over adapter Calls (Unknown > false PASS).
@@ -9967,6 +9977,16 @@ def _chainmap_maps_root(
     """
 
     node = _peel_call_func(maps_expr)
+    # Shared adapter pipeline: Name-bind / BoolOp / getattr / copy / list0
+    # before ChainMap maps/parents root recognition (Unknown > false PASS).
+    node = _peel_adapter_pipeline(
+        node,
+        projection_aliases=projection_aliases,
+        getattr_aliases=getattr_aliases,
+        sequence_aliases=sequence_aliases,
+        bound_partials=bound_partials,
+        copy_aliases=copy_aliases,
+    )
     # ``copy.copy|deepcopy(cm.parents.maps)`` / ``copy.copy(getattr(p,"maps"))``.
     copy_inner = _copy_wrapper_operand(
         node,
