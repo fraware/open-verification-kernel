@@ -459,6 +459,14 @@ class _RequestStateAliasEnv:
                     self.nullcontext_aliases.add(local)
                 elif alias.name in _OPERATOR_PROJECTION_NAMES | _KEY_APPLICATOR_NAMES:
                     self.operator_projection_aliases[local] = alias.name
+                elif alias.name in {
+                    "loads",
+                    "literal_eval",
+                    "decode",
+                    "JSONDecoder",
+                }:
+                    # ``from ast import literal_eval as le`` empty-pack peels.
+                    self.operator_projection_aliases[local] = alias.name
                 elif alias.name in {"vars", "globals", "locals"}:
                     self.ns_projection_aliases.add(local)
         elif isinstance(node, ast.Import):
