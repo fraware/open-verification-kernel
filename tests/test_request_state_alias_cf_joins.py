@@ -1,4 +1,4 @@
-"""Request/state alias CF joins + guarded match exhaustiveness (#171).
+﻿"""Request/state alias CF joins + guarded match exhaustiveness (#171).
 
 Closes false PASSes where:
 1. Guarded final ``case _ if cond:`` was treated as exhaustive.
@@ -96,7 +96,7 @@ def _safe_rebind_block(*, indent: int = 8, name: str = "write_state") -> str:
 
 
 def test_if_one_branch_severs_alias_other_writes_client_never_authorized() -> None:
-    """1. Alias established; one if branch severs it, other writes client → never authorized."""
+    """1. Alias established; one if branch severs it, other writes client â†’ never authorized."""
 
     findings = _unit(
         """
@@ -116,7 +116,7 @@ def handler(request, bypass_filter=False):
 
 
 def test_alias_on_one_branch_only_post_join_write_is_uncertain() -> None:
-    """2. Alias established on only one branch; post-join field write → uncertain/dynamic."""
+    """2. Alias established on only one branch; post-join field write â†’ uncertain/dynamic."""
 
     findings = _unit(
         """
@@ -134,7 +134,7 @@ def handler(request, bypass_filter=False):
 
 
 def test_alias_on_every_branch_may_remain_exact() -> None:
-    """3. Alias established on every branch → may remain exact / authorized."""
+    """3. Alias established on every branch â†’ may remain exact / authorized."""
 
     findings = _unit(
         """
@@ -442,7 +442,7 @@ async def handler(request, bypass_filter: bool = False, user = Depends(get_curre
 def test_persistent_state_round_trip_and_version_invalidation(tmp_path) -> None:
     """13. Persistent-state round trip and version invalidation."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.91.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.92.0"
 
     trusted_helpers = """
 def write_state(state, value):
@@ -625,7 +625,7 @@ def test_join_cross_kind_keeps_both_may_sets() -> None:
 
 
 def test_cross_kind_join_client_write_via_state_never_authorized() -> None:
-    """1. Request on one branch, state on another, then x.field = client → never authorized."""
+    """1. Request on one branch, state on another, then x.field = client â†’ never authorized."""
 
     findings = _unit(
         """
@@ -665,7 +665,7 @@ def handler(request, bypass_filter=False):
 
 
 def test_cross_kind_join_request_state_field_write_is_dynamic() -> None:
-    """3. Request on one branch, state on another, then x.state.field = client → dynamic."""
+    """3. Request on one branch, state on another, then x.state.field = client â†’ dynamic."""
 
     findings = _unit(
         """
@@ -705,7 +705,7 @@ def handler(request, bypass_filter=False):
 
 
 def test_may_state_actual_helper_literal_write_no_positive_authority() -> None:
-    """5. May-state actual → helper literal state write must NOT establish positive authority."""
+    """5. May-state actual â†’ helper literal state write must NOT establish positive authority."""
 
     findings = _unit(
         """
@@ -724,7 +724,7 @@ def handler(request, bypass_filter=False):
 
 
 def test_may_request_actual_helper_state_attr_literal_no_positive_authority() -> None:
-    """6. May-request actual → helper req.state.field = literal must NOT establish positive authority."""
+    """6. May-request actual â†’ helper req.state.field = literal must NOT establish positive authority."""
 
     findings = _unit(
         """
@@ -802,7 +802,7 @@ def handler(request, bypass_filter=False):
 
 
 def test_keyword_actual_formal_preserves_may_status() -> None:
-    """9. Keyword actual→formal preserves may status."""
+    """9. Keyword actualâ†’formal preserves may status."""
 
     findings = _unit(
         """
@@ -1039,7 +1039,7 @@ def test_ifexp_classify_cross_kind_keeps_dual_may() -> None:
 
 
 def test_ifexp_cross_kind_client_write_never_authorized() -> None:
-    """1. ``x = request.state if flag else request`` then ``x.field = client`` → never authorized."""
+    """1. ``x = request.state if flag else request`` then ``x.field = client`` â†’ never authorized."""
 
     findings = _unit(
         """
@@ -1057,7 +1057,7 @@ def handler(request, bypass_filter=False):
 
 
 def test_ifexp_cross_kind_client_write_reversed_never_authorized() -> None:
-    """2. Branch order reversed: ``x = request if flag else request.state`` → same."""
+    """2. Branch order reversed: ``x = request if flag else request.state`` â†’ same."""
 
     findings = _unit(
         """
@@ -1075,7 +1075,7 @@ def handler(request, bypass_filter=False):
 
 
 def test_nested_ifexp_mixed_arms_dual_may_dynamic_write() -> None:
-    """3. Nested IfExp with mixed request/state arms → dual may / dynamic write."""
+    """3. Nested IfExp with mixed request/state arms â†’ dual may / dynamic write."""
 
     findings = _unit(
         """
@@ -1093,7 +1093,7 @@ def handler(request, bypass_filter=False, other=False):
 
 
 def test_ifexp_may_state_helper_literal_write_no_positive_authority() -> None:
-    """4. IfExp may-state passed into helper literal write → no positive authority."""
+    """4. IfExp may-state passed into helper literal write â†’ no positive authority."""
 
     findings = _unit(
         """
@@ -1111,7 +1111,7 @@ def handler(request, bypass_filter=False):
 
 
 def test_ifexp_may_request_then_state_field_write_is_dynamic() -> None:
-    """5. IfExp may-request then ``x.state.field = client`` → dynamic/UNKNOWN as applicable."""
+    """5. IfExp may-request then ``x.state.field = client`` â†’ dynamic/UNKNOWN as applicable."""
 
     findings = _unit(
         """
@@ -1311,7 +1311,7 @@ async def handler(request, bypass_filter: bool = False, user = Depends(get_curre
 
 
 def test_boolop_and_or_cross_kind_never_authorized() -> None:
-    """BoolOp ``flag and request.state or request`` joins to dual may — never PASS."""
+    """BoolOp ``flag and request.state or request`` joins to dual may â€” never PASS."""
 
     findings = _unit(
         """
@@ -1329,7 +1329,7 @@ def handler(request, bypass_filter=False, flag=True):
 
 
 def test_boolop_same_kind_and_or_never_authorized() -> None:
-    """Same-kind BoolOp still yields may (short-circuit) — never PASS."""
+    """Same-kind BoolOp still yields may (short-circuit) â€” never PASS."""
 
     findings = _unit(
         """
@@ -1347,7 +1347,7 @@ def handler(request, bypass_filter=False, flag=True):
 
 
 def test_boolop_classify_lattice_units() -> None:
-    """Unit: BoolOp classify joins operands; never promotes may→must."""
+    """Unit: BoolOp classify joins operands; never promotes mayâ†’must."""
 
     import ast
 
@@ -1376,7 +1376,7 @@ def test_boolop_classify_lattice_units() -> None:
 
 
 def test_match_as_pattern_captures_state_subject_never_authorized() -> None:
-    """``match request.state: case object() as x:`` binds x — never false PASS."""
+    """``match request.state: case object() as x:`` binds x â€” never false PASS."""
 
     findings = _unit(
         """
@@ -1489,7 +1489,7 @@ def handler(request, bypass_filter=False, flag=True):
 
 
 def test_interprocedural_boolop_dual_may_no_positive_authority() -> None:
-    """BoolOp dual-may into a helper literal write → no positive authority."""
+    """BoolOp dual-may into a helper literal write â†’ no positive authority."""
 
     findings = _unit(
         """
@@ -1531,7 +1531,7 @@ def test_matchclass_positional_peel_match_args_reorder_never_authorized() -> Non
     ``Pair.__match_args__ = ("second", "first")`` makes ``case Pair(x, _)`` bind
     ``x`` to ``second`` (= ``request.state``) while Call order is
     ``(object(), request.state)``. A 1:1 positional peel bound ``x`` to
-    ``object()`` and omitted the client write → false PASS.
+    ``object()`` and omitted the client write â†’ false PASS.
     """
 
     findings = _unit(

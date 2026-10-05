@@ -1,4 +1,4 @@
-"""Bounded lexical-environment propagation for state-writer callees (#173).
+﻿"""Bounded lexical-environment propagation for state-writer callees (#173).
 
 Nested closures / default captures of request/state aliases must enter the
 writer theorem at call time. Definition-time body scans under an empty alias
@@ -71,7 +71,7 @@ def _never_authorized(findings: object) -> None:
 
 
 def test_zero_arg_closure_captures_state_alias_never_authorized() -> None:
-    """1. Zero-arg nested closure captures state = request.state → never authorized."""
+    """1. Zero-arg nested closure captures state = request.state â†’ never authorized."""
 
     findings = _unit(
         """
@@ -91,7 +91,7 @@ def handler(request, bypass_filter=False):
 
 
 def test_closure_captures_request_alias_writes_state_field() -> None:
-    """2. Closure captures req = request and writes req.state.field → never authorized."""
+    """2. Closure captures req = request and writes req.state.field â†’ never authorized."""
 
     findings = _unit(
         """
@@ -130,7 +130,7 @@ def handler(request, bypass_filter=False):
 
 
 def test_closure_may_state_alias_from_branch_join_dynamic() -> None:
-    """4. Closure captures may-state alias from branch join → dynamic/UNKNOWN."""
+    """4. Closure captures may-state alias from branch join â†’ dynamic/UNKNOWN."""
 
     findings = _unit(
         """
@@ -194,7 +194,7 @@ def handler(request, bypass_filter=False):
 
 
 def test_default_param_state_omitted_at_call_counted() -> None:
-    """7. Default parameter state=request.state, omitted at call → writer counted."""
+    """7. Default parameter state=request.state, omitted at call â†’ writer counted."""
 
     findings = _unit(
         """
@@ -213,11 +213,11 @@ def handler(request, bypass_filter=False):
 
 
 def test_default_param_explicitly_overridden_unrelated_object() -> None:
-    """8. Default overridden with unrelated object → default identity does not apply.
+    """8. Default overridden with unrelated object â†’ default identity does not apply.
 
     With an unrelated explicit actual, the nested write is not a governed-state
     write. Authority may still fail closed for other reasons; the trusted
-    literal alone must not authorize when a client write remains elsewhere —
+    literal alone must not authorize when a client write remains elsewhere â€”
     here the only client write target is non-state, so a pure trusted path
     may authorize. Guard: overridden default must not be treated as state.
     """
@@ -242,7 +242,7 @@ def handler(request, bypass_filter=False):
 
 
 def test_default_captured_before_outer_alias_rebind() -> None:
-    """9. Default captured before outer alias rebind → definition-time identity."""
+    """9. Default captured before outer alias rebind â†’ definition-time identity."""
 
     findings = _unit(
         """
@@ -345,7 +345,7 @@ def handler(request, bypass_filter=False):
 
 
 def test_escaped_closure_carrying_governed_state_unknown() -> None:
-    """14. Escaped closure carrying governed state identity → UNKNOWN."""
+    """14. Escaped closure carrying governed state identity â†’ UNKNOWN."""
 
     findings = _unit(
         """
@@ -492,7 +492,7 @@ def handler(request, bypass_filter=False):
 
 
 def test_class_nested_method_closes_over_state_never_authorized() -> None:
-    """Class-nested method closing over outer state and called → never authorized."""
+    """Class-nested method closing over outer state and called â†’ never authorized."""
 
     findings = _unit(
         """
@@ -511,7 +511,7 @@ def handler(request, bypass_filter=False):
 
 
 def test_list_subscript_closure_call_never_authorized() -> None:
-    """Closure assigned to list and called via subscript → never authorized."""
+    """Closure assigned to list and called via subscript â†’ never authorized."""
 
     findings = _unit(
         """
@@ -620,7 +620,7 @@ def handler(request, bypass_filter=False):
 
 
 def test_returned_closure_name_call_never_authorized() -> None:
-    """``fn = mid(); fn()`` where mid returns a free-var closure → never authorized."""
+    """``fn = mid(); fn()`` where mid returns a free-var closure â†’ never authorized."""
 
     findings = _unit(
         """
@@ -641,7 +641,7 @@ def handler(request, bypass_filter=False):
 
 
 def test_cell_rebind_between_mid_return_and_call_never_authorized() -> None:
-    """Late-bound cell becomes governed after mid returns poison → never authorized."""
+    """Late-bound cell becomes governed after mid returns poison â†’ never authorized."""
 
     findings = _unit(
         """
@@ -2472,4 +2472,4 @@ def handler(request, bypass_filter=False):
 
 
 def test_persistent_version_bumped_for_lexical_closure() -> None:
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.91.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "0.92.0"

@@ -1,4 +1,4 @@
-"""Persistent dependency-aware FastAPI semantic compilation state.
+﻿"""Persistent dependency-aware FastAPI semantic compilation state.
 
 The cache stores typed JSON only. Cached state can reduce semantic compilation
 work but cannot directly produce a verification PASS.
@@ -63,7 +63,7 @@ from ovk.core.bundle import content_digest
 
 
 PERSISTENT_FASTAPI_STATE_SCHEMA = "ovk.fastapi_incremental_state_cache.v1"
-PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION = "0.91.0"
+PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION = "0.92.0"
 DEFAULT_PERSISTENT_FASTAPI_STATE_DIR = Path(
     ".verification/cache/fastapi-incremental-state"
 )

@@ -1554,6 +1554,19 @@ class _RequestStateAliasEnv:
                     if is_mc_factory and value.args:
                         mc_seed = value
                         break
+            # Also seed Name-bound ``ag = operator.attrgetter("__call__")`` so
+            # ``ag(g)(*args)`` shares methodcaller/attrgetter applied peels.
+            if mc_seed is None and isinstance(value, ast.Call):
+                from ovk.compilers.authorization.python_callee_resolution import (
+                    _attrgetter_static_name as _ag_seed_name,
+                )
+
+                if _ag_seed_name(
+                    value,
+                    projection_aliases=self.operator_projection_aliases,
+                    getattr_aliases=frozenset(g_aliases),
+                ) is not None:
+                    mc_seed = value
             if mc_seed is not None:
                 self.methodcaller_factories[name] = mc_seed
             else:
@@ -1848,13 +1861,66 @@ class _RequestStateAliasEnv:
             # ``[partial(*IfExp)].pop(0)()`` — list0 / itemgetter / getattr /
             # next(iter) peels project the callable before copy / operator.call
             # peels (Unknown > false PASS).
-            for _ in range(4):
+            for _ in range(6):
                 progressed = False
                 from ovk.compilers.authorization.python_callee_resolution import (
                     _is_partial_factory as _is_partial_proj,
                     _shallow_packed_callee_exprs as _shallow_proj,
+                    _rewrite_applied_dunder_call as _rewrite_applied_copy,
                 )
 
+                # ``methodcaller("__call__",0)(g)(keys)`` /
+                # ``ag(g)(*[0])(keys)`` / ``getattr(list,"__getitem__")([p],0)(*a)``
+                # / ``sorted([g])[0](*a)`` share rewritten copy peels
+                # (Unknown > false PASS).
+                if isinstance(peeled, ast.Call):
+                    from ovk.compilers.authorization.python_callee_resolution import (
+                        _methodcaller_static_name as _mc_fp,
+                        _attrgetter_static_name as _ag_fp,
+                    )
+
+                    _fp: dict[str, tuple[str, str | None]] = {}
+                    for _mk, _mv in self.methodcaller_factories.items():
+                        if isinstance(_mv, ast.Call):
+                            _mcn = _mc_fp(
+                                _mv,
+                                projection_aliases=self.operator_projection_aliases,
+                                getattr_aliases=frozenset(g_aliases),
+                            )
+                            if _mcn is not None:
+                                _fp[_mk] = ("methodcaller", _mcn)
+                            _agn = _ag_fp(
+                                _mv,
+                                projection_aliases=self.operator_projection_aliases,
+                                getattr_aliases=frozenset(g_aliases),
+                            )
+                            if _agn is not None:
+                                _fp[_mk] = ("attrgetter", _agn)
+                    rewritten_copy = _rewrite_applied_copy(
+                        peeled,
+                        sequence_aliases=self.sequence_literal_aliases,
+                        factory_products=_fp,
+                    )
+                    if rewritten_copy is None and isinstance(peeled.func, ast.Call):
+                        # ``list.__getitem__([g], i)(*[0])(keys)`` — rewrite the
+                        # applied getitem/pop product before the outer apply.
+                        inner_rw = _rewrite_applied_copy(
+                            peeled.func,
+                            sequence_aliases=self.sequence_literal_aliases,
+                            factory_products=_fp,
+                        )
+                        if inner_rw is not None:
+                            rewritten_copy = ast.Call(
+                                func=inner_rw,
+                                args=list(peeled.args),
+                                keywords=list(peeled.keywords),
+                            )
+                    if rewritten_copy is not None and rewritten_copy is not peeled:
+                        peeled = rewritten_copy
+                        f = peeled.func
+                        while isinstance(f, ast.NamedExpr):
+                            f = f.value
+                        progressed = True
                 # Peel Subscript / BoolOp / next carriers onto Attribute/Call
                 # heads before Call-only projection (Unknown > false PASS).
                 if not isinstance(f, ast.Call):
@@ -7456,14 +7522,68 @@ def _collect_writes_in_function(
             # packed methodcaller("__call__", p, keys)(operator.call) —
             # rewrite onto the underlying setitem Call (Unknown > false PASS).
             from ovk.compilers.authorization.python_callee_resolution import (
+                _attrgetter_static_name as _ag_si_fp,
                 _flatten_starred_args as _flat_call_si,
                 _is_partial_factory as _is_partial_call_si,
                 _methodcaller_call_bound_args as _mc_call_si,
                 _methodcaller_static_name,
+                _methodcaller_static_name as _mc_si_fp,
                 _peel_call_func as _peel_call_si,
                 _projection_factory_name,
+                _rewrite_applied_dunder_call as _rewrite_si_applied,
                 _shallow_packed_callee_exprs,
             )
+
+            # ``getattr(list,"__getitem__")([partial(op.call,p)],0)(*star)`` /
+            # ``getattr([partial],"__getitem__")(0)(*star)`` /
+            # ``getattr(c,"pop")()(*star)`` share list0 / partial peels.
+            _si_fp: dict[str, tuple[str, str | None]] = {}
+            for _mk, _mv in request_aliases.methodcaller_factories.items():
+                if isinstance(_mv, ast.Call):
+                    _mcn = _mc_si_fp(
+                        _mv,
+                        projection_aliases=(
+                            request_aliases.operator_projection_aliases
+                        ),
+                        getattr_aliases=frozenset(getattr_aliases),
+                    )
+                    if _mcn is not None:
+                        _si_fp[_mk] = ("methodcaller", _mcn)
+                    _agn = _ag_si_fp(
+                        _mv,
+                        projection_aliases=(
+                            request_aliases.operator_projection_aliases
+                        ),
+                        getattr_aliases=frozenset(getattr_aliases),
+                    )
+                    if _agn is not None:
+                        _si_fp[_mk] = ("attrgetter", _agn)
+            for _ in range(4):
+                if not isinstance(child, ast.Call):
+                    break
+                rewritten_si = _rewrite_si_applied(
+                    child,
+                    sequence_aliases=request_aliases.sequence_literal_aliases,
+                    factory_products=_si_fp,
+                )
+                if rewritten_si is None and isinstance(child.func, ast.Call):
+                    inner_si = _rewrite_si_applied(
+                        child.func,
+                        sequence_aliases=request_aliases.sequence_literal_aliases,
+                        factory_products=_si_fp,
+                    )
+                    if inner_si is not None:
+                        rewritten_si = ast.Call(
+                            func=inner_si,
+                            args=list(child.args),
+                            keywords=list(child.keywords),
+                        )
+                if rewritten_si is None or rewritten_si is child:
+                    break
+                child = rewritten_si
+            func = child.func
+            while isinstance(func, ast.NamedExpr):
+                func = func.value
 
             # ``partial(operator.call, p)(*star)`` ≡ ``operator.call(p, *star)``
             # including Name-bound ``poc=…`` / packed ``[partial(…)][0]``
