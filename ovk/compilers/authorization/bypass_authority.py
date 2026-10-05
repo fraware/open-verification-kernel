@@ -8602,7 +8602,7 @@ def _collect_writes_in_function(
             # flow into class, exec/eval, type-protocol and container aliases.
             if identity_session is not None:
                 identity_session.observe_for_binding(
-                    statement.target, statement.iter
+                    statement.target, statement.iter, body=statement.body
                 )
             # Instance carriers: ``for x in [Box()]: x.fn()`` (comp parity).
             _seed_assign_target_instance_bindings(statement.target, statement.iter)
