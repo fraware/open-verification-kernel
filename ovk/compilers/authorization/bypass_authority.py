@@ -186,6 +186,9 @@ _OPERATOR_PROJECTION_NAMES = frozenset(
         "deepcopy",
     }
 )
+# Builtin key applicators Name-bound like ``srt=sorted`` / ``mx=max`` —
+# shared with python_callee_resolution peels (Unknown > false PASS).
+_KEY_APPLICATOR_NAMES = frozenset({"sorted", "max", "min", "reduce"})
 _PROJECTION_DUNDER_ALIASES = {
     "__ior__": "ior",
     "__or__": "or_",
@@ -454,7 +457,7 @@ class _RequestStateAliasEnv:
                     self.adapter_aliases.add(local)
                 elif alias.name == "nullcontext":
                     self.nullcontext_aliases.add(local)
-                elif alias.name in _OPERATOR_PROJECTION_NAMES:
+                elif alias.name in _OPERATOR_PROJECTION_NAMES | _KEY_APPLICATOR_NAMES:
                     self.operator_projection_aliases[local] = alias.name
                 elif alias.name in {"vars", "globals", "locals"}:
                     self.ns_projection_aliases.add(local)
@@ -1324,7 +1327,7 @@ class _RequestStateAliasEnv:
                 self.nullcontext_aliases.add(name)
             if value.id in {"vars", "globals", "locals"} or value.id in self.ns_projection_aliases:
                 self.ns_projection_aliases.add(name)
-            if value.id in _OPERATOR_PROJECTION_NAMES:
+            if value.id in _OPERATOR_PROJECTION_NAMES | _KEY_APPLICATOR_NAMES:
                 self.operator_projection_aliases[name] = value.id
             elif value.id in self.operator_projection_aliases:
                 self.operator_projection_aliases[name] = (
@@ -1386,7 +1389,7 @@ class _RequestStateAliasEnv:
                 self.nullcontext_aliases.add(name)
             if value.attr in {"vars", "globals", "locals"}:
                 self.ns_projection_aliases.add(name)
-            if value.attr in _OPERATOR_PROJECTION_NAMES:
+            if value.attr in _OPERATOR_PROJECTION_NAMES | _KEY_APPLICATOR_NAMES:
                 self.operator_projection_aliases[name] = value.attr
             else:
                 canon = _PROJECTION_DUNDER_ALIASES.get(value.attr)
@@ -1432,7 +1435,7 @@ class _RequestStateAliasEnv:
                 self.string_constant_names[name] = projected
                 if projected == "MappingProxyType":
                     self.adapter_aliases.add(name)
-                if projected in _OPERATOR_PROJECTION_NAMES:
+                if projected in _OPERATOR_PROJECTION_NAMES | _KEY_APPLICATOR_NAMES:
                     self.operator_projection_aliases[name] = projected
             key = _static_or_bound_key(value.slice)
             if key is not None and self._base_is_namespace_projection(
@@ -1630,7 +1633,7 @@ class _RequestStateAliasEnv:
                     self.nullcontext_aliases.add(name)
                 if attr in {"vars", "globals", "locals"}:
                     self.ns_projection_aliases.add(name)
-                if attr in _OPERATOR_PROJECTION_NAMES:
+                if attr in _OPERATOR_PROJECTION_NAMES | _KEY_APPLICATOR_NAMES:
                     self.operator_projection_aliases[name] = attr
                 else:
                     # ``mut = getattr(operator, "__ior__")`` → ior.
@@ -1812,6 +1815,22 @@ class _RequestStateAliasEnv:
         # nested path (Unknown > false PASS).
         if isinstance(peeled, ast.Call):
             element = _call_projected_value(peeled)
+            # Mid-bind ``p=g(0)`` after ``g=getattr([partial(copy.copy)],"pop")``
+            # / ``p=srt([g.__call__],…)[0](*[0])`` — seed the projected idle
+            # partial so ``c=p(keys)`` shares ``partial(copy.copy)(keys)``
+            # (Unknown > false PASS).
+            if isinstance(element, ast.Call):
+                from ovk.compilers.authorization.python_callee_resolution import (
+                    _is_partial_factory as _is_partial_projected,
+                    _peel_call_func as _peel_projected_partial,
+                )
+
+                projected_partial = _peel_projected_partial(element)
+                if isinstance(projected_partial, ast.Call) and _is_partial_projected(
+                    projected_partial,
+                    getattr_aliases=frozenset(g_aliases),
+                ):
+                    self.partial_factories[name] = projected_partial
             # Bound ``keys.copy()`` / ``dict.copy(keys)`` / ``copy.copy(keys)``
             # / ``copy.deepcopy(keys)`` — shallow copy of the Name-bound Dict
             # carrier (mutation on ``c`` must not rewrite ``keys`` unless they
@@ -1900,14 +1919,18 @@ class _RequestStateAliasEnv:
                         peeled,
                         sequence_aliases=self.sequence_literal_aliases,
                         factory_products=_fp,
+                        projection_aliases=self.operator_projection_aliases,
                     )
                     if rewritten_copy is None and isinstance(peeled.func, ast.Call):
                         # ``list.__getitem__([g], i)(*[0])(keys)`` — rewrite the
                         # applied getitem/pop product before the outer apply.
+                        # Name-bound ``srt=sorted`` / ``mx=max`` share the same
+                        # projection_aliases peel (Unknown > false PASS).
                         inner_rw = _rewrite_applied_copy(
                             peeled.func,
                             sequence_aliases=self.sequence_literal_aliases,
                             factory_products=_fp,
+                            projection_aliases=self.operator_projection_aliases,
                         )
                         if inner_rw is not None:
                             rewritten_copy = ast.Call(
@@ -2084,6 +2107,27 @@ class _RequestStateAliasEnv:
                         progressed = True
                 if not progressed:
                     break
+            # Re-project after sorted/getitem/pop rewrites so mid-bound
+            # ``p=srt(...)[0](*[0])`` / ``p=g(0)`` seed idle partials
+            # (Unknown > false PASS).
+            if isinstance(peeled, ast.Call):
+                rewritten_element = _call_projected_value(peeled)
+                if rewritten_element is not None:
+                    element = rewritten_element
+                if isinstance(element, ast.Call):
+                    from ovk.compilers.authorization.python_callee_resolution import (
+                        _is_partial_factory as _is_partial_rewritten,
+                        _peel_call_func as _peel_rewritten_partial,
+                    )
+
+                    projected_partial = _peel_rewritten_partial(element)
+                    if isinstance(
+                        projected_partial, ast.Call
+                    ) and _is_partial_rewritten(
+                        projected_partial,
+                        getattr_aliases=frozenset(g_aliases),
+                    ):
+                        self.partial_factories[name] = projected_partial
             if isinstance(f, ast.Attribute) and f.attr == "copy" and not peeled.args:
                 copy_src = f.value
             elif (
