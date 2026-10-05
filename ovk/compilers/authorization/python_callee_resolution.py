@@ -7117,6 +7117,20 @@ def _build_identity_scanner(
                                 in _NS_DICT_VIEW_ATTRS | _MAPPING_COPY_FUNCS
                                 and irest
                             ):
+                                if (
+                                    iattr in _MAPPING_COPY_FUNCS
+                                    and irecv is not None
+                                    and isinstance(
+                                        _peel_call_func(irecv), ast.Name
+                                    )
+                                    and _peel_call_func(irecv).id  # type: ignore[union-attr]
+                                    in copy_module_aliases
+                                ):
+                                    # Module ``partial(copy.copy, d)()`` /
+                                    # packed ``[partial(copy.copy, d)][0]()``
+                                    # — mapping operand is idle rest[0]
+                                    # (Unknown > false PASS).
+                                    return iattr, irest[0]
                                 if irecv is not None and _is_dict_constructor(
                                     irecv,
                                     dict_ctor_aliases=frozenset(
