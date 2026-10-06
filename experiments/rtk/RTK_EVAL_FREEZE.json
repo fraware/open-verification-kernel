@@ -1,0 +1,146 @@
+{
+  "schema_version": "rtk.eval_freeze.v1",
+  "status": "PRE_ORACLE_FEASIBILITY_AMENDMENT",
+  "protocol_paths": {
+    "readme": "experiments/rtk/README.md",
+    "protocol": "experiments/rtk/PROTOCOL.md",
+    "analysis_plan": "experiments/rtk/ANALYSIS_PLAN.md",
+    "expansion_protocol": "experiments/rtk/SOURCE_UNIVERSE_EXPANSION_PROTOCOL.v1.md",
+    "candidates": "experiments/rtk/SOURCE_REPOSITORY_CANDIDATES.v1.json",
+    "go_provenance": "experiments/rtk/GO_CHECKER_PROVENANCE.v0.md",
+    "evaluated_implementation": "experiments/rtk/EVALUATED_IMPLEMENTATION_IDENTITY.v0.json",
+    "external_sealed_references": "experiments/rtk/EXTERNAL_SEALED_REFERENCES.v0.json",
+    "census_cardinality_probe": "experiments/rtk/CENSUS_CARDINALITY_PROBE.v0.json"
+  },
+  "protocol_commit_sha": null,
+  "source_repositories": [
+    {
+      "repository": "CertifyEdge",
+      "url": "https://github.com/fraware/CertifyEdge",
+      "cutoff_sha": "6ef02d54c4697886b20577f10eec683861475db2",
+      "cutoff_timestamp": "2026-05-22T10:56:51-07:00",
+      "history_rule": "FIRST_PARENT",
+      "role": "SOURCE_UNIVERSE_V0",
+      "ovk_materialization_status": "PENDING_SOURCE_MATERIALIZATION"
+    },
+    {
+      "repository": "pcs-core",
+      "url": "https://github.com/SentinelOps-CI/pcs-core",
+      "cutoff_sha": "9c971f5f9da8a424924dd8f48d6a3b71a1009e1b",
+      "cutoff_timestamp": "2026-07-24T20:21:55+02:00",
+      "history_rule": "FIRST_PARENT",
+      "role": "SOURCE_UNIVERSE_V0",
+      "ovk_materialization_status": "PENDING_SOURCE_MATERIALIZATION"
+    }
+  ],
+  "source_universe_v0_policy": {
+    "immutable": true,
+    "never_rewrite_v0": true
+  },
+  "tier_policy": {
+    "tier_a": {
+      "name": "REPLAY_VERIFIED",
+      "role": "PRIMARY_SCORING"
+    },
+    "tier_b_v1": {
+      "name": "COMMITTED_NATIVE_ATTESTATION",
+      "role": "SECONDARY_SCORING",
+      "do_not_inflate_tier_a": true,
+      "do_not_treat_as_worthless": true
+    },
+    "tier_b_v0": {
+      "excluded_from_scoring": true
+    },
+    "local_tier_counts": "NOT_LOCALLY_PRODUCED"
+  },
+  "pre_oracle_feasibility": {
+    "gate_name": "minimum_eligible_transitions",
+    "target_transitions": 20,
+    "gate_kind": "FEASIBILITY_RULE_NOT_SCIENTIFIC_VALIDITY",
+    "status": "PRE_ORACLE_FEASIBILITY_AMENDMENT",
+    "external_report": {
+      "provenance": "EXTERNAL_REPORT_UNVERIFIED_ON_OVK",
+      "reported_anchors": 9,
+      "reported_transitions": 3,
+      "note": "Observed figures from prior private eval; not re-verified on OVK."
+    },
+    "expansion_stop_rule": "STOP_EXPANSION_WHEN_CANDIDATE_LIST_EXHAUSTED_BELOW_GATE",
+    "oracle_status": "BLOCKED_UNTIL_EXPANSION_FINISHED_AND_HUMAN_CHECKPOINT"
+  },
+  "amendment_history": [
+    {
+      "amendment_id": "pre_oracle_feasibility_20_transition_gate",
+      "status": "PRE_ORACLE_FEASIBILITY_AMENDMENT",
+      "summary": "Record 20-transition threshold as pre-oracle feasibility rule only; not an absolute scientific validity criterion. Record external unverified observation of 9 anchors / 3 transitions. Do not run oracle in this phase."
+    },
+    {
+      "amendment_id": "go_checker_not_absolute_blocker",
+      "status": "PRE_ORACLE_FEASIBILITY_AMENDMENT",
+      "summary": "Bounded Go provenance yields UNVERIFIED. Proceed with CDI freeze and DecisionInput mapping policy without waiting for Go."
+    },
+    {
+      "amendment_id": "ovk_source_materialization_pending",
+      "status": "PRE_ORACLE_FEASIBILITY_AMENDMENT",
+      "summary": "OVK first-parent cardinality probe matches 248 but sealed census digest not byte-reproduced. Anchors/projection/source-evidence binding remain PENDING_SOURCE_MATERIALIZATION. No fabricated SOURCE_EVIDENCE_V1_BINDING."
+    }
+  ],
+  "canonical_decision_input": {
+    "schema": "experiments/rtk/schemas/CanonicalDecisionInput.v1.schema.json",
+    "canonicalization": "experiments/rtk/specs/CanonicalDecisionInput.v1.canonicalization.md",
+    "implementation_independent": true,
+    "go_serialization_must_not_define_corpus": true,
+    "mapping_waits_for_go": false
+  },
+  "mappings": {
+    "context_footprint": "experiments/rtk/mappings/CONTEXT_FOOTPRINT_MAPPING.v0.json",
+    "relying_profile": "experiments/rtk/mappings/RELYING_PROFILE_MAPPING.v0.json",
+    "repair_catalog": "experiments/rtk/mappings/REPAIR_CATALOG_MAPPING.v0.json",
+    "binding_status": "PENDING_SOURCE_MATERIALIZATION"
+  },
+  "rtk_implementation": {
+    "go_checker_status": "UNVERIFIED",
+    "go_checker_sha": null,
+    "python_checker_sha": null,
+    "evaluated_implementation_status": "INTERFACE_FROZEN_IMPLEMENTATION_PENDING",
+    "identity_document": "experiments/rtk/EVALUATED_IMPLEMENTATION_IDENTITY.v0.json",
+    "repository": "fraware/open-verification-kernel",
+    "commit_sha": null,
+    "lean_commit_sha": null,
+    "schema_versions": {
+      "CanonicalDecisionInput": "v1",
+      "case": "v0",
+      "transition": "v0",
+      "evidence_snapshot": "v0",
+      "oracle": "v0"
+    },
+    "toolchain_versions": {},
+    "evaluation_interface_version": "CanonicalDecisionInput.v1"
+  },
+  "source_evidence": {
+    "workflow": "UNCREATED",
+    "tier_v1": "UNCREATED",
+    "unit_tests": "UNCREATED",
+    "binding": "UNCREATED",
+    "reason": "No honest OVK source-evidence materialization modules or sealed census/anchor artifacts available to bind without fabricating digests."
+  },
+  "case_generator": {
+    "repository": null,
+    "commit_sha": null,
+    "version": null,
+    "status": "NOT_STARTED"
+  },
+  "baselines": [],
+  "sampling": {
+    "mode": "ALL_ELIGIBLE",
+    "seed": null,
+    "target_size": null
+  },
+  "execution_prohibitions_this_phase": [
+    "NO_ORACLE",
+    "NO_RTK_PREDICTION",
+    "NO_BASELINE_EXECUTION",
+    "NO_UNBLINDING",
+    "NO_RTK_SEMANTICS_CHANGE_FOR_HOLDOUT"
+  ],
+  "seal_manifest_sha256": null
+}

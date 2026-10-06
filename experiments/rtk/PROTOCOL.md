@@ -2,6 +2,13 @@
 
 Status: methods freeze draft. This document contains no benchmark results.
 
+Companion freeze artifacts (pre-oracle): `RTK_EVAL_FREEZE.json`,
+`SOURCE_UNIVERSE_EXPANSION_PROTOCOL.v1.md`,
+`SOURCE_REPOSITORY_CANDIDATES.v1.json`,
+`schemas/CanonicalDecisionInput.v1.schema.json`.
+Oracle labeling remains blocked until expansion finishes and a human reviews
+the checkpoint.
+
 ## Objective
 
 Evaluate whether claim-conditioned evidence applicability under repository or verifier change correctly identifies evidence that remains valid, evidence that becomes invalid, and evidence that requires revalidation, while limiting unnecessary revalidation.

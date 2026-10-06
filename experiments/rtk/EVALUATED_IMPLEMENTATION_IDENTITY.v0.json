@@ -1,0 +1,27 @@
+{
+  "schema_version": "evaluated_implementation_identity.v0",
+  "go_checker_status": "UNVERIFIED",
+  "go_checker_sha": null,
+  "python_rtk_predictor_status": "NOT_PRESENT_ON_OVK",
+  "python_rtk_predictor_sha": null,
+  "evaluated_implementation_status": "INTERFACE_FROZEN_IMPLEMENTATION_PENDING",
+  "notes": [
+    "Preferred Go production checker was not recovered under bounded provenance search.",
+    "No OVK Python RTK predictor matching the sealed verdict interface was found to bind as a substitute.",
+    "This identity document freezes the evaluation interface (CanonicalDecisionInput.v1 + case/oracle schemas) without claiming an unrecovered Go checker.",
+    "Binding an executable implementation later must not modify RTK semantics for holdout cases and must record exact commit SHAs in RTK_EVAL_FREEZE.json."
+  ],
+  "frozen_interface": {
+    "canonical_decision_input": "schemas/CanonicalDecisionInput.v1.schema.json",
+    "canonicalization_spec": "specs/CanonicalDecisionInput.v1.canonicalization.md",
+    "case_schema": "schemas/case.schema.json",
+    "oracle_schema": "schemas/oracle.schema.json",
+    "verdict_space": [
+      "VALID",
+      "INVALID",
+      "REVALIDATION_REQUIRED",
+      "UNRESOLVED"
+    ]
+  },
+  "not_the_unrecovered_historical_go_checker": true
+}

@@ -1,0 +1,31 @@
+{
+  "schema_version": "census_cardinality_probe.v0",
+  "status": "PROBE_ONLY_NOT_A_BINDING",
+  "generated_on_ovk": true,
+  "history_rule": "FIRST_PARENT",
+  "repositories": [
+    {
+      "repository": "CertifyEdge",
+      "url": "https://github.com/fraware/CertifyEdge",
+      "cutoff_sha": "6ef02d54c4697886b20577f10eec683861475db2",
+      "first_parent_commit_count": 51,
+      "first_parent_transition_count": 50,
+      "cutoff_committer_timestamp": "2026-05-22T10:56:51-07:00"
+    },
+    {
+      "repository": "pcs-core",
+      "url": "https://github.com/SentinelOps-CI/pcs-core",
+      "cutoff_sha": "9c971f5f9da8a424924dd8f48d6a3b71a1009e1b",
+      "first_parent_commit_count": 199,
+      "first_parent_transition_count": 198,
+      "cutoff_committer_timestamp": "2026-07-24T20:21:55+02:00"
+    }
+  ],
+  "total_first_parent_transition_count": 248,
+  "external_reported_census_cardinality": 248,
+  "cardinality_match": true,
+  "external_reported_census_sha256": "b1816276176297adf345981fe5d9c8271cf00f5b71653d59a21d8261d64a6b11",
+  "local_serialization_attempts": "multiple_canonical_json_and_ndjson_variants",
+  "local_digest_match": false,
+  "conclusion": "Cardinality of FIRST_PARENT transitions at the immutable cutoffs matches the external sealed reference (248). Byte-identical census digest was NOT reproduced under OVK-local serializations. SOURCE_EVIDENCE binding and sealed census artifact claims remain PENDING_SOURCE_MATERIALIZATION / FORBIDDEN until format-parity regeneration succeeds or sealed artifacts are imported verbatim with provenance."
+}

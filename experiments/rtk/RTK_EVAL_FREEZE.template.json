@@ -1,11 +1,12 @@
 {
   "schema_version": "rtk.eval_freeze.v0",
   "status": "TEMPLATE_NOT_FROZEN",
+  "note": "Unfrozen template retained for reference. Active freeze document is RTK_EVAL_FREEZE.json.",
   "protocol_commit_sha": null,
   "source_repositories": [
     {
       "repository": "CertifyEdge",
-      "url": null,
+      "url": "https://github.com/fraware/CertifyEdge",
       "cutoff_sha": null,
       "cutoff_timestamp": null,
       "history_rule": "FIRST_PARENT"

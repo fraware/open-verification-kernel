@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-verification-kernel.invalid/rtk/CanonicalDecisionInput.v1.schema.json",
+  "title": "CanonicalDecisionInput.v1",
+  "description": "Implementation-independent decision input for RTK sealed evaluation. Go serialization must not define the corpus. Mapping from source materials proceeds after this schema freeze and does not wait for Go checker recovery.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "decision_input_id",
+    "transition",
+    "claim",
+    "evidence_snapshot",
+    "context_footprint",
+    "relying_profile",
+    "canonical_digest"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "CanonicalDecisionInput.v1"
+    },
+    "decision_input_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transition_id",
+        "repository",
+        "source_sha",
+        "target_sha",
+        "history_rule"
+      ],
+      "properties": {
+        "transition_id": { "type": "string", "minLength": 1 },
+        "repository": { "type": "string", "minLength": 1 },
+        "source_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "target_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "history_rule": { "const": "FIRST_PARENT" },
+        "changed_paths": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_id", "claim_class"],
+      "properties": {
+        "claim_id": { "type": "string", "minLength": 1 },
+        "claim_class": { "type": "string", "minLength": 1 },
+        "claim_digest": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "evidence_snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot_id",
+        "digest",
+        "digest_algorithm",
+        "completeness"
+      ],
+      "properties": {
+        "snapshot_id": { "type": "string", "minLength": 1 },
+        "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "digest_algorithm": { "const": "sha256" },
+        "completeness": {
+          "enum": ["COMPLETE", "INCOMPLETE", "UNKNOWN"]
+        },
+        "artifact_refs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "sha256"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+            }
+          }
+        }
+      }
+    },
+    "context_footprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mapping_id", "footprint_digest"],
+      "properties": {
+        "mapping_id": { "type": "string", "minLength": 1 },
+        "footprint_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "elements": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "relying_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mapping_id", "profile_id"],
+      "properties": {
+        "mapping_id": { "type": "string", "minLength": 1 },
+        "profile_id": { "type": "string", "minLength": 1 },
+        "profile_digest": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "repair_catalog_ref": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["mapping_id", "catalog_id"],
+      "properties": {
+        "mapping_id": { "type": "string", "minLength": 1 },
+        "catalog_id": { "type": "string", "minLength": 1 },
+        "catalog_digest": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "canonical_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the canonicalization specified in specs/CanonicalDecisionInput.v1.canonicalization.md over all fields except canonical_digest itself."
+    }
+  }
+}

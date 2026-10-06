@@ -1,0 +1,20 @@
+{
+  "schema_version": "context_footprint_mapping.v0",
+  "mapping_id": "CONTEXT_FOOTPRINT_MAPPING.v0",
+  "binding_status": "PENDING_SOURCE_MATERIALIZATION",
+  "provenance": "OVK_METHODS_STUB_FROM_REQUIRED_FIELDS_ONLY",
+  "notes": [
+    "Required mapping stage before RELYING_PROFILE_MAPPING.v0.",
+    "No historical frozen footprint rules were present under experiments/rtk/ on OVK at methods freeze time.",
+    "Entries remain empty pending source materialization; do not invent digests."
+  ],
+  "required_fields_per_entry": [
+    "footprint_id",
+    "repository",
+    "source_sha",
+    "element_paths",
+    "footprint_digest"
+  ],
+  "entries": [],
+  "mapping_digest": null
+}

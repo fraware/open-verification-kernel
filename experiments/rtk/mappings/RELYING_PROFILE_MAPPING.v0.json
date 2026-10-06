@@ -1,0 +1,20 @@
+{
+  "schema_version": "relying_profile_mapping.v0",
+  "mapping_id": "RELYING_PROFILE_MAPPING.v0",
+  "binding_status": "PENDING_SOURCE_MATERIALIZATION",
+  "depends_on": ["CONTEXT_FOOTPRINT_MAPPING.v0"],
+  "provenance": "OVK_METHODS_STUB_FROM_REQUIRED_FIELDS_ONLY",
+  "notes": [
+    "Required mapping stage after CONTEXT_FOOTPRINT_MAPPING.v0 and before REPAIR_CATALOG_MAPPING.v0.",
+    "No historical frozen relying-profile rules were present under experiments/rtk/ on OVK at methods freeze time.",
+    "Entries remain empty pending source materialization; do not invent digests."
+  ],
+  "required_fields_per_entry": [
+    "profile_id",
+    "footprint_id",
+    "profile_class",
+    "profile_digest"
+  ],
+  "entries": [],
+  "mapping_digest": null
+}

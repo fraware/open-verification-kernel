@@ -1,0 +1,91 @@
+{
+  "schema_version": "source_repository_candidates.v1",
+  "status": "FROZEN_BEFORE_ADDED_REPO_INSPECTION",
+  "notes": [
+    "Ordered list. source-universe-v0 identities are recorded first and are immutable.",
+    "Expansion candidates below are OVK-side proposed public repositories for pre-oracle feasibility only.",
+    "They are not claimed to be copies of any private evaluation candidate roster.",
+    "Do not inspect added-repo trees for case content until this file is frozen in the evaluation commit.",
+    "If this list is exhausted below the 20-transition feasibility gate: STOP EXPANSION."
+  ],
+  "source_universe_v0": [
+    {
+      "order": 0,
+      "repository": "CertifyEdge",
+      "url": "https://github.com/fraware/CertifyEdge",
+      "cutoff_sha": "6ef02d54c4697886b20577f10eec683861475db2",
+      "history_rule": "FIRST_PARENT",
+      "role": "SOURCE_UNIVERSE_V0",
+      "inspection_status": "IDENTITY_RECORDED",
+      "ovk_materialization_status": "PENDING_SOURCE_MATERIALIZATION"
+    },
+    {
+      "order": 1,
+      "repository": "pcs-core",
+      "url": "https://github.com/SentinelOps-CI/pcs-core",
+      "cutoff_sha": "9c971f5f9da8a424924dd8f48d6a3b71a1009e1b",
+      "history_rule": "FIRST_PARENT",
+      "role": "SOURCE_UNIVERSE_V0",
+      "inspection_status": "IDENTITY_RECORDED",
+      "ovk_materialization_status": "PENDING_SOURCE_MATERIALIZATION"
+    }
+  ],
+  "expansion_candidates_ordered": [
+    {
+      "order": 2,
+      "repository": "pcs-bench",
+      "url": "https://github.com/fraware/pcs-bench",
+      "cutoff_sha": null,
+      "cutoff_policy": "PIN_BEFORE_INSPECTION",
+      "history_rule": "FIRST_PARENT",
+      "role": "EXPANSION_CANDIDATE",
+      "eligibility_basis": "source_side_public_history_only",
+      "inspection_status": "NOT_INSPECTED"
+    },
+    {
+      "order": 3,
+      "repository": "ovk-consumer-fastapi-terraform",
+      "url": "https://github.com/fraware/ovk-consumer-fastapi-terraform",
+      "cutoff_sha": null,
+      "cutoff_policy": "PIN_BEFORE_INSPECTION",
+      "history_rule": "FIRST_PARENT",
+      "role": "EXPANSION_CANDIDATE",
+      "eligibility_basis": "source_side_public_history_only",
+      "inspection_status": "NOT_INSPECTED"
+    },
+    {
+      "order": 4,
+      "repository": "ovk-consumer-express-actions",
+      "url": "https://github.com/fraware/ovk-consumer-express-actions",
+      "cutoff_sha": null,
+      "cutoff_policy": "PIN_BEFORE_INSPECTION",
+      "history_rule": "FIRST_PARENT",
+      "role": "EXPANSION_CANDIDATE",
+      "eligibility_basis": "source_side_public_history_only",
+      "inspection_status": "NOT_INSPECTED"
+    },
+    {
+      "order": 5,
+      "repository": "environment-assurance-compiler",
+      "url": "https://github.com/fraware/environment-assurance-compiler",
+      "cutoff_sha": null,
+      "cutoff_policy": "PIN_BEFORE_INSPECTION",
+      "history_rule": "FIRST_PARENT",
+      "role": "EXPANSION_CANDIDATE",
+      "eligibility_basis": "source_side_public_history_only",
+      "inspection_status": "NOT_INSPECTED"
+    },
+    {
+      "order": 6,
+      "repository": "lean-project-evidence",
+      "url": "https://github.com/fraware/lean-project-evidence",
+      "cutoff_sha": null,
+      "cutoff_policy": "PIN_BEFORE_INSPECTION",
+      "history_rule": "FIRST_PARENT",
+      "role": "EXPANSION_CANDIDATE",
+      "eligibility_basis": "source_side_public_history_only",
+      "inspection_status": "NOT_INSPECTED"
+    }
+  ],
+  "stop_rule": "STOP_EXPANSION_WHEN_CANDIDATE_LIST_EXHAUSTED_BELOW_FEASIBILITY_GATE"
+}
