@@ -1,4 +1,4 @@
-"""READ-ONLY six-surface Reaudit probe for PE peel closure tip 1.3.0.
+"""READ-ONLY six-surface Reaudit probe for PE peel closure tip 1.4.0.
 
 Adjacent adapters beyond fortieth pins. Exit 0 = all PASS (no false authorize).
 Non-material OOS shapes are documented separately and not asserted here.

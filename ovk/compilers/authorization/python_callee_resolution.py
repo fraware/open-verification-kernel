@@ -9189,9 +9189,11 @@ def _next_iter_first_pack_elt(
                 base, projection_aliases=projs
             )
             if nested_pair is not None:
-                # ``…[0][1]`` on enumerate pair Tuple — select elt at idx.
+                # ``…[0][1]`` on enumerate pair Tuple / nested list packs
+                # ``views=[[d.keys]]; views[0][0]`` — select elt at idx
+                # (Unknown > false PASS).
                 if (
-                    isinstance(nested_pair, ast.Tuple)
+                    isinstance(nested_pair, (ast.Tuple, ast.List))
                     and nested_pair.elts
                     and idx is not None
                     and -len(nested_pair.elts) <= idx < len(nested_pair.elts)
@@ -9204,7 +9206,7 @@ def _next_iter_first_pack_elt(
         )
         if inner is not None and (idx == 0 or idx == 1 or idx is None):
             if (
-                isinstance(inner, ast.Tuple)
+                isinstance(inner, (ast.Tuple, ast.List))
                 and inner.elts
                 and idx is not None
                 and -len(inner.elts) <= idx < len(inner.elts)
