@@ -159,6 +159,8 @@ class PcsBenchAdapter(ExpansionAdapterBase):
         else:
             env = dict(os.environ)
             env["PYTHONPATH"] = "src"
+            # Do not use --dry-run: that skips pcs validate and would weaken
+            # Tier A / REPLAY_VERIFIED relative to a true native validator run.
             command = self._run_in_source_worktree(
                 checkout,
                 source_sha,
@@ -169,7 +171,6 @@ class PcsBenchAdapter(ExpansionAdapterBase):
                     "validate-cases",
                     "--suite",
                     "all",
-                    "--dry-run",
                 ],
                 timeout_sec=300,
                 env=env,

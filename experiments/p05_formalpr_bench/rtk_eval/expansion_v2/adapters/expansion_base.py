@@ -57,7 +57,7 @@ class ExpansionAdapterBase(SourceRepositoryAdapter):
 
     def __init__(self, identity: RepositoryIdentity) -> None:
         self._identity = identity
-        self._command_cache: dict[tuple[str, tuple[str, ...]], dict[str, Any]] = {}
+        self._command_cache: dict[tuple[Any, ...], dict[str, Any]] = {}
 
     @property
     def identity(self) -> RepositoryIdentity:
@@ -245,6 +245,11 @@ class ExpansionAdapterBase(SourceRepositoryAdapter):
         timeout_sec: int = 600,
         env: dict[str, str] | None = None,
     ) -> dict[str, Any]:
+        cache_key = (source_sha, tuple(argv), cwd_relative)
+        cached = self._command_cache.get(cache_key)
+        if cached is not None:
+            return dict(cached)
+
         mse_work = tempfile.mkdtemp(prefix="rtk-exp-wt-")
         worktree = Path(mse_work) / source_sha
         try:
@@ -274,26 +279,32 @@ class ExpansionAdapterBase(SourceRepositoryAdapter):
                 check=False,
                 timeout=timeout_sec,
             )
-            return {
+            result = {
                 "status": "COMPLETED",
                 "exit_code": proc.returncode,
                 "argv": argv,
                 "stdout_sha256": _sha256(proc.stdout),
                 "stderr_sha256": _sha256(proc.stderr),
             }
+            self._command_cache[cache_key] = result
+            return dict(result)
         except subprocess.TimeoutExpired:
-            return {
+            result = {
                 "status": "TIMEOUT",
                 "exit_code": None,
                 "argv": argv,
             }
+            self._command_cache[cache_key] = result
+            return dict(result)
         except Exception as exc:  # noqa: BLE001 — recorded as operational failure
-            return {
+            result = {
                 "status": "OPERATIONAL_FAILURE",
                 "exit_code": None,
                 "argv": argv,
                 "error": str(exc),
             }
+            self._command_cache[cache_key] = result
+            return dict(result)
         finally:
             subprocess.run(
                 [
