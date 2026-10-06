@@ -405,6 +405,7 @@
     "unblinding": "SCORING_ONLY",
     "false_reuse_case_level": 0.0,
     "unnecessary_revalidation_case_level": 0.0,
-    "baselines_status": "BASELINES_PENDING"
+    "baselines_status": "BASELINES_PENDING",
+    "commit_sha": "8346d4c96adc48282fd79032b4f64859d408a4b5"
   }
 }
