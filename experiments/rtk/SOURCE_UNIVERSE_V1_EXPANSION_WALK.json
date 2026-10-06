@@ -1,0 +1,147 @@
+{
+  "schema_version": "source_universe_v1_expansion_walk.v0",
+  "status": "WALK_COMPLETE_LIST_EXHAUSTED",
+  "protocol_path": "experiments/rtk/SOURCE_UNIVERSE_EXPANSION_PROTOCOL.v1.md",
+  "candidates_path": "experiments/rtk/SOURCE_REPOSITORY_CANDIDATES.v1.json",
+  "candidates_sha256": "62f60ccd209b144db096a1dec0a9334e6896ee1d50a0373be934252d07e33648",
+  "cutoff_pin_commit_sha": "13b1ae5b90985ad320abfde2b15194498f5aa564",
+  "authentic_modules_unchanged": {
+    "extract_historical_anchors.py": "f37323dfee0ebc40417eeee548c95de2debbd44f",
+    "materialize_source_evidence.py": "f97e2826308342a9ac772d39aee794a781417113",
+    "project_source_evidence_semantics.py": "8e1870eea20dd18b6bd090cc7ee3b8ded7f70987",
+    "tier_source_evidence_v1.py": "6010c44bb6ee2d89a30927726b37c1b346be4e0f"
+  },
+  "generate_transition_census_py": "UNAVAILABLE",
+  "source_universe_v0_immutable": true,
+  "selection_rule": "locked_order_only_no_outcome_driven_reordering",
+  "repos_processed_in_order": [
+    {
+      "order": 2,
+      "repository": "pcs-bench",
+      "url": "https://github.com/fraware/pcs-bench",
+      "cutoff_sha": "6092cccefee7841dfde1393e6881d433838a2252",
+      "cutoff_timestamp": "2026-05-27T09:31:28-07:00",
+      "public_cloneable": true,
+      "history_rule": "FIRST_PARENT",
+      "first_parent_commit_count": 10,
+      "first_parent_transition_count": 9,
+      "source_side_eligibility": "PUBLIC_HISTORY_PRESENT",
+      "authentic_extract_probe": {
+        "exit_code": 1,
+        "message": "unsupported frozen repository: fraware/pcs-bench"
+      },
+      "overlay_census_records_admitted": 0,
+      "anchors_materialized": 0,
+      "source_evidence_materialized": 0,
+      "replay_verified_transitions_added": 0,
+      "outcome": "BLOCKED_AUTHENTIC_EXTRACT_UNSUPPORTED_REPOSITORY"
+    },
+    {
+      "order": 3,
+      "repository": "ovk-consumer-fastapi-terraform",
+      "url": "https://github.com/fraware/ovk-consumer-fastapi-terraform",
+      "cutoff_sha": "784576bc5fd01ac80092662887a896301d4fe186",
+      "cutoff_timestamp": "2026-08-26T14:19:38-07:00",
+      "public_cloneable": true,
+      "history_rule": "FIRST_PARENT",
+      "first_parent_commit_count": 7,
+      "first_parent_transition_count": 6,
+      "source_side_eligibility": "PUBLIC_HISTORY_PRESENT",
+      "authentic_extract_probe": {
+        "exit_code": 1,
+        "message": "unsupported frozen repository: fraware/ovk-consumer-fastapi-terraform"
+      },
+      "overlay_census_records_admitted": 0,
+      "anchors_materialized": 0,
+      "source_evidence_materialized": 0,
+      "replay_verified_transitions_added": 0,
+      "outcome": "BLOCKED_AUTHENTIC_EXTRACT_UNSUPPORTED_REPOSITORY"
+    },
+    {
+      "order": 4,
+      "repository": "ovk-consumer-express-actions",
+      "url": "https://github.com/fraware/ovk-consumer-express-actions",
+      "cutoff_sha": "31aed31a04c7bca67d3bd6151caf1e42f4b7d1f8",
+      "cutoff_timestamp": "2026-08-26T14:19:47-07:00",
+      "public_cloneable": true,
+      "history_rule": "FIRST_PARENT",
+      "first_parent_commit_count": 8,
+      "first_parent_transition_count": 7,
+      "source_side_eligibility": "PUBLIC_HISTORY_PRESENT",
+      "authentic_extract_probe": {
+        "exit_code": 1,
+        "message": "unsupported frozen repository: fraware/ovk-consumer-express-actions"
+      },
+      "overlay_census_records_admitted": 0,
+      "anchors_materialized": 0,
+      "source_evidence_materialized": 0,
+      "replay_verified_transitions_added": 0,
+      "outcome": "BLOCKED_AUTHENTIC_EXTRACT_UNSUPPORTED_REPOSITORY"
+    },
+    {
+      "order": 5,
+      "repository": "environment-assurance-compiler",
+      "url": "https://github.com/fraware/environment-assurance-compiler",
+      "cutoff_sha": "812b4b13f8acdfcafb50de9d794c7fa0b20b31ad",
+      "cutoff_timestamp": "2026-09-20T17:30:12-07:00",
+      "public_cloneable": true,
+      "history_rule": "FIRST_PARENT",
+      "first_parent_commit_count": 88,
+      "first_parent_transition_count": 87,
+      "source_side_eligibility": "PUBLIC_HISTORY_PRESENT",
+      "authentic_extract_probe": {
+        "exit_code": 1,
+        "message": "unsupported frozen repository: fraware/environment-assurance-compiler"
+      },
+      "overlay_census_records_admitted": 0,
+      "anchors_materialized": 0,
+      "source_evidence_materialized": 0,
+      "replay_verified_transitions_added": 0,
+      "outcome": "BLOCKED_AUTHENTIC_EXTRACT_UNSUPPORTED_REPOSITORY"
+    },
+    {
+      "order": 6,
+      "repository": "lean-project-evidence",
+      "url": "https://github.com/fraware/lean-project-evidence",
+      "cutoff_sha": "4660d97db933b0fbcf5c9af466191055c887bea3",
+      "cutoff_timestamp": "2026-07-22T03:47:25-07:00",
+      "public_cloneable": true,
+      "history_rule": "FIRST_PARENT",
+      "first_parent_commit_count": 71,
+      "first_parent_transition_count": 70,
+      "source_side_eligibility": "PUBLIC_HISTORY_PRESENT",
+      "authentic_extract_probe": {
+        "exit_code": 1,
+        "message": "unsupported frozen repository: fraware/lean-project-evidence"
+      },
+      "overlay_census_records_admitted": 0,
+      "anchors_materialized": 0,
+      "source_evidence_materialized": 0,
+      "replay_verified_transitions_added": 0,
+      "outcome": "BLOCKED_AUTHENTIC_EXTRACT_UNSUPPORTED_REPOSITORY"
+    }
+  ],
+  "blocker_summary": [
+    "Authentic extract_historical_anchors.py hard-requires repository identity fraware/CertifyEdge or SentinelOps-CI/pcs-core.",
+    "All five locked expansion candidates are public and have FIRST_PARENT transitions, but none are supported by authentic extract/materialize/tier modules.",
+    "generate_transition_census.py remains UNAVAILABLE; no fabricated overlay census bytes were claimed as authentic-generator output.",
+    "v0 predicates and modules were not modified for cardinality.",
+    "No additional repositories were searched after list exhaustion."
+  ],
+  "totals": {
+    "candidates_processed": 5,
+    "candidates_materialized": 0,
+    "overlay_census_records_admitted": 0,
+    "replay_verified_transitions_added": 0
+  },
+  "prohibitions_honored": [
+    "NO_ORACLE",
+    "NO_RTK_PREDICTION",
+    "NO_BASELINE_EXECUTION",
+    "NO_UNBLINDING",
+    "NO_V0_REWRITE",
+    "NO_PREDICATE_WEAKENING",
+    "NO_FABRICATED_EVIDENCE",
+    "NO_INDEFINITE_REPO_SEARCH"
+  ]
+}

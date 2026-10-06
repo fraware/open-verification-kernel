@@ -1,6 +1,6 @@
 {
   "schema_version": "rtk.eval_freeze.v1",
-  "status": "SOURCE_EVIDENCE_V1_BOUND",
+  "status": "SOURCE_UNIVERSE_EXPANSION_EXHAUSTED_BELOW_20",
   "protocol_paths": {
     "readme": "experiments/rtk/README.md",
     "protocol": "experiments/rtk/PROTOCOL.md",
@@ -20,7 +20,9 @@
     "v1_run_head_provenance": "experiments/rtk/sealed/v1_run_head_0758dac/",
     "frozen_outputs": "experiments/rtk/sealed/frozen_outputs/",
     "source_evidence_v1_binding_draft": "experiments/rtk/SOURCE_EVIDENCE_V1_BINDING.DRAFT.json",
-    "source_evidence_v1_binding": "experiments/rtk/SOURCE_EVIDENCE_V1_BINDING.json"
+    "source_evidence_v1_binding": "experiments/rtk/SOURCE_EVIDENCE_V1_BINDING.json",
+    "source_universe_v1_binding": "experiments/rtk/SOURCE_UNIVERSE_V1_BINDING.json",
+    "source_universe_v1_expansion_walk": "experiments/rtk/SOURCE_UNIVERSE_V1_EXPANSION_WALK.json"
   },
   "protocol_commit_sha": "1bff877e9f405c447d10304221f4d1509abe141d",
   "source_repositories": [
@@ -88,18 +90,25 @@
     }
   },
   "pre_oracle_feasibility": {
-    "gate_name": "minimum_eligible_transitions",
+    "gate_name": "minimum_independent_replay_verified_transitions",
     "target_transitions": 20,
     "gate_kind": "FEASIBILITY_RULE_NOT_SCIENTIFIC_VALIDITY",
-    "status": "GATE_MET_TIER_A_3_TRANSITIONS_BOUND",
+    "status": "EXHAUSTED_BELOW_20",
+    "independent_replay_verified_transitions": {
+      "source_universe_v0": 3,
+      "source_universe_v1": 0,
+      "total": 3
+    },
     "external_report": {
       "provenance": "LOCALLY_REPRODUCED_ON_OVK",
       "reported_anchors": 9,
       "reported_transitions": 3,
-      "note": "Tier A counts reproduced with authentic modules at frozen digests."
+      "note": "Tier A counts remain v0-only; expansion added zero REPLAY_VERIFIED transitions."
     },
     "expansion_stop_rule": "STOP_EXPANSION_WHEN_CANDIDATE_LIST_EXHAUSTED_BELOW_GATE",
-    "oracle_status": "BLOCKED_UNTIL_EXPANSION_FINISHED_AND_HUMAN_CHECKPOINT"
+    "expansion_status": "STOPPED_CANDIDATE_LIST_EXHAUSTED",
+    "oracle_status": "BLOCKED_UNTIL_HUMAN_CHECKPOINT_AFTER_EXPANSION",
+    "sample_size_note": "Sealed study would proceed at available sample size (3) with explicit uncertainty/power later; oracle not started in this pass."
   },
   "amendment_history": [
     {
@@ -136,6 +145,11 @@
       "amendment_id": "ovk_source_evidence_v1_bound",
       "status": "SOURCE_EVIDENCE_V1_BOUND",
       "summary": "SOURCE_EVIDENCE_V1_BINDING.json created after Actions run 37517623512 / job 112454498374 succeeded at 831a589 with frozen census/anchors/semantic digests matched. Tier A 9/3, Tier B 161/161. Materializer f97e2826\u2026. No oracle."
+    },
+    {
+      "amendment_id": "source_universe_expansion_exhausted_below_20",
+      "status": "SOURCE_UNIVERSE_EXPANSION_EXHAUSTED_BELOW_20",
+      "summary": "Pinned expansion candidate cutoffs (13b1ae5). Walked all five locked candidates in order. Each is public with FIRST_PARENT transitions but authentic extract_historical_anchors.py rejects non-v0 repository identities. generate_transition_census.py remains UNAVAILABLE. No overlay census/evidence fabricated. REPLAY_VERIFIED transitions remain 3 (v0) + 0 (v1). Gate EXHAUSTED_BELOW_20. No oracle/RTK/baseline/unblind."
     }
   ],
   "canonical_decision_input": {
@@ -203,5 +217,23 @@
     "NO_UNBLINDING",
     "NO_RTK_SEMANTICS_CHANGE_FOR_HOLDOUT"
   ],
-  "seal_manifest_sha256": "b1816276176297adf345981fe5d9c8271cf00f5b71653d59a21d8261d64a6b11"
+  "seal_manifest_sha256": "b1816276176297adf345981fe5d9c8271cf00f5b71653d59a21d8261d64a6b11",
+  "source_universe_v1": {
+    "status": "NO_OVERLAY_MATERIALIZED",
+    "binding": "experiments/rtk/SOURCE_UNIVERSE_V1_BINDING.json",
+    "binding_sha256": "63ea7fc8465285dc7ec78eafe55e964bb7a0992c2dbf70a8ec9c675227b6c901",
+    "expansion_walk": "experiments/rtk/SOURCE_UNIVERSE_V1_EXPANSION_WALK.json",
+    "expansion_walk_sha256": "7692574e1cf6c3ec0d9cdfc3364a44463bfa893cdfe81127988c4f174ac8d893",
+    "candidates_sha256_at_pin": "62f60ccd209b144db096a1dec0a9334e6896ee1d50a0373be934252d07e33648",
+    "cutoff_pin_commit_sha": "13b1ae5b90985ad320abfde2b15194498f5aa564",
+    "repos_processed_in_order": [
+      "pcs-bench",
+      "ovk-consumer-fastapi-terraform",
+      "ovk-consumer-express-actions",
+      "environment-assurance-compiler",
+      "lean-project-evidence"
+    ],
+    "replay_verified_transitions_added": 0,
+    "blocker": "AUTHENTIC_EXTRACT_SUPPORTS_ONLY_CERTIFYEDGE_AND_PCS_CORE"
+  }
 }
