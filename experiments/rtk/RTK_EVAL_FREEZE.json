@@ -1,6 +1,6 @@
 {
   "schema_version": "rtk.eval_freeze.v1",
-  "status": "PRE_ORACLE_ACCEPT_N10_PILOT_AFTER_V2_EXHAUSTION",
+  "status": "ORACLE_COMMITTED_TIER_A_PILOT_N10_PRE_PREDICTION",
   "protocol_paths": {
     "readme": "experiments/rtk/README.md",
     "protocol": "experiments/rtk/PROTOCOL.md",
@@ -27,7 +27,10 @@
     "source_universe_v1_expansion_walk": "experiments/rtk/SOURCE_UNIVERSE_V1_EXPANSION_WALK.json",
     "source_universe_v2_binding": "experiments/rtk/SOURCE_UNIVERSE_V2_BINDING.json",
     "source_universe_v2_expansion_walk": "experiments/rtk/SOURCE_UNIVERSE_V2_EXPANSION_WALK.json",
-    "expansion_v2_outputs": "experiments/rtk/sealed/expansion_v2_outputs/"
+    "expansion_v2_outputs": "experiments/rtk/sealed/expansion_v2_outputs/",
+    "oracle_binding": "experiments/rtk/ORACLE_BINDING.json",
+    "oracle_rules_pilot_n10": "experiments/rtk/oracle/ORACLE_RULES.pilot_n10.v0.md",
+    "pilot_n10": "experiments/rtk/sealed/pilot_n10/"
   },
   "protocol_commit_sha": "1bff877e9f405c447d10304221f4d1509abe141d",
   "source_repositories": [
@@ -113,7 +116,7 @@
     },
     "expansion_stop_rule": "STOP_EXPANSION_WHEN_CANDIDATE_LIST_EXHAUSTED_BELOW_GATE",
     "expansion_status": "STOPPED_CANDIDATE_LIST_EXHAUSTED",
-    "oracle_status": "AUTHORIZED_INDEPENDENT_ORACLE_TIER_A_ONLY",
+    "oracle_status": "ORACLE_COMMITTED",
     "sample_size_note": "Human proceed after v2 exhaustion: accept available Tier-A sample N=10 independent REPLAY_VERIFIED transitions as sealed pilot / limited-power primary evaluation path. 20-transition feasibility gate remains unmet and is not waived as a scientific-validity criterion. Inferential limits: even 0/10 false-reuse leaves weak upper bounds versus 20/59 planning targets; do not present N=10 as a strong reliability claim. Tier B remains secondary and separately reported; not folded into Tier A. No further candidate search in this version. No Tier A criteria weakening. v2 candidate list not reopened.",
     "acceptance": {
       "decision": "ACCEPT_N10_SEALED_PILOT",
@@ -126,7 +129,7 @@
       "tier_a_criteria_weakened": false,
       "v2_candidate_list_reopened": false
     },
-    "next_pass": "Independent oracle adjudication on PRIMARY Tier A only, then prediction commitment on bound reference implementation. No unblinding in the oracle pass."
+    "next_pass": "RTK predictions on bound reference implementation for sealed Tier-A CDI, with blind prediction commitment before any unblinding/scoring feedback into semantics."
   },
   "amendment_history": [
     {
@@ -188,6 +191,11 @@
       "amendment_id": "pre_oracle_accept_n10_pilot_after_v2_exhaustion",
       "status": "PRE_ORACLE_ACCEPT_N10_PILOT_AFTER_V2_EXHAUSTION",
       "summary": "Accept available Tier-A sample of 10 independent REPLAY_VERIFIED transitions (v0:3 + v2:7) as sealed pilot path after v2 candidate-list exhaustion below the 20-transition feasibility gate. Explicit power limits: N=10 is a limited-power primary Tier-A evaluation, not a strong reliability claim; even 0/10 false-reuse yields weak upper bounds versus 20/59 targets. Tier B remains secondary and separately reported; not folded into Tier A. No further candidate search in this version. Tier A criteria unchanged. v2 candidate list not reopened. pcs-bench OPERATIONAL_FAILURE left unrepaired (pcs CLI absent; no dry-run / predicate stretch). Independent oracle track authorized next for PRIMARY Tier A only; no RTK prediction/baseline/unblind in this amendment."
+    },
+    {
+      "amendment_id": "oracle_committed_tier_a_pilot_n10",
+      "status": "ORACLE_COMMITTED_TIER_A_PILOT_N10_PRE_PREDICTION",
+      "summary": "Committed independent oracle labels for PRIMARY Tier-A REPLAY_VERIFIED pilot (cases=16, transitions=10, verdicts={'REVALIDATION_REQUIRED': 5, 'VALID': 11}) under ORACLE_RULES.pilot_n10 path-identity carry. Independence held: no RTK/baseline/aggregate inputs. UNRESOLVED allowed; none forced. Tier B not labeled for confirmatory path. No unblinding. RTK prediction commitment authorized next on bound reference implementation."
     }
   ],
   "canonical_decision_input": {
@@ -249,10 +257,13 @@
     "successful_job_id": 112454498374
   },
   "case_generator": {
-    "repository": null,
+    "repository": "fraware/open-verification-kernel",
     "commit_sha": null,
-    "version": null,
-    "status": "NOT_STARTED"
+    "version": "rtk.case_generator.pilot_n10.v0",
+    "status": "BOUND_PILOT_N10_TIER_A",
+    "path": "experiments/rtk/sealed/pilot_n10/TIER_A_CASES.jsonl",
+    "cdi_path": "experiments/rtk/sealed/pilot_n10/CanonicalDecisionInput.tier_a.jsonl",
+    "note": "Tier-A pilot case pack; prior frozen_outputs CDI left untouched."
   },
   "baselines": [],
   "sampling": {
@@ -261,13 +272,12 @@
     "target_size": null
   },
   "execution_prohibitions_this_phase": [
-    "NO_RTK_PREDICTION",
-    "NO_BASELINE_EXECUTION",
     "NO_UNBLINDING",
     "NO_RTK_SEMANTICS_CHANGE_FOR_HOLDOUT",
     "NO_FURTHER_CANDIDATE_SEARCH_THIS_VERSION",
     "NO_TIER_A_WEAKENING",
-    "NO_TIER_B_PROMOTION_INTO_TIER_A"
+    "NO_TIER_B_PROMOTION_INTO_TIER_A",
+    "NO_BASELINE_EXECUTION_UNTIL_REGISTERED"
   ],
   "seal_manifest_sha256": "b1816276176297adf345981fe5d9c8271cf00f5b71653d59a21d8261d64a6b11",
   "source_universe_v1": {
@@ -329,5 +339,28 @@
       "REPOSITORY_NATIVE_HISTORICAL_ARTIFACTS",
       "TRANSITION_CENSUS_AND_V2_OVERLAYS"
     ]
+  },
+  "oracle": {
+    "status": "ORACLE_COMMITTED",
+    "binding": "experiments/rtk/ORACLE_BINDING.json",
+    "rules": "experiments/rtk/oracle/ORACLE_RULES.pilot_n10.v0.md",
+    "oracle_jsonl": "experiments/rtk/sealed/pilot_n10/ORACLE.jsonl",
+    "scope": "PRIMARY_TIER_A_REPLAY_VERIFIED_ONLY",
+    "case_count": 16,
+    "transition_count": 10,
+    "verdict_counts": {
+      "REVALIDATION_REQUIRED": 5,
+      "VALID": 11
+    },
+    "digests": {
+      "CanonicalDecisionInput.tier_a.jsonl": "aab9e084dcf39ba1a7b27e1fad73e681e68ef9d67530f9a04a05ade05079aa5c",
+      "MAPPING_OVERLAY.v2_tier_a.json": "d818a940b9023c0a68c13165b9ddbd0cf931a5e11a941bc303f0df0dc5a2d660",
+      "ORACLE.jsonl": "59694f29701e6ed93cdb51cbfb94d5966a69f53758d7305c3871768564ccc0bf",
+      "ORACLE_RULES.pilot_n10.v0.md": "5d4484f4edebc7859703a4a68dafb4e3677a96fba01b0e25962f358b37aa1cbf",
+      "TIER_A_CASES.jsonl": "c502c4efefa5d92b574b0411a334b32c192797f29b45eba2c0e5cfaeb1e65204",
+      "TIER_A_MANIFEST.json": "5b10919614764a5c07a13cfa149695e944256f6aaf0d092197e3968b11f64b90"
+    },
+    "independence_held": true,
+    "unblinding": false
   }
 }

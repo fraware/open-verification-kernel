@@ -1,0 +1,29 @@
+{
+  "case_count": 16,
+  "cdi_count": 16,
+  "digests": {
+    "CanonicalDecisionInput.tier_a.jsonl": "aab9e084dcf39ba1a7b27e1fad73e681e68ef9d67530f9a04a05ade05079aa5c",
+    "MAPPING_OVERLAY.v2_tier_a.json": "d818a940b9023c0a68c13165b9ddbd0cf931a5e11a941bc303f0df0dc5a2d660",
+    "ORACLE.jsonl": "59694f29701e6ed93cdb51cbfb94d5966a69f53758d7305c3871768564ccc0bf",
+    "TIER_A_CASES.jsonl": "c502c4efefa5d92b574b0411a334b32c192797f29b45eba2c0e5cfaeb1e65204"
+  },
+  "independent_replay_verified_transitions": {
+    "source_universe_v0": 3,
+    "source_universe_v1": 0,
+    "source_universe_v2": 7,
+    "total": 10
+  },
+  "note": "Pilot CDI recomputed under frozen CanonicalDecisionInput.v1 canonicalization for Tier A only. Prior frozen_outputs CDI corpus left byte-untouched (known digest preimage mismatch vs frozen canonicalization for reference execution).",
+  "oracle_count": 16,
+  "oracle_labels_consulted_during_case_derivation": false,
+  "oracle_rules_id": "rtk.oracle.pilot_n10.path_identity_carry.v0",
+  "prior_frozen_cdi_untouched": "experiments/rtk/sealed/frozen_outputs/CanonicalDecisionInput.v1.jsonl",
+  "records_by_repository": {
+    "SentinelOps-CI/pcs-core": 9,
+    "fraware/ovk-consumer-express-actions": 4,
+    "fraware/ovk-consumer-fastapi-terraform": 3
+  },
+  "rtk_executed": false,
+  "schema_version": "rtk.pilot_n10_tier_a_manifest.v0",
+  "status": "SEALED_PILOT_TIER_A"
+}

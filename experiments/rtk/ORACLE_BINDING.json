@@ -1,0 +1,47 @@
+{
+  "adjudication": {
+    "forced_resolved_labels": false,
+    "mode": "SINGLE_REVIEW",
+    "unresolved_legitimate": true
+  },
+  "case_count": 16,
+  "commit_sha": "PENDING_COMMIT",
+  "digests": {
+    "CanonicalDecisionInput.tier_a.jsonl": "aab9e084dcf39ba1a7b27e1fad73e681e68ef9d67530f9a04a05ade05079aa5c",
+    "MAPPING_OVERLAY.v2_tier_a.json": "d818a940b9023c0a68c13165b9ddbd0cf931a5e11a941bc303f0df0dc5a2d660",
+    "ORACLE.jsonl": "59694f29701e6ed93cdb51cbfb94d5966a69f53758d7305c3871768564ccc0bf",
+    "ORACLE_RULES.pilot_n10.v0.md": "5d4484f4edebc7859703a4a68dafb4e3677a96fba01b0e25962f358b37aa1cbf",
+    "TIER_A_CASES.jsonl": "c502c4efefa5d92b574b0411a334b32c192797f29b45eba2c0e5cfaeb1e65204",
+    "TIER_A_MANIFEST.json": "5b10919614764a5c07a13cfa149695e944256f6aaf0d092197e3968b11f64b90"
+  },
+  "independence": {
+    "aggregate_rtk_results_consulted": false,
+    "allowed_materials_only": true,
+    "baseline_predictions_consulted": false,
+    "reference_predictor_imported": false,
+    "rtk_derived_failure_taxonomies_consulted": false,
+    "rtk_predictions_consulted": false
+  },
+  "independent_replay_verified_transitions_total": 10,
+  "oracle_rules_id": "rtk.oracle.pilot_n10.path_identity_carry.v0",
+  "oracle_schema": "experiments/rtk/schemas/oracle.schema.json",
+  "paths": {
+    "cases_jsonl": "experiments/rtk/sealed/pilot_n10/TIER_A_CASES.jsonl",
+    "cdi_jsonl": "experiments/rtk/sealed/pilot_n10/CanonicalDecisionInput.tier_a.jsonl",
+    "mapping_overlay": "experiments/rtk/sealed/pilot_n10/MAPPING_OVERLAY.v2_tier_a.json",
+    "oracle_jsonl": "experiments/rtk/sealed/pilot_n10/ORACLE.jsonl",
+    "oracle_rules": "experiments/rtk/oracle/ORACLE_RULES.pilot_n10.v0.md",
+    "tier_a_manifest": "experiments/rtk/sealed/pilot_n10/TIER_A_MANIFEST.json"
+  },
+  "pilot_acceptance_status": "PRE_ORACLE_ACCEPT_N10_PILOT_AFTER_V2_EXHAUSTION",
+  "rtk_prediction_status": "NOT_STARTED",
+  "schema_version": "rtk.oracle_binding.v0",
+  "scope": "PRIMARY_TIER_A_REPLAY_VERIFIED_ONLY",
+  "status": "ORACLE_COMMITTED_TIER_A_PILOT_N10",
+  "transition_count": 10,
+  "unblinding": false,
+  "verdict_counts": {
+    "REVALIDATION_REQUIRED": 5,
+    "VALID": 11
+  }
+}
