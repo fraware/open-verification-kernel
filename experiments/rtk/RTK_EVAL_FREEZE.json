@@ -12,7 +12,7 @@
     "external_sealed_references": "experiments/rtk/EXTERNAL_SEALED_REFERENCES.v0.json",
     "census_cardinality_probe": "experiments/rtk/CENSUS_CARDINALITY_PROBE.v0.json"
   },
-  "protocol_commit_sha": null,
+  "protocol_commit_sha": "1bff877e9f405c447d10304221f4d1509abe141d",
   "source_repositories": [
     {
       "repository": "CertifyEdge",
@@ -104,7 +104,7 @@
     "evaluated_implementation_status": "INTERFACE_FROZEN_IMPLEMENTATION_PENDING",
     "identity_document": "experiments/rtk/EVALUATED_IMPLEMENTATION_IDENTITY.v0.json",
     "repository": "fraware/open-verification-kernel",
-    "commit_sha": null,
+    "commit_sha": "1bff877e9f405c447d10304221f4d1509abe141d",
     "lean_commit_sha": null,
     "schema_versions": {
       "CanonicalDecisionInput": "v1",
