@@ -42,36 +42,54 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "setitem_get",
         "ior_get",
         "dictcomp_list_vb",
+        # Forty-first-pass atoms (shared peels).
+        "partial_setitem",
+        "bitor_dictcomp",
+        "ior_dict_vb",
+        "update_copy",
     ),
     "identity": (
         "star_zip_getitem",
         "star_enumerate",
         "filter_zip",
         "map_zip",
+        "partial_getitem_zip",
+        "filterfalse_zip",
+        "filter_bool_zip",
     ),
     "lexical": (
         "itruediv",
         "dunder_itruediv",
         "getattr_itruediv",
         "packed_itruediv",
+        "iadd",
+        "dunder_ifloordiv",
+        "index",
     ),
     "alias": (
         "dict_ctor_pack",
         "name_dict_pack",
         "mpt_pack",
         "attrgetter_call",
+        "next_iter_dict",
+        "od_ctor",
     ),
     "class": (
         "iconcat_list_copy_maps",
         "iadd_list_copy_parents",
         "extend_list_copy_maps",
         "methodcaller_iadd_copy",
+        "attrgetter_maps",
+        "getattr_maps",
     ),
     "interproc": (
         "unbound_decoder_decode",
         "from_import_literal_eval",
         "getattr_iadd_empty",
         "getattr_from_iterable",
+        "raw_decode_bound",
+        "pickle_loads",
+        "getattr_tuple_getitem_slice0",
     ),
 }
 
@@ -111,5 +129,18 @@ NON_MATERIAL_OOS: tuple[str, ...] = (
     "itertools.product() arity / empty-product one-tuple yield",
     "itertools.partition / combinations*(..., 0) non-material empties",
     "next(tee(...)) arity / tee half misuse that TypeErrors",
+    "list.extend TypeError empties / FormalPR freeze",
     "FormalPR freeze / #87 held-out until human gate",
+)
+
+# Forty-first-pass leftovers (prefer unknown over false authorize).
+FORTY_FIRST_LEFTOVERS: tuple[str, ...] = (
+    "alias: Name d.copy|get|pop|getattr(d,'get'); dict.__getitem__/"
+    "operator.getitem/methodcaller; partial(getattr).__call__.__call__; "
+    "packed/nexted/dict attrgetter('__call__'); getattr(ig(...),'__call__'); "
+    "ga=operator.getitem(builtins.__dict__,'getattr')",
+    "class: xs.append(list.copy(cm.maps)|cm.maps) then xs[1][0] "
+    "(head empty map — not a material ns write; prefer unknown)",
+    "interproc: packed/methodcaller/getattr(it,'chain').from_iterable; "
+    "csv.reader empty; Name/pack getattr((),'__getitem__')(slice(0))",
 )

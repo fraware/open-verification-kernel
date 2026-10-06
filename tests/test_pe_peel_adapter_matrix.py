@@ -75,7 +75,7 @@ def _cf_body(head: str, adapter: str) -> tuple[str, str]:
     vals = '[partial(setattr, ns, "e")]'
     imp = (
         "import types\nfrom functools import partial\n"
-        "import operator\nimport builtins\n"
+        "import operator\nimport builtins\nimport copy\n"
     )
     seed = {
         "setdefault_get": (
@@ -88,6 +88,15 @@ def _cf_body(head: str, adapter: str) -> tuple[str, str]:
             "d={}\nfor k in vb:\n    d.__ior__({k: vb.get(k)})"
         ),
         "dictcomp_list_vb": "d={k: vb.get(k) for k in list(vb)}",
+        "partial_setitem": (
+            "d={}\nfor k in vb:\n"
+            "    partial(operator.setitem, d)(k, vb.get(k))"
+        ),
+        "bitor_dictcomp": "d={} | {k: vb.get(k) for k in vb}",
+        "ior_dict_vb": "d={}\noperator.ior(d, dict(vb))",
+        "update_copy": (
+            "d={}\nfor k in vb:\n    d.update(copy.copy({k: vb.get(k)}))"
+        ),
     }[head]
     # CF adapters only apply to Name-bind / bare; BoolOp wrapping a
     # multi-line for-seed is not a valid composition.
@@ -98,7 +107,10 @@ def _cf_body(head: str, adapter: str) -> tuple[str, str]:
             f'pm=partial(d["map"], {fn})\n'
             f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})"
         )
-    elif adapter == "bool_or" and head == "dictcomp_list_vb":
+    elif adapter == "bool_or" and head in {
+        "dictcomp_list_vb",
+        "bitor_dictcomp",
+    }:
         body = (
             f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
             f"d=(0 or {{k: vb.get(k) for k in list(vb)}})\n"
@@ -116,7 +128,10 @@ def _cf_body(head: str, adapter: str) -> tuple[str, str]:
 
 
 def _identity_body(head: str, adapter: str) -> tuple[str, str]:
-    imp = "import operator\nimport builtins\nfrom functools import partial\n"
+    imp = (
+        "import operator\nimport builtins\nfrom functools import partial\n"
+        "from itertools import filterfalse\n"
+    )
     cores = {
         "star_zip_getitem": (
             "operator.getitem([*zip([list.__dict__['sort']])],0)[0]"
@@ -124,6 +139,16 @@ def _identity_body(head: str, adapter: str) -> tuple[str, str]:
         "star_enumerate": "[*enumerate(zip([list.__dict__['sort']]))][0][1][0]",
         "filter_zip": "list(filter(None, zip([list.__dict__['sort']])))[0][0]",
         "map_zip": "list(map(lambda t: t, zip([list.__dict__['sort']])))[0][0]",
+        "partial_getitem_zip": (
+            "partial(operator.getitem,[*zip([list.__dict__['sort']])],0)()[0]"
+        ),
+        "filterfalse_zip": (
+            "list(filterfalse(lambda x: False, "
+            "zip([list.__dict__['sort']])))[0][0]"
+        ),
+        "filter_bool_zip": (
+            "list(filter(bool, zip([list.__dict__['sort']])))[0][0]"
+        ),
     }
     core = cores[head]
     if adapter == "name_bind" and head == "star_zip_getitem":
@@ -161,12 +186,19 @@ def _lexical_body(head: str, adapter: str) -> tuple[str, str]:
         "dunder_itruediv": "operator.__itruediv__(2,1)",
         "getattr_itruediv": 'getattr(operator,"itruediv")(2,1)',
         "packed_itruediv": "[operator.itruediv][0](2,1)",
+        "iadd": "operator.iadd([1],[1])",
+        "dunder_ifloordiv": "operator.__ifloordiv__(2,1)",
+        "index": "operator.index(1)",
     }
     arm = arms[head]
     if adapter == "bool_or" and head == "itruediv":
         arm = "(0 or operator.itruediv)(2,1)"
     elif adapter == "list0" and head == "itruediv":
         arm = "[operator.itruediv][0](2,1)"
+    elif adapter == "bool_or" and head == "iadd":
+        arm = "(0 or operator.iadd)([1],[1])"
+    elif adapter == "list0" and head == "iadd":
+        arm = "[operator.iadd][0]([1],[1])"
     body = (
         f"d={{Mut:1}}\nnew=partial.__new__\n"
         f"e=({arm} and new)(partial, copy.copy, d)()\n"
@@ -180,6 +212,7 @@ def _alias_body(head: str, adapter: str) -> str:
         'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
         "from functools import partial\n"
         "from types import MappingProxyType\n"
+        "from collections import OrderedDict\n"
         'g=getattr([partial(copy.copy)],"pop")\n'
         "oc=operator.call\n"
     )
@@ -189,6 +222,8 @@ def _alias_body(head: str, adapter: str) -> str:
         "name_dict_pack": 'd["gi"]',
         "mpt_pack": 'MappingProxyType({"gi":operator.getitem})["gi"]',
         "attrgetter_call": "ag(operator.getitem)",
+        "next_iter_dict": 'next(iter([{"gi":operator.getitem}]))["gi"]',
+        "od_ctor": 'OrderedDict({"gi":operator.getitem})["gi"]',
     }[head]
     if head == "name_dict_pack":
         setup = 'd={"gi":operator.getitem}\n'
@@ -221,7 +256,7 @@ def _class_body(head: str, adapter: str) -> tuple[str, str]:
     imp = (
         "import types\nimport operator\nimport copy\n"
         "from functools import partial\nfrom collections import ChainMap\n"
-        "from operator import iconcat, methodcaller"
+        "from operator import iconcat, methodcaller, attrgetter"
     )
     grows = {
         "iconcat_list_copy_maps": 'iconcat(xs, list.copy(cm.maps))',
@@ -232,12 +267,20 @@ def _class_body(head: str, adapter: str) -> tuple[str, str]:
         "methodcaller_iadd_copy": (
             'methodcaller("__iadd__", list.copy(cm.maps))(xs)'
         ),
+        "attrgetter_maps": (
+            'iconcat(xs, list.copy(attrgetter("maps")(cm)))'
+        ),
+        "getattr_maps": 'iconcat(xs, list.copy(getattr(cm,"maps")))',
     }
     grow = grows[head]
     if adapter == "bool_or" and head == "iconcat_list_copy_maps":
         grow = "(0 or iconcat)(xs, list.copy(cm.maps))"
     elif adapter == "list0" and head == "iconcat_list_copy_maps":
         grow = "[iconcat][0](xs, list.copy(cm.maps))"
+    elif adapter == "bool_or" and head == "attrgetter_maps":
+        grow = 'iconcat(xs, list.copy((0 or attrgetter("maps"))(cm)))'
+    elif adapter == "list0" and head == "attrgetter_maps":
+        grow = 'iconcat(xs, list.copy([attrgetter("maps")][0](cm)))'
     idx = "1" if "parents" in head else "2"
     body = (
         f"ns=types.SimpleNamespace()\n"
@@ -272,6 +315,23 @@ def _interproc_call(head: str, adapter: str) -> str:
             "    cm=nullcontext(*args); e=cm.__enter__; "
             "f=e(*getattr(it.chain,'from_iterable')(())); f(evil)"
         ),
+        "raw_decode_bound": (
+            "import json\n"
+            "    from contextlib import nullcontext; args=(n.install,)\n"
+            "    cm=nullcontext(*args); e=cm.__enter__; "
+            "f=e(*json.JSONDecoder().raw_decode('[]')[0]); f(evil)"
+        ),
+        "pickle_loads": (
+            "import pickle\n"
+            "    from contextlib import nullcontext; args=(n.install,)\n"
+            "    cm=nullcontext(*args); e=cm.__enter__; "
+            "f=e(*pickle.loads(pickle.dumps([]))); f(evil)"
+        ),
+        "getattr_tuple_getitem_slice0": (
+            "from contextlib import nullcontext; args=(n.install,)\n"
+            "    cm=nullcontext(*args); e=cm.__enter__; "
+            "f=e(*getattr((),'__getitem__')(slice(0))); f(evil)"
+        ),
     }
     call = cores[head]
     if adapter == "name_bind" and head == "unbound_decoder_decode":
@@ -287,6 +347,15 @@ def _interproc_call(head: str, adapter: str) -> str:
 
 # Fast-core matrix rows: adapter × family head (keep unit CI lean).
 _MATRIX_CASES: list[tuple[str, str, str]] = []
+_CF_FOR_SEEDS = frozenset(
+    {
+        "setdefault_get",
+        "setitem_get",
+        "ior_get",
+        "partial_setitem",
+        "update_copy",
+    }
+)
 for family, heads in FAMILY_HEADS.items():
     for head in heads:
         for adapter in ("bare", "list0", "bool_or", "name_bind"):
@@ -297,11 +366,7 @@ for family, heads in FAMILY_HEADS.items():
             if adapter == "bool_or" and family == "interproc":
                 continue
             # BoolOp around multi-line CF for-seeds is not a valid composition.
-            if (
-                adapter == "bool_or"
-                and family == "cf"
-                and head in {"setdefault_get", "setitem_get", "ior_get"}
-            ):
+            if adapter == "bool_or" and family == "cf" and head in _CF_FOR_SEEDS:
                 continue
             _MATRIX_CASES.append((family, head, adapter))
 
