@@ -73,6 +73,10 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "attrgetter_call",
         "next_iter_dict",
         "od_ctor",
+        # Leftover atoms closed at 1.6.0 (shared peels).
+        "name_copy_get",
+        "operator_getitem_pack",
+        "partial_getattr_callcall",
     ),
     "class": (
         "iconcat_list_copy_maps",
@@ -81,6 +85,7 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "methodcaller_iadd_copy",
         "attrgetter_maps",
         "getattr_maps",
+        "append_list_copy_maps",
     ),
     "interproc": (
         "unbound_decoder_decode",
@@ -90,6 +95,9 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "raw_decode_bound",
         "pickle_loads",
         "getattr_tuple_getitem_slice0",
+        "packed_from_iterable",
+        "csv_reader_empty",
+        "name_getattr_slice0",
     ),
 }
 
@@ -133,14 +141,5 @@ NON_MATERIAL_OOS: tuple[str, ...] = (
     "FormalPR freeze / #87 held-out until human gate",
 )
 
-# Forty-first-pass leftovers (prefer unknown over false authorize).
-FORTY_FIRST_LEFTOVERS: tuple[str, ...] = (
-    "alias: Name d.copy|get|pop|getattr(d,'get'); dict.__getitem__/"
-    "operator.getitem/methodcaller; partial(getattr).__call__.__call__; "
-    "packed/nexted/dict attrgetter('__call__'); getattr(ig(...),'__call__'); "
-    "ga=operator.getitem(builtins.__dict__,'getattr')",
-    "class: xs.append(list.copy(cm.maps)|cm.maps) then xs[1][0] "
-    "(head empty map — not a material ns write; prefer unknown)",
-    "interproc: packed/methodcaller/getattr(it,'chain').from_iterable; "
-    "csv.reader empty; Name/pack getattr((),'__getitem__')(slice(0))",
-)
+# Closed at 1.6.0 via shared peels + catalog atoms (was FORTY_FIRST_LEFTOVERS).
+FORTY_FIRST_LEFTOVERS: tuple[str, ...] = ()

@@ -224,8 +224,15 @@ def _alias_body(head: str, adapter: str) -> str:
         "attrgetter_call": "ag(operator.getitem)",
         "next_iter_dict": 'next(iter([{"gi":operator.getitem}]))["gi"]',
         "od_ctor": 'OrderedDict({"gi":operator.getitem})["gi"]',
+        "name_copy_get": 'd.copy()["gi"]',
+        "operator_getitem_pack": (
+            'operator.getitem({"gi":operator.getitem},"gi")'
+        ),
+        "partial_getattr_callcall": (
+            'partial(getattr,list,"__getitem__").__call__.__call__'
+        ),
     }[head]
-    if head == "name_dict_pack":
+    if head in {"name_dict_pack", "name_copy_get"}:
         setup = 'd={"gi":operator.getitem}\n'
     elif head == "attrgetter_call":
         setup = 'ag=attrgetter("__call__")\n'
@@ -271,6 +278,7 @@ def _class_body(head: str, adapter: str) -> tuple[str, str]:
             'iconcat(xs, list.copy(attrgetter("maps")(cm)))'
         ),
         "getattr_maps": 'iconcat(xs, list.copy(getattr(cm,"maps")))',
+        "append_list_copy_maps": "xs.append(list.copy(cm.maps))",
     }
     grow = grows[head]
     if adapter == "bool_or" and head == "iconcat_list_copy_maps":
@@ -281,12 +289,19 @@ def _class_body(head: str, adapter: str) -> tuple[str, str]:
         grow = 'iconcat(xs, list.copy((0 or attrgetter("maps"))(cm)))'
     elif adapter == "list0" and head == "attrgetter_maps":
         grow = 'iconcat(xs, list.copy([attrgetter("maps")][0](cm)))'
-    idx = "1" if "parents" in head else "2"
-    body = (
-        f"ns=types.SimpleNamespace()\n"
-        f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
-        f"{grow}; xs[{idx}][\"e\"]=exec\nns.e({ex})"
-    )
+    if head == "append_list_copy_maps":
+        body = (
+            f"ns=types.SimpleNamespace()\n"
+            f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+            f"{grow}; xs[1][0][\"e\"]=exec\nns.e({ex})"
+        )
+    else:
+        idx = "1" if "parents" in head else "2"
+        body = (
+            f"ns=types.SimpleNamespace()\n"
+            f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+            f"{grow}; xs[{idx}][\"e\"]=exec\nns.e({ex})"
+        )
     return body, imp
 
 
@@ -331,6 +346,23 @@ def _interproc_call(head: str, adapter: str) -> str:
             "from contextlib import nullcontext; args=(n.install,)\n"
             "    cm=nullcontext(*args); e=cm.__enter__; "
             "f=e(*getattr((),'__getitem__')(slice(0))); f(evil)"
+        ),
+        "packed_from_iterable": (
+            "import itertools as it\n"
+            "    from contextlib import nullcontext; args=(n.install,)\n"
+            "    cm=nullcontext(*args); e=cm.__enter__; "
+            "f=e(*[it.chain.from_iterable][0](())); f(evil)"
+        ),
+        "csv_reader_empty": (
+            "import csv, io\n"
+            "    from contextlib import nullcontext; args=(n.install,)\n"
+            "    cm=nullcontext(*args); e=cm.__enter__; "
+            "f=e(*csv.reader(io.StringIO(''))); f(evil)"
+        ),
+        "name_getattr_slice0": (
+            "from contextlib import nullcontext; args=(n.install,)\n"
+            "    cm=nullcontext(*args); e=cm.__enter__; "
+            "g=getattr; f=e(*g((),'__getitem__')(slice(0))); f(evil)"
         ),
     }
     call = cores[head]

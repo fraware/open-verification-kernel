@@ -144,7 +144,7 @@ def test_persistent_fastapi_state_round_trips_typed_state(tmp_path) -> None:
         loaded.contract_composition_state.contracts.keys()
         == state.contract_composition_state.contracts.keys()
     )
-    # #157 persisted fields must survive the 1.5.1 round-trip.
+    # #157 persisted fields must survive the 1.6.0 round-trip.
     assert loaded.head_repository_python_manifest_digest is not None
     assert (
         loaded.head_repository_python_manifest_digest
@@ -159,14 +159,14 @@ def test_persistent_fastapi_state_round_trips_typed_state(tmp_path) -> None:
 def test_old_persistent_fastapi_state_implementation_version_is_cache_miss(
     tmp_path,
 ) -> None:
-    """0.80.0 key identity must not load under 1.5.1 (#173)."""
+    """0.80.0 key identity must not load under 1.6.0 (#173)."""
 
     from ovk.compilers.authorization.persistent_fastapi_state import (
         PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION,
         _key_components,
     )
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "1.5.1"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "1.6.0"
 
     summary_root = tmp_path / "summaries"
     state_root = tmp_path / "state"
@@ -198,13 +198,13 @@ def test_old_persistent_fastapi_state_implementation_version_is_cache_miss(
         repo=state.repo,
         profile_digest=state.profile_digest,
     ) is None
-    # Current key components still advertise 1.5.1.
+    # Current key components still advertise 1.6.0.
     assert (
         _key_components(
             repo=state.repo,
             profile_digest=state.profile_digest,
         )["implementation_version"]
-        == "1.5.1"
+        == "1.6.0"
     )
 
 

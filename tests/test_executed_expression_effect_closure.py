@@ -19845,7 +19845,7 @@ def test_forty_first_pass_lexical_never_authorized() -> None:
 
 
 def test_forty_first_pass_alias_never_authorized() -> None:
-    """Alias: next(iter|reversed) dict packs; list.__getitem__(0); OD/CM/UD ctors."""
+    """Alias: next/OD/CM/UD packs; Name copy/get/pop; getitem/partial leftovers."""
 
     alias_prefix = (
         'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
@@ -19853,49 +19853,101 @@ def test_forty_first_pass_alias_never_authorized() -> None:
         "from types import MappingProxyType\n"
         "from collections import OrderedDict, ChainMap, UserDict\n"
     )
+    _alias_tail = (
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter"
+    )
     cases = (
         alias_prefix
         + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
         'c=oc(next(iter([{"gi":operator.getitem}]))["gi"],'
         "[g.__call__],0)(*[0])(keys)\n"
-        'c["z"]=c.pop("x"); k=c.get("z")\n'
-        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
-        "s.bypass_filter=bypass_filter",
+        + _alias_tail,
         alias_prefix
         + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
         'c=oc(next(reversed([{"gi":operator.getitem}]))["gi"],'
         "[g.__call__],0)(*[0])(keys)\n"
-        'c["z"]=c.pop("x"); k=c.get("z")\n'
-        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
-        "s.bypass_filter=bypass_filter",
+        + _alias_tail,
         alias_prefix
         + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
         'c=oc([{"gi":operator.getitem}].__getitem__(0)["gi"],'
         "[g.__call__],0)(*[0])(keys)\n"
-        'c["z"]=c.pop("x"); k=c.get("z")\n'
-        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
-        "s.bypass_filter=bypass_filter",
+        + _alias_tail,
         alias_prefix
         + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
         'c=oc(OrderedDict({"gi":operator.getitem})["gi"],'
         "[g.__call__],0)(*[0])(keys)\n"
-        'c["z"]=c.pop("x"); k=c.get("z")\n'
-        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
-        "s.bypass_filter=bypass_filter",
+        + _alias_tail,
         alias_prefix
         + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
         'c=oc(ChainMap({"gi":operator.getitem})["gi"],'
         "[g.__call__],0)(*[0])(keys)\n"
-        'c["z"]=c.pop("x"); k=c.get("z")\n'
-        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
-        "s.bypass_filter=bypass_filter",
+        + _alias_tail,
         alias_prefix
         + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
         'c=oc(UserDict({"gi":operator.getitem})["gi"],'
         "[g.__call__],0)(*[0])(keys)\n"
-        'c["z"]=c.pop("x"); k=c.get("z")\n'
-        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
-        "s.bypass_filter=bypass_filter",
+        + _alias_tail,
+        # 1.6.0 leftover pins (shared peels).
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'd={"gi":operator.getitem}; '
+        'c=oc(d.copy()["gi"],[g.__call__],0)(*[0])(keys)\n'
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'd={"gi":operator.getitem}; '
+        'c=oc(d.get("gi"),[g.__call__],0)(*[0])(keys)\n'
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'd={"gi":operator.getitem}; '
+        'c=oc(d.pop("gi"),[g.__call__],0)(*[0])(keys)\n'
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'd={"gi":operator.getitem}; '
+        'c=oc(getattr(d,"get")("gi"),[g.__call__],0)(*[0])(keys)\n'
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'c=oc(dict.__getitem__({"gi":operator.getitem},"gi"),'
+        "[g.__call__],0)(*[0])(keys)\n"
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'c=oc(operator.getitem({"gi":operator.getitem},"gi"),'
+        "[g.__call__],0)(*[0])(keys)\n"
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'd={"gi":operator.getitem}; gi=operator.getitem(d,"gi"); '
+        "c=oc(gi,[g.__call__],0)(*[0])(keys)\n"
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'c=oc(methodcaller("__getitem__","gi")({"gi":operator.getitem}),'
+        "[g.__call__],0)(*[0])(keys)\n"
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'c=oc(partial(getattr,list,"__getitem__").__call__.__call__,'
+        "[g.__call__],0)(*[0])(keys)\n"
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        "from operator import itemgetter\n"
+        'ig=itemgetter("__getitem__"); '
+        'gi=getattr(ig(list.__dict__),"__call__"); '
+        "c=oc(gi,[g.__call__],0)(*[0])(keys)\n"
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        "import builtins\n"
+        'ga=operator.getitem(builtins.__dict__,"getattr"); '
+        'c=oc(partial(ga,list,"__getitem__"),[g.__call__],0)(*[0])(keys)\n'
+        + _alias_tail,
     )
     for body in cases:
         findings = _unit(
@@ -19913,7 +19965,7 @@ def test_forty_first_pass_alias_never_authorized() -> None:
 
 
 def test_forty_first_pass_class_never_authorized() -> None:
-    """Class: attrgetter/getattr/methodcaller maps RHS grow via iconcat."""
+    """Class: attrgetter/getattr maps grow; append(list.copy|maps) leftovers."""
 
     ex = _NINTH_EXEC
     class_imp = (
@@ -19942,13 +19994,22 @@ def test_forty_first_pass_class_never_authorized() -> None:
                 f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
                 f'iconcat(xs, list.copy((0 or attrgetter("maps"))(cm))); '
                 f'xs[2]["e"]=exec\nns.e({ex})',
+                # 1.6.0 leftover pins (append maps / list.copy maps).
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+                f"xs.append(list.copy(cm.maps)); "
+                f'xs[1][0]["e"]=exec\nns.e({ex})',
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+                f"xs.append(cm.maps); "
+                f'xs[1][0]["e"]=exec\nns.e({ex})',
             )
         )
     )
 
 
 def test_forty_first_pass_interproc_never_authorized() -> None:
-    """Interproc: packed/getattr decode; raw_decode; pickle/marshal/re/struct; slice0."""
+    """Interproc: packed decode/raw_decode; pickle; slice0; from_iterable/csv leftovers."""
 
     nested = """
 def install(fn):
@@ -19994,6 +20055,33 @@ def write_state(state, value):
         "    from operator import methodcaller\n"
         "    cm=nullcontext(*args); e=cm.__enter__; "
         "f=e(*methodcaller('__getitem__',slice(0))(())); f(evil)",
+        # 1.6.0 leftover pins (from_iterable / csv / Name-getattr slice0).
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*[it.chain.from_iterable][0](())); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    from operator import methodcaller\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*methodcaller('from_iterable',())(it.chain)); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*getattr(it,'chain').from_iterable(())); f(evil)",
+        "import csv, io\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*csv.reader(io.StringIO(''))); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g((),'__getitem__')(slice(0))); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*[getattr][0]((),'__getitem__')(slice(0))); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*(0 or getattr)((),'__getitem__')(slice(0))); f(evil)",
     ):
         routes = f"""
 import pkg.nested as n
@@ -20055,4 +20143,4 @@ def test_forty_first_pass_positive_authorized_smoke() -> None:
 def test_persistent_version_bumped_for_executed_expr_closure() -> None:
     """Cache / semantic versions bump with PASS-semantics change."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "1.5.1"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "1.6.0"
