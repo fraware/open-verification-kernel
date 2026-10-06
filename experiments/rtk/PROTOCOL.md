@@ -3,7 +3,8 @@
 Status: methods freeze draft. This document contains no benchmark results.
 
 Companion freeze artifacts (pre-oracle): `RTK_EVAL_FREEZE.json`,
-`SOURCE_UNIVERSE_EXPANSION_PROTOCOL.v1.md`,
+`SOURCE_UNIVERSE_EXPANSION_PROTOCOL.v1.md` (immutable exhausted-procedure record),
+`SOURCE_UNIVERSE_EXPANSION_PROTOCOL.v2.md` (adapter-interface methodology amendment),
 `SOURCE_REPOSITORY_CANDIDATES.v1.json`,
 `schemas/CanonicalDecisionInput.v1.schema.json`.
 Oracle labeling remains blocked until expansion finishes and a human reviews

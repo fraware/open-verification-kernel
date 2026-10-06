@@ -1,11 +1,13 @@
 {
   "schema_version": "rtk.eval_freeze.v1",
-  "status": "SOURCE_UNIVERSE_EXPANSION_EXHAUSTED_BELOW_20",
+  "status": "V2_METHODOLOGY_INTERFACE_FROZEN_PENDING_MATERIALIZATION",
   "protocol_paths": {
     "readme": "experiments/rtk/README.md",
     "protocol": "experiments/rtk/PROTOCOL.md",
     "analysis_plan": "experiments/rtk/ANALYSIS_PLAN.md",
     "expansion_protocol": "experiments/rtk/SOURCE_UNIVERSE_EXPANSION_PROTOCOL.v1.md",
+    "expansion_protocol_v2": "experiments/rtk/SOURCE_UNIVERSE_EXPANSION_PROTOCOL.v2.md",
+    "expansion_v2_adapter_package": "experiments/p05_formalpr_bench/rtk_eval/expansion_v2/",
     "candidates": "experiments/rtk/SOURCE_REPOSITORY_CANDIDATES.v1.json",
     "go_provenance": "experiments/rtk/GO_CHECKER_PROVENANCE.v0.md",
     "evaluated_implementation": "experiments/rtk/EVALUATED_IMPLEMENTATION_IDENTITY.v0.json",
@@ -150,6 +152,11 @@
       "amendment_id": "source_universe_expansion_exhausted_below_20",
       "status": "SOURCE_UNIVERSE_EXPANSION_EXHAUSTED_BELOW_20",
       "summary": "Pinned expansion candidate cutoffs (13b1ae5). Walked all five locked candidates in order. Each is public with FIRST_PARENT transitions but authentic extract_historical_anchors.py rejects non-v0 repository identities. generate_transition_census.py remains UNAVAILABLE. No overlay census/evidence fabricated. REPLAY_VERIFIED transitions remain 3 (v0) + 0 (v1). Gate EXHAUSTED_BELOW_20. No oracle/RTK/baseline/unblind."
+    },
+    {
+      "amendment_id": "source_universe_expansion_protocol_v2_adapter_interface",
+      "status": "V2_METHODOLOGY_INTERFACE_FROZEN_PENDING_MATERIALIZATION",
+      "summary": "Pre-oracle Path B amendment: freeze SOURCE_UNIVERSE_EXPANSION_PROTOCOL.v2.md and generic source-side adapter contract (expansion_v2) because v1 candidate eligibility and authentic extractor closed-repository dispatch were inconsistent. Keep five candidates and cutoffs frozen; no add/delete/reorder. New generate_transition_census_v2.py is explicitly non-authentic skeleton only; no overlay census/evidence invented; zero candidate materialization. Interface tests and v0 compatibility harness declared (live equivalence gated ADAPTER_NOT_YET_IMPLEMENTED). Tier A preservation unchanged. No oracle/RTK/baseline/unblind. Authentic v0 modules untouched."
     }
   ],
   "canonical_decision_input": {
@@ -234,6 +241,22 @@
       "lean-project-evidence"
     ],
     "replay_verified_transitions_added": 0,
-    "blocker": "AUTHENTIC_EXTRACT_SUPPORTS_ONLY_CERTIFYEDGE_AND_PCS_CORE"
+    "blocker": "AUTHENTIC_EXTRACT_SUPPORTS_ONLY_CERTIFYEDGE_AND_PCS_CORE",
+    "immutable_exhaustion_record": true
+  },
+  "source_universe_v2": {
+    "status": "V2_METHODOLOGY_INTERFACE_FROZEN_PENDING_MATERIALIZATION",
+    "protocol": "experiments/rtk/SOURCE_UNIVERSE_EXPANSION_PROTOCOL.v2.md",
+    "adapter_package": "experiments/p05_formalpr_bench/rtk_eval/expansion_v2/",
+    "census_module": "experiments/p05_formalpr_bench/rtk_eval/expansion_v2/generate_transition_census_v2.py",
+    "census_module_role": "NEW_V2_SKELETON_NOT_AUTHENTIC_V0",
+    "candidates_file": "experiments/rtk/SOURCE_REPOSITORY_CANDIDATES.v1.json",
+    "candidates_mutation": "FORBIDDEN_DURING_V2",
+    "overlay_census_path": null,
+    "overlay_census_sha256": null,
+    "candidate_materialization": "NOT_STARTED",
+    "v0_compatibility_harness": "experiments/p05_formalpr_bench/rtk_eval/expansion_v2/tests/test_v0_compatibility.py",
+    "v0_compatibility_status": "DECLARED_SKIP_UNTIL_ADAPTERS_IMPLEMENTED",
+    "next_pass": "After human review: implement v0 adapters to satisfy semantic equivalence, then process five frozen candidates under v2 admission rules; still pre-oracle."
   }
 }
