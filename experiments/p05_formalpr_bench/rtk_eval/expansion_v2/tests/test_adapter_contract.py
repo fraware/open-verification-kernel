@@ -181,11 +181,21 @@ class AdapterContractTests(unittest.TestCase):
         self.assertEqual(len(registry), 7)
         for identity in V0_IDENTITIES:
             self.assertIn(identity.repository, registry)
+            self.assertEqual(
+                registry[identity.repository].implementation_status,
+                "READY_FOR_MATERIALIZATION",
+            )
         expansion_ids = frozen_expansion_repository_ids()
         self.assertEqual(len(expansion_ids), 5)
         for repo_id in expansion_ids:
             self.assertIn(repo_id, registry)
-            self.assertIsInstance(registry[repo_id], AdapterNotYetImplemented)
+            # Expansion adapters are concrete (not placeholders) after the
+            # materialization pass; placeholders remain available for tests.
+            self.assertEqual(
+                registry[repo_id].implementation_status,
+                "READY_FOR_MATERIALIZATION",
+            )
+            self.assertFalse(isinstance(registry[repo_id], AdapterNotYetImplemented))
 
     def test_expansion_candidate_count_frozen_at_five(self) -> None:
         self.assertEqual(len(EXPANSION_IDENTITIES), 5)

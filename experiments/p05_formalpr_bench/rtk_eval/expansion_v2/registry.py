@@ -1,15 +1,23 @@
 """Adapter registry for expansion_v2.
 
-Registers identities for source-universe-v0 and the five frozen expansion
-candidates. Semantic mapping for materialization is intentionally not supplied
-in the interface-freeze pass.
+Registers concrete adapters for source-universe-v0 and the five frozen
+expansion candidates. Identities/cutoffs remain frozen.
 """
 
 from __future__ import annotations
 
 from typing import Dict
 
-from .adapter_contract import AdapterNotYetImplemented, RepositoryIdentity, SourceRepositoryAdapter
+from .adapter_contract import RepositoryIdentity, SourceRepositoryAdapter
+from .adapters import (
+    CertifyEdgeAdapter,
+    EnvironmentAssuranceCompilerAdapter,
+    LeanProjectEvidenceAdapter,
+    OvkConsumerExpressActionsAdapter,
+    OvkConsumerFastapiTerraformAdapter,
+    PcsBenchAdapter,
+    PcsCoreAdapter,
+)
 
 # source-universe-v0 identities (immutable)
 V0_IDENTITIES: tuple[RepositoryIdentity, ...] = (
@@ -64,19 +72,23 @@ EXPANSION_IDENTITIES: tuple[RepositoryIdentity, ...] = (
 )
 
 
-def _placeholder(identity: RepositoryIdentity) -> SourceRepositoryAdapter:
-    return AdapterNotYetImplemented(identity)
-
-
 def build_default_registry() -> Dict[str, SourceRepositoryAdapter]:
-    """Return adapters for v0 + five expansion identities (all placeholders).
-
-    Placeholder registration freezes the *interface* surface. It does not
-    authorize materialization of expansion candidates.
-    """
-    registry: Dict[str, SourceRepositoryAdapter] = {}
-    for identity in V0_IDENTITIES + EXPANSION_IDENTITIES:
-        registry[identity.repository] = _placeholder(identity)
+    """Return concrete adapters for v0 + five expansion identities."""
+    adapters: list[SourceRepositoryAdapter] = [
+        CertifyEdgeAdapter(),
+        PcsCoreAdapter(),
+        PcsBenchAdapter(),
+        OvkConsumerFastapiTerraformAdapter(),
+        OvkConsumerExpressActionsAdapter(),
+        EnvironmentAssuranceCompilerAdapter(),
+        LeanProjectEvidenceAdapter(),
+    ]
+    registry = {adapter.repository: adapter for adapter in adapters}
+    expected = {identity.repository for identity in V0_IDENTITIES + EXPANSION_IDENTITIES}
+    if set(registry) != expected:
+        raise RuntimeError(
+            f"registry identity mismatch: got {sorted(registry)} expected {sorted(expected)}"
+        )
     return registry
 
 

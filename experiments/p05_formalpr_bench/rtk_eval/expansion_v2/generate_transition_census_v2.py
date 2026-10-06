@@ -26,8 +26,8 @@ from .registry import EXPANSION_IDENTITIES, frozen_expansion_repository_ids
 
 SCHEMA_VERSION_JSONL = "rtk.transition_census.v2"
 SCHEMA_VERSION_MANIFEST = "rtk.transition_census_manifest.v2"
-GENERATOR_ROLE = "NEW_V2_SKELETON_NOT_AUTHENTIC_V0"
-INTERFACE_STATUS = "V2_METHODOLOGY_INTERFACE_FROZEN_PENDING_MATERIALIZATION"
+GENERATOR_ROLE = "NEW_V2_CENSUS_NOT_AUTHENTIC_V0"
+INTERFACE_STATUS = "V2_ADAPTERS_IMPLEMENTED_MATERIALIZATION_AUTHORIZED"
 
 # Output schema (documentation + validation helpers).
 # Each JSONL record mirrors the v0 transition schema field set so overlays can
@@ -77,6 +77,7 @@ CENSUS_OUTPUT_SCHEMA: dict[str, Any] = {
     ],
     "authentic_v0_claim": False,
     "materialization_authorized_in_interface_freeze": False,
+    "materialization_authorized_after_v0_compat": True,
 }
 
 
