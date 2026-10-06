@@ -258,7 +258,7 @@
   },
   "case_generator": {
     "repository": "fraware/open-verification-kernel",
-    "commit_sha": null,
+    "commit_sha": "ef90e4674aabfc5438e2eac49a4e80dc03cc0275",
     "version": "rtk.case_generator.pilot_n10.v0",
     "status": "BOUND_PILOT_N10_TIER_A",
     "path": "experiments/rtk/sealed/pilot_n10/TIER_A_CASES.jsonl",
@@ -361,6 +361,7 @@
       "TIER_A_MANIFEST.json": "5b10919614764a5c07a13cfa149695e944256f6aaf0d092197e3968b11f64b90"
     },
     "independence_held": true,
-    "unblinding": false
+    "unblinding": false,
+    "commit_sha": "ef90e4674aabfc5438e2eac49a4e80dc03cc0275"
   }
 }
