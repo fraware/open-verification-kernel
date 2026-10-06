@@ -1,0 +1,275 @@
+name: RTK source-native evidence materialization
+
+on:
+  push:
+    branches:
+      - experiment/rtk-sealed-evaluation
+    paths:
+      - "experiments/p05_formalpr_bench/rtk_eval/materialize_source_evidence.py"
+      - "experiments/p05_formalpr_bench/rtk_eval/tier_source_evidence_v1.py"
+      - "experiments/p05_formalpr_bench/rtk_eval/project_source_evidence_semantics.py"
+      - "experiments/p05_formalpr_bench/rtk_eval/SOURCE_EVIDENCE_TIER_AMENDMENT.v1.md"
+      - "experiments/p05_formalpr_bench/rtk_eval/schemas/source_evidence_tiered.v1.schema.json"
+      - "experiments/p05_formalpr_bench/rtk_eval/extract_historical_anchors.py"
+      - "experiments/p05_formalpr_bench/rtk_eval/generate_transition_census.py"
+      - "experiments/p05_formalpr_bench/rtk_eval/CASE_DERIVATION_SPEC.md"
+      - "experiments/p05_formalpr_bench/rtk_eval/RTK_EVAL_FREEZE.json"
+      - ".github/workflows/rtk-source-evidence.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      METHOD_SHA: ${{ github.sha }}
+      CE_SHA: 6ef02d54c4697886b20577f10eec683861475db2
+      PCS_SHA: 9c971f5f9da8a424924dd8f48d6a3b71a1009e1b
+      FROZEN_CENSUS_SHA256: b1816276176297adf345981fe5d9c8271cf00f5b71653d59a21d8261d64a6b11
+      FROZEN_ANCHORS_SHA256: 44cb1f2701705375e9354b4a51a07064d2dba2d33f757e0955fc03db00d4d5cc
+      FROZEN_SOURCE_EVIDENCE_SEMANTIC_SHA256: 7ea32cb2c579077f281a3356683a3e926872492b6e756b44c0c39d077358f1fe
+      SOURCES: ${{ github.workspace }}/_rtk_sources
+      OUT: ${{ github.workspace }}/_rtk_source_evidence
+      WORK_ROOT: ${{ github.workspace }}/_rtk_materialize_work
+
+    steps:
+      - name: Checkout exact methodology revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.METHOD_SHA }}
+          fetch-depth: 0
+
+      - name: Set up exact Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.16"
+
+      - name: Set up CertifyEdge Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.88.0 --profile minimal --no-self-update
+          rustup default 1.88.0
+          test "$(rustc --version | awk '{print $2}')" = "1.88.0"
+
+      - name: Verify methodology checkout and compile generators
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$METHOD_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          python -m py_compile             experiments/p05_formalpr_bench/rtk_eval/generate_transition_census.py             experiments/p05_formalpr_bench/rtk_eval/extract_historical_anchors.py             experiments/p05_formalpr_bench/rtk_eval/materialize_source_evidence.py             experiments/p05_formalpr_bench/rtk_eval/tier_source_evidence_v1.py
+
+      - name: Clone exact public source histories
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$SOURCES" "$OUT" "$WORK_ROOT"
+          git clone --quiet --no-tags https://github.com/fraware/CertifyEdge.git "$SOURCES/CertifyEdge"
+          git -C "$SOURCES/CertifyEdge" checkout --quiet --detach "$CE_SHA"
+          test "$(git -C "$SOURCES/CertifyEdge" rev-parse HEAD)" = "$CE_SHA"
+
+          git clone --quiet --no-tags https://github.com/SentinelOps-CI/pcs-core.git "$SOURCES/pcs-core"
+          git -C "$SOURCES/pcs-core" checkout --quiet --detach "$PCS_SHA"
+          test "$(git -C "$SOURCES/pcs-core" rev-parse HEAD)" = "$PCS_SHA"
+
+      - name: Regenerate frozen transition census
+        shell: bash
+        run: |
+          set -euo pipefail
+          python experiments/p05_formalpr_bench/rtk_eval/generate_transition_census.py             --repo "fraware/CertifyEdge=$SOURCES/CertifyEdge@$CE_SHA"             --repo "SentinelOps-CI/pcs-core=$SOURCES/pcs-core@$PCS_SHA"             --out "$OUT/TRANSITION_CENSUS.jsonl"             --manifest "$OUT/TRANSITION_CENSUS_MANIFEST.json"
+
+      - name: Regenerate historical anchors
+        shell: bash
+        run: |
+          set -euo pipefail
+          python experiments/p05_formalpr_bench/rtk_eval/extract_historical_anchors.py             --census "$OUT/TRANSITION_CENSUS.jsonl"             --repo "fraware/CertifyEdge=$SOURCES/CertifyEdge"             --repo "SentinelOps-CI/pcs-core=$SOURCES/pcs-core"             --out "$OUT/HISTORICAL_ANCHORS.jsonl"             --manifest "$OUT/HISTORICAL_ANCHORS_MANIFEST.json"
+
+      - name: Verify frozen structural inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+
+          out = Path(os.environ["OUT"])
+          census = (out / "TRANSITION_CENSUS.jsonl").read_bytes()
+          anchors = (out / "HISTORICAL_ANCHORS.jsonl").read_bytes()
+          assert hashlib.sha256(census).hexdigest() == os.environ["FROZEN_CENSUS_SHA256"]
+          assert hashlib.sha256(anchors).hexdigest() == os.environ["FROZEN_ANCHORS_SHA256"]
+
+          cm = json.loads((out / "TRANSITION_CENSUS_MANIFEST.json").read_text())
+          am = json.loads((out / "HISTORICAL_ANCHORS_MANIFEST.json").read_text())
+          assert cm["record_count"] == 248
+          assert am["anchor_count"] == 541
+          assert am["anchors_by_family"] == {
+              "CERTIFYEDGE_PROPERTY_PROFILE": 40,
+              "PCS_VERIFIER_PROFILE_V1": 5,
+              "PCS_WORKFLOW_PROFILE": 496,
+          }
+          assert not am["source_native_validators_executed"]
+          assert not am["target_native_validators_executed"]
+          assert not am["rtk_executed"]
+          assert not am["oracle_labels_consulted"]
+          PY
+
+      - name: Materialize committed source evidence with source-native validators
+        shell: bash
+        run: |
+          set -euo pipefail
+          python experiments/p05_formalpr_bench/rtk_eval/materialize_source_evidence.py             --anchors "$OUT/HISTORICAL_ANCHORS.jsonl"             --repo "fraware/CertifyEdge=$SOURCES/CertifyEdge"             --repo "SentinelOps-CI/pcs-core=$SOURCES/pcs-core"             --out "$OUT/SOURCE_EVIDENCE.jsonl"             --manifest "$OUT/SOURCE_EVIDENCE_MANIFEST.json"             --work-root "$WORK_ROOT"             --timeout-sec 1800
+
+      - name: Validate source-evidence materialization boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          out = Path(os.environ["OUT"])
+          manifest = json.loads((out / "SOURCE_EVIDENCE_MANIFEST.json").read_text())
+          assert manifest["record_count"] == 541, manifest
+          assert sum(manifest["status_counts"].values()) == 541, manifest
+          assert manifest["status_counts"].get("SOURCE_ACCEPTED", 0) > 0, manifest
+          assert manifest["source_native_validators_executed"] is True
+          assert manifest["target_native_validators_executed"] is False
+          assert manifest["rtk_executed"] is False
+          assert manifest["oracle_labels_consulted"] is False
+          assert manifest["fresh_evidence_generated"] is False
+
+          accepted = 0
+          for line in (out / "SOURCE_EVIDENCE.jsonl").read_text().splitlines():
+              if not line.strip():
+                  continue
+              row = json.loads(line)
+              assert row["target_native_validator_executed"] is False
+              assert row["rtk_executed"] is False
+              assert row["oracle_labels_consulted"] is False
+              if row["materialization_status"] == "SOURCE_ACCEPTED":
+                  accepted += 1
+                  assert row["subject_binding"]
+                  assert row["selected_candidate_id"]
+                  assert row["native_verifier_digest"]
+                  snapshot = row["evidence_snapshot"]
+                  assert snapshot and snapshot["artifacts"]
+                  assert snapshot["completeness_policy"]["source_bytes_only"] is True
+          assert accepted == manifest["status_counts"]["SOURCE_ACCEPTED"]
+          print(json.dumps(manifest, indent=2, sort_keys=True))
+          PY
+
+      - name: Project and verify stable v0 replay semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          python experiments/p05_formalpr_bench/rtk_eval/project_source_evidence_semantics.py \
+            --input "$OUT/SOURCE_EVIDENCE.jsonl" \
+            --out "$OUT/SOURCE_EVIDENCE_SEMANTIC.jsonl" \
+            --manifest "$OUT/SOURCE_EVIDENCE_SEMANTIC_MANIFEST.json"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          out = Path(os.environ["OUT"])
+          manifest = json.loads((out / "SOURCE_EVIDENCE_SEMANTIC_MANIFEST.json").read_text())
+          assert manifest["projection_sha256"] == os.environ["FROZEN_SOURCE_EVIDENCE_SEMANTIC_SHA256"], manifest
+          assert manifest["status_counts"] == {
+              "OPERATIONAL_FAILURE": 507,
+              "SOURCE_ACCEPTED": 9,
+              "SOURCE_REJECTED": 5,
+              "UNSUPPORTED_NATIVE_VALIDATOR": 20,
+          }, manifest["status_counts"]
+          print(json.dumps(manifest, indent=2, sort_keys=True))
+          PY
+
+      - name: Classify replay-verified and committed-attestation source evidence v1
+        shell: bash
+        run: |
+          set -euo pipefail
+          python experiments/p05_formalpr_bench/rtk_eval/tier_source_evidence_v1.py \
+            --source-evidence "$OUT/SOURCE_EVIDENCE.jsonl" \
+            --repo "fraware/CertifyEdge=$SOURCES/CertifyEdge" \
+            --repo "SentinelOps-CI/pcs-core=$SOURCES/pcs-core" \
+            --out "$OUT/SOURCE_EVIDENCE_TIERED.jsonl" \
+            --manifest "$OUT/SOURCE_EVIDENCE_TIERED_MANIFEST.json" \
+            --work-root "$WORK_ROOT/tiering"
+
+      - name: Validate v1 tier separation and schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from jsonschema import Draft202012Validator
+
+          out = Path(os.environ["OUT"])
+          manifest = json.loads((out / "SOURCE_EVIDENCE_TIERED_MANIFEST.json").read_text())
+          assert manifest["schema_version"] == "rtk.source_evidence_tiered_manifest.v1", manifest
+          assert manifest["record_count"] == 541, manifest
+          assert manifest["evidence_class_counts"].get("REPLAY_VERIFIED") == 9, manifest
+          assert manifest["target_native_validators_executed"] is False
+          assert manifest["rtk_executed"] is False
+          assert manifest["oracle_labels_consulted"] is False
+          assert manifest["fresh_evidence_generated"] is False
+
+          schema = json.loads(Path(
+              "experiments/p05_formalpr_bench/rtk_eval/schemas/source_evidence_tiered.v1.schema.json"
+          ).read_text())
+          validator = Draft202012Validator(schema)
+
+          rows = [
+              json.loads(line)
+              for line in (out / "SOURCE_EVIDENCE_TIERED.jsonl").read_text().splitlines()
+              if line.strip()
+          ]
+          assert len(rows) == 541
+          tier_b = 0
+          for row in rows:
+              errors = list(validator.iter_errors(row))
+              assert not errors, errors[:3]
+              status = row["materialization_status"]
+              evidence_class = row["source_evidence_class"]
+              assert row["target_native_validator_executed"] is False
+              assert row["rtk_executed"] is False
+              assert row["oracle_labels_consulted"] is False
+              if status == "SOURCE_ACCEPTED":
+                  assert evidence_class == "REPLAY_VERIFIED"
+              elif status == "SOURCE_ATTESTED":
+                  tier_b += 1
+                  assert evidence_class == "COMMITTED_NATIVE_ATTESTATION"
+                  assert row["evidence_snapshot"]
+                  assert row["subject_binding"]
+                  accepted = [c for c in row["attestation_candidates"] if c["attestation_accept"]]
+                  assert accepted
+                  for candidate in accepted:
+                      assert candidate["native_certificate_status"] == "CertificateChecked"
+                      assert candidate["result_source_commit_is_ancestor"] is True
+                      assert candidate["release_manifest_locator"]
+              else:
+                  assert evidence_class is None
+          assert manifest["evidence_class_counts"].get("COMMITTED_NATIVE_ATTESTATION", 0) == tier_b
+          print(json.dumps(manifest, indent=2, sort_keys=True))
+          PY
+
+      - name: Upload pre-oracle source evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: rtk-source-evidence-${{ env.METHOD_SHA }}
+          path: |
+            ${{ env.OUT }}/TRANSITION_CENSUS.jsonl
+            ${{ env.OUT }}/TRANSITION_CENSUS_MANIFEST.json
+            ${{ env.OUT }}/HISTORICAL_ANCHORS.jsonl
+            ${{ env.OUT }}/HISTORICAL_ANCHORS_MANIFEST.json
+            ${{ env.OUT }}/SOURCE_EVIDENCE.jsonl
+            ${{ env.OUT }}/SOURCE_EVIDENCE_MANIFEST.json
+            ${{ env.OUT }}/SOURCE_EVIDENCE_SEMANTIC.jsonl
+            ${{ env.OUT }}/SOURCE_EVIDENCE_SEMANTIC_MANIFEST.json
+            ${{ env.OUT }}/SOURCE_EVIDENCE_TIERED.jsonl
+            ${{ env.OUT }}/SOURCE_EVIDENCE_TIERED_MANIFEST.json
+          if-no-files-found: error
+          retention-days: 30
