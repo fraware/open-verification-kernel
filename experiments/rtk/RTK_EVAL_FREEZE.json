@@ -157,6 +157,11 @@
       "amendment_id": "source_universe_expansion_protocol_v2_adapter_interface",
       "status": "V2_METHODOLOGY_INTERFACE_FROZEN_PENDING_MATERIALIZATION",
       "summary": "Pre-oracle Path B amendment: freeze SOURCE_UNIVERSE_EXPANSION_PROTOCOL.v2.md and generic source-side adapter contract (expansion_v2) because v1 candidate eligibility and authentic extractor closed-repository dispatch were inconsistent. Keep five candidates and cutoffs frozen; no add/delete/reorder. New generate_transition_census_v2.py is explicitly non-authentic skeleton only; no overlay census/evidence invented; zero candidate materialization. Interface tests and v0 compatibility harness declared (live equivalence gated ADAPTER_NOT_YET_IMPLEMENTED). Tier A preservation unchanged. No oracle/RTK/baseline/unblind. Authentic v0 modules untouched."
+    },
+    {
+      "amendment_id": "bind_reference_implementation_cdi_v1",
+      "status": "EVALUATED_IMPLEMENTATION_BOUND_REFERENCE",
+      "summary": "No existing CDI.v1 sealed-verdict executable found on OVK. Bound NEW experiments/rtk/reference_implementation at SHA 2c97b59b8b546ac9392a279970a8c25573c30296. Go remains UNVERIFIED. Not historical Go. Synthetic conformance only; no oracle/holdout/baseline/unblind; source-universe/expansion/census/evidence untouched."
     }
   ],
   "canonical_decision_input": {
@@ -175,21 +180,33 @@
   "rtk_implementation": {
     "go_checker_status": "UNVERIFIED",
     "go_checker_sha": null,
-    "python_checker_sha": null,
-    "evaluated_implementation_status": "INTERFACE_FROZEN_IMPLEMENTATION_PENDING",
+    "python_checker_sha": "2c97b59b8b546ac9392a279970a8c25573c30296",
+    "evaluated_implementation_status": "BOUND_REFERENCE_IMPLEMENTATION",
     "identity_document": "experiments/rtk/EVALUATED_IMPLEMENTATION_IDENTITY.v0.json",
     "repository": "fraware/open-verification-kernel",
-    "commit_sha": "831a589ed5c01fe2f980d32a95c73b4c5d338b58",
+    "commit_sha": "2c97b59b8b546ac9392a279970a8c25573c30296",
     "lean_commit_sha": null,
     "schema_versions": {
       "CanonicalDecisionInput": "v1",
       "case": "v0",
       "transition": "v0",
       "evidence_snapshot": "v0",
-      "oracle": "v0"
+      "oracle": "v0",
+      "prediction": "v0"
     },
-    "toolchain_versions": {},
-    "evaluation_interface_version": "CanonicalDecisionInput.v1"
+    "toolchain_versions": {
+      "language": "Python",
+      "python": "3.12.3",
+      "python_implementation": "CPython",
+      "jsonschema": "4.26.0",
+      "pytest": "8.4.2",
+      "requires_python": ">=3.10"
+    },
+    "evaluation_interface_version": "CanonicalDecisionInput.v1",
+    "evaluated_implementation_id": "rtk.reference_implementation.v0",
+    "evaluated_implementation_path": "experiments/rtk/reference_implementation/",
+    "implementation_kind": "REFERENCE_NOT_HISTORICAL_GO",
+    "not_the_unrecovered_historical_go_checker": true
   },
   "source_evidence": {
     "workflow": "REPAIRED_NOT_BYTE_IDENTICAL_TO_cc374b68",
