@@ -34,7 +34,7 @@
     "tier_a_manifest": "experiments/rtk/sealed/pilot_n10/TIER_A_MANIFEST.json"
   },
   "pilot_acceptance_status": "PRE_ORACLE_ACCEPT_N10_PILOT_AFTER_V2_EXHAUSTION",
-  "rtk_prediction_status": "NOT_STARTED",
+  "rtk_prediction_status": "COMMITTED_BLIND",
   "schema_version": "rtk.oracle_binding.v0",
   "scope": "PRIMARY_TIER_A_REPLAY_VERIFIED_ONLY",
   "status": "ORACLE_COMMITTED_TIER_A_PILOT_N10",

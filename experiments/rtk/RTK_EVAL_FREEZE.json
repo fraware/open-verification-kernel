@@ -1,6 +1,6 @@
 {
   "schema_version": "rtk.eval_freeze.v1",
-  "status": "ORACLE_COMMITTED_TIER_A_PILOT_N10_PRE_PREDICTION",
+  "status": "RTK_PREDICTIONS_COMMITTED_BLIND_BASELINES_PENDING",
   "protocol_paths": {
     "readme": "experiments/rtk/README.md",
     "protocol": "experiments/rtk/PROTOCOL.md",
@@ -30,7 +30,9 @@
     "expansion_v2_outputs": "experiments/rtk/sealed/expansion_v2_outputs/",
     "oracle_binding": "experiments/rtk/ORACLE_BINDING.json",
     "oracle_rules_pilot_n10": "experiments/rtk/oracle/ORACLE_RULES.pilot_n10.v0.md",
-    "pilot_n10": "experiments/rtk/sealed/pilot_n10/"
+    "pilot_n10": "experiments/rtk/sealed/pilot_n10/",
+    "prediction_binding": "experiments/rtk/PREDICTION_BINDING.json",
+    "rtk_predictions_pilot_n10": "experiments/rtk/sealed/pilot_n10/RTK_PREDICTIONS.jsonl"
   },
   "protocol_commit_sha": "1bff877e9f405c447d10304221f4d1509abe141d",
   "source_repositories": [
@@ -196,6 +198,11 @@
       "amendment_id": "oracle_committed_tier_a_pilot_n10",
       "status": "ORACLE_COMMITTED_TIER_A_PILOT_N10_PRE_PREDICTION",
       "summary": "Committed independent oracle labels for PRIMARY Tier-A REPLAY_VERIFIED pilot (cases=16, transitions=10, verdicts={'REVALIDATION_REQUIRED': 5, 'VALID': 11}) under ORACLE_RULES.pilot_n10 path-identity carry. Independence held: no RTK/baseline/aggregate inputs. UNRESOLVED allowed; none forced. Tier B not labeled for confirmatory path. No unblinding. RTK prediction commitment authorized next on bound reference implementation."
+    },
+    {
+      "amendment_id": "rtk_predictions_committed_blind_pilot_n10",
+      "status": "RTK_PREDICTIONS_COMMITTED_BLIND_BASELINES_PENDING",
+      "summary": "Committed blind RTK predictions from rtk.reference_implementation.v0 on sealed Tier-A pilot CDI (n_cases=16, execution_ok={'OK': 16}). Prediction commitment recorded before oracle comparison/unblinding. Baselines registry empty → BASELINES_PENDING. No reference-implementation semantic changes."
     }
   ],
   "canonical_decision_input": {
@@ -272,7 +279,6 @@
     "target_size": null
   },
   "execution_prohibitions_this_phase": [
-    "NO_UNBLINDING",
     "NO_RTK_SEMANTICS_CHANGE_FOR_HOLDOUT",
     "NO_FURTHER_CANDIDATE_SEARCH_THIS_VERSION",
     "NO_TIER_A_WEAKENING",
@@ -363,5 +369,24 @@
     "independence_held": true,
     "unblinding": false,
     "commit_sha": "ef90e4674aabfc5438e2eac49a4e80dc03cc0275"
-  }
+  },
+  "rtk_predictions": {
+    "status": "COMMITTED_BLIND",
+    "binding": "experiments/rtk/PREDICTION_BINDING.json",
+    "predictions_path": "experiments/rtk/sealed/pilot_n10/RTK_PREDICTIONS.jsonl",
+    "predictions_sha256": "104a506f41994d14753710dadc3301a3ee4fe7cd2822c8c44a6ea65a7f33429f",
+    "implementation_id": "rtk.reference_implementation.v0",
+    "case_count": 16,
+    "execution_status_counts": {
+      "OK": 16
+    },
+    "predicted_verdict_counts_ok_only": {
+      "REVALIDATION_REQUIRED": 5,
+      "VALID": 11
+    },
+    "oracle_compared": false,
+    "unblinding": false
+  },
+  "baselines_status": "BASELINES_PENDING",
+  "baselines_note": "No baseline identifiers were registered in the freeze before execution; baseline runs deferred."
 }
