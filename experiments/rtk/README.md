@@ -54,3 +54,13 @@ predictions, baseline runs, or unblinding.
 - 20-transition threshold is a feasibility rule, not scientific validity.
 - Generator blob check is independent reproducibility only
   (`GENERATOR_BLOB_UNAVAILABLE` recorded).
+
+## Source-evidence v1 (OVK progress)
+
+- Authentic modules installed from handoff transport `de781bad…` (VERIFY.py OK; blobs match).
+- Baseline commit lands pre-fix workflow blob `cc374b68…` unchanged; repair commit is **not** byte-identical.
+- Materializer executed identity: `f97e2826…`.
+- Local pipeline matched frozen anchors `44cb1f27…` and semantic projection `7ea32cb2…`.
+- Tier A: 9 anchors / 3 transitions; Tier B v1: 161 anchors / 161 transitions.
+- `SOURCE_EVIDENCE_V1_BINDING.json` remains uncreated until repaired-workflow Actions success IDs are recorded (draft at `SOURCE_EVIDENCE_V1_BINDING.DRAFT.json`).
+- No oracle / RTK prediction / baseline / unblinding.

@@ -1,7 +1,7 @@
 {
   "schema_version": "pipeline_module_recovery.v0",
-  "status": "PIPELINE_MODULES_UNAVAILABLE",
-  "generated_at_utc": "2026-10-06T18:11:00+00:00",
+  "status": "PIPELINE_MODULES_INSTALLED_FROM_AUTHENTIC_HANDOFF",
+  "generated_at_utc": "2026-10-06T19:16:00+00:00",
   "sealed_census_status": {
     "path": "experiments/rtk/sealed/TRANSITION_CENSUS.jsonl",
     "sha256": "b1816276176297adf345981fe5d9c8271cf00f5b71653d59a21d8261d64a6b11",
@@ -52,22 +52,29 @@
     {
       "attempt": "GitHub_Actions_artifact_11387510679_live_fetch",
       "result": "repository_not_accessible_provenance_label_only"
+    },
+    {
+      "attempt": "rtk_v1_authentic_modules_handoff_zip",
+      "transport_sha256": "de781bada7b61e511ad97c043693e323f02d43eee193d4ba086164bdc8940397",
+      "result": "installed_five_files_blob_verified; workflow_jsonschema_repaired_in_followup_commit"
     }
   ],
   "decision": {
     "invent_substitute_semantics": false,
-    "workflow_jsonschema_repair": "BLOCKED_NO_AUTHENTIC_WORKFLOW",
-    "tier_v1_unit_tests": "BLOCKED_NO_AUTHENTIC_TIER_MODULE",
-    "local_pipeline_rerun": "BLOCKED_NO_AUTHENTIC_PIPELINE",
-    "SOURCE_EVIDENCE_V1_BINDING": "UNCREATED",
-    "reason": "Authentic anchors/materialize/project/tier_v1 modules are not present on OVK and were not in the census handoff. Inventing substitutes to chase frozen anchor/projection digests is forbidden. Hard-stop criteria remain in force."
+    "workflow_jsonschema_repair": "APPLIED_NOT_BYTE_IDENTICAL_TO_cc374b68",
+    "tier_v1_unit_tests": "PRESENT_AND_PASSING",
+    "local_pipeline_rerun": "SUCCESS_FROZEN_DIGESTS_MATCHED",
+    "SOURCE_EVIDENCE_V1_BINDING": "DRAFT_PENDING_CI_SUCCESS",
+    "reason": "Authentic modules installed and local pipeline matched frozen anchors/projection digests; binding waits for repaired-workflow Actions success IDs."
   },
   "immutable_downstream_targets": {
     "anchors_cardinality": 541,
     "anchors_sha256": "44cb1f2701705375e9354b4a51a07064d2dba2d33f757e0955fc03db00d4d5cc",
     "semantic_projection_sha256": "7ea32cb2c579077f281a3356683a3e926872492b6e756b44c0c39d077358f1fe",
     "replay_verified_anchors": 9,
-    "replay_verified_transitions": 3
+    "replay_verified_transitions": 3,
+    "tier_b_committed_native_attestation_anchors": 161,
+    "tier_b_committed_native_attestation_transitions": 161
   },
   "prohibitions_honored": [
     "NO_ORACLE",
@@ -78,5 +85,12 @@
     "NO_FABRICATED_BINDING",
     "NO_INVENTED_PIPELINE_SEMANTICS",
     "NO_FABRICATED_CI_IDS"
-  ]
+  ],
+  "installed_blob_sha1": {
+    "extract_historical_anchors.py": "f37323dfee0ebc40417eeee548c95de2debbd44f",
+    "materialize_source_evidence.py": "f97e2826308342a9ac772d39aee794a781417113",
+    "project_source_evidence_semantics.py": "8e1870eea20dd18b6bd090cc7ee3b8ded7f70987",
+    "tier_source_evidence_v1.py": "6010c44bb6ee2d89a30927726b37c1b346be4e0f",
+    "rtk-source-evidence.yml_pre_fix": "cc374b68685911d384e97e2e54acc9bbc9306560"
+  }
 }

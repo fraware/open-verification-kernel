@@ -1,7 +1,7 @@
 {
   "schema_version": "external_sealed_references.v0",
-  "provenance": "SEALED_CENSUS_BYTES_COMMITTED_ON_OVK",
-  "purpose": "Record digests and cardinalities for the sealed source-universe-v0 evaluation. Census bytes are now committed on OVK. Anchor and semantic-projection digests remain external targets until authentic pipeline modules reproduce them byte-identically.",
+  "provenance": "SEALED_CENSUS_AND_DOWNSTREAM_DIGESTS_REPRODUCED_ON_OVK",
+  "purpose": "Record digests and cardinalities for the sealed source-universe-v0 evaluation after authentic pipeline modules reproduced anchors and semantic projection byte-identically.",
   "source_universe_v0_identities": {
     "CertifyEdge": {
       "url": "https://github.com/fraware/CertifyEdge",
@@ -25,17 +25,19 @@
     "anchors": {
       "cardinality": 541,
       "sha256": "44cb1f2701705375e9354b4a51a07064d2dba2d33f757e0955fc03db00d4d5cc",
-      "ovk_local_status": "NOT_MATERIALIZED_AUTHENTIC_EXTRACTOR_UNAVAILABLE"
+      "ovk_local_status": "BYTE_IDENTICAL_COMMITTED",
+      "ovk_path": "experiments/rtk/sealed/frozen_outputs/HISTORICAL_ANCHORS.jsonl"
     },
     "semantic_projection": {
       "sha256": "7ea32cb2c579077f281a3356683a3e926872492b6e756b44c0c39d077358f1fe",
-      "ovk_local_status": "NOT_MATERIALIZED_AUTHENTIC_PROJECTOR_UNAVAILABLE"
+      "ovk_local_status": "BYTE_IDENTICAL_COMMITTED",
+      "ovk_path": "experiments/rtk/sealed/frozen_outputs/SOURCE_EVIDENCE_SEMANTIC.jsonl"
     },
     "pre_oracle_feasibility_observation": {
       "reported_anchors": 9,
       "reported_transitions": 3,
-      "label": "EXTERNAL_REPORT_UNVERIFIED_ON_OVK",
-      "note": "Reported from prior private eval; not re-verified on OVK pending authentic pipeline."
+      "label": "LOCALLY_REPRODUCED_TIER_A",
+      "note": "Tier A REPLAY_VERIFIED: 9 anchors / 3 transitions reproduced locally with authentic modules; Tier B COMMITTED_NATIVE_ATTESTATION: 161 anchors / 161 transitions."
     }
   },
   "ovk_cardinality_probe": {
@@ -44,14 +46,19 @@
     "matches_reported_census_cardinality": true,
     "matches_reported_census_sha256": true,
     "hard_stop_on_digest_mismatch": true,
-    "binding_claim": "CENSUS_BOUND; DOWNSTREAM_BINDING_FORBIDDEN_UNTIL_ANCHOR_AND_PROJECTION_MATCH"
+    "binding_claim": "CENSUS_AND_DOWNSTREAM_DIGESTS_BOUND; V1_BINDING_WAITS_ON_CI_SUCCESS"
   },
   "ovk_digest_forensics": {
     "artifact": "forensics/CENSUS_DIGEST_FORENSICS.v0.json",
-    "status": "SUPERSEDED_BY_SEALED_BYTE_COMMIT",
+    "status": "SUPERSEDED_BY_AUTHENTIC_PIPELINE_REPRODUCTION",
     "pipeline_recovery": "forensics/PIPELINE_MODULE_RECOVERY.v0.json",
-    "anchors_materialized": false,
-    "projection_materialized": false,
-    "source_evidence_v1_binding": "UNCREATED"
+    "anchors_materialized": true,
+    "projection_materialized": true,
+    "source_evidence_v1_binding": "DRAFT_PENDING_CI_SUCCESS"
+  },
+  "materializer_executed_identity": {
+    "git_blob_sha1": "f97e2826308342a9ac772d39aee794a781417113",
+    "authoritative_for_v1_run": 37420715584,
+    "note": "Supersedes any earlier freeze entry that recorded an older materializer blob."
   }
 }
