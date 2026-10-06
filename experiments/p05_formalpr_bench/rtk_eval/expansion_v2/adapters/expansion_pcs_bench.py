@@ -32,6 +32,7 @@ class PcsBenchAdapter(ExpansionAdapterBase):
                 role="EXPANSION_CANDIDATE",
             )
         )
+        self._validate_cache: dict[str, dict] = {}
 
     def discover_governed_artifacts(
         self,
@@ -152,24 +153,28 @@ class PcsBenchAdapter(ExpansionAdapterBase):
 
         import os
 
-        env = dict(os.environ)
-        env["PYTHONPATH"] = "src"
-        # Native validator: repository CLI at source revision (not structural-only).
-        command = self._run_in_source_worktree(
-            checkout,
-            source_sha,
-            [
-                sys.executable,
-                "-m",
-                "pcs_bench",
-                "validate-cases",
-                "--suite",
-                "all",
-                "--dry-run",
-            ],
-            timeout_sec=300,
-            env=env,
-        )
+        # Native validator is suite-scoped at a source revision; cache per SHA.
+        if source_sha in self._validate_cache:
+            command = self._validate_cache[source_sha]
+        else:
+            env = dict(os.environ)
+            env["PYTHONPATH"] = "src"
+            command = self._run_in_source_worktree(
+                checkout,
+                source_sha,
+                [
+                    sys.executable,
+                    "-m",
+                    "pcs_bench",
+                    "validate-cases",
+                    "--suite",
+                    "all",
+                    "--dry-run",
+                ],
+                timeout_sec=300,
+                env=env,
+            )
+            self._validate_cache[source_sha] = command
         if command.get("status") != "COMPLETED":
             return NativeValidatorResult(
                 status="OPERATIONAL_FAILURE",

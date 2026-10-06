@@ -90,14 +90,12 @@ def main(argv: list[str] | None = None) -> int:
     out_root = args.out_dir
     out_root.mkdir(parents=True, exist_ok=True)
 
+    # Process every frozen candidate under identical admission rules, including
+    # zero-admissible outcomes. Do not skip later candidates because earlier
+    # ones yielded zeros. The ≥20 gate stops indefinite further-repo search;
+    # the locked list itself is always walked to completion in this pass.
     per_repo: list[dict[str, Any]] = []
-    tier_a_total = V0_TIER_A_TRANSITIONS
-    stop_reason = "CANDIDATE_LIST_EXHAUSTED"
-
     for identity in EXPANSION_IDENTITIES:
-        if tier_a_total >= TARGET_TIER_A:
-            stop_reason = "FEASIBILITY_GATE_MET"
-            break
         adapter = registry[identity.repository]
         checkout = DEFAULT_CHECKOUTS.get(identity.repository)
         repo_out = out_root / identity.repository.replace("/", "__")
@@ -121,30 +119,7 @@ def main(argv: list[str] | None = None) -> int:
             materialize_v0_via_authentic=False,
         )
         per_repo.append(result.as_dict())
-        tier_a_total += result.tier_a_transitions
-        if tier_a_total >= TARGET_TIER_A:
-            stop_reason = "FEASIBILITY_GATE_MET"
-            # Continue? Protocol: stop early if gate met while walking.
-            # Record remaining as not processed? "Stop early if the gate is met"
-            break
 
-    processed = {row["repository"] for row in per_repo}
-    for identity in EXPANSION_IDENTITIES:
-        if identity.repository not in processed and stop_reason == "FEASIBILITY_GATE_MET":
-            per_repo.append(
-                {
-                    "repository": identity.repository,
-                    "cutoff_sha": identity.cutoff_sha,
-                    "outcome": "NOT_PROCESSED_GATE_ALREADY_MET",
-                    "tier_a_replay_verified": {"transition_count": 0, "anchor_count": 0},
-                }
-            )
-        elif identity.repository not in processed:
-            # Should not happen: protocol requires processing every candidate.
-            pass
-
-    # Protocol: process every candidate including zero-admissible. If we stopped
-    # early for gate, that is allowed. If list exhausted below 20, mark status.
     expansion_tier_a = sum(
         int(row.get("tier_a_replay_verified", {}).get("transition_count", 0))
         for row in per_repo
@@ -153,39 +128,11 @@ def main(argv: list[str] | None = None) -> int:
     if total_tier_a >= TARGET_TIER_A:
         gate = "MET"
         expansion_status = "STOPPED_GATE_MET"
+        stop_reason = "FEASIBILITY_GATE_MET"
     else:
-        # Ensure all five were attempted
-        attempted = {
-            row["repository"]
-            for row in per_repo
-            if row.get("outcome") not in {"NOT_PROCESSED_GATE_ALREADY_MET"}
-        }
-        expected = {i.repository for i in EXPANSION_IDENTITIES}
-        if attempted != expected:
-            # Process any missing before declaring exhausted.
-            for identity in EXPANSION_IDENTITIES:
-                if identity.repository in attempted:
-                    continue
-                adapter = registry[identity.repository]
-                checkout = DEFAULT_CHECKOUTS[identity.repository]
-                repo_out = out_root / identity.repository.replace("/", "__")
-                print(f"Processing remaining {identity.repository} ...", flush=True)
-                result = process_repository(
-                    adapter,
-                    checkout,
-                    repo_out,
-                    timeout_sec=args.timeout_sec,
-                    materialize_v0_via_authentic=False,
-                )
-                per_repo.append(result.as_dict())
-                expansion_tier_a += result.tier_a_transitions
-            total_tier_a = V0_TIER_A_TRANSITIONS + expansion_tier_a
-        gate = "MET" if total_tier_a >= TARGET_TIER_A else "EXHAUSTED_BELOW_20"
-        expansion_status = (
-            "STOPPED_GATE_MET"
-            if gate == "MET"
-            else "STOPPED_CANDIDATE_LIST_EXHAUSTED"
-        )
+        gate = "EXHAUSTED_BELOW_20"
+        expansion_status = "STOPPED_CANDIDATE_LIST_EXHAUSTED"
+        stop_reason = "CANDIDATE_LIST_EXHAUSTED"
 
     walk = {
         "schema_version": "source_universe_v2_expansion_walk.v0",

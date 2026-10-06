@@ -57,6 +57,7 @@ class ExpansionAdapterBase(SourceRepositoryAdapter):
 
     def __init__(self, identity: RepositoryIdentity) -> None:
         self._identity = identity
+        self._command_cache: dict[tuple[str, tuple[str, ...]], dict[str, Any]] = {}
 
     @property
     def identity(self) -> RepositoryIdentity:
