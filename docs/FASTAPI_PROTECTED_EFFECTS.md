@@ -46,7 +46,7 @@ development replay only and do not rewrite frozen external-candidate labels.
 
 ## Executed-expression effect closure (PE)
 
-Cache / semantic tip: `PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION = "1.5.1"`
+Cache / semantic tip: `PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION = "1.6.0"`
 on branch `feature/executed-expression-effect-closure` (open PR #173).
 
 False `authorized` + `source_proved_server_authority_write` must fail closed when
@@ -63,7 +63,7 @@ Regression layers:
 - Six-surface Reaudit probe: `tests/_reaudit_six_surface_probe.py`
 
 Plan exit for this tip: two consecutive all-PASS six-surface Reaudits on the
-same algebra tip (or tip+doc-only). FormalPR freeze / merge / #87 remain a
+same algebra tip (or tip+doc-only). `FORTY_FIRST_LEFTOVERS` is empty at 1.6.0. FormalPR freeze / merge / #87 remain a
 separate human gate. Non-material OOS (TypeError empties / held-out FormalPR)
 are listed in `tests/pe_peel_catalog.py` (`NON_MATERIAL_OOS`) and must stay
 UNKNOWN rather than be "closed" into a false PASS.
