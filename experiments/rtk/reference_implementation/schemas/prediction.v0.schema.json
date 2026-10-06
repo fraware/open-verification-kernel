@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-verification-kernel.invalid/rtk/prediction.v0.schema.json",
+  "title": "RTK sealed-verdict-shaped prediction.v0",
+  "description": "Output contract for the experiments/rtk reference predictor. Operational failures never map to VALID.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "implementation_id",
+    "implementation_kind",
+    "decision_input_id",
+    "execution_status",
+    "verdict",
+    "failure_category",
+    "detail",
+    "impacted_paths",
+    "predicted_repair_catalog_id",
+    "rationale_codes"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "rtk.sealed_prediction.v0"
+    },
+    "implementation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "implementation_kind": {
+      "const": "REFERENCE_NOT_HISTORICAL_GO"
+    },
+    "decision_input_id": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "execution_status": {
+      "enum": ["OK", "OPERATIONAL_FAILURE"]
+    },
+    "verdict": {
+      "type": ["string", "null"],
+      "enum": ["VALID", "INVALID", "REVALIDATION_REQUIRED", "UNRESOLVED", null]
+    },
+    "failure_category": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "detail": {
+      "type": "string",
+      "minLength": 1
+    },
+    "impacted_paths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "predicted_repair_catalog_id": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "rationale_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "minItems": 1,
+      "uniqueItems": true
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "execution_status": { "const": "OK" } }
+      },
+      "then": {
+        "required": ["verdict"],
+        "properties": {
+          "verdict": {
+            "type": "string",
+            "enum": ["VALID", "INVALID", "REVALIDATION_REQUIRED", "UNRESOLVED"]
+          },
+          "failure_category": { "type": "null" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "execution_status": { "const": "OPERATIONAL_FAILURE" } }
+      },
+      "then": {
+        "required": ["failure_category"],
+        "properties": {
+          "verdict": { "type": "null" },
+          "failure_category": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  ]
+}
