@@ -1,6 +1,6 @@
 {
   "schema_version": "rtk.eval_freeze.v1",
-  "status": "V2_EXPANSION_EXHAUSTED_BELOW_20",
+  "status": "PRE_ORACLE_ACCEPT_N10_PILOT_AFTER_V2_EXHAUSTION",
   "protocol_paths": {
     "readme": "experiments/rtk/README.md",
     "protocol": "experiments/rtk/PROTOCOL.md",
@@ -98,7 +98,7 @@
     "gate_name": "minimum_independent_replay_verified_transitions",
     "target_transitions": 20,
     "gate_kind": "FEASIBILITY_RULE_NOT_SCIENTIFIC_VALIDITY",
-    "status": "EXHAUSTED_BELOW_20",
+    "status": "EXHAUSTED_BELOW_20_ACCEPTED_N10_PILOT",
     "independent_replay_verified_transitions": {
       "source_universe_v0": 3,
       "source_universe_v1": 0,
@@ -113,8 +113,20 @@
     },
     "expansion_stop_rule": "STOP_EXPANSION_WHEN_CANDIDATE_LIST_EXHAUSTED_BELOW_GATE",
     "expansion_status": "STOPPED_CANDIDATE_LIST_EXHAUSTED",
-    "oracle_status": "BLOCKED_UNTIL_HUMAN_CHECKPOINT_AFTER_EXPANSION",
-    "sample_size_note": "Sealed study would proceed at available sample size (10 REPLAY_VERIFIED transitions) with explicit uncertainty/power later; oracle not started in this pass."
+    "oracle_status": "AUTHORIZED_INDEPENDENT_ORACLE_TIER_A_ONLY",
+    "sample_size_note": "Human proceed after v2 exhaustion: accept available Tier-A sample N=10 independent REPLAY_VERIFIED transitions as sealed pilot / limited-power primary evaluation path. 20-transition feasibility gate remains unmet and is not waived as a scientific-validity criterion. Inferential limits: even 0/10 false-reuse leaves weak upper bounds versus 20/59 planning targets; do not present N=10 as a strong reliability claim. Tier B remains secondary and separately reported; not folded into Tier A. No further candidate search in this version. No Tier A criteria weakening. v2 candidate list not reopened.",
+    "acceptance": {
+      "decision": "ACCEPT_N10_SEALED_PILOT",
+      "independent_replay_verified_transitions_total": 10,
+      "feasibility_gate_met": false,
+      "feasibility_gate_target": 20,
+      "power_characterization": "LIMITED_POWER_PILOT_NOT_STRONG_RELIABILITY_CLAIM",
+      "tier_b_policy": "SECONDARY_SEPARATELY_REPORTED_NOT_FOLDED_INTO_TIER_A",
+      "further_candidate_search_this_version": false,
+      "tier_a_criteria_weakened": false,
+      "v2_candidate_list_reopened": false
+    },
+    "next_pass": "Independent oracle adjudication on PRIMARY Tier A only, then prediction commitment on bound reference implementation. No unblinding in the oracle pass."
   },
   "amendment_history": [
     {
@@ -145,12 +157,12 @@
     {
       "amendment_id": "ovk_authentic_v1_modules_and_jsonschema_repair",
       "status": "SOURCE_EVIDENCE_V1_LOCAL_SUCCESS_BINDING_PENDING_CI",
-      "summary": "Installed authentic v1 run-head modules (baseline d741899) from handoff transport de781bad\u2026; applied jsonschema==4.26.0 environment repair (df68928, clean-tree fix 831a589). Local pipeline matched frozen anchors 44cb1f27\u2026 and semantic projection 7ea32cb2\u2026. Materializer identity f97e2826\u2026 authoritative. SOURCE_EVIDENCE_V1_BINDING waits for repaired-workflow Actions success IDs. No oracle."
+      "summary": "Installed authentic v1 run-head modules (baseline d741899) from handoff transport de781bad…; applied jsonschema==4.26.0 environment repair (df68928, clean-tree fix 831a589). Local pipeline matched frozen anchors 44cb1f27… and semantic projection 7ea32cb2…. Materializer identity f97e2826… authoritative. SOURCE_EVIDENCE_V1_BINDING waits for repaired-workflow Actions success IDs. No oracle."
     },
     {
       "amendment_id": "ovk_source_evidence_v1_bound",
       "status": "SOURCE_EVIDENCE_V1_BOUND",
-      "summary": "SOURCE_EVIDENCE_V1_BINDING.json created after Actions run 37517623512 / job 112454498374 succeeded at 831a589 with frozen census/anchors/semantic digests matched. Tier A 9/3, Tier B 161/161. Materializer f97e2826\u2026. No oracle."
+      "summary": "SOURCE_EVIDENCE_V1_BINDING.json created after Actions run 37517623512 / job 112454498374 succeeded at 831a589 with frozen census/anchors/semantic digests matched. Tier A 9/3, Tier B 161/161. Materializer f97e2826…. No oracle."
     },
     {
       "amendment_id": "source_universe_expansion_exhausted_below_20",
@@ -170,7 +182,12 @@
     {
       "amendment_id": "source_universe_expansion_protocol_v2_materialization",
       "status": "V2_EXPANSION_EXHAUSTED_BELOW_20",
-      "summary": "Implemented CertifyEdge/pcs-core and five-candidate adapters under frozen v2 contract. Cleared v0 compatibility (transition identity + sealed anchors digest 44cb1f27\u2026 + decision-surface semantic equivalence via authentic materializer bridge). Processed all five frozen candidates via census_v2\u2192extract\u2192materialize\u2192project\u2192tier without mutating sealed v0 bytes or authentic blobs. REPLAY_VERIFIED transitions: v0=3 + v1=0 + v2=7 = 10. Gate EXHAUSTED_BELOW_20. pcs-bench native validate-cases is OPERATIONAL_FAILURE without pcs; OVK consumers contribute pin-guard Tier A only; eac/lpe yield SOURCE_REJECTED. No oracle/RTK/baseline/unblind; no Tier A weakening; no Tier B promotion; no further-repo search."
+      "summary": "Implemented CertifyEdge/pcs-core and five-candidate adapters under frozen v2 contract. Cleared v0 compatibility (transition identity + sealed anchors digest 44cb1f27… + decision-surface semantic equivalence via authentic materializer bridge). Processed all five frozen candidates via census_v2→extract→materialize→project→tier without mutating sealed v0 bytes or authentic blobs. REPLAY_VERIFIED transitions: v0=3 + v1=0 + v2=7 = 10. Gate EXHAUSTED_BELOW_20. pcs-bench native validate-cases is OPERATIONAL_FAILURE without pcs; OVK consumers contribute pin-guard Tier A only; eac/lpe yield SOURCE_REJECTED. No oracle/RTK/baseline/unblind; no Tier A weakening; no Tier B promotion; no further-repo search."
+    },
+    {
+      "amendment_id": "pre_oracle_accept_n10_pilot_after_v2_exhaustion",
+      "status": "PRE_ORACLE_ACCEPT_N10_PILOT_AFTER_V2_EXHAUSTION",
+      "summary": "Accept available Tier-A sample of 10 independent REPLAY_VERIFIED transitions (v0:3 + v2:7) as sealed pilot path after v2 candidate-list exhaustion below the 20-transition feasibility gate. Explicit power limits: N=10 is a limited-power primary Tier-A evaluation, not a strong reliability claim; even 0/10 false-reuse yields weak upper bounds versus 20/59 targets. Tier B remains secondary and separately reported; not folded into Tier A. No further candidate search in this version. Tier A criteria unchanged. v2 candidate list not reopened. pcs-bench OPERATIONAL_FAILURE left unrepaired (pcs CLI absent; no dry-run / predicate stretch). Independent oracle track authorized next for PRIMARY Tier A only; no RTK prediction/baseline/unblind in this amendment."
     }
   ],
   "canonical_decision_input": {
@@ -244,11 +261,13 @@
     "target_size": null
   },
   "execution_prohibitions_this_phase": [
-    "NO_ORACLE",
     "NO_RTK_PREDICTION",
     "NO_BASELINE_EXECUTION",
     "NO_UNBLINDING",
-    "NO_RTK_SEMANTICS_CHANGE_FOR_HOLDOUT"
+    "NO_RTK_SEMANTICS_CHANGE_FOR_HOLDOUT",
+    "NO_FURTHER_CANDIDATE_SEARCH_THIS_VERSION",
+    "NO_TIER_A_WEAKENING",
+    "NO_TIER_B_PROMOTION_INTO_TIER_A"
   ],
   "seal_manifest_sha256": "b1816276176297adf345981fe5d9c8271cf00f5b71653d59a21d8261d64a6b11",
   "source_universe_v1": {
@@ -271,7 +290,7 @@
     "immutable_exhaustion_record": true
   },
   "source_universe_v2": {
-    "status": "V2_EXPANSION_EXHAUSTED_BELOW_20",
+    "status": "V2_EXPANSION_EXHAUSTED_BELOW_20_N10_PILOT_ACCEPTED",
     "protocol": "experiments/rtk/SOURCE_UNIVERSE_EXPANSION_PROTOCOL.v2.md",
     "adapter_package": "experiments/p05_formalpr_bench/rtk_eval/expansion_v2/",
     "census_module": "experiments/p05_formalpr_bench/rtk_eval/expansion_v2/generate_transition_census_v2.py",
@@ -287,8 +306,28 @@
     "v0_compatibility_status": "PASSED_SEMANTIC_EQUIVALENCE",
     "replay_verified_transitions_added": 7,
     "gate_status": "EXHAUSTED_BELOW_20",
-    "next_pass": "Human checkpoint. No oracle/RTK/baseline/unblind. Optional Path A fallback later; do not invent more repos in this phase.",
+    "next_pass": "N=10 pilot accepted after v2 exhaustion. No further expansion in this version. Independent oracle track authorized for Tier A only.",
     "binding_sha256": "8c9a4e281ac70335f859d5665ddd0abd2b7778414df13e97225e3e5b19434bc6",
     "expansion_walk_sha256": "8b83fecf5794b6657c765b36b04487bf973271c0668211a65bf71e9dc9d2044c"
+  },
+  "oracle_authorization": {
+    "status": "AUTHORIZED_INDEPENDENT_ORACLE_TIER_A_ONLY",
+    "scope": "PRIMARY_TIER_A_REPLAY_VERIFIED",
+    "independence_required": true,
+    "unresolved_legitimate": true,
+    "forbidden_inputs": [
+      "RTK_PREDICTIONS_OR_CERTIFICATES",
+      "BASELINE_PREDICTIONS",
+      "AGGREGATE_RTK_RESULTS",
+      "RTK_DERIVED_FAILURE_TAXONOMIES"
+    ],
+    "allowed_inputs": [
+      "HISTORICAL_ANCHORS",
+      "SOURCE_EVIDENCE_RECORDS",
+      "CDI_RECORDS",
+      "FROZEN_MAPPINGS",
+      "REPOSITORY_NATIVE_HISTORICAL_ARTIFACTS",
+      "TRANSITION_CENSUS_AND_V2_OVERLAYS"
+    ]
   }
 }
