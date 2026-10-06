@@ -10,7 +10,9 @@
     "go_provenance": "experiments/rtk/GO_CHECKER_PROVENANCE.v0.md",
     "evaluated_implementation": "experiments/rtk/EVALUATED_IMPLEMENTATION_IDENTITY.v0.json",
     "external_sealed_references": "experiments/rtk/EXTERNAL_SEALED_REFERENCES.v0.json",
-    "census_cardinality_probe": "experiments/rtk/CENSUS_CARDINALITY_PROBE.v0.json"
+    "census_cardinality_probe": "experiments/rtk/CENSUS_CARDINALITY_PROBE.v0.json",
+    "census_digest_forensics": "experiments/rtk/forensics/CENSUS_DIGEST_FORENSICS.v0.json",
+    "census_candidate_not_sealed": "experiments/rtk/forensics/CENSUS_CANDIDATE.source_universe_census.v0.json"
   },
   "protocol_commit_sha": "1bff877e9f405c447d10304221f4d1509abe141d",
   "source_repositories": [
@@ -51,7 +53,17 @@
     "tier_b_v0": {
       "excluded_from_scoring": true
     },
-    "local_tier_counts": "NOT_LOCALLY_PRODUCED"
+    "local_tier_counts": "NOT_LOCALLY_PRODUCED",
+    "tier_a_replay_verified": {
+      "anchor_count": null,
+      "transition_count": null,
+      "status": "NOT_LOCALLY_PRODUCED_DIGEST_HARD_STOP"
+    },
+    "tier_b_v1_committed_native_attestation": {
+      "anchor_count": null,
+      "transition_count": null,
+      "status": "NOT_LOCALLY_PRODUCED_DIGEST_HARD_STOP"
+    }
   },
   "pre_oracle_feasibility": {
     "gate_name": "minimum_eligible_transitions",
@@ -82,6 +94,11 @@
       "amendment_id": "ovk_source_materialization_pending",
       "status": "PRE_ORACLE_FEASIBILITY_AMENDMENT",
       "summary": "OVK first-parent cardinality probe matches 248 but sealed census digest not byte-reproduced. Anchors/projection/source-evidence binding remain PENDING_SOURCE_MATERIALIZATION. No fabricated SOURCE_EVIDENCE_V1_BINDING."
+    },
+    {
+      "amendment_id": "ovk_census_digest_forensics_hard_stop",
+      "status": "PRE_ORACLE_FEASIBILITY_AMENDMENT",
+      "summary": "Extended local forensics on full (non-shallow) public clones: cardinality 248 confirmed; 13 serialization candidates all miss sealed census SHA-256; sealed bytes unavailable for byte-level diff; pipeline modules not invented to chase digests; SOURCE_EVIDENCE_V1_BINDING remains UNCREATED; mappings remain PENDING_SOURCE_MATERIALIZATION; no oracle."
     }
   ],
   "canonical_decision_input": {
@@ -121,7 +138,7 @@
     "tier_v1": "UNCREATED",
     "unit_tests": "UNCREATED",
     "binding": "UNCREATED",
-    "reason": "No honest OVK source-evidence materialization modules or sealed census/anchor artifacts available to bind without fabricating digests."
+    "reason": "HARD_STOP_DIGEST_MISMATCH: FIRST_PARENT cardinality matches (248) but sealed census SHA-256 was not reproduced under documented local serializations; sealed census bytes unavailable for byte-level diff; authentic generate/extract/materialize/project/tier_v1 modules not present on OVK. Inventing them to chase digests is forbidden. See experiments/rtk/forensics/CENSUS_DIGEST_FORENSICS.v0.json."
   },
   "case_generator": {
     "repository": null,

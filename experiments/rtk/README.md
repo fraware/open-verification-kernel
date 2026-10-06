@@ -20,7 +20,9 @@ runs, or unblinding.
 | Go provenance | `GO_CHECKER_PROVENANCE.v0.md` | **UNVERIFIED** |
 | External sealed refs | `EXTERNAL_SEALED_REFERENCES.v0.json` | Recorded, not locally validated |
 | Census cardinality probe | `CENSUS_CARDINALITY_PROBE.v0.json` | 248 cardinality match; digest mismatch |
-| Source-evidence workflow / tier_v1 / binding | — | **UNCREATED** |
+| Census digest forensics | `forensics/CENSUS_DIGEST_FORENSICS.v0.*` | HARD_STOP; 13 serializations miss sealed SHA |
+| Census candidate (not sealed) | `forensics/CENSUS_CANDIDATE.source_universe_census.v0.json` | Local format only; digest ≠ sealed |
+| Source-evidence workflow / tier_v1 / binding | — | **UNCREATED** (digest hard stop) |
 
 ## Evaluation phases (ordered)
 
@@ -35,7 +37,7 @@ runs, or unblinding.
 - Tier A = `REPLAY_VERIFIED` (primary).
 - Tier B v1 = `COMMITTED_NATIVE_ATTESTATION` (secondary; do not inflate A; do not treat as worthless).
 - Tier B v0 excluded from scoring.
-- Local Tier A/B counts: not produced on OVK in this phase.
+- Local Tier A/B counts: not produced on OVK (digest hard stop).
 
 ## Honesty constraints
 
@@ -47,3 +49,4 @@ runs, or unblinding.
 - Go production checker is not an absolute blocker; bounded result is FOUND or
   UNVERIFIED only.
 - 20-transition threshold is a feasibility rule, not scientific validity.
+- Do not invent materialization/tier modules solely to chase sealed hashes.

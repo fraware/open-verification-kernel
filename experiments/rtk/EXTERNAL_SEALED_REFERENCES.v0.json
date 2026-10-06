@@ -41,5 +41,15 @@
     "matches_reported_census_sha256": false,
     "hard_stop_on_digest_mismatch": true,
     "binding_claim": "FORBIDDEN_UNTIL_BYTE_IDENTICAL_OR_DOCUMENTED_FORMAT_PARITY"
+  },
+  "ovk_digest_forensics": {
+    "artifact": "forensics/CENSUS_DIGEST_FORENSICS.v0.json",
+    "status": "HARD_STOP_DIGEST_MISMATCH",
+    "local_serialization_attempts": 13,
+    "any_match": false,
+    "byte_level_diff_possible": false,
+    "anchors_materialized": false,
+    "projection_materialized": false,
+    "source_evidence_v1_binding": "UNCREATED"
   }
 }
