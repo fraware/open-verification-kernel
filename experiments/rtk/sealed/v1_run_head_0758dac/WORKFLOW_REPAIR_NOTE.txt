@@ -1,0 +1,20 @@
+# rtk-source-evidence.yml environment repair
+
+Authentic pre-fix workflow blob (handoff / run 37420715584 head):
+  cc374b68685911d384e97e2e54acc9bbc9306560
+
+The repaired workflow committed on this branch is NOT byte-identical to that
+blob. Repair scope:
+
+- pin jsonschema==4.26.0 after Python setup with explicit version assert
+- write and upload VALIDATION_ENVIRONMENT.txt
+- split concatenated py_compile path entries onto separate lines
+- compile project_source_evidence_semantics.py and tier_source_evidence_v1.py
+- load experiments/p05_formalpr_bench/rtk_eval/schemas/source_evidence_tiered.v1.schema.json
+  during Validate v1 tier separation and schema
+- install sealed TRANSITION_CENSUS bytes (authentic generate_transition_census
+  blob UNAVAILABLE on OVK)
+- trigger research/rtk-sealed-evaluation-507f and synthetic unit-test step
+
+tier_source_evidence_v1.py predicates are unchanged (blob
+6010c44bb6ee2d89a30927726b37c1b346be4e0f).

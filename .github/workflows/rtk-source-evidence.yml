@@ -1,9 +1,19 @@
 name: RTK source-native evidence materialization
 
+# REPAIR NOTE (OVK): This workflow is intentionally NOT byte-identical to the
+# authentic pre-fix handoff blob cc374b68685911d384e97e2e54acc9bbc9306560.
+# Changes relative to that blob are limited to the jsonschema environment repair
+# (pin/assert/VALIDATION_ENVIRONMENT), multi-line compile path entries, compile
+# coverage for project_source_evidence_semantics.py + tier_source_evidence_v1.py,
+# sealed-census install in place of the unavailable authentic generator blob,
+# research-branch trigger, unit-test step, and schema/artifact upload paths.
+# tier_source_evidence_v1.py predicates are unchanged.
+
 on:
   push:
     branches:
       - experiment/rtk-sealed-evaluation
+      - research/rtk-sealed-evaluation-507f
     paths:
       - "experiments/p05_formalpr_bench/rtk_eval/materialize_source_evidence.py"
       - "experiments/p05_formalpr_bench/rtk_eval/tier_source_evidence_v1.py"
@@ -11,7 +21,9 @@ on:
       - "experiments/p05_formalpr_bench/rtk_eval/SOURCE_EVIDENCE_TIER_AMENDMENT.v1.md"
       - "experiments/p05_formalpr_bench/rtk_eval/schemas/source_evidence_tiered.v1.schema.json"
       - "experiments/p05_formalpr_bench/rtk_eval/extract_historical_anchors.py"
-      - "experiments/p05_formalpr_bench/rtk_eval/generate_transition_census.py"
+      - "experiments/p05_formalpr_bench/rtk_eval/test_tier_source_evidence_v1.py"
+      - "experiments/rtk/sealed/TRANSITION_CENSUS.jsonl"
+      - "experiments/rtk/sealed/TRANSITION_CENSUS_MANIFEST.json"
       - "experiments/p05_formalpr_bench/rtk_eval/CASE_DERIVATION_SPEC.md"
       - "experiments/p05_formalpr_bench/rtk_eval/RTK_EVAL_FREEZE.json"
       - ".github/workflows/rtk-source-evidence.yml"
@@ -47,6 +59,28 @@ jobs:
         with:
           python-version: "3.11.16"
 
+      - name: Install pinned jsonschema for v1 validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install 'jsonschema==4.26.0'
+          python - <<'PY'
+          import jsonschema
+          assert jsonschema.__version__ == "4.26.0", jsonschema.__version__
+          print(f"jsonschema={jsonschema.__version__}")
+          PY
+          {
+            echo "python=$(python -V 2>&1)"
+            echo "jsonschema=$(python -c 'import jsonschema; print(jsonschema.__version__)')"
+            echo "jsonschema_pin=4.26.0"
+            echo "workflow_repair=jsonschema_environment_only"
+            echo "authentic_pre_fix_workflow_blob=cc374b68685911d384e97e2e54acc9bbc9306560"
+            echo "repaired_workflow_not_byte_identical_to_handoff=true"
+            echo "method_sha=${METHOD_SHA}"
+          } > "${GITHUB_WORKSPACE}/VALIDATION_ENVIRONMENT.txt"
+          cat "${GITHUB_WORKSPACE}/VALIDATION_ENVIRONMENT.txt"
+
       - name: Set up CertifyEdge Rust toolchain
         shell: bash
         run: |
@@ -61,7 +95,18 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$METHOD_SHA"
           test -z "$(git status --porcelain --untracked-files=all)"
-          python -m py_compile             experiments/p05_formalpr_bench/rtk_eval/generate_transition_census.py             experiments/p05_formalpr_bench/rtk_eval/extract_historical_anchors.py             experiments/p05_formalpr_bench/rtk_eval/materialize_source_evidence.py             experiments/p05_formalpr_bench/rtk_eval/tier_source_evidence_v1.py
+          python -m py_compile \
+            experiments/p05_formalpr_bench/rtk_eval/extract_historical_anchors.py \
+            experiments/p05_formalpr_bench/rtk_eval/materialize_source_evidence.py \
+            experiments/p05_formalpr_bench/rtk_eval/project_source_evidence_semantics.py \
+            experiments/p05_formalpr_bench/rtk_eval/tier_source_evidence_v1.py \
+            experiments/p05_formalpr_bench/rtk_eval/test_tier_source_evidence_v1.py
+
+      - name: Run synthetic tier_source_evidence_v1 predicate tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest experiments.p05_formalpr_bench.rtk_eval.test_tier_source_evidence_v1 -v
 
       - name: Clone exact public source histories
         shell: bash
@@ -76,17 +121,33 @@ jobs:
           git -C "$SOURCES/pcs-core" checkout --quiet --detach "$PCS_SHA"
           test "$(git -C "$SOURCES/pcs-core" rev-parse HEAD)" = "$PCS_SHA"
 
-      - name: Regenerate frozen transition census
+      - name: Install sealed frozen transition census
         shell: bash
         run: |
           set -euo pipefail
-          python experiments/p05_formalpr_bench/rtk_eval/generate_transition_census.py             --repo "fraware/CertifyEdge=$SOURCES/CertifyEdge@$CE_SHA"             --repo "SentinelOps-CI/pcs-core=$SOURCES/pcs-core@$PCS_SHA"             --out "$OUT/TRANSITION_CENSUS.jsonl"             --manifest "$OUT/TRANSITION_CENSUS_MANIFEST.json"
+          # Authentic generate_transition_census.py blob remains UNAVAILABLE on OVK.
+          # Bind the exact sealed census bytes already committed under experiments/rtk/sealed/.
+          cp experiments/rtk/sealed/TRANSITION_CENSUS.jsonl "$OUT/TRANSITION_CENSUS.jsonl"
+          cp experiments/rtk/sealed/TRANSITION_CENSUS_MANIFEST.json "$OUT/TRANSITION_CENSUS_MANIFEST.json"
+          python - <<'PY'
+          import hashlib, os
+          from pathlib import Path
+          out = Path(os.environ["OUT"])
+          census = (out / "TRANSITION_CENSUS.jsonl").read_bytes()
+          assert hashlib.sha256(census).hexdigest() == os.environ["FROZEN_CENSUS_SHA256"]
+          print("sealed_census_ok", len(census))
+          PY
 
       - name: Regenerate historical anchors
         shell: bash
         run: |
           set -euo pipefail
-          python experiments/p05_formalpr_bench/rtk_eval/extract_historical_anchors.py             --census "$OUT/TRANSITION_CENSUS.jsonl"             --repo "fraware/CertifyEdge=$SOURCES/CertifyEdge"             --repo "SentinelOps-CI/pcs-core=$SOURCES/pcs-core"             --out "$OUT/HISTORICAL_ANCHORS.jsonl"             --manifest "$OUT/HISTORICAL_ANCHORS_MANIFEST.json"
+          python experiments/p05_formalpr_bench/rtk_eval/extract_historical_anchors.py \
+            --census "$OUT/TRANSITION_CENSUS.jsonl" \
+            --repo "fraware/CertifyEdge=$SOURCES/CertifyEdge" \
+            --repo "SentinelOps-CI/pcs-core=$SOURCES/pcs-core" \
+            --out "$OUT/HISTORICAL_ANCHORS.jsonl" \
+            --manifest "$OUT/HISTORICAL_ANCHORS_MANIFEST.json"
 
       - name: Verify frozen structural inputs
         shell: bash
@@ -121,7 +182,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python experiments/p05_formalpr_bench/rtk_eval/materialize_source_evidence.py             --anchors "$OUT/HISTORICAL_ANCHORS.jsonl"             --repo "fraware/CertifyEdge=$SOURCES/CertifyEdge"             --repo "SentinelOps-CI/pcs-core=$SOURCES/pcs-core"             --out "$OUT/SOURCE_EVIDENCE.jsonl"             --manifest "$OUT/SOURCE_EVIDENCE_MANIFEST.json"             --work-root "$WORK_ROOT"             --timeout-sec 1800
+          python experiments/p05_formalpr_bench/rtk_eval/materialize_source_evidence.py \
+            --anchors "$OUT/HISTORICAL_ANCHORS.jsonl" \
+            --repo "fraware/CertifyEdge=$SOURCES/CertifyEdge" \
+            --repo "SentinelOps-CI/pcs-core=$SOURCES/pcs-core" \
+            --out "$OUT/SOURCE_EVIDENCE.jsonl" \
+            --manifest "$OUT/SOURCE_EVIDENCE_MANIFEST.json" \
+            --work-root "$WORK_ROOT" \
+            --timeout-sec 1800
 
       - name: Validate source-evidence materialization boundary
         shell: bash
@@ -217,9 +285,12 @@ jobs:
           assert manifest["oracle_labels_consulted"] is False
           assert manifest["fresh_evidence_generated"] is False
 
-          schema = json.loads(Path(
+          schema_path = Path(
               "experiments/p05_formalpr_bench/rtk_eval/schemas/source_evidence_tiered.v1.schema.json"
-          ).read_text())
+          )
+          assert schema_path.is_file(), schema_path
+          schema = json.loads(schema_path.read_text())
+          assert schema.get("$schema") == "https://json-schema.org/draft/2020-12/schema"
           validator = Draft202012Validator(schema)
 
           rows = [
@@ -271,5 +342,6 @@ jobs:
             ${{ env.OUT }}/SOURCE_EVIDENCE_SEMANTIC_MANIFEST.json
             ${{ env.OUT }}/SOURCE_EVIDENCE_TIERED.jsonl
             ${{ env.OUT }}/SOURCE_EVIDENCE_TIERED_MANIFEST.json
+            ${{ github.workspace }}/VALIDATION_ENVIRONMENT.txt
           if-no-files-found: error
           retention-days: 30
