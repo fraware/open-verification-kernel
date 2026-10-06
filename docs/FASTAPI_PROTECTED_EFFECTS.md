@@ -46,7 +46,7 @@ development replay only and do not rewrite frozen external-candidate labels.
 
 ## Executed-expression effect closure (PE)
 
-Cache / semantic tip: `PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION = "1.6.0"`
+Cache / semantic tip: `PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION = "1.7.0"`
 on branch `feature/executed-expression-effect-closure` (open PR #173).
 
 False `authorized` + `source_proved_server_authority_write` must fail closed when
@@ -56,7 +56,7 @@ materialize / copy paths used by packing, identity, and ChainMap observe).
 Regression layers:
 
 - Named pass ledger: `tests/test_executed_expression_effect_closure.py`
-  (through forty-first-pass pins)
+  (through forty-second-pass pins)
 - Adapter matrix: `tests/test_pe_peel_adapter_matrix.py` + catalog
   `tests/pe_peel_catalog.py`
 - Seeded generative property: `tests/test_pe_peel_property.py`

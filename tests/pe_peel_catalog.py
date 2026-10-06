@@ -47,6 +47,10 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "bitor_dictcomp",
         "ior_dict_vb",
         "update_copy",
+        # Forty-second-pass atoms (shared peels).
+        "name_setitem_dunder",
+        "augassign_ior_copy_dictcomp",
+        "chainmap_getattr_setdefault",
     ),
     "identity": (
         "star_zip_getitem",
@@ -56,6 +60,11 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "partial_getitem_zip",
         "filterfalse_zip",
         "filter_bool_zip",
+        # Forty-second-pass atoms (shared peels).
+        "from_iterable_zip",
+        "name_zip_star",
+        "cycle_zip",
+        "filter_true_zip",
     ),
     "lexical": (
         "itruediv",
@@ -77,6 +86,11 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "name_copy_get",
         "operator_getitem_pack",
         "partial_getattr_callcall",
+        # Forty-second-pass atoms (shared peels).
+        "list0_copy_gi",
+        "next_values_gi",
+        "fromkeys_gi",
+        "ig_call_applied",
     ),
     "class": (
         "iconcat_list_copy_maps",
@@ -86,6 +100,10 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "attrgetter_maps",
         "getattr_maps",
         "append_list_copy_maps",
+        # Forty-second-pass atoms (shared peels).
+        "binop_add_list_maps",
+        "append_list_maps",
+        "append_maps_slice",
     ),
     "interproc": (
         "unbound_decoder_decode",
@@ -98,6 +116,13 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "packed_from_iterable",
         "csv_reader_empty",
         "name_getattr_slice0",
+        # Forty-second-pass atoms (shared peels).
+        "name_getattr_decode",
+        "getattr_raw_decode",
+        "pickle_load",
+        "zlib_decompress",
+        "itemgetter_slice0",
+        "csv_dict_reader",
     ),
 }
 
@@ -138,8 +163,14 @@ NON_MATERIAL_OOS: tuple[str, ...] = (
     "itertools.partition / combinations*(..., 0) non-material empties",
     "next(tee(...)) arity / tee half misuse that TypeErrors",
     "list.extend TypeError empties / FormalPR freeze",
+    # Idle ``partial(operator.getitem)(carrier, idx)()`` — empty apply on the
+    # zip-pair Tuple TypeErrors (Unknown > false authorize; do not materialize).
+    "partial(operator.getitem)([*zip(...)],0)() empty-apply TypeError",
     "FormalPR freeze / #87 held-out until human gate",
 )
 
 # Closed at 1.6.0 via shared peels + catalog atoms (was FORTY_FIRST_LEFTOVERS).
 FORTY_FIRST_LEFTOVERS: tuple[str, ...] = ()
+
+# Closed at 1.7.0 via shared peels + catalog atoms (was FORTY_SECOND leftovers).
+FORTY_SECOND_LEFTOVERS: tuple[str, ...] = ()
