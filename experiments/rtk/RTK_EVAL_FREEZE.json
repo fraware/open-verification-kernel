@@ -1,6 +1,6 @@
 {
   "schema_version": "rtk.eval_freeze.v1",
-  "status": "RTK_PREDICTIONS_COMMITTED_BLIND_BASELINES_PENDING",
+  "status": "PILOT_N10_SCORED_AFTER_PREDICTION_COMMITMENT_BASELINES_PENDING",
   "protocol_paths": {
     "readme": "experiments/rtk/README.md",
     "protocol": "experiments/rtk/PROTOCOL.md",
@@ -32,7 +32,9 @@
     "oracle_rules_pilot_n10": "experiments/rtk/oracle/ORACLE_RULES.pilot_n10.v0.md",
     "pilot_n10": "experiments/rtk/sealed/pilot_n10/",
     "prediction_binding": "experiments/rtk/PREDICTION_BINDING.json",
-    "rtk_predictions_pilot_n10": "experiments/rtk/sealed/pilot_n10/RTK_PREDICTIONS.jsonl"
+    "rtk_predictions_pilot_n10": "experiments/rtk/sealed/pilot_n10/RTK_PREDICTIONS.jsonl",
+    "scoring_binding": "experiments/rtk/SCORING_BINDING.json",
+    "scoring_report_pilot_n10": "experiments/rtk/sealed/pilot_n10/SCORING_REPORT.json"
   },
   "protocol_commit_sha": "1bff877e9f405c447d10304221f4d1509abe141d",
   "source_repositories": [
@@ -203,6 +205,11 @@
       "amendment_id": "rtk_predictions_committed_blind_pilot_n10",
       "status": "RTK_PREDICTIONS_COMMITTED_BLIND_BASELINES_PENDING",
       "summary": "Committed blind RTK predictions from rtk.reference_implementation.v0 on sealed Tier-A pilot CDI (n_cases=16, execution_ok={'OK': 16}). Prediction commitment recorded before oracle comparison/unblinding. Baselines registry empty → BASELINES_PENDING. No reference-implementation semantic changes."
+    },
+    {
+      "amendment_id": "pilot_n10_scored_after_prediction_commitment",
+      "status": "PILOT_N10_SCORED_AFTER_PREDICTION_COMMITMENT_BASELINES_PENDING",
+      "summary": "After prediction commitment, computed frozen ANALYSIS_PLAN metrics on Tier-A pilot (FR case-level=0.0, UR case-level=0.0, transition exact-match=1.0). Scoring-only unblinding; no SUT semantic patch; baselines still pending; power limits unchanged."
     }
   ],
   "canonical_decision_input": {
@@ -367,7 +374,7 @@
       "TIER_A_MANIFEST.json": "5b10919614764a5c07a13cfa149695e944256f6aaf0d092197e3968b11f64b90"
     },
     "independence_held": true,
-    "unblinding": false,
+    "unblinding": "SCORING_ONLY_AFTER_PREDICTION_COMMITMENT",
     "commit_sha": "ef90e4674aabfc5438e2eac49a4e80dc03cc0275"
   },
   "rtk_predictions": {
@@ -384,10 +391,20 @@
       "REVALIDATION_REQUIRED": 5,
       "VALID": 11
     },
-    "oracle_compared": false,
-    "unblinding": false,
+    "oracle_compared": true,
+    "unblinding": "SCORING_ONLY_AFTER_COMMITMENT",
     "commit_sha": "62e140e97000ac7a199216240341333267112281"
   },
   "baselines_status": "BASELINES_PENDING",
-  "baselines_note": "No baseline identifiers were registered in the freeze before execution; baseline runs deferred."
+  "baselines_note": "No baseline identifiers were registered in the freeze before execution; baseline runs deferred.",
+  "scoring": {
+    "status": "SCORED_AFTER_PREDICTION_COMMITMENT",
+    "binding": "experiments/rtk/SCORING_BINDING.json",
+    "report": "experiments/rtk/sealed/pilot_n10/SCORING_REPORT.json",
+    "report_sha256": "f810180cc6547391d8287a18ff743ac1ffe944ff529b8bf79c797c904dbcd049",
+    "unblinding": "SCORING_ONLY",
+    "false_reuse_case_level": 0.0,
+    "unnecessary_revalidation_case_level": 0.0,
+    "baselines_status": "BASELINES_PENDING"
+  }
 }

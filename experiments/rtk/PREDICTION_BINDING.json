@@ -18,10 +18,11 @@
     "VALID": 11
   },
   "failure_category_counts": {},
-  "oracle_compared": false,
-  "unblinding": false,
+  "oracle_compared": true,
+  "unblinding": "SCORING_ONLY_AFTER_COMMITMENT",
   "baselines_status": "BASELINES_PENDING",
   "baselines_note": "Freeze baselines registry empty; no baseline identifiers frozen for execution.",
   "independence_note": "Predictions produced from CDI only after oracle commitment; no semantic patching from holdout.",
-  "commit_sha": "62e140e97000ac7a199216240341333267112281"
+  "commit_sha": "62e140e97000ac7a199216240341333267112281",
+  "scoring_report": "experiments/rtk/sealed/pilot_n10/SCORING_REPORT.json"
 }
