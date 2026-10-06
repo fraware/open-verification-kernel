@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/rtk/case.schema.json",
+  "title": "RTK sealed evaluation case",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "case_id",
+    "transition_id",
+    "repository",
+    "source_sha",
+    "target_sha",
+    "claim_id",
+    "evidence_snapshot_id",
+    "generator_version",
+    "case_digest"
+  ],
+  "properties": {
+    "case_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "transition_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repository": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "target_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "claim_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence_snapshot_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generator_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "changed_context": {
+      "type": "object"
+    },
+    "rtk_input": {
+      "type": "object"
+    },
+    "case_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}
