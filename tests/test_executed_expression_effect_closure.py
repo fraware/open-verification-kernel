@@ -20055,4 +20055,4 @@ def test_forty_first_pass_positive_authorized_smoke() -> None:
 def test_persistent_version_bumped_for_executed_expr_closure() -> None:
     """Cache / semantic versions bump with PASS-semantics change."""
 
-    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "1.5.0"
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "1.5.1"

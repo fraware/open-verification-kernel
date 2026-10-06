@@ -24536,7 +24536,15 @@ def _build_identity_scanner(
             else:
                 # ``d=dict({k: vb.get(k) for k in vb})`` ns rebuild.
                 _seed_dictcomp_ns_rebuild(name, value)
-                elems = _iter_elements(value)
+                # Keep the richer ChainMap-list alias seeded above. Direct-call
+                # element resolution is useful for expressions such as
+                # ``iconcat(..., getattr(cm, "maps"))``, but materializing
+                # children here erases the receiver identity needed by ``m[i]``.
+                elems = (
+                    None
+                    if name in chainmap_list_aliases
+                    else _iter_elements(value)
+                )
                 if elems is not None:
                     sequence_view_aliases[name] = ast.List(
                         elts=list(elems), ctx=ast.Load()
