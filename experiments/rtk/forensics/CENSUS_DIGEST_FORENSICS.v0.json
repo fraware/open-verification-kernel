@@ -2,9 +2,9 @@
   "anchor_projection_status": {
     "anchors_materialized": false,
     "projection_materialized": false,
-    "reason": "Stopped before inventing extract_historical_anchors / materialize_source_evidence / project_source_evidence_semantics. Those modules are not present on OVK; reconstructing them without the sealed artifact bytes or historically intended scripts would invent new semantics to chase hashes, which is forbidden."
+    "reason": "Authentic extract/materialize/project modules unavailable after sealed census commit; not inventing substitutes."
   },
-  "binding_decision": "SOURCE_EVIDENCE_V1_BINDING.json UNCREATED",
+  "binding_decision": "SOURCE_EVIDENCE_V1_BINDING.json UNCREATED (pipeline modules unavailable)",
   "byte_level_diff_status": {
     "possible": false,
     "reason": "Sealed census artifact bytes are not present on OVK and are not recoverable from public CertifyEdge/pcs-core trees or public GitHub search for the digest. Without the sealed byte string, a byte-level diff cannot be computed; only candidate digests can be compared to the published SHA-256."
@@ -194,5 +194,11 @@
     "NO_FABRICATED_BINDING"
   ],
   "schema_version": "census_digest_forensics.v0",
-  "status": "HARD_STOP_DIGEST_MISMATCH"
+  "status": "SUPERSEDED_BY_SEALED_BYTE_COMMIT",
+  "supersession": {
+    "note": "Prior HARD_STOP_DIGEST_MISMATCH applied when sealed bytes were absent. Bytes are now committed; remaining blocker is authentic pipeline module recovery.",
+    "pipeline_recovery": "experiments/rtk/forensics/PIPELINE_MODULE_RECOVERY.v0.json",
+    "sealed_census_path": "experiments/rtk/sealed/TRANSITION_CENSUS.jsonl",
+    "sealed_census_sha256": "b1816276176297adf345981fe5d9c8271cf00f5b71653d59a21d8261d64a6b11"
+  }
 }

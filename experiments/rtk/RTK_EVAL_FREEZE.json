@@ -12,7 +12,11 @@
     "external_sealed_references": "experiments/rtk/EXTERNAL_SEALED_REFERENCES.v0.json",
     "census_cardinality_probe": "experiments/rtk/CENSUS_CARDINALITY_PROBE.v0.json",
     "census_digest_forensics": "experiments/rtk/forensics/CENSUS_DIGEST_FORENSICS.v0.json",
-    "census_candidate_not_sealed": "experiments/rtk/forensics/CENSUS_CANDIDATE.source_universe_census.v0.json"
+    "census_candidate_not_sealed": "experiments/rtk/forensics/CENSUS_CANDIDATE.source_universe_census.v0.json",
+    "pipeline_module_recovery": "experiments/rtk/forensics/PIPELINE_MODULE_RECOVERY.v0.json",
+    "sealed_census": "experiments/rtk/sealed/TRANSITION_CENSUS.jsonl",
+    "sealed_census_manifest": "experiments/rtk/sealed/TRANSITION_CENSUS_MANIFEST.json",
+    "sealed_census_provenance": "experiments/rtk/sealed/SEALED_CENSUS_PROVENANCE.json"
   },
   "protocol_commit_sha": "1bff877e9f405c447d10304221f4d1509abe141d",
   "source_repositories": [
@@ -23,7 +27,7 @@
       "cutoff_timestamp": "2026-05-22T10:56:51-07:00",
       "history_rule": "FIRST_PARENT",
       "role": "SOURCE_UNIVERSE_V0",
-      "ovk_materialization_status": "PENDING_SOURCE_MATERIALIZATION"
+      "ovk_materialization_status": "CENSUS_BOUND_DOWNSTREAM_PENDING_AUTHENTIC_PIPELINE"
     },
     {
       "repository": "pcs-core",
@@ -32,12 +36,26 @@
       "cutoff_timestamp": "2026-07-24T20:21:55+02:00",
       "history_rule": "FIRST_PARENT",
       "role": "SOURCE_UNIVERSE_V0",
-      "ovk_materialization_status": "PENDING_SOURCE_MATERIALIZATION"
+      "ovk_materialization_status": "CENSUS_BOUND_DOWNSTREAM_PENDING_AUTHENTIC_PIPELINE"
     }
   ],
   "source_universe_v0_policy": {
     "immutable": true,
     "never_rewrite_v0": true
+  },
+  "sealed_census": {
+    "path": "experiments/rtk/sealed/TRANSITION_CENSUS.jsonl",
+    "sha256": "b1816276176297adf345981fe5d9c8271cf00f5b71653d59a21d8261d64a6b11",
+    "manifest_path": "experiments/rtk/sealed/TRANSITION_CENSUS_MANIFEST.json",
+    "manifest_sha256": "c4b1e90eba63a489da016b29e8b6ff1c93be969a98a098f3f9b2d957319c4ab3",
+    "size_bytes": 412559,
+    "record_count": 248,
+    "records_by_repository": {
+      "fraware/CertifyEdge": 50,
+      "SentinelOps-CI/pcs-core": 198
+    },
+    "status": "SEALED_BYTES_COMMITTED",
+    "generator_check": "GENERATOR_BLOB_UNAVAILABLE"
   },
   "tier_policy": {
     "tier_a": {
@@ -57,12 +75,12 @@
     "tier_a_replay_verified": {
       "anchor_count": null,
       "transition_count": null,
-      "status": "NOT_LOCALLY_PRODUCED_DIGEST_HARD_STOP"
+      "status": "NOT_LOCALLY_PRODUCED_PIPELINE_MODULES_UNAVAILABLE"
     },
     "tier_b_v1_committed_native_attestation": {
       "anchor_count": null,
       "transition_count": null,
-      "status": "NOT_LOCALLY_PRODUCED_DIGEST_HARD_STOP"
+      "status": "NOT_LOCALLY_PRODUCED_PIPELINE_MODULES_UNAVAILABLE"
     }
   },
   "pre_oracle_feasibility": {
@@ -99,6 +117,11 @@
       "amendment_id": "ovk_census_digest_forensics_hard_stop",
       "status": "PRE_ORACLE_FEASIBILITY_AMENDMENT",
       "summary": "Extended local forensics on full (non-shallow) public clones: cardinality 248 confirmed; 13 serialization candidates all miss sealed census SHA-256; sealed bytes unavailable for byte-level diff; pipeline modules not invented to chase digests; SOURCE_EVIDENCE_V1_BINDING remains UNCREATED; mappings remain PENDING_SOURCE_MATERIALIZATION; no oracle."
+    },
+    {
+      "amendment_id": "ovk_sealed_census_bytes_committed",
+      "status": "PRE_ORACLE_FEASIBILITY_AMENDMENT",
+      "summary": "Exact sealed TRANSITION_CENSUS.jsonl and manifest committed under experiments/rtk/sealed/ from structural-corpus artifact handoff (run 37405175934 / artifact 11387510679). Generator blob UNAVAILABLE. Authentic extract/materialize/project/tier_v1 modules still unavailable on OVK; workflow repair, predicate tests, and SOURCE_EVIDENCE_V1_BINDING remain blocked. No invented pipeline semantics. No oracle."
     }
   ],
   "canonical_decision_input": {
@@ -138,7 +161,7 @@
     "tier_v1": "UNCREATED",
     "unit_tests": "UNCREATED",
     "binding": "UNCREATED",
-    "reason": "HARD_STOP_DIGEST_MISMATCH: FIRST_PARENT cardinality matches (248) but sealed census SHA-256 was not reproduced under documented local serializations; sealed census bytes unavailable for byte-level diff; authentic generate/extract/materialize/project/tier_v1 modules not present on OVK. Inventing them to chase digests is forbidden. See experiments/rtk/forensics/CENSUS_DIGEST_FORENSICS.v0.json."
+    "reason": "SEALED_CENSUS_BOUND_BUT_PIPELINE_MODULES_UNAVAILABLE: exact TRANSITION_CENSUS.jsonl is committed and hash-verified; authentic extract_historical_anchors / materialize_source_evidence / project_source_evidence_semantics / tier_source_evidence_v1 / rtk-source-evidence.yml are not recoverable from OVK, the census handoff, or accessible public mirrors. Inventing substitutes to chase frozen anchor/projection digests is forbidden. See experiments/rtk/forensics/PIPELINE_MODULE_RECOVERY.v0.json."
   },
   "case_generator": {
     "repository": null,
@@ -159,5 +182,5 @@
     "NO_UNBLINDING",
     "NO_RTK_SEMANTICS_CHANGE_FOR_HOLDOUT"
   ],
-  "seal_manifest_sha256": null
+  "seal_manifest_sha256": "b1816276176297adf345981fe5d9c8271cf00f5b71653d59a21d8261d64a6b11"
 }

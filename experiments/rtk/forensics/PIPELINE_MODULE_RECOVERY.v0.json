@@ -1,0 +1,82 @@
+{
+  "schema_version": "pipeline_module_recovery.v0",
+  "status": "PIPELINE_MODULES_UNAVAILABLE",
+  "generated_at_utc": "2026-10-06T18:11:00+00:00",
+  "sealed_census_status": {
+    "path": "experiments/rtk/sealed/TRANSITION_CENSUS.jsonl",
+    "sha256": "b1816276176297adf345981fe5d9c8271cf00f5b71653d59a21d8261d64a6b11",
+    "manifest_sha256": "c4b1e90eba63a489da016b29e8b6ff1c93be969a98a098f3f9b2d957319c4ab3",
+    "size_bytes": 412559,
+    "record_count": 248,
+    "bytes_match_sealed_target": true
+  },
+  "authentic_generator_check": {
+    "commit": "f0e432d3546170bc17e77d9ea1141b51b3bfa5eb",
+    "path": "experiments/p05_formalpr_bench/rtk_eval/generate_transition_census.py",
+    "git_blob_sha": "dcd3bcb521e3267f4e7a07556373b12d7d885705",
+    "status": "GENERATOR_BLOB_UNAVAILABLE",
+    "probes": [
+      "OVK git object store",
+      "GitHub blob API on OVK/CertifyEdge/pcs-core",
+      "Software Heritage sha1_git content API",
+      "raw.githubusercontent.com at generator commit"
+    ],
+    "note": "Independent reproducibility check only; sealed census bytes remain the binding object."
+  },
+  "required_authentic_modules": [
+    "extract_historical_anchors.py",
+    "materialize_source_evidence.py",
+    "project_source_evidence_semantics.py",
+    "tier_source_evidence_v1.py",
+    "schemas/source_evidence_tiered.v1.schema.json",
+    "SOURCE_EVIDENCE_TIER_AMENDMENT.v1.md",
+    ".github/workflows/rtk-source-evidence.yml"
+  ],
+  "recovery_attempts": [
+    {
+      "attempt": "handoff_zip_contents",
+      "result": "census_manifest_provenance_only_no_pipeline_modules"
+    },
+    {
+      "attempt": "OVK_history_and_trees",
+      "result": "experiments/p05_formalpr_bench/ absent; no rtk-source-evidence workflow"
+    },
+    {
+      "attempt": "accessible_fraware_public_repos_tree_scan",
+      "result": "no_rtk_eval_pipeline_paths"
+    },
+    {
+      "attempt": "known_portfolio_commit_and_blob_SHAs_on_public_mirrors",
+      "result": "not_found"
+    },
+    {
+      "attempt": "GitHub_Actions_artifact_11387510679_live_fetch",
+      "result": "repository_not_accessible_provenance_label_only"
+    }
+  ],
+  "decision": {
+    "invent_substitute_semantics": false,
+    "workflow_jsonschema_repair": "BLOCKED_NO_AUTHENTIC_WORKFLOW",
+    "tier_v1_unit_tests": "BLOCKED_NO_AUTHENTIC_TIER_MODULE",
+    "local_pipeline_rerun": "BLOCKED_NO_AUTHENTIC_PIPELINE",
+    "SOURCE_EVIDENCE_V1_BINDING": "UNCREATED",
+    "reason": "Authentic anchors/materialize/project/tier_v1 modules are not present on OVK and were not in the census handoff. Inventing substitutes to chase frozen anchor/projection digests is forbidden. Hard-stop criteria remain in force."
+  },
+  "immutable_downstream_targets": {
+    "anchors_cardinality": 541,
+    "anchors_sha256": "44cb1f2701705375e9354b4a51a07064d2dba2d33f757e0955fc03db00d4d5cc",
+    "semantic_projection_sha256": "7ea32cb2c579077f281a3356683a3e926872492b6e756b44c0c39d077358f1fe",
+    "replay_verified_anchors": 9,
+    "replay_verified_transitions": 3
+  },
+  "prohibitions_honored": [
+    "NO_ORACLE",
+    "NO_RTK_PREDICTION",
+    "NO_BASELINE_EXECUTION",
+    "NO_UNBLINDING",
+    "NO_DIGEST_SEMANTICS_WEAKENING",
+    "NO_FABRICATED_BINDING",
+    "NO_INVENTED_PIPELINE_SEMANTICS",
+    "NO_FABRICATED_CI_IDS"
+  ]
+}

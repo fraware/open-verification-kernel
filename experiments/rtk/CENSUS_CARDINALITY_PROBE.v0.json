@@ -1,6 +1,6 @@
 {
   "schema_version": "census_cardinality_probe.v0",
-  "status": "PROBE_ONLY_NOT_A_BINDING",
+  "status": "PROBE_ONLY_SEALED_BYTES_NOW_PRESENT",
   "generated_on_ovk": true,
   "history_rule": "FIRST_PARENT",
   "repositories": [
@@ -29,9 +29,13 @@
   "external_reported_census_sha256": "b1816276176297adf345981fe5d9c8271cf00f5b71653d59a21d8261d64a6b11",
   "local_serialization_attempts": 13,
   "local_digest_match": false,
+  "sealed_bytes_committed": true,
+  "sealed_bytes_path": "experiments/rtk/sealed/TRANSITION_CENSUS.jsonl",
+  "sealed_bytes_sha256_verified": true,
   "forensics_artifact": "experiments/rtk/forensics/CENSUS_DIGEST_FORENSICS.v0.json",
+  "pipeline_recovery_artifact": "experiments/rtk/forensics/PIPELINE_MODULE_RECOVERY.v0.json",
   "candidate_artifact": "experiments/rtk/forensics/CENSUS_CANDIDATE.source_universe_census.v0.json",
   "candidate_sha256": "92033cdc87ed3c517072f4d17f66eb7fa45623b58669fe8a66aef52ee825768d",
-  "byte_level_diff_possible": false,
-  "conclusion": "Cardinality of FIRST_PARENT transitions at the immutable cutoffs matches the external sealed reference (248). Thirteen documented local serializations (array/object/NDJSON/CSV, path-order, timestamp, tid, and field-set variants) all miss the sealed census SHA-256. Sealed census bytes are not present on OVK, so a byte-level diff is impossible. SOURCE_EVIDENCE_V1_BINDING remains UNCREATED; do not weaken digests or invent materialization semantics."
+  "byte_level_diff_possible": true,
+  "conclusion": "Sealed TRANSITION_CENSUS.jsonl bytes are now committed under experiments/rtk/sealed/ and verify to the frozen SHA-256. Prior local serializations remain non-matching and are diagnostic only. Authentic extract/materialize/project/tier_v1 modules are still unavailable; SOURCE_EVIDENCE_V1_BINDING remains UNCREATED."
 }
