@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/rtk/transition.schema.json",
+  "title": "RTK historical transition census record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "transition_id",
+    "repository",
+    "source_sha",
+    "target_sha",
+    "source_timestamp",
+    "target_timestamp",
+    "changed_paths",
+    "eligibility"
+  ],
+  "properties": {
+    "transition_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repository": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "target_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "source_timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "target_timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "changed_paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "candidate_semantic_categories": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "eligibility": {
+      "enum": [
+        "ELIGIBLE",
+        "EXCLUDED"
+      ]
+    },
+    "exclusion_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "history_rule": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "eligibility": {
+            "const": "EXCLUDED"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "exclusion_reason"
+        ],
+        "properties": {
+          "exclusion_reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  ]
+}

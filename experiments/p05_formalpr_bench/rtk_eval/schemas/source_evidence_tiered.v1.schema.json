@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openverification.dev/rtk/source_evidence_tiered.v1.schema.json",
+  "title": "RTK source evidence tiered record v1",
+  "type": "object",
+  "required": [
+    "anchor_id",
+    "transition_id",
+    "repository",
+    "source_sha",
+    "family",
+    "claim_id",
+    "materialization_status",
+    "source_evidence_class",
+    "attestation_candidates",
+    "tiering_amendment_applied",
+    "target_native_validator_executed",
+    "rtk_executed",
+    "oracle_labels_consulted"
+  ],
+  "properties": {
+    "anchor_id": { "type": "string", "minLength": 1 },
+    "transition_id": { "type": "string", "minLength": 1 },
+    "repository": { "type": "string", "minLength": 1 },
+    "source_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "family": { "type": "string" },
+    "claim_id": { "type": "string" },
+    "contract_locator": { "type": ["string", "null"] },
+    "materialization_status": {
+      "type": "string",
+      "enum": [
+        "SOURCE_ACCEPTED",
+        "SOURCE_ATTESTED",
+        "SOURCE_REJECTED",
+        "OPERATIONAL_FAILURE",
+        "UNSUPPORTED_NATIVE_VALIDATOR",
+        "NO_CANDIDATE"
+      ]
+    },
+    "source_evidence_class": {
+      "type": ["string", "null"],
+      "enum": ["REPLAY_VERIFIED", "COMMITTED_NATIVE_ATTESTATION", null]
+    },
+    "subject_binding": { "type": ["string", "null"] },
+    "selected_candidate_id": { "type": ["string", "null"] },
+    "native_verifier_digest": { "type": ["string", "null"] },
+    "evidence_snapshot": { "type": ["object", "null"] },
+    "candidates": { "type": "array" },
+    "attestation_candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "candidate_id",
+          "attestation_accept",
+          "attestation_rejection_reasons"
+        ],
+        "properties": {
+          "candidate_id": { "type": "string" },
+          "locator": { "type": "string" },
+          "profile_locator": { "type": "string" },
+          "attestation_sha256": { "type": "string" },
+          "artifacts": { "type": "array" },
+          "attestation_accept": { "type": "boolean" },
+          "attestation_rejection_reasons": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "subject_binding": { "type": ["string", "null"] },
+          "validator": { "type": ["string", "null"] },
+          "status": { "type": ["string", "null"] },
+          "checked_at": { "type": ["string", "null"] },
+          "result_source_commit": { "type": ["string", "null"] },
+          "result_source_commit_is_ancestor": { "type": "boolean" },
+          "native_certificate_locator": { "type": ["string", "null"] },
+          "native_certificate_id": { "type": ["string", "null"] },
+          "native_certificate_status": { "type": ["string", "null"] },
+          "release_manifest_locator": { "type": ["string", "null"] }
+        },
+        "additionalProperties": true
+      }
+    },
+    "tiering_amendment_applied": { "type": "boolean", "const": true },
+    "environment": { "type": ["object", "null"] },
+    "notes": { "type": "array", "items": { "type": "string" } },
+    "target_native_validator_executed": { "type": "boolean", "const": false },
+    "rtk_executed": { "type": "boolean", "const": false },
+    "oracle_labels_consulted": { "type": "boolean", "const": false }
+  },
+  "additionalProperties": true,
+  "allOf": [
+    {
+      "if": {
+        "properties": { "materialization_status": { "const": "SOURCE_ACCEPTED" } },
+        "required": ["materialization_status"]
+      },
+      "then": {
+        "properties": {
+          "source_evidence_class": { "const": "REPLAY_VERIFIED" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "materialization_status": { "const": "SOURCE_ATTESTED" } },
+        "required": ["materialization_status"]
+      },
+      "then": {
+        "required": ["evidence_snapshot", "subject_binding"],
+        "properties": {
+          "source_evidence_class": { "const": "COMMITTED_NATIVE_ATTESTATION" },
+          "evidence_snapshot": { "type": "object" },
+          "subject_binding": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "materialization_status": {
+            "enum": [
+              "SOURCE_REJECTED",
+              "OPERATIONAL_FAILURE",
+              "UNSUPPORTED_NATIVE_VALIDATOR",
+              "NO_CANDIDATE"
+            ]
+          }
+        },
+        "required": ["materialization_status"]
+      },
+      "then": {
+        "properties": {
+          "source_evidence_class": { "type": "null" }
+        }
+      }
+    }
+  ]
+}

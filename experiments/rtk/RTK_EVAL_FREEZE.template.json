@@ -1,0 +1,44 @@
+{
+  "schema_version": "rtk.eval_freeze.v0",
+  "status": "TEMPLATE_NOT_FROZEN",
+  "note": "Unfrozen template retained for reference. Active freeze document is RTK_EVAL_FREEZE.json.",
+  "protocol_commit_sha": null,
+  "source_repositories": [
+    {
+      "repository": "CertifyEdge",
+      "url": "https://github.com/fraware/CertifyEdge",
+      "cutoff_sha": null,
+      "cutoff_timestamp": null,
+      "history_rule": "FIRST_PARENT"
+    },
+    {
+      "repository": "pcs-core",
+      "url": "https://github.com/SentinelOps-CI/pcs-core",
+      "cutoff_sha": null,
+      "cutoff_timestamp": null,
+      "history_rule": "FIRST_PARENT"
+    }
+  ],
+  "rtk_implementation": {
+    "repository": null,
+    "commit_sha": null,
+    "python_checker_sha": null,
+    "go_checker_sha": null,
+    "lean_commit_sha": null,
+    "schema_versions": {},
+    "toolchain_versions": {},
+    "evaluation_interface_version": null
+  },
+  "case_generator": {
+    "repository": null,
+    "commit_sha": null,
+    "version": null
+  },
+  "baselines": [],
+  "sampling": {
+    "mode": "ALL_ELIGIBLE",
+    "seed": null,
+    "target_size": null
+  },
+  "seal_manifest_sha256": null
+}

@@ -1,0 +1,11 @@
+{
+  "schema_version": "rtk.scoring_binding.v0",
+  "status": "SCORED_AFTER_PREDICTION_COMMITMENT",
+  "scoring_report_path": "experiments/rtk/sealed/pilot_n10/SCORING_REPORT.json",
+  "scoring_report_sha256": "f810180cc6547391d8287a18ff743ac1ffe944ff529b8bf79c797c904dbcd049",
+  "prediction_binding": "experiments/rtk/PREDICTION_BINDING.json",
+  "oracle_binding": "experiments/rtk/ORACLE_BINDING.json",
+  "unblinding": "SCORING_ONLY_AFTER_PREDICTION_COMMITMENT",
+  "baselines_status": "BASELINES_PENDING",
+  "commit_sha": "8346d4c96adc48282fd79032b4f64859d408a4b5"
+}

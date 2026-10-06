@@ -1,0 +1,411 @@
+{
+  "schema_version": "rtk.eval_freeze.v1",
+  "status": "PILOT_N10_SCORED_AFTER_PREDICTION_COMMITMENT_BASELINES_PENDING",
+  "protocol_paths": {
+    "readme": "experiments/rtk/README.md",
+    "protocol": "experiments/rtk/PROTOCOL.md",
+    "analysis_plan": "experiments/rtk/ANALYSIS_PLAN.md",
+    "expansion_protocol": "experiments/rtk/SOURCE_UNIVERSE_EXPANSION_PROTOCOL.v1.md",
+    "expansion_protocol_v2": "experiments/rtk/SOURCE_UNIVERSE_EXPANSION_PROTOCOL.v2.md",
+    "expansion_v2_adapter_package": "experiments/p05_formalpr_bench/rtk_eval/expansion_v2/",
+    "candidates": "experiments/rtk/SOURCE_REPOSITORY_CANDIDATES.v1.json",
+    "go_provenance": "experiments/rtk/GO_CHECKER_PROVENANCE.v0.md",
+    "evaluated_implementation": "experiments/rtk/EVALUATED_IMPLEMENTATION_IDENTITY.v0.json",
+    "external_sealed_references": "experiments/rtk/EXTERNAL_SEALED_REFERENCES.v0.json",
+    "census_cardinality_probe": "experiments/rtk/CENSUS_CARDINALITY_PROBE.v0.json",
+    "census_digest_forensics": "experiments/rtk/forensics/CENSUS_DIGEST_FORENSICS.v0.json",
+    "census_candidate_not_sealed": "experiments/rtk/forensics/CENSUS_CANDIDATE.source_universe_census.v0.json",
+    "pipeline_module_recovery": "experiments/rtk/forensics/PIPELINE_MODULE_RECOVERY.v0.json",
+    "sealed_census": "experiments/rtk/sealed/TRANSITION_CENSUS.jsonl",
+    "sealed_census_manifest": "experiments/rtk/sealed/TRANSITION_CENSUS_MANIFEST.json",
+    "sealed_census_provenance": "experiments/rtk/sealed/SEALED_CENSUS_PROVENANCE.json",
+    "v1_run_head_provenance": "experiments/rtk/sealed/v1_run_head_0758dac/",
+    "frozen_outputs": "experiments/rtk/sealed/frozen_outputs/",
+    "source_evidence_v1_binding_draft": "experiments/rtk/SOURCE_EVIDENCE_V1_BINDING.DRAFT.json",
+    "source_evidence_v1_binding": "experiments/rtk/SOURCE_EVIDENCE_V1_BINDING.json",
+    "source_universe_v1_binding": "experiments/rtk/SOURCE_UNIVERSE_V1_BINDING.json",
+    "source_universe_v1_expansion_walk": "experiments/rtk/SOURCE_UNIVERSE_V1_EXPANSION_WALK.json",
+    "source_universe_v2_binding": "experiments/rtk/SOURCE_UNIVERSE_V2_BINDING.json",
+    "source_universe_v2_expansion_walk": "experiments/rtk/SOURCE_UNIVERSE_V2_EXPANSION_WALK.json",
+    "expansion_v2_outputs": "experiments/rtk/sealed/expansion_v2_outputs/",
+    "oracle_binding": "experiments/rtk/ORACLE_BINDING.json",
+    "oracle_rules_pilot_n10": "experiments/rtk/oracle/ORACLE_RULES.pilot_n10.v0.md",
+    "pilot_n10": "experiments/rtk/sealed/pilot_n10/",
+    "prediction_binding": "experiments/rtk/PREDICTION_BINDING.json",
+    "rtk_predictions_pilot_n10": "experiments/rtk/sealed/pilot_n10/RTK_PREDICTIONS.jsonl",
+    "scoring_binding": "experiments/rtk/SCORING_BINDING.json",
+    "scoring_report_pilot_n10": "experiments/rtk/sealed/pilot_n10/SCORING_REPORT.json"
+  },
+  "protocol_commit_sha": "1bff877e9f405c447d10304221f4d1509abe141d",
+  "source_repositories": [
+    {
+      "repository": "CertifyEdge",
+      "url": "https://github.com/fraware/CertifyEdge",
+      "cutoff_sha": "6ef02d54c4697886b20577f10eec683861475db2",
+      "cutoff_timestamp": "2026-05-22T10:56:51-07:00",
+      "history_rule": "FIRST_PARENT",
+      "role": "SOURCE_UNIVERSE_V0",
+      "ovk_materialization_status": "SOURCE_EVIDENCE_V1_BOUND"
+    },
+    {
+      "repository": "pcs-core",
+      "url": "https://github.com/SentinelOps-CI/pcs-core",
+      "cutoff_sha": "9c971f5f9da8a424924dd8f48d6a3b71a1009e1b",
+      "cutoff_timestamp": "2026-07-24T20:21:55+02:00",
+      "history_rule": "FIRST_PARENT",
+      "role": "SOURCE_UNIVERSE_V0",
+      "ovk_materialization_status": "SOURCE_EVIDENCE_V1_BOUND"
+    }
+  ],
+  "source_universe_v0_policy": {
+    "immutable": true,
+    "never_rewrite_v0": true
+  },
+  "sealed_census": {
+    "path": "experiments/rtk/sealed/TRANSITION_CENSUS.jsonl",
+    "sha256": "b1816276176297adf345981fe5d9c8271cf00f5b71653d59a21d8261d64a6b11",
+    "manifest_path": "experiments/rtk/sealed/TRANSITION_CENSUS_MANIFEST.json",
+    "manifest_sha256": "c4b1e90eba63a489da016b29e8b6ff1c93be969a98a098f3f9b2d957319c4ab3",
+    "size_bytes": 412559,
+    "record_count": 248,
+    "records_by_repository": {
+      "fraware/CertifyEdge": 50,
+      "SentinelOps-CI/pcs-core": 198
+    },
+    "status": "SEALED_BYTES_COMMITTED",
+    "generator_check": "GENERATOR_BLOB_UNAVAILABLE"
+  },
+  "tier_policy": {
+    "tier_a": {
+      "name": "REPLAY_VERIFIED",
+      "role": "PRIMARY_SCORING"
+    },
+    "tier_b_v1": {
+      "name": "COMMITTED_NATIVE_ATTESTATION",
+      "role": "SECONDARY_SCORING",
+      "do_not_inflate_tier_a": true,
+      "do_not_treat_as_worthless": true
+    },
+    "tier_b_v0": {
+      "excluded_from_scoring": true
+    },
+    "local_tier_counts": "PRODUCED_FROM_AUTHENTIC_PIPELINE",
+    "tier_a_replay_verified": {
+      "anchor_count": 9,
+      "transition_count": 3,
+      "status": "BOUND_FROM_ACTIONS_AND_LOCAL"
+    },
+    "tier_b_v1_committed_native_attestation": {
+      "anchor_count": 161,
+      "transition_count": 161,
+      "status": "BOUND_FROM_ACTIONS_AND_LOCAL"
+    }
+  },
+  "pre_oracle_feasibility": {
+    "gate_name": "minimum_independent_replay_verified_transitions",
+    "target_transitions": 20,
+    "gate_kind": "FEASIBILITY_RULE_NOT_SCIENTIFIC_VALIDITY",
+    "status": "EXHAUSTED_BELOW_20_ACCEPTED_N10_PILOT",
+    "independent_replay_verified_transitions": {
+      "source_universe_v0": 3,
+      "source_universe_v1": 0,
+      "source_universe_v2": 7,
+      "total": 10
+    },
+    "external_report": {
+      "provenance": "LOCALLY_REPRODUCED_ON_OVK",
+      "reported_anchors": 9,
+      "reported_transitions": 3,
+      "note": "v0 Tier A remains 9 anchors / 3 transitions. v2 expansion added 7 REPLAY_VERIFIED transitions (OVK consumer pin-guard native validators). Total 10 < 20."
+    },
+    "expansion_stop_rule": "STOP_EXPANSION_WHEN_CANDIDATE_LIST_EXHAUSTED_BELOW_GATE",
+    "expansion_status": "STOPPED_CANDIDATE_LIST_EXHAUSTED",
+    "oracle_status": "ORACLE_COMMITTED",
+    "sample_size_note": "Human proceed after v2 exhaustion: accept available Tier-A sample N=10 independent REPLAY_VERIFIED transitions as sealed pilot / limited-power primary evaluation path. 20-transition feasibility gate remains unmet and is not waived as a scientific-validity criterion. Inferential limits: even 0/10 false-reuse leaves weak upper bounds versus 20/59 planning targets; do not present N=10 as a strong reliability claim. Tier B remains secondary and separately reported; not folded into Tier A. No further candidate search in this version. No Tier A criteria weakening. v2 candidate list not reopened.",
+    "acceptance": {
+      "decision": "ACCEPT_N10_SEALED_PILOT",
+      "independent_replay_verified_transitions_total": 10,
+      "feasibility_gate_met": false,
+      "feasibility_gate_target": 20,
+      "power_characterization": "LIMITED_POWER_PILOT_NOT_STRONG_RELIABILITY_CLAIM",
+      "tier_b_policy": "SECONDARY_SEPARATELY_REPORTED_NOT_FOLDED_INTO_TIER_A",
+      "further_candidate_search_this_version": false,
+      "tier_a_criteria_weakened": false,
+      "v2_candidate_list_reopened": false
+    },
+    "next_pass": "RTK predictions on bound reference implementation for sealed Tier-A CDI, with blind prediction commitment before any unblinding/scoring feedback into semantics."
+  },
+  "amendment_history": [
+    {
+      "amendment_id": "pre_oracle_feasibility_20_transition_gate",
+      "status": "PRE_ORACLE_FEASIBILITY_AMENDMENT",
+      "summary": "Record 20-transition threshold as pre-oracle feasibility rule only; not an absolute scientific validity criterion. Record external unverified observation of 9 anchors / 3 transitions. Do not run oracle in this phase."
+    },
+    {
+      "amendment_id": "go_checker_not_absolute_blocker",
+      "status": "PRE_ORACLE_FEASIBILITY_AMENDMENT",
+      "summary": "Bounded Go provenance yields UNVERIFIED. Proceed with CDI freeze and DecisionInput mapping policy without waiting for Go."
+    },
+    {
+      "amendment_id": "ovk_source_materialization_pending",
+      "status": "PRE_ORACLE_FEASIBILITY_AMENDMENT",
+      "summary": "OVK first-parent cardinality probe matches 248 but sealed census digest not byte-reproduced. Anchors/projection/source-evidence binding remain PENDING_SOURCE_MATERIALIZATION. No fabricated SOURCE_EVIDENCE_V1_BINDING."
+    },
+    {
+      "amendment_id": "ovk_census_digest_forensics_hard_stop",
+      "status": "PRE_ORACLE_FEASIBILITY_AMENDMENT",
+      "summary": "Extended local forensics on full (non-shallow) public clones: cardinality 248 confirmed; 13 serialization candidates all miss sealed census SHA-256; sealed bytes unavailable for byte-level diff; pipeline modules not invented to chase digests; SOURCE_EVIDENCE_V1_BINDING remains UNCREATED; mappings remain PENDING_SOURCE_MATERIALIZATION; no oracle."
+    },
+    {
+      "amendment_id": "ovk_sealed_census_bytes_committed",
+      "status": "PRE_ORACLE_FEASIBILITY_AMENDMENT",
+      "summary": "Exact sealed TRANSITION_CENSUS.jsonl and manifest committed under experiments/rtk/sealed/ from structural-corpus artifact handoff (run 37405175934 / artifact 11387510679). Generator blob UNAVAILABLE. Authentic extract/materialize/project/tier_v1 modules still unavailable on OVK; workflow repair, predicate tests, and SOURCE_EVIDENCE_V1_BINDING remain blocked. No invented pipeline semantics. No oracle."
+    },
+    {
+      "amendment_id": "ovk_authentic_v1_modules_and_jsonschema_repair",
+      "status": "SOURCE_EVIDENCE_V1_LOCAL_SUCCESS_BINDING_PENDING_CI",
+      "summary": "Installed authentic v1 run-head modules (baseline d741899) from handoff transport de781bad…; applied jsonschema==4.26.0 environment repair (df68928, clean-tree fix 831a589). Local pipeline matched frozen anchors 44cb1f27… and semantic projection 7ea32cb2…. Materializer identity f97e2826… authoritative. SOURCE_EVIDENCE_V1_BINDING waits for repaired-workflow Actions success IDs. No oracle."
+    },
+    {
+      "amendment_id": "ovk_source_evidence_v1_bound",
+      "status": "SOURCE_EVIDENCE_V1_BOUND",
+      "summary": "SOURCE_EVIDENCE_V1_BINDING.json created after Actions run 37517623512 / job 112454498374 succeeded at 831a589 with frozen census/anchors/semantic digests matched. Tier A 9/3, Tier B 161/161. Materializer f97e2826…. No oracle."
+    },
+    {
+      "amendment_id": "source_universe_expansion_exhausted_below_20",
+      "status": "SOURCE_UNIVERSE_EXPANSION_EXHAUSTED_BELOW_20",
+      "summary": "Pinned expansion candidate cutoffs (13b1ae5). Walked all five locked candidates in order. Each is public with FIRST_PARENT transitions but authentic extract_historical_anchors.py rejects non-v0 repository identities. generate_transition_census.py remains UNAVAILABLE. No overlay census/evidence fabricated. REPLAY_VERIFIED transitions remain 3 (v0) + 0 (v1). Gate EXHAUSTED_BELOW_20. No oracle/RTK/baseline/unblind."
+    },
+    {
+      "amendment_id": "source_universe_expansion_protocol_v2_adapter_interface",
+      "status": "V2_METHODOLOGY_INTERFACE_FROZEN_PENDING_MATERIALIZATION",
+      "summary": "Pre-oracle Path B amendment: freeze SOURCE_UNIVERSE_EXPANSION_PROTOCOL.v2.md and generic source-side adapter contract (expansion_v2) because v1 candidate eligibility and authentic extractor closed-repository dispatch were inconsistent. Keep five candidates and cutoffs frozen; no add/delete/reorder. New generate_transition_census_v2.py is explicitly non-authentic skeleton only; no overlay census/evidence invented; zero candidate materialization. Interface tests and v0 compatibility harness declared (live equivalence gated ADAPTER_NOT_YET_IMPLEMENTED). Tier A preservation unchanged. No oracle/RTK/baseline/unblind. Authentic v0 modules untouched."
+    },
+    {
+      "amendment_id": "bind_reference_implementation_cdi_v1",
+      "status": "EVALUATED_IMPLEMENTATION_BOUND_REFERENCE",
+      "summary": "No existing CDI.v1 sealed-verdict executable found on OVK. Bound NEW experiments/rtk/reference_implementation at SHA 2c97b59b8b546ac9392a279970a8c25573c30296. Go remains UNVERIFIED. Not historical Go. Synthetic conformance only; no oracle/holdout/baseline/unblind; source-universe/expansion/census/evidence untouched."
+    },
+    {
+      "amendment_id": "source_universe_expansion_protocol_v2_materialization",
+      "status": "V2_EXPANSION_EXHAUSTED_BELOW_20",
+      "summary": "Implemented CertifyEdge/pcs-core and five-candidate adapters under frozen v2 contract. Cleared v0 compatibility (transition identity + sealed anchors digest 44cb1f27… + decision-surface semantic equivalence via authentic materializer bridge). Processed all five frozen candidates via census_v2→extract→materialize→project→tier without mutating sealed v0 bytes or authentic blobs. REPLAY_VERIFIED transitions: v0=3 + v1=0 + v2=7 = 10. Gate EXHAUSTED_BELOW_20. pcs-bench native validate-cases is OPERATIONAL_FAILURE without pcs; OVK consumers contribute pin-guard Tier A only; eac/lpe yield SOURCE_REJECTED. No oracle/RTK/baseline/unblind; no Tier A weakening; no Tier B promotion; no further-repo search."
+    },
+    {
+      "amendment_id": "pre_oracle_accept_n10_pilot_after_v2_exhaustion",
+      "status": "PRE_ORACLE_ACCEPT_N10_PILOT_AFTER_V2_EXHAUSTION",
+      "summary": "Accept available Tier-A sample of 10 independent REPLAY_VERIFIED transitions (v0:3 + v2:7) as sealed pilot path after v2 candidate-list exhaustion below the 20-transition feasibility gate. Explicit power limits: N=10 is a limited-power primary Tier-A evaluation, not a strong reliability claim; even 0/10 false-reuse yields weak upper bounds versus 20/59 targets. Tier B remains secondary and separately reported; not folded into Tier A. No further candidate search in this version. Tier A criteria unchanged. v2 candidate list not reopened. pcs-bench OPERATIONAL_FAILURE left unrepaired (pcs CLI absent; no dry-run / predicate stretch). Independent oracle track authorized next for PRIMARY Tier A only; no RTK prediction/baseline/unblind in this amendment."
+    },
+    {
+      "amendment_id": "oracle_committed_tier_a_pilot_n10",
+      "status": "ORACLE_COMMITTED_TIER_A_PILOT_N10_PRE_PREDICTION",
+      "summary": "Committed independent oracle labels for PRIMARY Tier-A REPLAY_VERIFIED pilot (cases=16, transitions=10, verdicts={'REVALIDATION_REQUIRED': 5, 'VALID': 11}) under ORACLE_RULES.pilot_n10 path-identity carry. Independence held: no RTK/baseline/aggregate inputs. UNRESOLVED allowed; none forced. Tier B not labeled for confirmatory path. No unblinding. RTK prediction commitment authorized next on bound reference implementation."
+    },
+    {
+      "amendment_id": "rtk_predictions_committed_blind_pilot_n10",
+      "status": "RTK_PREDICTIONS_COMMITTED_BLIND_BASELINES_PENDING",
+      "summary": "Committed blind RTK predictions from rtk.reference_implementation.v0 on sealed Tier-A pilot CDI (n_cases=16, execution_ok={'OK': 16}). Prediction commitment recorded before oracle comparison/unblinding. Baselines registry empty → BASELINES_PENDING. No reference-implementation semantic changes."
+    },
+    {
+      "amendment_id": "pilot_n10_scored_after_prediction_commitment",
+      "status": "PILOT_N10_SCORED_AFTER_PREDICTION_COMMITMENT_BASELINES_PENDING",
+      "summary": "After prediction commitment, computed frozen ANALYSIS_PLAN metrics on Tier-A pilot (FR case-level=0.0, UR case-level=0.0, transition exact-match=1.0). Scoring-only unblinding; no SUT semantic patch; baselines still pending; power limits unchanged."
+    }
+  ],
+  "canonical_decision_input": {
+    "schema": "experiments/rtk/schemas/CanonicalDecisionInput.v1.schema.json",
+    "canonicalization": "experiments/rtk/specs/CanonicalDecisionInput.v1.canonicalization.md",
+    "implementation_independent": true,
+    "go_serialization_must_not_define_corpus": true,
+    "mapping_waits_for_go": false
+  },
+  "mappings": {
+    "context_footprint": "experiments/rtk/mappings/CONTEXT_FOOTPRINT_MAPPING.v0.json",
+    "relying_profile": "experiments/rtk/mappings/RELYING_PROFILE_MAPPING.v0.json",
+    "repair_catalog": "experiments/rtk/mappings/REPAIR_CATALOG_MAPPING.v0.json",
+    "binding_status": "BOUND_FROM_SOURCE_EVIDENCE_V1"
+  },
+  "rtk_implementation": {
+    "go_checker_status": "UNVERIFIED",
+    "go_checker_sha": null,
+    "python_checker_sha": "2c97b59b8b546ac9392a279970a8c25573c30296",
+    "evaluated_implementation_status": "BOUND_REFERENCE_IMPLEMENTATION",
+    "identity_document": "experiments/rtk/EVALUATED_IMPLEMENTATION_IDENTITY.v0.json",
+    "repository": "fraware/open-verification-kernel",
+    "commit_sha": "2c97b59b8b546ac9392a279970a8c25573c30296",
+    "lean_commit_sha": null,
+    "schema_versions": {
+      "CanonicalDecisionInput": "v1",
+      "case": "v0",
+      "transition": "v0",
+      "evidence_snapshot": "v0",
+      "oracle": "v0",
+      "prediction": "v0"
+    },
+    "toolchain_versions": {
+      "language": "Python",
+      "python": "3.12.3",
+      "python_implementation": "CPython",
+      "jsonschema": "4.26.0",
+      "pytest": "8.4.2",
+      "requires_python": ">=3.10"
+    },
+    "evaluation_interface_version": "CanonicalDecisionInput.v1",
+    "evaluated_implementation_id": "rtk.reference_implementation.v0",
+    "evaluated_implementation_path": "experiments/rtk/reference_implementation/",
+    "implementation_kind": "REFERENCE_NOT_HISTORICAL_GO",
+    "not_the_unrecovered_historical_go_checker": true
+  },
+  "source_evidence": {
+    "workflow": "REPAIRED_NOT_BYTE_IDENTICAL_TO_cc374b68",
+    "tier_v1": "AUTHENTIC_BLOB_6010c44b",
+    "unit_tests": "PASSING_SYNTHETIC_PREDICATE_SUITE",
+    "binding": "experiments/rtk/SOURCE_EVIDENCE_V1_BINDING.json",
+    "reason": "Full repaired-workflow Actions success on 831a589 (run 37517623512 / job 112454498374) with frozen digests matched; historical failing pre-fix run 37420715584 recorded for provenance.",
+    "authentic_pre_fix_workflow_blob": "cc374b68685911d384e97e2e54acc9bbc9306560",
+    "materializer_blob": "f97e2826308342a9ac772d39aee794a781417113",
+    "baseline_commit_sha": "d74189961e1076e8fc203a4951bccd20a59ebf0e",
+    "repair_commit_sha": "df68928728bbd496b8726bea8ec86af9cf14f5fc",
+    "historical_failure_run_id": 37420715584,
+    "successful_run_id": 37517623512,
+    "successful_job_id": 112454498374
+  },
+  "case_generator": {
+    "repository": "fraware/open-verification-kernel",
+    "commit_sha": "ef90e4674aabfc5438e2eac49a4e80dc03cc0275",
+    "version": "rtk.case_generator.pilot_n10.v0",
+    "status": "BOUND_PILOT_N10_TIER_A",
+    "path": "experiments/rtk/sealed/pilot_n10/TIER_A_CASES.jsonl",
+    "cdi_path": "experiments/rtk/sealed/pilot_n10/CanonicalDecisionInput.tier_a.jsonl",
+    "note": "Tier-A pilot case pack; prior frozen_outputs CDI left untouched."
+  },
+  "baselines": [],
+  "sampling": {
+    "mode": "ALL_ELIGIBLE",
+    "seed": null,
+    "target_size": null
+  },
+  "execution_prohibitions_this_phase": [
+    "NO_RTK_SEMANTICS_CHANGE_FOR_HOLDOUT",
+    "NO_FURTHER_CANDIDATE_SEARCH_THIS_VERSION",
+    "NO_TIER_A_WEAKENING",
+    "NO_TIER_B_PROMOTION_INTO_TIER_A",
+    "NO_BASELINE_EXECUTION_UNTIL_REGISTERED"
+  ],
+  "seal_manifest_sha256": "b1816276176297adf345981fe5d9c8271cf00f5b71653d59a21d8261d64a6b11",
+  "source_universe_v1": {
+    "status": "NO_OVERLAY_MATERIALIZED",
+    "binding": "experiments/rtk/SOURCE_UNIVERSE_V1_BINDING.json",
+    "binding_sha256": "63ea7fc8465285dc7ec78eafe55e964bb7a0992c2dbf70a8ec9c675227b6c901",
+    "expansion_walk": "experiments/rtk/SOURCE_UNIVERSE_V1_EXPANSION_WALK.json",
+    "expansion_walk_sha256": "7692574e1cf6c3ec0d9cdfc3364a44463bfa893cdfe81127988c4f174ac8d893",
+    "candidates_sha256_at_pin": "62f60ccd209b144db096a1dec0a9334e6896ee1d50a0373be934252d07e33648",
+    "cutoff_pin_commit_sha": "13b1ae5b90985ad320abfde2b15194498f5aa564",
+    "repos_processed_in_order": [
+      "pcs-bench",
+      "ovk-consumer-fastapi-terraform",
+      "ovk-consumer-express-actions",
+      "environment-assurance-compiler",
+      "lean-project-evidence"
+    ],
+    "replay_verified_transitions_added": 0,
+    "blocker": "AUTHENTIC_EXTRACT_SUPPORTS_ONLY_CERTIFYEDGE_AND_PCS_CORE",
+    "immutable_exhaustion_record": true
+  },
+  "source_universe_v2": {
+    "status": "V2_EXPANSION_EXHAUSTED_BELOW_20_N10_PILOT_ACCEPTED",
+    "protocol": "experiments/rtk/SOURCE_UNIVERSE_EXPANSION_PROTOCOL.v2.md",
+    "adapter_package": "experiments/p05_formalpr_bench/rtk_eval/expansion_v2/",
+    "census_module": "experiments/p05_formalpr_bench/rtk_eval/expansion_v2/generate_transition_census_v2.py",
+    "census_module_role": "NEW_V2_CENSUS_NOT_AUTHENTIC_V0",
+    "candidates_file": "experiments/rtk/SOURCE_REPOSITORY_CANDIDATES.v1.json",
+    "candidates_mutation": "FORBIDDEN_DURING_V2",
+    "binding": "experiments/rtk/SOURCE_UNIVERSE_V2_BINDING.json",
+    "expansion_walk": "experiments/rtk/SOURCE_UNIVERSE_V2_EXPANSION_WALK.json",
+    "outputs_dir": "experiments/rtk/sealed/expansion_v2_outputs/",
+    "overlay_census_path": "experiments/rtk/sealed/expansion_v2_outputs/",
+    "candidate_materialization": "COMPLETE_LIST_EXHAUSTED",
+    "v0_compatibility_harness": "experiments/p05_formalpr_bench/rtk_eval/expansion_v2/tests/test_v0_compatibility.py",
+    "v0_compatibility_status": "PASSED_SEMANTIC_EQUIVALENCE",
+    "replay_verified_transitions_added": 7,
+    "gate_status": "EXHAUSTED_BELOW_20",
+    "next_pass": "N=10 pilot accepted after v2 exhaustion. No further expansion in this version. Independent oracle track authorized for Tier A only.",
+    "binding_sha256": "8c9a4e281ac70335f859d5665ddd0abd2b7778414df13e97225e3e5b19434bc6",
+    "expansion_walk_sha256": "8b83fecf5794b6657c765b36b04487bf973271c0668211a65bf71e9dc9d2044c"
+  },
+  "oracle_authorization": {
+    "status": "AUTHORIZED_INDEPENDENT_ORACLE_TIER_A_ONLY",
+    "scope": "PRIMARY_TIER_A_REPLAY_VERIFIED",
+    "independence_required": true,
+    "unresolved_legitimate": true,
+    "forbidden_inputs": [
+      "RTK_PREDICTIONS_OR_CERTIFICATES",
+      "BASELINE_PREDICTIONS",
+      "AGGREGATE_RTK_RESULTS",
+      "RTK_DERIVED_FAILURE_TAXONOMIES"
+    ],
+    "allowed_inputs": [
+      "HISTORICAL_ANCHORS",
+      "SOURCE_EVIDENCE_RECORDS",
+      "CDI_RECORDS",
+      "FROZEN_MAPPINGS",
+      "REPOSITORY_NATIVE_HISTORICAL_ARTIFACTS",
+      "TRANSITION_CENSUS_AND_V2_OVERLAYS"
+    ]
+  },
+  "oracle": {
+    "status": "ORACLE_COMMITTED",
+    "binding": "experiments/rtk/ORACLE_BINDING.json",
+    "rules": "experiments/rtk/oracle/ORACLE_RULES.pilot_n10.v0.md",
+    "oracle_jsonl": "experiments/rtk/sealed/pilot_n10/ORACLE.jsonl",
+    "scope": "PRIMARY_TIER_A_REPLAY_VERIFIED_ONLY",
+    "case_count": 16,
+    "transition_count": 10,
+    "verdict_counts": {
+      "REVALIDATION_REQUIRED": 5,
+      "VALID": 11
+    },
+    "digests": {
+      "CanonicalDecisionInput.tier_a.jsonl": "aab9e084dcf39ba1a7b27e1fad73e681e68ef9d67530f9a04a05ade05079aa5c",
+      "MAPPING_OVERLAY.v2_tier_a.json": "d818a940b9023c0a68c13165b9ddbd0cf931a5e11a941bc303f0df0dc5a2d660",
+      "ORACLE.jsonl": "59694f29701e6ed93cdb51cbfb94d5966a69f53758d7305c3871768564ccc0bf",
+      "ORACLE_RULES.pilot_n10.v0.md": "5d4484f4edebc7859703a4a68dafb4e3677a96fba01b0e25962f358b37aa1cbf",
+      "TIER_A_CASES.jsonl": "c502c4efefa5d92b574b0411a334b32c192797f29b45eba2c0e5cfaeb1e65204",
+      "TIER_A_MANIFEST.json": "5b10919614764a5c07a13cfa149695e944256f6aaf0d092197e3968b11f64b90"
+    },
+    "independence_held": true,
+    "unblinding": "SCORING_ONLY_AFTER_PREDICTION_COMMITMENT",
+    "commit_sha": "ef90e4674aabfc5438e2eac49a4e80dc03cc0275"
+  },
+  "rtk_predictions": {
+    "status": "COMMITTED_BLIND",
+    "binding": "experiments/rtk/PREDICTION_BINDING.json",
+    "predictions_path": "experiments/rtk/sealed/pilot_n10/RTK_PREDICTIONS.jsonl",
+    "predictions_sha256": "104a506f41994d14753710dadc3301a3ee4fe7cd2822c8c44a6ea65a7f33429f",
+    "implementation_id": "rtk.reference_implementation.v0",
+    "case_count": 16,
+    "execution_status_counts": {
+      "OK": 16
+    },
+    "predicted_verdict_counts_ok_only": {
+      "REVALIDATION_REQUIRED": 5,
+      "VALID": 11
+    },
+    "oracle_compared": true,
+    "unblinding": "SCORING_ONLY_AFTER_COMMITMENT",
+    "commit_sha": "62e140e97000ac7a199216240341333267112281"
+  },
+  "baselines_status": "BASELINES_PENDING",
+  "baselines_note": "No baseline identifiers were registered in the freeze before execution; baseline runs deferred.",
+  "scoring": {
+    "status": "SCORED_AFTER_PREDICTION_COMMITMENT",
+    "binding": "experiments/rtk/SCORING_BINDING.json",
+    "report": "experiments/rtk/sealed/pilot_n10/SCORING_REPORT.json",
+    "report_sha256": "f810180cc6547391d8287a18ff743ac1ffe944ff529b8bf79c797c904dbcd049",
+    "unblinding": "SCORING_ONLY",
+    "false_reuse_case_level": 0.0,
+    "unnecessary_revalidation_case_level": 0.0,
+    "baselines_status": "BASELINES_PENDING",
+    "commit_sha": "8346d4c96adc48282fd79032b4f64859d408a4b5"
+  }
+}
