@@ -22,4 +22,6 @@ jobs:
           python scripts/sync_package_data.py
           pip install --no-cache-dir -e '.[dev]'
       - name: Run six-surface Reaudit probe
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: python tests/_reaudit_six_surface_probe.py
