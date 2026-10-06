@@ -65,6 +65,15 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "augassign_od_dictcomp",
         "augassign_dict_src_items",
         "defaultdict_factory_dictcomp_items",
+        # Forty-fifth-pass atoms (shared peels).
+        "nested_dict_list_items",
+        "filter_items_mid",
+        "map_items_mid",
+        "star_items_mid",
+        "packed_partial_setitem",
+        "name_partial_setitem",
+        "zip_keys_values_rebuild",
+        "enumerate_items_rebuild",
     ),
     "identity": (
         "star_zip_getitem",
@@ -91,6 +100,13 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "getattr_builtins_map",
         "next_filter_truth",
         "attrgetter_repeat",
+        # Forty-fifth-pass atoms (shared peels).
+        "next_partial_builtins_map",
+        "packed_builtins_filter",
+        "packed_repeat",
+        "islice_cycle",
+        "dropwhile_false",
+        "takewhile_true",
     ),
     "lexical": (
         "itruediv",
@@ -100,6 +116,12 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "iadd",
         "dunder_ifloordiv",
         "index",
+        # Forty-fifth-pass atoms (shared peels).
+        "partial_iadd_half",
+        "partial_itruediv_half",
+        "partial_idle_or_list0",
+        "partial_getattr_call",
+        "partial_half_apply",
     ),
     "alias": (
         "dict_ctor_pack",
@@ -133,6 +155,14 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "popitem_gi",
         "getattr_fromkeys_gi",
         "copy_or_gi",
+        # Forty-fifth-pass atoms (shared peels).
+        "chainmap_maps0_gi",
+        "getattr_popitem_gi",
+        "methodcaller_popitem_gi",
+        "dict_popitem_unbound_gi",
+        "attrgetter_fromkeys_gi",
+        "methodcaller_fromkeys_gi",
+        "mpt_name_gi",
     ),
     "class": (
         "iconcat_list_copy_maps",
@@ -155,6 +185,12 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "reduce_lambda_add_maps",
         "reduce_add_init_maps",
         "reduce_iadd_init_maps",
+        # Forty-fifth-pass atoms (shared peels).
+        "reduce_lambda_operator_add",
+        "reduce_lambda_iadd_or",
+        "reduce_partial_add_init",
+        "getattr_functools_reduce",
+        "reduce_star_pack",
     ),
     "interproc": (
         "unbound_decoder_decode",
@@ -187,6 +223,13 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "decode_name_read",
         "loads_decode_peels",
         "raw_decode_read",
+        # Forty-fifth-pass atoms (shared peels).
+        "unpickler_unbound_load",
+        "getattr_io_sio_bio",
+        "codecs_decode",
+        "packed_decode_peels",
+        "getattr_read_adapters",
+        "nullcontext_enter_attr_chain",
     ),
 }
 
@@ -244,3 +287,6 @@ FORTY_THIRD_LEFTOVERS: tuple[str, ...] = ()
 
 # Closed at 1.9.0 via shared peels + catalog atoms (was FORTY_FOURTH leftovers).
 FORTY_FOURTH_LEFTOVERS: tuple[str, ...] = ()
+
+# Closed at 1.10.0 via shared peels + catalog atoms (was FORTY_FIFTH leftovers).
+FORTY_FIFTH_LEFTOVERS: tuple[str, ...] = ()
