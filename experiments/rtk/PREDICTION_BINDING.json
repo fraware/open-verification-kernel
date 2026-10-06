@@ -23,5 +23,5 @@
   "baselines_status": "BASELINES_PENDING",
   "baselines_note": "Freeze baselines registry empty; no baseline identifiers frozen for execution.",
   "independence_note": "Predictions produced from CDI only after oracle commitment; no semantic patching from holdout.",
-  "commit_sha": "PENDING_COMMIT"
+  "commit_sha": "62e140e97000ac7a199216240341333267112281"
 }
