@@ -51,6 +51,13 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "name_setitem_dunder",
         "augassign_ior_copy_dictcomp",
         "chainmap_getattr_setdefault",
+        # Forty-third-pass atoms (shared peels).
+        "bound_d_setitem",
+        "bound_d_ior",
+        "dict_setitem_unbound",
+        "dict_ior_unbound",
+        "setdefault_copy_items",
+        "chainmap_maps_getitem_getattr",
     ),
     "identity": (
         "star_zip_getitem",
@@ -65,6 +72,11 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "name_zip_star",
         "cycle_zip",
         "filter_true_zip",
+        # Forty-third-pass atoms (shared peels).
+        "repeat_zip",
+        "getattr_from_iterable_zip",
+        "filter_truth_zip",
+        "partial_map_zip",
     ),
     "lexical": (
         "itruediv",
@@ -91,6 +103,13 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "next_values_gi",
         "fromkeys_gi",
         "ig_call_applied",
+        # Forty-third-pass atoms (shared peels).
+        "d_or_empty_gi",
+        "operator_or_gi",
+        "list_values_gi",
+        "next_items_gi",
+        "name_fromkeys_gi",
+        "getattr_gi_call",
     ),
     "class": (
         "iconcat_list_copy_maps",
@@ -104,6 +123,10 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "binop_add_list_maps",
         "append_list_maps",
         "append_maps_slice",
+        # Forty-third-pass atoms (shared peels).
+        "partial_add_list_maps",
+        "sum_list_maps",
+        "reduce_add_list_maps",
     ),
     "interproc": (
         "unbound_decoder_decode",
@@ -123,6 +146,12 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "zlib_decompress",
         "itemgetter_slice0",
         "csv_dict_reader",
+        # Forty-third-pass atoms (shared peels).
+        "json_load_sio",
+        "json_load_bio",
+        "unpickler_load",
+        "decode_read",
+        "loads_decode",
     ),
 }
 
@@ -174,3 +203,6 @@ FORTY_FIRST_LEFTOVERS: tuple[str, ...] = ()
 
 # Closed at 1.7.0 via shared peels + catalog atoms (was FORTY_SECOND leftovers).
 FORTY_SECOND_LEFTOVERS: tuple[str, ...] = ()
+
+# Closed at 1.8.0 via shared peels + catalog atoms (was FORTY_THIRD leftovers).
+FORTY_THIRD_LEFTOVERS: tuple[str, ...] = ()

@@ -46,8 +46,8 @@ development replay only and do not rewrite frozen external-candidate labels.
 
 ## Executed-expression effect closure (PE)
 
-Cache / semantic tip: `PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION = "1.7.0"`
-on branch `feature/executed-expression-effect-closure` (open PR #173).
+Cache / semantic tip: `PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION = "1.8.0"`
+on branch `feature/executed-expression-effect-closure` (PR #173 merged; follow-on tips).
 
 False `authorized` + `source_proved_server_authority_write` must fail closed when
 Mut / evil / client writes remain reachable through packing adapters. Shared
@@ -56,17 +56,19 @@ materialize / copy paths used by packing, identity, and ChainMap observe).
 Regression layers:
 
 - Named pass ledger: `tests/test_executed_expression_effect_closure.py`
-  (through forty-second-pass pins)
+  (through forty-third-pass pins)
 - Adapter matrix: `tests/test_pe_peel_adapter_matrix.py` + catalog
   `tests/pe_peel_catalog.py`
 - Seeded generative property: `tests/test_pe_peel_property.py`
 - Six-surface Reaudit probe: `tests/_reaudit_six_surface_probe.py`
 
 Plan exit for this tip: two consecutive all-PASS six-surface Reaudits on the
-same algebra tip (or tip+doc-only). `FORTY_FIRST_LEFTOVERS` is empty at 1.6.0. FormalPR freeze / merge / #87 remain a
-separate human gate. Non-material OOS (TypeError empties / held-out FormalPR)
-are listed in `tests/pe_peel_catalog.py` (`NON_MATERIAL_OOS`) and must stay
-UNKNOWN rather than be "closed" into a false PASS.
+same algebra tip (or tip+doc-only). `FORTY_FIRST_LEFTOVERS` /
+`FORTY_SECOND_LEFTOVERS` / `FORTY_THIRD_LEFTOVERS` are empty at 1.8.0. FormalPR
+freeze / merge / #87 remain a separate human gate. Non-material OOS (TypeError
+empties / held-out FormalPR) are listed in `tests/pe_peel_catalog.py`
+(`NON_MATERIAL_OOS`) and must stay UNKNOWN rather than be "closed" into a false
+PASS.
 
 The profile marks unsupported loops/try/match/with, dynamic guard effect names,
 unsupported call signatures, syntax errors, and missing head material as

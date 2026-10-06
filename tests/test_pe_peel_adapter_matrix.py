@@ -110,6 +110,34 @@ def _cf_body(head: str, adapter: str) -> tuple[str, str]:
             "for k in vb:\n"
             '    getattr(cm.maps[0],"setdefault")(k, vb.get(k))'
         ),
+        "bound_d_setitem": (
+            "d={}\nfor k in vb:\n"
+            "    si=d.__setitem__; si(k, vb.get(k))"
+        ),
+        "bound_d_ior": (
+            "d={}\nfor k in vb:\n"
+            "    ior=d.__ior__; ior({k: vb.get(k)})"
+        ),
+        "dict_setitem_unbound": (
+            "d={}\nsi=dict.__setitem__\n"
+            "for k in vb:\n    si(d, k, vb.get(k))"
+        ),
+        "dict_ior_unbound": (
+            "d={}\nior=dict.__ior__\n"
+            "for k in vb:\n    ior(d, {k: vb.get(k)})"
+        ),
+        "setdefault_copy_items": (
+            "d={}\nfor k,v in copy.copy("
+            "{k: vb.get(k) for k in vb}).items():\n"
+            "    d.setdefault(k, v)"
+        ),
+        "chainmap_maps_getitem_getattr": (
+            "from collections import ChainMap\n"
+            "d={}\ncm=ChainMap(d)\n"
+            "for k in vb:\n"
+            '    getattr(cm.maps.__getitem__(0),"setdefault")'
+            "(k, vb.get(k))"
+        ),
     }[head]
     # CF adapters only apply to Name-bind / bare; BoolOp wrapping a
     # multi-line for-seed is not a valid composition.
@@ -143,7 +171,7 @@ def _cf_body(head: str, adapter: str) -> tuple[str, str]:
 def _identity_body(head: str, adapter: str) -> tuple[str, str]:
     imp = (
         "import operator\nimport builtins\nfrom functools import partial\n"
-        "from itertools import filterfalse, chain, cycle\n"
+        "from itertools import filterfalse, chain, cycle, repeat\n"
     )
     cores = {
         "star_zip_getitem": (
@@ -171,6 +199,19 @@ def _identity_body(head: str, adapter: str) -> tuple[str, str]:
         "cycle_zip": "next(cycle(zip([list.__dict__['sort']])))[0]",
         "filter_true_zip": (
             "list(filter(lambda x: True, zip([list.__dict__['sort']])))[0][0]"
+        ),
+        "repeat_zip": "next(repeat(list.__dict__['sort'], 1))",
+        "getattr_from_iterable_zip": (
+            "next(getattr(chain,'from_iterable')"
+            "([zip([list.__dict__['sort']])]))[0]"
+        ),
+        "filter_truth_zip": (
+            "list(filter(getattr(operator,'truth'), "
+            "zip([list.__dict__['sort']])))[0][0]"
+        ),
+        "partial_map_zip": (
+            "list(partial(map, lambda t: t)"
+            "(zip([list.__dict__['sort']])))[0][0]"
         ),
     }
     core = cores[head]
@@ -264,21 +305,33 @@ def _alias_body(head: str, adapter: str) -> str:
         "next_values_gi": "next(iter(d.values()))",
         "fromkeys_gi": 'dict.fromkeys(["gi"], operator.getitem)["gi"]',
         "ig_call_applied": "gi.__call__",
+        "d_or_empty_gi": 'd.__or__({})["gi"]',
+        "operator_or_gi": 'operator.__or__(d, {})["gi"]',
+        "list_values_gi": "list(d.values())[0]",
+        "next_items_gi": "next(iter(d.items()))[1]",
+        "name_fromkeys_gi": 'fk(["gi"], operator.getitem)["gi"]',
+        "getattr_gi_call": 'getattr(gi,"__call__")',
     }[head]
     if head in {
         "name_dict_pack",
         "name_copy_get",
         "list0_copy_gi",
         "next_values_gi",
+        "d_or_empty_gi",
+        "operator_or_gi",
+        "list_values_gi",
+        "next_items_gi",
     }:
         setup = 'd={"gi":operator.getitem}\n'
     elif head == "attrgetter_call":
         setup = 'ag=attrgetter("__call__")\n'
-    elif head == "ig_call_applied":
+    elif head in {"ig_call_applied", "getattr_gi_call"}:
         setup = (
             "from operator import itemgetter\n"
             'ig=itemgetter("__getitem__"); gi=ig(list.__dict__)\n'
         )
+    elif head == "name_fromkeys_gi":
+        setup = "fk=dict.fromkeys\n"
     if adapter == "bool_or" and head == "dict_ctor_pack":
         mid = '(0 or dict({"gi":operator.getitem}))["gi"]'
     elif adapter == "list0" and head == "dict_ctor_pack":
@@ -305,7 +358,8 @@ def _class_body(head: str, adapter: str) -> tuple[str, str]:
     ex = _NINTH_EXEC
     imp = (
         "import types\nimport operator\nimport copy\n"
-        "from functools import partial\nfrom collections import ChainMap\n"
+        "from functools import partial, reduce\n"
+        "from collections import ChainMap\n"
         "from operator import iconcat, methodcaller, attrgetter"
     )
     grows = {
@@ -325,6 +379,13 @@ def _class_body(head: str, adapter: str) -> tuple[str, str]:
         "binop_add_list_maps": "ys=xs + list(cm.maps)",
         "append_list_maps": "xs.append(list(cm.maps))",
         "append_maps_slice": "xs.append(cm.maps[:])",
+        "partial_add_list_maps": (
+            "ys=partial(operator.__add__, xs)(list(cm.maps))"
+        ),
+        "sum_list_maps": "ys=sum([xs, list(cm.maps)], [])",
+        "reduce_add_list_maps": (
+            "ys=reduce(operator.add, [xs, list(cm.maps)])"
+        ),
     }
     grow = grows[head]
     if adapter == "bool_or" and head == "iconcat_list_copy_maps":
@@ -345,7 +406,12 @@ def _class_body(head: str, adapter: str) -> tuple[str, str]:
             f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
             f"{grow}; xs[1][0][\"e\"]=exec\nns.e({ex})"
         )
-    elif head == "binop_add_list_maps":
+    elif head in {
+        "binop_add_list_maps",
+        "partial_add_list_maps",
+        "sum_list_maps",
+        "reduce_add_list_maps",
+    }:
         body = (
             f"ns=types.SimpleNamespace()\n"
             f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
@@ -458,6 +524,38 @@ def _interproc_call(head: str, adapter: str) -> str:
             "    cm=nullcontext(*args); e=cm.__enter__; "
             "f=e(*csv.DictReader(io.StringIO(''))); f(evil)"
         ),
+        "json_load_sio": (
+            "import json, io\n"
+            "    from contextlib import nullcontext; args=(n.install,)\n"
+            "    cm=nullcontext(*args); e=cm.__enter__; "
+            "f=e(*json.load(io.StringIO('[]'))); f(evil)"
+        ),
+        "json_load_bio": (
+            "import json, io\n"
+            "    from contextlib import nullcontext; args=(n.install,)\n"
+            "    cm=nullcontext(*args); e=cm.__enter__; "
+            "f=e(*json.load(io.BytesIO(b'[]'))); f(evil)"
+        ),
+        "unpickler_load": (
+            "import pickle, io\n"
+            "    from contextlib import nullcontext; args=(n.install,)\n"
+            "    cm=nullcontext(*args); e=cm.__enter__; "
+            "f=e(*pickle.Unpickler(io.BytesIO(pickle.dumps([]))).load()); "
+            "f(evil)"
+        ),
+        "decode_read": (
+            "import json, io\n"
+            "    from contextlib import nullcontext; args=(n.install,)\n"
+            "    cm=nullcontext(*args); e=cm.__enter__; "
+            "f=e(*json.JSONDecoder().decode(io.StringIO('[]').read())); "
+            "f(evil)"
+        ),
+        "loads_decode": (
+            "import json\n"
+            "    from contextlib import nullcontext; args=(n.install,)\n"
+            "    cm=nullcontext(*args); e=cm.__enter__; "
+            "f=e(*json.loads(b'[]'.decode())); f(evil)"
+        ),
     }
     call = cores[head]
     if adapter == "name_bind" and head == "unbound_decoder_decode":
@@ -482,6 +580,12 @@ _CF_FOR_SEEDS = frozenset(
         "update_copy",
         "name_setitem_dunder",
         "chainmap_getattr_setdefault",
+        "bound_d_setitem",
+        "bound_d_ior",
+        "dict_setitem_unbound",
+        "dict_ior_unbound",
+        "setdefault_copy_items",
+        "chainmap_maps_getitem_getattr",
     }
 )
 for family, heads in FAMILY_HEADS.items():
