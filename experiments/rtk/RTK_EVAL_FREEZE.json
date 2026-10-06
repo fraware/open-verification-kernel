@@ -1,6 +1,6 @@
 {
   "schema_version": "rtk.eval_freeze.v1",
-  "status": "V2_METHODOLOGY_INTERFACE_FROZEN_PENDING_MATERIALIZATION",
+  "status": "V2_EXPANSION_EXHAUSTED_BELOW_20",
   "protocol_paths": {
     "readme": "experiments/rtk/README.md",
     "protocol": "experiments/rtk/PROTOCOL.md",
@@ -24,7 +24,10 @@
     "source_evidence_v1_binding_draft": "experiments/rtk/SOURCE_EVIDENCE_V1_BINDING.DRAFT.json",
     "source_evidence_v1_binding": "experiments/rtk/SOURCE_EVIDENCE_V1_BINDING.json",
     "source_universe_v1_binding": "experiments/rtk/SOURCE_UNIVERSE_V1_BINDING.json",
-    "source_universe_v1_expansion_walk": "experiments/rtk/SOURCE_UNIVERSE_V1_EXPANSION_WALK.json"
+    "source_universe_v1_expansion_walk": "experiments/rtk/SOURCE_UNIVERSE_V1_EXPANSION_WALK.json",
+    "source_universe_v2_binding": "experiments/rtk/SOURCE_UNIVERSE_V2_BINDING.json",
+    "source_universe_v2_expansion_walk": "experiments/rtk/SOURCE_UNIVERSE_V2_EXPANSION_WALK.json",
+    "expansion_v2_outputs": "experiments/rtk/sealed/expansion_v2_outputs/"
   },
   "protocol_commit_sha": "1bff877e9f405c447d10304221f4d1509abe141d",
   "source_repositories": [
@@ -99,18 +102,19 @@
     "independent_replay_verified_transitions": {
       "source_universe_v0": 3,
       "source_universe_v1": 0,
-      "total": 3
+      "source_universe_v2": 7,
+      "total": 10
     },
     "external_report": {
       "provenance": "LOCALLY_REPRODUCED_ON_OVK",
       "reported_anchors": 9,
       "reported_transitions": 3,
-      "note": "Tier A counts remain v0-only; expansion added zero REPLAY_VERIFIED transitions."
+      "note": "v0 Tier A remains 9 anchors / 3 transitions. v2 expansion added 7 REPLAY_VERIFIED transitions (OVK consumer pin-guard native validators). Total 10 < 20."
     },
     "expansion_stop_rule": "STOP_EXPANSION_WHEN_CANDIDATE_LIST_EXHAUSTED_BELOW_GATE",
     "expansion_status": "STOPPED_CANDIDATE_LIST_EXHAUSTED",
     "oracle_status": "BLOCKED_UNTIL_HUMAN_CHECKPOINT_AFTER_EXPANSION",
-    "sample_size_note": "Sealed study would proceed at available sample size (3) with explicit uncertainty/power later; oracle not started in this pass."
+    "sample_size_note": "Sealed study would proceed at available sample size (10 REPLAY_VERIFIED transitions) with explicit uncertainty/power later; oracle not started in this pass."
   },
   "amendment_history": [
     {
@@ -162,6 +166,11 @@
       "amendment_id": "bind_reference_implementation_cdi_v1",
       "status": "EVALUATED_IMPLEMENTATION_BOUND_REFERENCE",
       "summary": "No existing CDI.v1 sealed-verdict executable found on OVK. Bound NEW experiments/rtk/reference_implementation at SHA 2c97b59b8b546ac9392a279970a8c25573c30296. Go remains UNVERIFIED. Not historical Go. Synthetic conformance only; no oracle/holdout/baseline/unblind; source-universe/expansion/census/evidence untouched."
+    },
+    {
+      "amendment_id": "source_universe_expansion_protocol_v2_materialization",
+      "status": "V2_EXPANSION_EXHAUSTED_BELOW_20",
+      "summary": "Implemented CertifyEdge/pcs-core and five-candidate adapters under frozen v2 contract. Cleared v0 compatibility (transition identity + sealed anchors digest 44cb1f27\u2026 + decision-surface semantic equivalence via authentic materializer bridge). Processed all five frozen candidates via census_v2\u2192extract\u2192materialize\u2192project\u2192tier without mutating sealed v0 bytes or authentic blobs. REPLAY_VERIFIED transitions: v0=3 + v1=0 + v2=7 = 10. Gate EXHAUSTED_BELOW_20. pcs-bench native validate-cases is OPERATIONAL_FAILURE without pcs; OVK consumers contribute pin-guard Tier A only; eac/lpe yield SOURCE_REJECTED. No oracle/RTK/baseline/unblind; no Tier A weakening; no Tier B promotion; no further-repo search."
     }
   ],
   "canonical_decision_input": {
@@ -262,18 +271,24 @@
     "immutable_exhaustion_record": true
   },
   "source_universe_v2": {
-    "status": "V2_METHODOLOGY_INTERFACE_FROZEN_PENDING_MATERIALIZATION",
+    "status": "V2_EXPANSION_EXHAUSTED_BELOW_20",
     "protocol": "experiments/rtk/SOURCE_UNIVERSE_EXPANSION_PROTOCOL.v2.md",
     "adapter_package": "experiments/p05_formalpr_bench/rtk_eval/expansion_v2/",
     "census_module": "experiments/p05_formalpr_bench/rtk_eval/expansion_v2/generate_transition_census_v2.py",
-    "census_module_role": "NEW_V2_SKELETON_NOT_AUTHENTIC_V0",
+    "census_module_role": "NEW_V2_CENSUS_NOT_AUTHENTIC_V0",
     "candidates_file": "experiments/rtk/SOURCE_REPOSITORY_CANDIDATES.v1.json",
     "candidates_mutation": "FORBIDDEN_DURING_V2",
-    "overlay_census_path": null,
-    "overlay_census_sha256": null,
-    "candidate_materialization": "NOT_STARTED",
+    "binding": "experiments/rtk/SOURCE_UNIVERSE_V2_BINDING.json",
+    "expansion_walk": "experiments/rtk/SOURCE_UNIVERSE_V2_EXPANSION_WALK.json",
+    "outputs_dir": "experiments/rtk/sealed/expansion_v2_outputs/",
+    "overlay_census_path": "experiments/rtk/sealed/expansion_v2_outputs/",
+    "candidate_materialization": "COMPLETE_LIST_EXHAUSTED",
     "v0_compatibility_harness": "experiments/p05_formalpr_bench/rtk_eval/expansion_v2/tests/test_v0_compatibility.py",
-    "v0_compatibility_status": "DECLARED_SKIP_UNTIL_ADAPTERS_IMPLEMENTED",
-    "next_pass": "After human review: implement v0 adapters to satisfy semantic equivalence, then process five frozen candidates under v2 admission rules; still pre-oracle."
+    "v0_compatibility_status": "PASSED_SEMANTIC_EQUIVALENCE",
+    "replay_verified_transitions_added": 7,
+    "gate_status": "EXHAUSTED_BELOW_20",
+    "next_pass": "Human checkpoint. No oracle/RTK/baseline/unblind. Optional Path A fallback later; do not invent more repos in this phase.",
+    "binding_sha256": "8c9a4e281ac70335f859d5665ddd0abd2b7778414df13e97225e3e5b19434bc6",
+    "expansion_walk_sha256": "8b83fecf5794b6657c765b36b04487bf973271c0668211a65bf71e9dc9d2044c"
   }
 }

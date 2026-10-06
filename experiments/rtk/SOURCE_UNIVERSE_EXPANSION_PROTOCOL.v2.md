@@ -1,11 +1,11 @@
 # Source Universe Expansion Protocol v2
 
-Status: **pre-oracle methodology amendment**. Interface freeze only.
-No oracle labeling. No RTK prediction execution. No candidate materialization
-in the interface-freeze pass.
+Status: **pre-oracle expansion walk complete** under the frozen v2 adapter
+contract. Gate: `EXHAUSTED_BELOW_20`. No oracle labeling. No RTK prediction
+execution. No baseline execution. No unblinding.
 
-Amendment identity: `source_universe_expansion_protocol_v2_adapter_interface`.
-Freeze status target: `V2_METHODOLOGY_INTERFACE_FROZEN_PENDING_MATERIALIZATION`.
+Amendment identity: `source_universe_expansion_protocol_v2_materialization`.
+Related interface freeze: `source_universe_expansion_protocol_v2_adapter_interface`.
 
 ## Purpose
 
