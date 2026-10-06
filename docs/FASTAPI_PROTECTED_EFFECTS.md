@@ -44,6 +44,30 @@ Python source roots. Missing, mismatched, dynamically imported, or unresolved
 repository-local scope keeps authorization UNKNOWN. Open WebUI bypass checks are
 development replay only and do not rewrite frozen external-candidate labels.
 
+## Executed-expression effect closure (PE)
+
+Cache / semantic tip: `PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION = "1.6.0"`
+on branch `feature/executed-expression-effect-closure` (open PR #173).
+
+False `authorized` + `source_proved_server_authority_write` must fail closed when
+Mut / evil / client writes remain reachable through packing adapters. Shared
+peels live in `python_callee_resolution.py` (carrier / choice / factory /
+materialize / copy paths used by packing, identity, and ChainMap observe).
+Regression layers:
+
+- Named pass ledger: `tests/test_executed_expression_effect_closure.py`
+  (through forty-first-pass pins)
+- Adapter matrix: `tests/test_pe_peel_adapter_matrix.py` + catalog
+  `tests/pe_peel_catalog.py`
+- Seeded generative property: `tests/test_pe_peel_property.py`
+- Six-surface Reaudit probe: `tests/_reaudit_six_surface_probe.py`
+
+Plan exit for this tip: two consecutive all-PASS six-surface Reaudits on the
+same algebra tip (or tip+doc-only). `FORTY_FIRST_LEFTOVERS` is empty at 1.6.0. FormalPR freeze / merge / #87 remain a
+separate human gate. Non-material OOS (TypeError empties / held-out FormalPR)
+are listed in `tests/pe_peel_catalog.py` (`NON_MATERIAL_OOS`) and must stay
+UNKNOWN rather than be "closed" into a false PASS.
+
 The profile marks unsupported loops/try/match/with, dynamic guard effect names,
 unsupported call signatures, syntax errors, and missing head material as
 unsupported semantics. A strict product surface must not upgrade partial or

@@ -1,0 +1,20146 @@
+"""Executed-expression effect closure on PE CF positions (#173).
+
+Side effects in executed control-flow expressions must be included in the PE
+execution theorem via one shared observer ``_observe_executed_expression``:
+
+``If.test``, ``While.test``, ``For.iter``, ``AsyncFor.iter``,
+``With`` / ``AsyncWith.context_expr``, ``Match.subject``, ``MatchCase.guard``.
+
+Closes false PASSes where setattr / zero-arg callable-identity mutators /
+nested BoolOp / IfExp / walrus call effects in those positions were omitted
+from writer closure or request-time identity scanning.
+
+Unknown > false PASS. Held-out FormalPR partitions are not frozen.
+"""
+
+from __future__ import annotations
+
+import sys
+
+import pytest
+
+from ovk.compilers.authorization.bypass_authority import (
+    ClosedWorldScopeProof,
+    analyze_bypass_authority_unit,
+)
+from ovk.compilers.authorization.incremental_fastapi_compiler import (
+    compile_incremental_fastapi_assurance,
+)
+from ovk.compilers.authorization.material_loader import AuthMaterials
+from ovk.compilers.authorization.persistent_fastapi_state import (
+    PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION,
+)
+from ovk.compilers.authorization.protected_effect_fastapi_dependency import (
+    FastApiDependencyEffectExtractor,
+    FastApiDependencyEffectProfile,
+)
+from ovk.compilers.authorization.python_ast_index import parse_head_python_materials
+from ovk.compilers.authorization.fastapi_route_summary import build_route_summary_index
+from ovk.compilers.authorization.resource_return_contracts import (
+    build_contract_summary_index,
+)
+
+
+def _scope(*paths: str, import_roots: tuple[str, ...] = ()) -> ClosedWorldScopeProof:
+    return ClosedWorldScopeProof(
+        accounted_paths=tuple(paths),
+        source_roots=(".",),
+        python_import_roots=import_roots,
+    )
+
+
+def _helpers_source(*, body: str = "True") -> str:
+    return f"""
+def write_state(state, value):
+    state.bypass_filter = {body}
+""".strip()
+
+
+def _unit(routes: str, *, helpers: str | None = None) -> object:
+    files = {
+        "app/helpers.py": helpers or _helpers_source(),
+        "app/routes.py": routes.strip(),
+    }
+    return analyze_bypass_authority_unit(
+        files,
+        entry_path="app/routes.py",
+        function_name="handler",
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope(
+            "app/helpers.py",
+            "app/routes.py",
+            import_roots=("app",),
+        ),
+    )
+
+
+def test_if_setattr_in_test_never_authorized() -> None:
+    """1. if setattr(request.state, field, client) → never authorized."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    if setattr(request.state, "bypass_filter", bypass_filter):
+        pass
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_while_setattr_in_test_never_authorized() -> None:
+    """2. while setattr(...) → never authorized."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    while setattr(request.state, "bypass_filter", bypass_filter):
+        break
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_if_zero_arg_poison_in_test_later_helper_unknown() -> None:
+    """3. zero-arg poison() in if test → later helper UNKNOWN."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return False
+    if poison():
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_if_nested_boolop_poison_in_test() -> None:
+    """4. nested flag and poison() test."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False, flag=False):
+    def poison():
+        helpers.write_state = evil
+        return False
+    if flag and poison():
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_if_conditional_expr_containing_mutator() -> None:
+    """5. conditional expression containing mutator call."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False, flag=False):
+    def poison():
+        helpers.write_state = evil
+        return False
+    if (poison() if flag else False):
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_for_mutate_and_return_iter() -> None:
+    """6. for _ in mutate_and_return_iter(...):"""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    def mutate_and_return_iter(state, value):
+        setattr(state, "bypass_filter", value)
+        return []
+    request.state.bypass_filter = True
+    for _ in mutate_and_return_iter(request.state, bypass_filter):
+        pass
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_for_zero_arg_callable_identity_mutator_in_iter() -> None:
+    """7. zero-arg callable-identity mutator in for iterable."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return []
+    for _ in poison():
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_with_mutation_in_context_factory() -> None:
+    """8. mutation in with context_factory(...)."""
+
+    findings = _unit(
+        """
+import helpers
+from contextlib import nullcontext
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def context_factory():
+        helpers.write_state = evil
+        return nullcontext()
+    with context_factory():
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_match_mutation_in_subject() -> None:
+    """9. mutation in match SUBJECT."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return 0
+    match poison():
+        case _:
+            pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_match_mutation_in_guarded_case() -> None:
+    """10. mutation in guarded case _ if GUARD."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    match bypass_filter:
+        case _ if setattr(request.state, "bypass_filter", bypass_filter):
+            pass
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_match_guard_zero_arg_identity_mutator_later_helper() -> None:
+    """11. zero-arg callable identity mutator in match guard → later helper call."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return True
+    match bypass_filter:
+        case _ if poison():
+            pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_walrus_containing_side_effecting_call() -> None:
+    """12. walrus containing side-effecting call."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return False
+    if (flag := poison()):
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+
+
+def test_executed_expr_full_equals_incremental() -> None:
+    """13. full vs incremental parity."""
+
+    trusted_helpers = """
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    clean_routes = """
+from fastapi import Depends, FastAPI
+import helpers
+app = FastAPI()
+
+@app.post("/chat")
+async def handler(request, user = Depends(get_current_user)):
+    helpers.write_state(request.state, True)
+    if request.state.bypass_filter:
+        return sink(user)
+    return sink(user)
+""".strip()
+    poisoned_routes = """
+from fastapi import Depends, FastAPI
+import helpers
+app = FastAPI()
+
+def evil(state, value):
+    state.bypass_filter = value
+
+@app.post("/chat")
+async def handler(request, bypass_filter: bool = False, user = Depends(get_current_user)):
+    def poison():
+        helpers.write_state = evil
+        return False
+    request.state.bypass_filter = True
+    if setattr(request.state, "bypass_filter", bypass_filter):
+        pass
+    if poison():
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    if request.state.bypass_filter:
+        return sink(user)
+    return sink(user)
+""".strip()
+
+    profile = FastApiDependencyEffectProfile(
+        sink_effects={"sink": "model.invoke"},
+        sink_static_resources={"sink": "chat"},
+        trusted_bypass_authorities={
+            "request.state.bypass_filter": ("model.invoke",),
+        },
+        principal_parameter="user",
+    )
+
+    def _materials(routes: str, revision: str) -> AuthMaterials:
+        repo = {
+            "app/helpers.py": trusted_helpers + "\n",
+            "app/routes.py": routes,
+        }
+        return AuthMaterials(
+            base_files=dict(repo),
+            head_files=dict(repo),
+            repo="example/executed-expression-effect-closure",
+            base_revision="base",
+            head_revision=revision,
+            repository_python_files=repo,
+            head_repository_python_files=repo,
+            base_repository_python_files=repo,
+        )
+
+    def _indexes(materials: AuthMaterials):
+        parsed = parse_head_python_materials(materials)
+        contracts = build_contract_summary_index(
+            materials,
+            parsed_trees=parsed.trees,
+            source_digests=parsed.source_digests,
+        )
+        routes = build_route_summary_index(
+            materials,
+            parsed_trees=parsed.trees,
+            source_digests=parsed.source_digests,
+        )
+        return parsed, contracts, routes
+
+    first_materials = _materials(clean_routes, "head-1")
+    parsed, contracts, routes = _indexes(first_materials)
+    first = compile_incremental_fastapi_assurance(
+        first_materials,
+        profile,
+        parsed_index=parsed,
+        contract_summary_index=contracts,
+        route_summary_index=routes,
+    )
+    first_payload = first.ir.canonical_payload()
+
+    second_materials = _materials(poisoned_routes, "head-2")
+    parsed2, contracts2, routes2 = _indexes(second_materials)
+    second = compile_incremental_fastapi_assurance(
+        second_materials,
+        profile,
+        parsed_index=parsed2,
+        contract_summary_index=contracts2,
+        route_summary_index=routes2,
+        previous_state=first.state,
+    )
+    full = FastApiDependencyEffectExtractor().compile(
+        second_materials,
+        profile,
+        parsed_index=parsed2,
+        contract_summary_index=contracts2,
+        route_summary_index=routes2,
+    )
+    assert second.ir.canonical_payload() == full.canonical_payload()
+    assert second.ir.canonical_payload() != first_payload
+    assert all(
+        item.status != "established" for item in second.ir.bypass_authority_evidence
+    )
+
+
+def test_e2e_pe_executed_expr_cannot_source_proved_authorize() -> None:
+    """14. e2e PE: none yields established bypass evidence / source_proved unsoundly."""
+
+    helpers = """
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    routes = """
+from fastapi import Depends, FastAPI
+import helpers
+app = FastAPI()
+
+def evil(state, value):
+    state.bypass_filter = value
+
+@app.post("/chat")
+async def handler(request, bypass_filter: bool = False, user = Depends(get_current_user)):
+    def poison():
+        helpers.write_state = evil
+        return False
+    request.state.bypass_filter = True
+    if setattr(request.state, "bypass_filter", bypass_filter):
+        pass
+    while setattr(request.state, "bypass_filter", bypass_filter):
+        break
+    for _ in (poison(),):
+        pass
+    match bypass_filter:
+        case _ if poison():
+            pass
+    helpers.write_state(request.state, bypass_filter)
+    if request.state.bypass_filter:
+        return sink(user)
+    return sink(user)
+""".strip()
+    repo = {
+        "app/helpers.py": helpers + "\n",
+        "app/routes.py": routes,
+    }
+    materials = AuthMaterials(
+        base_files=dict(repo),
+        head_files=dict(repo),
+        repo="example/executed-expr-e2e",
+        base_revision="base",
+        head_revision="head",
+        repository_python_files=repo,
+        head_repository_python_files=repo,
+        base_repository_python_files=repo,
+    )
+    profile = FastApiDependencyEffectProfile(
+        sink_effects={"sink": "model.invoke"},
+        sink_static_resources={"sink": "chat"},
+        trusted_bypass_authorities={
+            "request.state.bypass_filter": ("model.invoke",),
+        },
+        principal_parameter="user",
+    )
+    parsed = parse_head_python_materials(materials)
+    contracts = build_contract_summary_index(
+        materials,
+        parsed_trees=parsed.trees,
+        source_digests=parsed.source_digests,
+    )
+    routes_idx = build_route_summary_index(
+        materials,
+        parsed_trees=parsed.trees,
+        source_digests=parsed.source_digests,
+    )
+    ir = FastApiDependencyEffectExtractor().compile(
+        materials,
+        profile,
+        parsed_index=parsed,
+        contract_summary_index=contracts,
+        route_summary_index=routes_idx,
+    )
+    assert all(
+        item.status != "established" for item in ir.bypass_authority_evidence
+    )
+    for item in ir.bypass_authority_evidence:
+        assert item.reason != "source_proved_server_authority_write"
+
+
+def test_pure_if_bool_config_flag_does_not_poison_identity() -> None:
+    """15. positive: pure if bool(config_flag) does not unnecessarily poison identity."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False, config_flag=False):
+    if bool(config_flag):
+        pass
+    helpers.write_state(request.state, True)
+    return request.state.bypass_filter
+""",
+        helpers=_helpers_source(body="True"),
+    )
+    assert findings[0].status == "authorized"
+    assert findings[0].reason == "source_proved_server_authority_write"
+
+
+def test_benign_observational_calls_remain_acceptable() -> None:
+    """16. positive: benign observational calls (len etc.) remain acceptable."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    if len(str(bypass_filter)) >= 0:
+        pass
+    if hasattr(request.state, "bypass_filter"):
+        pass
+    helpers.write_state(request.state, True)
+    return request.state.bypass_filter
+""",
+        helpers=_helpers_source(body="True"),
+    )
+    assert findings[0].status == "authorized"
+    assert findings[0].reason == "source_proved_server_authority_write"
+
+
+def test_if_unary_not_poison_never_authorized() -> None:
+    """UnaryOp operand executes: ``if not poison()`` must not authorize."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return False
+    if not poison():
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_if_compare_poison_never_authorized() -> None:
+    """Compare operands execute: ``if poison() == False`` must not authorize."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return False
+    if poison() == False:
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_if_subscript_index_poison_never_authorized() -> None:
+    """Subscript index executes: ``if xs[poison()]`` must not authorize."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return 0
+    xs = [False]
+    if xs[poison()]:
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_if_fstring_poison_never_authorized() -> None:
+    """JoinedStr values execute: ``if f'{poison()}'`` must not authorize."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return False
+    if f'{poison()}':
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_while_unary_not_poison_never_authorized() -> None:
+    """While.test UnaryOp operand must observe identity mutation."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return False
+    while not poison():
+        break
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_match_guard_unary_not_poison_never_authorized() -> None:
+    """MatchCase.guard UnaryOp operand must observe identity mutation."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return True
+    match bypass_filter:
+        case _ if not poison():
+            pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_compare_in_tuple_poison_never_authorized() -> None:
+    """``if 0 in (poison(),)`` must not authorize."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return 0
+    if 0 in (poison(),):
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_augassign_poison_rhs_never_authorized() -> None:
+    """AugAssign RHS executes: ``x += poison()`` must not authorize."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return 0
+    x = 0
+    x += poison()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_assert_unary_not_poison_never_authorized() -> None:
+    """Assert.test executes nested UnaryOp call effects."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return False
+    assert not poison()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_raise_poison_never_authorized() -> None:
+    """Raise.exc executes: ``raise poison()`` must not authorize."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return Exception('x')
+    try:
+        raise poison()
+    except Exception:
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_except_type_poison_never_authorized() -> None:
+    """except TYPE executes: ``except poison():`` must not authorize."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return Exception
+    try:
+        raise RuntimeError('x')
+    except poison():
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_return_poison_arg_before_helper_write_never_authorized() -> None:
+    """Return value executes args before callee: identity mutator then write."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return bypass_filter
+    return helpers.write_state(request.state, poison()) or True
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_if_helper_call_with_poison_arg_never_authorized() -> None:
+    """Same-expression arg-order: ``if write_state(state, poison())``."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return bypass_filter
+    if helpers.write_state(request.state, poison()):
+        pass
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_stmt_helper_call_with_poison_arg_never_authorized() -> None:
+    """Statement call with arg-order identity mutator before write inlining."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return bypass_filter
+    helpers.write_state(request.state, poison())
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_class_base_poison_never_authorized() -> None:
+    """Class bases execute at definition: ``class C(poison())``."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return object
+    class C(poison()):
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_class_metaclass_poison_never_authorized() -> None:
+    """Class keywords execute: ``class C(metaclass=poison())``."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return type
+    class C(metaclass=poison()):
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_class_name_decorator_poison_never_authorized() -> None:
+    """``@poison`` on a nested class must follow the decorator call."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison(cls):
+        helpers.write_state = evil
+        return cls
+    @poison
+    class C:
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_setattr_in_nested_def_default_never_authorized() -> None:
+    """Nested function defaults execute in the enclosing frame."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    def nested(x=setattr(request.state, "bypass_filter", bypass_filter)):
+        return x
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_setattr_in_class_base_never_authorized() -> None:
+    """setattr in a class base must be a counted PE write."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    class C(setattr(request.state, "bypass_filter", bypass_filter) or object):
+        pass
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_nested_param_annotation_poison_never_authorized() -> None:
+    """Parameter annotations evaluate at definition (no postponed eval)."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return bool
+    def nested(x: poison() = True):
+        return x
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_annotation_only_annassign_poison_never_authorized() -> None:
+    """``x: poison()`` evaluates the annotation at runtime."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return bool
+    x: poison()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_class_body_setattr_assign_never_authorized() -> None:
+    """Class-body Assign executes: ``class C: x = setattr(state, ...)``."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    class C:
+        x = setattr(request.state, "bypass_filter", bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_class_body_expr_setattr_never_authorized() -> None:
+    """Class-body Expr executes setattr at definition."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    class C:
+        setattr(request.state, "bypass_filter", bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_class_body_annassign_setattr_never_authorized() -> None:
+    """Class-body AnnAssign value executes at definition."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    class C:
+        x: object = setattr(request.state, "bypass_filter", bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_method_default_setattr_never_authorized() -> None:
+    """Method defaults execute during class-body definition."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    class C:
+        def m(self, x=setattr(request.state, "bypass_filter", bypass_filter)):
+            return x
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="PEP 695 type aliases require 3.12+")
+def test_type_alias_poison_never_authorized() -> None:
+    """``type X = poison()`` evaluates the value at definition."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return int
+    type X = poison()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_unresolved_callee_kwarg_poison_never_authorized() -> None:
+    """Imported callee kwargs execute: ``TypeVar('T', bound=poison())``."""
+
+    findings = _unit(
+        """
+import helpers
+from typing import TypeVar
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return int
+    T = TypeVar('T', bound=poison())
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_imported_ctor_kwarg_poison_never_authorized() -> None:
+    """``OrderedDict(a=poison())`` must observe keyword actuals."""
+
+    findings = _unit(
+        """
+import helpers
+from collections import OrderedDict
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return 1
+    OrderedDict(a=poison())
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_starred_kwarg_poison_never_authorized() -> None:
+    """``OrderedDict(**poison())`` must observe **kwargs actuals."""
+
+    findings = _unit(
+        """
+import helpers
+from collections import OrderedDict
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return {'a': 1}
+    OrderedDict(**poison())
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="PEP 695 type params require 3.12+")
+def test_pep695_type_param_bound_poison_never_authorized() -> None:
+    """PEP 695 ``def nested[T: poison()]`` evaluates the bound."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return int
+    def nested[T: poison()](x: T = True):
+        return x
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_lambda_default_poison_never_authorized() -> None:
+    """Lambda defaults execute at definition: ``f = lambda x=poison(): x``."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return 0
+    f = lambda x=poison(): x
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_lambda_expr_stmt_default_poison_never_authorized() -> None:
+    """Bare ``(lambda x=poison(): x)`` still evaluates defaults."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return 0
+    (lambda x=poison(): x)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_lambda_default_in_if_test_poison_never_authorized() -> None:
+    """``if (lambda x=poison(): x):`` must observe default identity effects."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return 0
+    if (lambda x=poison(): x):
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_nested_lambda_default_poison_never_authorized() -> None:
+    """Outer default that is itself a lambda must evaluate inner defaults."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return 0
+    f = lambda x=(lambda y=poison(): y): x
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "unknown"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_setattr_in_lambda_default_never_authorized() -> None:
+    """setattr in a lambda default is a counted PE write at definition."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    f = lambda x=setattr(request.state, "bypass_filter", bypass_filter): x
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].status in {"violated", "unknown"}
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_ifexp_test_poison_never_authorized() -> None:
+    """IfExp.test executes: ``if (False if poison() else False):``."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return False
+    if (False if poison() else False):
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_boolop_packed_callee_poison_never_authorized() -> None:
+    """``(poison() or len)("x")`` evaluates Call.func packing."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+        return len
+    (poison() or len)("x")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_walrus_lambda_callee_poison_never_authorized() -> None:
+    """``(f := (lambda: poison()))()`` follows NamedExpr-packed callee."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+    (f := (lambda: poison()))()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_list_subscript_lambda_callee_poison_never_authorized() -> None:
+    """``[lambda: poison()][0]()`` follows packed lambda callee."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+    [lambda: poison()][0]()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_lambda_starargs_body_poison_never_authorized() -> None:
+    """``lambda *a: poison(); f()`` follows vararg lambda bodies."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+    f = lambda *a: poison()
+    f()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_lambda_default_to_call_poison_never_authorized() -> None:
+    """Default-to-call: ``lambda x=(lambda: poison()): x(); f()``."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def poison():
+        helpers.write_state = evil
+    f = lambda x=(lambda: poison()): x()
+    f()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_nested_def_export_rebind_evil_never_authorized() -> None:
+    """Nested FunctionDef assigned to helpers.write_state must not use original."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    def evil(state, value):
+        state.bypass_filter = value
+    helpers.write_state = evil
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+    assert findings[0].status in {"violated", "unknown"}
+
+
+def test_nested_def_export_rebind_annassign_never_authorized() -> None:
+    """AnnAssign rebind of helpers.write_state to nested evil."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    def evil(state, value):
+        state.bypass_filter = value
+    helpers.write_state: object = evil
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_nested_def_export_rebind_tuple_unpack_never_authorized() -> None:
+    """Tuple-unpack rebind of helpers.write_state to nested evil."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    def evil(state, value):
+        state.bypass_filter = value
+    (helpers.write_state,) = (evil,)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_del_request_state_field_never_authorized() -> None:
+    """``del request.state.bypass_filter`` after literal server write."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    del request.state.bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_del_request_state_field_in_if_never_authorized() -> None:
+    """``del`` in if body after literal server write."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    if True:
+        del request.state.bypass_filter
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_local_metaclass_prepare_never_authorized() -> None:
+    """Local metaclass ``__prepare__``/``__new__`` fail closed / observed."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Meta:
+        @classmethod
+        def __prepare__(cls, name, bases):
+            helpers.write_state = evil
+            return {}
+        def __new__(cls, name, bases, ns):
+            helpers.write_state = evil
+            return type.__new__(cls, name, bases, ns)
+    class C(metaclass=Meta):
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_init_subclass_poison_never_authorized() -> None:
+    """Base ``__init_subclass__`` runs on subclassing — fail closed / observed."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    class C(Base):
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_types_new_class_exec_body_never_authorized() -> None:
+    """``types.new_class(..., exec_body=body)`` observes exec_body."""
+
+    findings = _unit(
+        """
+import helpers
+import types
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def body(ns):
+        helpers.write_state = evil
+    types.new_class("C", (), {}, body)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_exec_string_poison_never_authorized() -> None:
+    """Request-time ``exec`` of helper-mutating code fail closed."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    exec("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_matchclass_local_metaclass_never_authorized() -> None:
+    """MatchClass against local metaclass ``__instancecheck__`` fail closed."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Meta(type):
+        def __instancecheck__(self, obj):
+            helpers.write_state = evil
+            return True
+    class Box(metaclass=Meta):
+        pass
+    match object():
+        case Box():
+            pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_aliased_base_init_subclass_never_authorized() -> None:
+    """``Alias = Base; class C(Alias)`` must observe ``__init_subclass__``."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    Alias = Base
+    class C(Alias):
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_builtins_exec_as_run_never_authorized() -> None:
+    """``from builtins import exec as run; run(...)`` fail closed."""
+
+    findings = _unit(
+        """
+import helpers
+from builtins import exec as run
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    run("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_builtins_dot_exec_never_authorized() -> None:
+    """``builtins.exec(...)`` fail closed."""
+
+    findings = _unit(
+        """
+import helpers
+import builtins
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    builtins.exec("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_getattr_builtins_exec_never_authorized() -> None:
+    """``getattr(builtins, "exec")(...)`` fail closed."""
+
+    findings = _unit(
+        """
+import helpers
+import builtins
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    getattr(builtins, "exec")("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_types_as_t_new_class_never_authorized() -> None:
+    """``import types as t; t.new_class(..., body)`` observes exec_body."""
+
+    findings = _unit(
+        """
+import helpers
+import types as t
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def body(ns):
+        helpers.write_state = evil
+    t.new_class("C", (), {}, body)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_assert_msg_walrus_closure_never_authorized() -> None:
+    """Assert.msg walrus callable product must be observed before ``fn()``."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def mid():
+        def poison():
+            helpers.write_state = evil
+        return poison
+    try:
+        assert False, (fn := mid())
+    except AssertionError:
+        pass
+    fn()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_raise_cause_walrus_closure_never_authorized() -> None:
+    """Raise.cause walrus callable product must be observed before ``fn()``."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def mid():
+        def poison():
+            helpers.write_state = evil
+        return poison
+    try:
+        raise Exception("x") from (fn := mid())
+    except Exception:
+        pass
+    fn()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_for_attr_export_rebind_never_authorized() -> None:
+    """``for helpers.write_state in [evil]`` must poison later helper resolve."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    for helpers.write_state in [evil]:
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_with_as_attr_export_rebind_never_authorized() -> None:
+    """``with CM() as helpers.write_state`` must poison later helper resolve."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class CM:
+        def __enter__(self):
+            return evil
+        def __exit__(self, *a):
+            return False
+    with CM() as helpers.write_state:
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_mut_init_ifexp_test_never_authorized() -> None:
+    """Local ``Mut().__init__`` identity poison in IfExp.test must observe."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    if (False if Mut() else False):
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_mut_init_call_func_never_authorized() -> None:
+    """Local ``Mut()`` in Call.func IfExp arm must observe ``__init__``."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    (len if Mut() else len)("x")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_mut_init_lambda_default_never_authorized() -> None:
+    """Local ``Mut()`` in lambda default must observe ``__init__``."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    f = lambda x=Mut(): x
+    f()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_nested_local_import_affects_closed_world() -> None:
+    """Nested ``import other.missing`` must make closed-world incomplete."""
+
+    from ovk.compilers.authorization.bypass_authority import (
+        _evaluate_closed_world,
+    )
+
+    files = {
+        "app/helpers.py": _helpers_source(),
+        "app/routes.py": """
+import helpers
+def handler(request, bypass_filter=False):
+    import other.missing
+    request.state.bypass_filter = True
+    return request.state.bypass_filter
+""".strip(),
+        "app/other.py": "Y = 1\n",
+    }
+    cw = _evaluate_closed_world(
+        files,
+        scope_proof=_scope(
+            "app/helpers.py",
+            "app/routes.py",
+            "app/other.py",
+            import_roots=("app",),
+        ),
+    )
+    assert cw.complete is False
+    assert any("other.missing" in item for item in cw.unresolvable_imports)
+
+
+def test_positive_if_bool_config_still_authorized() -> None:
+    """Spot-check: pure ``if bool(config_flag)`` still authorizes."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False, config_flag=True):
+    request.state.bypass_filter = True
+    if bool(config_flag):
+        pass
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "authorized"
+    assert findings[0].reason == "source_proved_server_authority_write"
+
+
+def test_positive_len_hasattr_still_authorized() -> None:
+    """Spot-check: ``len`` / ``hasattr`` observers still authorize."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    request.state.bypass_filter = True
+    len("x")
+    hasattr(request, "state")
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "authorized"
+    assert findings[0].reason == "source_proved_server_authority_write"
+
+
+def test_positive_unused_lambda_body_still_authorized() -> None:
+    """Spot-check: unused lambda body does not poison authority."""
+
+    findings = _unit(
+        """
+import helpers
+def handler(request, bypass_filter=False):
+    def poison():
+        pass
+    f = lambda: poison()
+    request.state.bypass_filter = True
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status == "authorized"
+    assert findings[0].reason == "source_proved_server_authority_write"
+
+
+def test_packed_mut_construction_shapes_never_authorized() -> None:
+    """Packed/Attribute/inherited/factory ``Mut()`` must observe ``__init__``."""
+
+    for snippet in (
+        "(Mut if True else int)()",
+        "(False or Mut)()",
+        "[Mut][0]()",
+        '{"M":Mut}["M"]()',
+        "(m:=Mut)()",
+        "Holder.Mut()",
+        "class Child(Mut):\n        pass\n    Child()",
+        "def factory():\n        return Mut\n    factory()()",
+    ):
+        findings = _unit(
+            f"""
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    class Holder:
+        Mut = Mut
+    {snippet}
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        )
+        assert findings[0].status != "authorized", snippet
+        assert findings[0].reason != "source_proved_server_authority_write", snippet
+
+
+def test_for_with_unpack_export_rebind_never_authorized() -> None:
+    """Tuple/List/Starred for/with-as export rebinds recurse like Assign."""
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    for (helpers.write_state,) in [(evil,)]:
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+    findings = _unit(
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class CM:
+        def __enter__(self):
+            return (evil,)
+        def __exit__(self, *a):
+            return False
+    with CM() as (helpers.write_state,):
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_local_exec_new_class_and_type_protocols_never_authorized() -> None:
+    """Local exec/new_class rebinds, type(), match-as, __set_name__, projections."""
+
+    for routes in (
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    run = exec
+    run("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import types
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def body(ns):
+        helpers.write_state = evil
+    nc = types.new_class
+    nc("C", (), {}, body)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    type("C", (Base,), {})
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    match Base:
+        case x:
+            class C(x):
+                pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Desc:
+        def __set_name__(self, owner, name):
+            helpers.write_state = evil
+    class C:
+        x = Desc()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import builtins
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    vars(builtins)["exec"]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    list(map(exec, ["helpers.write_state = evil"]))
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_third_pass_class_exec_protocol_shapes_never_authorized() -> None:
+    """getattr/walrus/packed/type/__set_name__/itemgetter protocol shapes."""
+
+    for routes in (
+        """
+import helpers
+import builtins
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    run = getattr(builtins, "exec")
+    run("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import types
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def body(ns):
+        helpers.write_state = evil
+    g = getattr
+    g(types, "new_class")("C", (), {}, body)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    (run := exec)("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import types
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    def body(ns):
+        helpers.write_state = evil
+    (nc := types.new_class)("C", (), {}, body)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    T = type
+    T("C", (Base,), {})
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import builtins
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    builtins.type("C", (Base,), {})
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    type("C", bases=(Base,), dict={})
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Desc:
+        def __set_name__(self, owner, name):
+            helpers.write_state = evil
+    d = Desc()
+    class C:
+        x = d
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import builtins
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    operator.itemgetter("exec")(vars(builtins))("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    [exec][0]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_third_pass_identity_construction_shapes_never_authorized() -> None:
+    """getattr/attrgetter/vars/__call__/classmethod/map Mut construction."""
+
+    for routes in (
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Holder:
+        class Mut:
+            def __init__(self):
+                helpers.write_state = evil
+    getattr(Holder, "Mut")()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    vars()["Mut"]()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    Mut.__call__()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    type.__call__(Mut)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+        @classmethod
+        def make(cls):
+            return cls()
+    Mut.make()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    list(map(lambda c: c(), [Mut]))
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_third_pass_interproc_and_cf_packed_protocols_never_authorized() -> None:
+    """Match/comprehension Attribute rebinds and CF packed protocol callees."""
+
+    for routes in (
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    match (evil,):
+        case (helpers.write_state,):
+            pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    [0 for helpers.write_state in [evil]]
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {0 for helpers.write_state in [evil]}
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    if (exec if True else len)("helpers.write_state = evil"):
+        pass
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    while (False or exec)("helpers.write_state = evil"):
+        break
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {"e": exec}["e"]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    (type if True else int)("C", (Base,), {})
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_fourth_pass_shared_peel_exec_shapes_never_authorized() -> None:
+    """Shared Call peel: .get/.pop/next(iter)/getattr packs/operator.call/MPT."""
+
+    for routes in (
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {"e":exec}.get("e")("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    [exec].pop()("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {exec}.pop()("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    next(iter([exec]))("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import builtins
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    [getattr(builtins,"exec")][0]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import builtins
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    (getattr(builtins, "exec") if True else len)("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import builtins
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    (False or getattr(builtins, "exec"))("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    operator.call(exec, "helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    vars().get("exec")("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import builtins
+from types import MappingProxyType
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    MappingProxyType(vars(builtins))["exec"]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import builtins
+from operator import itemgetter as ig
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    ig("exec")(vars(builtins))("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    (x := {"e": exec}.get("e"))("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_fourth_pass_identity_construction_peels_never_authorized() -> None:
+    """attrgetter/getitem/methodcaller/partial/getattr(__call__)/type.__new__."""
+
+    for routes in (
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Holder:
+        class Mut:
+            def __init__(self):
+                helpers.write_state = evil
+    operator.attrgetter("Mut")(Holder)()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from operator import attrgetter as ag
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Holder:
+        class Mut:
+            def __init__(self):
+                helpers.write_state = evil
+    ag("Mut")(Holder)()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    {"Mut":Mut}.get("Mut")()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    d = {"Mut": Mut}
+    d.get("Mut")()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    {}.get("missing", Mut)()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    getattr(Mut,"__call__")()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    operator.attrgetter("__call__")(Mut)()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    operator.methodcaller("__call__")(Mut)()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    operator.getitem({"Mut": Mut}, "Mut")()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import functools
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    functools.partial(Mut)()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    type.__new__(type, "C", (Base,), {})
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    object.__class__.__new__(type, "C", (Base,), {})
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_fourth_pass_cross_module_proxy_adapter_never_authorized() -> None:
+    """``from helpers import Proxy`` after ``Proxy = MappingProxyType``."""
+
+    files = {
+        "app/helpers.py": """
+from types import MappingProxyType
+Proxy = MappingProxyType
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip(),
+        "app/routes.py": """
+from helpers import Proxy
+import helpers
+def handler(request, bypass_filter=False):
+    s = Proxy({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""".strip(),
+    }
+    findings = analyze_bypass_authority_unit(
+        files,
+        entry_path="app/routes.py",
+        function_name="handler",
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope(
+            "app/helpers.py",
+            "app/routes.py",
+            import_roots=("app",),
+        ),
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_fourth_pass_module_annassign_adapter_never_authorized() -> None:
+    """Module AnnAssign ``Proxy: object = MPT`` seeds adapter aliases."""
+
+    findings = _unit(
+        """
+import helpers
+from types import MappingProxyType as MPT
+Proxy: object = MPT
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    s = Proxy({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_fourth_pass_getattr_mappingproxy_alias_never_authorized() -> None:
+    """``Proxy = getattr(types, \"MappingProxyType\")`` seeds adapter alias."""
+
+    findings = _unit(
+        """
+import helpers
+import types
+def handler(request, bypass_filter=False):
+    Proxy = getattr(types, "MappingProxyType")
+    s = Proxy({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_fifth_pass_operator_call_name_aliases_never_authorized() -> None:
+    """Name-bound ``call as oc`` / assign / walrus / getattr before Name short-circuit."""
+
+    for routes in (
+        """
+import helpers
+from operator import call as oc
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    oc(exec, "helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    oc = operator.call
+    oc(exec, "helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    (oc := operator.call)(exec, "helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    oc = getattr(operator, "call")
+    oc(exec, "helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_fifth_pass_module_projection_and_factory_products_never_authorized() -> None:
+    """Module getitem/partial seeds; Name-bound attrgetter/partial/itemgetter products."""
+
+    for routes in (
+        """
+import helpers
+from operator import getitem as gi
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    gi({"Mut": Mut}, "Mut")()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from functools import partial as p
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    p(Mut)()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from operator import attrgetter as agf
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Holder:
+        class Mut:
+            def __init__(self):
+                helpers.write_state = evil
+    ag = agf("Mut")
+    ag(Holder)()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from functools import partial as pf
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    p = pf(Mut)
+    p()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from operator import itemgetter as igf
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    ig = igf("Mut")
+    ig({"Mut": Mut})()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from operator import methodcaller as mcf
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def poison(self):
+            helpers.write_state = evil
+    mc = mcf("poison")
+    mc(Mut())
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_fifth_pass_adapter_getattr_vars_dict_peels_never_authorized() -> None:
+    """Renamed/builtins.getattr, vars/__dict__, packed Proxy Call.func peels."""
+
+    for routes in (
+        """
+import helpers
+import types
+def handler(request, bypass_filter=False):
+    g = getattr
+    Proxy = g(types, "MappingProxyType")
+    s = Proxy({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import types
+import builtins
+def handler(request, bypass_filter=False):
+    Proxy = builtins.getattr(types, "MappingProxyType")
+    s = Proxy({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import types
+def handler(request, bypass_filter=False):
+    Proxy = vars(types)["MappingProxyType"]
+    s = Proxy({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import types
+def handler(request, bypass_filter=False):
+    Proxy = types.__dict__["MappingProxyType"]
+    s = Proxy({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from types import MappingProxyType
+def handler(request, bypass_filter=False):
+    Proxy = MappingProxyType
+    s = (Proxy if True else dict)({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from types import MappingProxyType
+def handler(request, bypass_filter=False):
+    Proxy = MappingProxyType
+    s = (False or Proxy)({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from types import MappingProxyType
+def handler(request, bypass_filter=False):
+    s = (Proxy := MappingProxyType)({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from types import MappingProxyType
+def handler(request, bypass_filter=False):
+    Proxy = MappingProxyType
+    s = [Proxy][0]({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_fifth_pass_type_protocol_and_match_class_bind_never_authorized() -> None:
+    """getattr/packed type.__new__/__call__, object.__class__.__call__, match C bind."""
+
+    for routes in (
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    getattr(type, "__new__")(type, "C", (Base,), {})
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    getattr(type, "__call__")(Mut)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    [getattr(type, "__new__")][0](type, "C", (Base,), {})
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    object.__class__.__call__(Mut)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    match Mut:
+        case C:
+            C()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_sixth_pass_packed_operator_call_and_type_protocol_never_authorized() -> None:
+    """Packed call/next/subscript/methodcaller + Name-bound type protocol."""
+
+    for routes in (
+        """
+import helpers
+from operator import call as oc
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    [oc][0](exec, "helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from operator import call as oc
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    next(iter([oc]))(exec, "helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from operator import call as oc, methodcaller
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    methodcaller("__call__", exec, "helpers.write_state = evil")(oc)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    [(oc := operator.call)][0](exec, "helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    next(iter([getattr(operator, "call")]))(exec, "helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    tn = type.__new__
+    tn(type, "C", (Base,), {})
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    tc = getattr(type, "__call__")
+    tc(Mut)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    match (Mut,):
+        case (C,):
+            C()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    match {"c": Mut}:
+        case {"c": C}:
+            C()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_sixth_pass_identity_projection_products_never_authorized() -> None:
+    """Intermediate Name-bound getitem/.get/partial.__call__ products."""
+
+    for routes in (
+        """
+import helpers
+from operator import getitem as gi
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    m = gi({"Mut": Mut}, "Mut")
+    m()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    d = {"Mut": Mut}
+    m = d["Mut"]
+    m()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    d = {"Mut": Mut}
+    m = d.get("Mut")
+    m()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    g = {}.get
+    g("missing", Mut)()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from functools import partial as pf
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    p = pf(Mut)
+    p.__call__()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from functools import partial as pf
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    p = pf(Mut)
+    getattr(p, "__call__")()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_sixth_pass_adapter_dict_and_ns_alias_peels_never_authorized() -> None:
+    """Dict-keyed Call.func, getattr(__dict__), renamed vars, .get MPT seeds."""
+
+    for routes in (
+        """
+import helpers
+from types import MappingProxyType as Proxy
+def handler(request, bypass_filter=False):
+    s = {"p": Proxy}["p"]({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from types import MappingProxyType as Proxy
+def handler(request, bypass_filter=False):
+    s = {0: Proxy}[0]({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from types import MappingProxyType as Proxy
+def handler(request, bypass_filter=False):
+    s = ({} | {"p": Proxy})["p"]({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import types
+def handler(request, bypass_filter=False):
+    Proxy = getattr(types, "__dict__")["MappingProxyType"]
+    s = Proxy({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import types
+def handler(request, bypass_filter=False):
+    v = vars
+    Proxy = v(types)["MappingProxyType"]
+    s = Proxy({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import types
+def handler(request, bypass_filter=False):
+    Proxy = types.__dict__.get("MappingProxyType")
+    s = Proxy({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import types
+def handler(request, bypass_filter=False):
+    Proxy = vars(types).get("MappingProxyType")
+    s = Proxy({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_seventh_pass_operator_call_attr_and_dict_packs_never_authorized() -> None:
+    """oc.__call__/getattr/dict() kwargs/Name-bound itemgetter/type.__call__ packs."""
+
+    for routes in (
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    oc = operator.call
+    oc.__call__(exec, "helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    oc = operator.call
+    getattr(oc, "__call__")(exec, "helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    operator.call.__call__(exec, "helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    oc = operator.call
+    d = oc.__call__
+    d(exec, "helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    dict(e=exec)["e"]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    dict(**{"e": exec})["e"]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from operator import itemgetter
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    oc = operator.call
+    ig = itemgetter(0)
+    ig([oc])(exec, "helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    next(iter([type.__call__]))(Mut)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    type.__call__.__call__(Mut)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    tn = type.__new__
+    [tn][0](type, "C", (Base,), {})
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    g = dict.get
+    g({}, "missing", Mut)()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import functools
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    p = getattr(functools, "partial")(Mut)
+    p()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from functools import partial as pf
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    (p := pf(Mut)).__call__()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from types import MappingProxyType as Proxy
+def handler(request, bypass_filter=False):
+    d = {"p": Proxy}
+    s = d["p"]({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from types import MappingProxyType as Proxy
+def handler(request, bypass_filter=False):
+    s = dict(p=Proxy)["p"]({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import types
+def handler(request, bypass_filter=False):
+    Proxy = getattr(types.__dict__, "get")("MappingProxyType")
+    s = Proxy({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    match (Mut,):
+        case (*xs,):
+            xs[0]()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    match {"c": Mut}:
+        case {"c": C, **rest}:
+            C()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_seventh_pass_nested_import_install_never_authorized() -> None:
+    """Accounted nested ``import pkg.nested as n; n.install(evil)`` export rebind."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    files = {
+        "app/helpers.py": _helpers_source(),
+        "app/pkg/__init__.py": "",
+        "app/pkg/nested.py": nested,
+        "app/routes.py": """
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    n.install(evil)
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""".strip(),
+    }
+    findings = analyze_bypass_authority_unit(
+        files,
+        entry_path="app/routes.py",
+        function_name="handler",
+        bypass_fields=frozenset({"bypass_filter"}),
+        scope_proof=_scope(*files, import_roots=("app",)),
+    )
+    assert findings[0].status != "authorized"
+    assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_eighth_pass_alias_ns_view_getitem_pop_never_authorized() -> None:
+    """getattr(ns, \"__getitem__\"|\"pop\") MappingProxy seeds (shared ns views)."""
+
+    for routes in (
+        """
+import helpers
+import types
+def handler(request, bypass_filter=False):
+    Proxy = getattr(types.__dict__, "__getitem__")("MappingProxyType")
+    s = Proxy({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import types
+def handler(request, bypass_filter=False):
+    Proxy = getattr(vars(types), "__getitem__")("MappingProxyType")
+    s = Proxy({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import types
+def handler(request, bypass_filter=False):
+    Proxy = getattr(types.__dict__, "pop")("MappingProxyType")
+    s = Proxy({"s": request.state})["s"]
+    s.bypass_filter = bypass_filter
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_eighth_pass_dict_ctor_merge_and_adapters_never_authorized() -> None:
+    """Name-bound dict/__call__/builtins/|/`|=`/OrderedDict/map/filter packs."""
+
+    for routes in (
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    D = dict
+    D(e=exec)["e"]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    dict.__call__(e=exec)["e"]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import builtins
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    getattr(builtins, "dict")(e=exec)["e"]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    ({} | {"e": exec})["e"]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    d = {}
+    d |= {"e": exec}
+    d["e"]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from collections import OrderedDict
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    OrderedDict(e=exec)["e"]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from collections import UserDict
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    UserDict(e=exec)["e"]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+from types import SimpleNamespace
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    SimpleNamespace(e=exec).e("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    dict.fromkeys(["e"], exec)["e"]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    oc = operator.call
+    next(map(lambda x: x, [oc]))(exec, "helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    oc = operator.call
+    next(filter(None, [oc]))(exec, "helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_eighth_pass_match_rest_and_protocol_binds_never_authorized() -> None:
+    """MatchMapping rest packs + Match Name exec/type/operator.call identity."""
+
+    for routes in (
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    match {"c": Mut}:
+        case {**rest}:
+            rest["c"]()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    match {"e": exec}:
+        case {"e": e}:
+            e("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    match (exec,):
+        case (*xs,):
+            xs[0]("helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    tn = type.__new__
+    match {"t": tn}:
+        case {"t": t}:
+            t(type, "C", (Base,), {})
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import operator
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    oc = operator.call
+    match {"o": oc}:
+        case {**rest}:
+            rest["o"](exec, "helpers.write_state = evil")
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_eighth_pass_type_protocol_and_dict_view_products_never_authorized() -> None:
+    """tc.__call__/tn.__call__/D.get/builtins.dict.get identity products."""
+
+    for routes in (
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    tc = type.__call__
+    tc.__call__(Mut)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    (tc := type.__call__).__call__(Mut)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Base:
+        def __init_subclass__(cls, **kw):
+            helpers.write_state = evil
+    tn = type.__new__
+    tn.__call__(type, "C", (Base,), {})
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    tc = type.__call__
+    d = tc.__call__
+    d(Mut)
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    D = dict
+    g = D.get
+    g({}, "missing", Mut)()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import builtins
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    g = builtins.dict.get
+    g({}, "missing", Mut)()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+import builtins
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    g = builtins.dict.pop
+    g({"m": Mut}, "m")()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_eighth_pass_lexical_unpack_with_and_star_never_authorized() -> None:
+    """Assign unpack / with-as constructor / star pack class seeds."""
+
+    for routes in (
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Cls:
+        def __init__(self):
+            helpers.write_state = evil
+    C, = [Cls]
+    C()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Cls:
+        def __init__(self):
+            helpers.write_state = evil
+    [C] = [Cls]
+    C()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    class CM:
+        def __enter__(self):
+            return Mut
+        def __exit__(self, *a):
+            return False
+    with CM() as M:
+        M()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    *xs, = [Mut]
+    xs[0]()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_eighth_pass_for_class_seed_iter_variety_never_authorized() -> None:
+    """For class seeds via dict views / comps / star packs / genexps."""
+
+    for routes in (
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    for C in {"c": Mut}.values():
+        C()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    for C in {Mut: 1}.keys():
+        C()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    for k, C in {"c": Mut}.items():
+        C()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    *xs, = [Mut]
+    for C in xs:
+        C()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    for C in [x for x in [Mut]]:
+        C()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import helpers
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    class Mut:
+        def __init__(self):
+            helpers.write_state = evil
+    for C in (x for x in [Mut]):
+        C()
+    helpers.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        findings = _unit(routes)
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def test_eighth_pass_nested_import_install_peels_never_authorized() -> None:
+    """getattr/__call__/list-pack/from-import nested install export rebinds."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for routes in (
+        """
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    getattr(n, "install")(evil)
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    n.install.__call__(evil)
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    [n.install][0](evil)
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+        """
+from pkg.nested import install
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    install(evil)
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+""",
+    ):
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized"
+        assert findings[0].reason != "source_proved_server_authority_write"
+
+
+def _ninth_src(body: str, *, imports: str = "") -> str:
+    """Build a handler source around ``body`` (indented one level by callers).
+
+    ``Mut`` / ``Base`` are defined only when referenced; ``Mut()`` rebinds
+    ``helpers.write_state`` to an attacker-controlled writer and ``Base``
+    does the same from ``__init_subclass__``.
+    """
+
+    lines = ["import helpers", *([imports] if imports else [])]
+    lines += [
+        "def evil(state, value):",
+        "    state.bypass_filter = value",
+        "def handler(request, bypass_filter=False):",
+    ]
+    if "Mut" in body:
+        lines += [
+            "    class Mut:",
+            "        def __init__(self):",
+            "            helpers.write_state = evil",
+        ]
+    if "Base" in body:
+        lines += [
+            "    class Base:",
+            "        def __init_subclass__(cls, **kw):",
+            "            helpers.write_state = evil",
+        ]
+    lines += [f"    {ln}" if ln else ln for ln in body.strip("\n").split("\n")]
+    lines += [
+        "    helpers.write_state(request.state, bypass_filter)",
+        "    return request.state.bypass_filter",
+    ]
+    return "\n".join(lines)
+
+
+_NINTH_EXEC = '"helpers.write_state = evil"'
+
+
+def _assert_ninth_not_authorized(cases: tuple[tuple[str, str], ...]) -> None:
+    leaked: list[str] = []
+    for body, imports in cases:
+        findings = _unit(_ninth_src(body, imports=imports))
+        if (
+            findings[0].status == "authorized"
+            or findings[0].reason == "source_proved_server_authority_write"
+        ):
+            leaked.append(body)
+    assert not leaked, "false PASS for:\n" + "\n---\n".join(leaked)
+
+
+def test_ninth_pass_match_subject_peel_class_and_protocol() -> None:
+    """Match subjects (Name/walrus/dict()/``**``/non-constant keys) seed rest."""
+
+    _assert_ninth_not_authorized(
+        (
+            ('d = {"c": Mut}\nmatch d:\n    case {**rest}:\n        rest["c"]()', ""),
+            (
+                'match (d := {"c": Mut}):\n    case {**rest}:\n        rest["c"]()',
+                "",
+            ),
+            ('match dict(c=Mut):\n    case {**rest}:\n        rest["c"]()', ""),
+            (
+                'match {**{"c": Mut}}:\n    case {**rest}:\n        rest["c"]()',
+                "",
+            ),
+            (
+                'k = "c"\nmatch {k: Mut}:\n    case {**rest}:\n        rest["c"]()',
+                "",
+            ),
+            (
+                'match {"c": Mut}:\n    case {**rest}:\n        rest["c"].__call__()',
+                "",
+            ),
+            (
+                'extra = {"c": Mut}\nmatch {**extra}:\n    case {**rest}:\n'
+                '        rest["c"]()',
+                "",
+            ),
+            (
+                'match {"a": 1, **{"c": Mut}}:\n    case {**rest}:\n'
+                '        rest["c"]()',
+                "",
+            ),
+            (
+                'd = {"e": exec}\nmatch d:\n    case {**rest}:\n'
+                f"        rest[\"e\"]({_NINTH_EXEC})",
+                "",
+            ),
+            (
+                'd = {"e": exec}\nmatch d:\n    case {**rest}:\n'
+                f"        rest[\"e\"].__call__({_NINTH_EXEC})",
+                "",
+            ),
+            (
+                'match (d := {"e": exec}):\n    case {**rest}:\n'
+                f"        rest[\"e\"]({_NINTH_EXEC})",
+                "",
+            ),
+            (
+                '{"e": exec}["e"].__call__(' + _NINTH_EXEC + ")",
+                "",
+            ),
+            (
+                'tn = type.__new__\nd = {"t": tn}\nmatch d:\n    case {**rest}:\n'
+                '        rest["t"](type, "C", (Base,), {})',
+                "",
+            ),
+            (
+                'oc = operator.call\nmatch dict(o=oc):\n    case {**rest}:\n'
+                f"        rest[\"o\"](exec, {_NINTH_EXEC})",
+                "import operator",
+            ),
+            (
+                'oc = operator.call\nmatch dict(o=oc):\n    case {**rest}:\n'
+                f"        rest[\"o\"].__call__(exec, {_NINTH_EXEC})",
+                "import operator",
+            ),
+            (
+                f'xs = (exec,)\nmatch xs:\n    case (*r,):\n        r[0]({_NINTH_EXEC})',
+                "",
+            ),
+        )
+    )
+
+
+def test_ninth_pass_alias_ns_name_bound_and_setdefault() -> None:
+    """Name-bound namespace projections and ``setdefault`` view attr."""
+
+    tail = (
+        'Proxy = {proxy}\ns = Proxy({{"s": request.state}})["s"]\n'
+        "s.bypass_filter = bypass_filter"
+    )
+    cases = (
+        'ns = types.__dict__\nProxy = ns.get("MappingProxyType")\n'
+        's = Proxy({"s": request.state})["s"]\ns.bypass_filter = bypass_filter',
+        'ns = vars(types)\nProxy = ns.get("MappingProxyType")\n'
+        's = Proxy({"s": request.state})["s"]\ns.bypass_filter = bypass_filter',
+        'ns = types.__dict__\nProxy = ns["MappingProxyType"]\n'
+        's = Proxy({"s": request.state})["s"]\ns.bypass_filter = bypass_filter',
+        'ns = types.__dict__\nProxy = getattr(ns, "get")("MappingProxyType")\n'
+        's = Proxy({"s": request.state})["s"]\ns.bypass_filter = bypass_filter',
+        'ns = types.__dict__\n'
+        'Proxy = getattr(ns, "__getitem__")("MappingProxyType")\n'
+        's = Proxy({"s": request.state})["s"]\ns.bypass_filter = bypass_filter',
+        'ns = vars(types)\nProxy = getattr(ns, "pop")("MappingProxyType")\n'
+        's = Proxy({"s": request.state})["s"]\ns.bypass_filter = bypass_filter',
+        tail.format(proxy='types.__dict__.setdefault("MappingProxyType")'),
+        tail.format(proxy='vars(types).setdefault("MappingProxyType")'),
+        tail.format(
+            proxy='getattr(types.__dict__, "setdefault")("MappingProxyType")'
+        ),
+        'ns = types.__dict__\nProxy = ns.setdefault("MappingProxyType")\n'
+        's = Proxy({"s": request.state})["s"]\ns.bypass_filter = bypass_filter',
+    )
+    _assert_ninth_not_authorized(tuple((c, "import types") for c in cases))
+
+
+def test_ninth_pass_dict_ctor_merge_and_adapters_never_authorized() -> None:
+    """defaultdict/ChainMap/Name-bound merge/operator or_/ior/comps/zip/update."""
+
+    ex = _NINTH_EXEC
+    plain = (
+        f'defaultdict(None, {{"e": exec}})["e"]({ex})',
+        f'defaultdict(e=exec)["e"]({ex})',
+        f'ChainMap({{"e": exec}})["e"]({ex})',
+        f'd = {{"e": exec}}\n(d | {{}})["e"]({ex})',
+        f'd = {{"e": exec}}\n({{}} | d)["e"]({ex})',
+        f'd = {{"e": exec}}\ne = d | {{}}\ne["e"]({ex})',
+        f'd = {{"e": exec}}\ne = {{}} | d\ne["e"]({ex})',
+        f'operator.or_({{}}, {{"e": exec}})["e"]({ex})',
+        f'operator.ior({{}}, {{"e": exec}})["e"]({ex})',
+        f'{{}}.__or__({{"e": exec}})["e"]({ex})',
+        f'{{}}.__ior__({{"e": exec}})["e"]({ex})',
+        f'd = {{"e": exec}}\nd.__or__({{}})["e"]({ex})',
+        f'd = {{}}\nd.__ior__({{"e": exec}})["e"]({ex})',
+        f'D = dict.__call__\nD(e=exec)["e"]({ex})',
+        f'D = dict\nE = D.__call__\nE(e=exec)["e"]({ex})',
+        f'd = {{"e": exec}}\ne = d["e"].__call__\ne({ex})',
+        f'next(x for x in [exec])({ex})',
+        f'[x for x in [exec]][0]({ex})',
+        f'next(iter([x for x in [exec]]))({ex})',
+        f'for _, f in enumerate([exec]):\n    f({ex})',
+        f'for f, in zip([exec]):\n    f({ex})',
+        f'next(zip([exec]))[0]({ex})',
+        f'next(enumerate([exec]))[1]({ex})',
+        f'd = {{}}\nd.update(e=exec)\nd["e"]({ex})',
+        f'd = {{}}\nd.update({{"e": exec}})\nd["e"]({ex})',
+        f'd = {{}}\nd.setdefault("e", exec)\nd["e"]({ex})',
+        f'd = {{"e": exec}}\nd.copy()["e"]({ex})',
+        f'd = {{"e": exec}}\nc = d.copy()\nc["e"]({ex})',
+        f'd = {{"e": exec}}\ndict(d)["e"]({ex})',
+        f'{{"e": exec}}.copy()["e"]({ex})',
+    )
+    cases = [(c, "from collections import ChainMap, defaultdict\nimport operator") for c in plain]
+    _assert_ninth_not_authorized(tuple(cases))
+    oc_cases = (
+        f'oc = operator.call\nfor f in zip([oc]):\n    f[0](exec, {ex})',
+        f'oc = operator.call\nfor _, f in enumerate([oc]):\n    f(exec, {ex})',
+    )
+    _assert_ninth_not_authorized(tuple((c, "import operator") for c in oc_cases))
+
+
+def test_ninth_pass_interproc_for_dict_view_seeds_never_authorized() -> None:
+    """Name/walrus/getattr/DictComp dict-view For seeds + class construction."""
+
+    _assert_ninth_not_authorized(
+        (
+            ('d = {"c": Mut}\nfor C in d.values():\n    C()', ""),
+            ('for C in (d := {"c": Mut}).values():\n    C()', ""),
+            ('d = {Mut: 1}\nfor C in d.keys():\n    C()', ""),
+            ('d = {"c": Mut}\nfor k, C in d.items():\n    C()', ""),
+            ('for C in getattr({"c": Mut}, "values")():\n    C()', ""),
+            ('d = {"c": Mut}\nfor C in getattr(d, "values")():\n    C()', ""),
+            ('for k, C in {k: Mut for k in ["c"]}.items():\n    C()', ""),
+            ('for C in {k: Mut for k in ["c"]}.values():\n    C()', ""),
+            ('for C in dict(c=Mut).values():\n    C()', ""),
+            ('for C in {"c": Mut}.copy().values():\n    C()', ""),
+        )
+    )
+
+
+def test_ninth_pass_nested_import_install_peels_never_authorized() -> None:
+    """``n.install.__call__`` / getattr.__call__ / packed install peels."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "n.install.__call__(evil)",
+        'getattr(n, "install").__call__(evil)',
+        '[getattr(n, "install")][0](evil)',
+        "next(iter([n.install]))(evil)",
+        "next(iter([n.install])).__call__(evil)",
+        "(f := n.install)(evil)",
+        "{'i': n.install}['i'](evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_ninth_pass_type_protocol_nested_call_and_dict_view_products() -> None:
+    """Nested ``tc.__call__`` / match-rest / for / map; setdefault; vars(builtins)."""
+
+    cases = (
+        'tc = type.__call__\n(d := tc.__call__)(Mut)',
+        'd = (tc := type.__call__).__call__\nd(Mut)',
+        'tc = type.__call__\nd = (e := tc.__call__)\nd(Mut)',
+        'type.__call__.__call__(Mut)',
+        'tc = type.__call__\ngetattr(tc, "__call__")(Mut)',
+        'getattr(type.__call__, "__call__")(Mut)',
+        'tc = type.__call__\nd = getattr(tc, "__call__")\nd(Mut)',
+        'tc = type.__call__\nfor f in [tc.__call__]:\n    f(Mut)',
+        'tc = type.__call__\nfor f in [tc]:\n    f.__call__(Mut)',
+        'tc = type.__call__\nnext(map(lambda x: x, [tc.__call__]))(Mut)',
+        'tc = type.__call__\nmatch {"t": tc}:\n    case {**rest}:\n        rest["t"].__call__(Mut)',
+        'tc = type.__call__\nmatch {"t": tc.__call__}:\n    case {"t": t}:\n        t(Mut)',
+        'tc = type.__call__\nmatch {"t": tc.__call__}:\n    case {**rest}:\n        rest["t"](Mut)',
+        'tn = type.__new__\ntn.__call__.__call__(type, "C", (Base,), {})',
+        'tn = type.__new__\nfor f in [tn.__call__]:\n    f(type, "C", (Base,), {})',
+        'D = dict\ng = D.setdefault\ng({}, "m", Mut)()',
+        'g = dict.setdefault\ng({}, "m", Mut)()',
+        'g = builtins.dict.setdefault\ng({}, "m", Mut)()',
+        'g = vars(builtins)["dict"].get\ng({}, "missing", Mut)()',
+        'g = builtins.__dict__["dict"].get\ng({}, "missing", Mut)()',
+        'g = vars(builtins).get("dict").get\ng({}, "missing", Mut)()',
+        'g = vars(builtins)["dict"].setdefault\ng({}, "m", Mut)()',
+        'ns = vars(builtins)\ng = ns["dict"].get\ng({}, "missing", Mut)()',
+    )
+    _assert_ninth_not_authorized(tuple((c, "import builtins") for c in cases))
+
+
+def test_ninth_pass_lexical_keys_values_unpack_never_authorized() -> None:
+    """Assign/star unpack from ``.keys()``/``.values()``/``.items()`` + match rest."""
+
+    _assert_ninth_not_authorized(
+        (
+            ('C, = {Mut: 1}.keys()\nC()', ""),
+            ('[C] = {Mut: 1}.keys()\nC()', ""),
+            ('C, = {"c": Mut}.values()\nC()', ""),
+            ('*xs, = {Mut: 1}.keys()\nxs[0]()', ""),
+            ('*xs, = {"c": Mut}.values()\nxs[0]()', ""),
+            ('(k, C), = {"c": Mut}.items()\nC()', ""),
+            ('C, = {Mut: 1}\nC()', ""),
+            ('d = {Mut: 1}\nC, = d.keys()\nC()', ""),
+            ('C, = list({Mut: 1}.keys())\nC()', ""),
+            ('C, = ({} | {Mut: 1}).keys()\nC()', ""),
+            (
+                "class CM:\n"
+                "    def __enter__(self):\n"
+                "        return {Mut: 1}.keys()\n"
+                "    def __exit__(self, *a):\n"
+                "        return False\n"
+                "with CM() as ks:\n"
+                "    C, = ks\n"
+                "    C()",
+                "",
+            ),
+            (
+                "class CM:\n"
+                "    def __enter__(self):\n"
+                "        return {Mut: 1}\n"
+                "    def __exit__(self, *a):\n"
+                "        return False\n"
+                "with CM() as d:\n"
+                "    C, = d.keys()\n"
+                "    C()",
+                "",
+            ),
+            ('match {"c": Mut}:\n    case {**rest}:\n        for C in rest.values():\n            C()', ""),
+            ('match {"c": Mut}:\n    case {**rest}:\n        for k, C in rest.items():\n            C()', ""),
+            ('match {"c": Mut}:\n    case {**rest}:\n        C, = rest.values()\n        C()', ""),
+            ('match {Mut: 1}:\n    case {**rest}:\n        C, = rest.keys()\n        C()', ""),
+            ('match {Mut: 1}:\n    case {**rest}:\n        for C in rest.keys():\n            C()', ""),
+            ('match {"c": Mut}:\n    case {**rest}:\n        (k, C), = rest.items()\n        C()', ""),
+        )
+    )
+
+
+def test_ninth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of the ninth-pass shapes remain authorized."""
+
+    for body in (
+        'd = {"c": int}\nmatch d:\n    case {**rest}:\n        rest["c"]()',
+        'ns = types.__dict__\nProxy = ns.get("MappingProxyType")\nProxy({})',
+        'D = dict.__call__\nD(e=len)["e"]("x")',
+        'C, = {int: 1}.keys()\nC()',
+    ):
+        src = (
+            "import helpers\nimport types\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_tenth_pass_trailing_call_and_map_apply_never_authorized() -> None:
+    """Trailing ``.__call__`` after adapters; map applies construction in lambda."""
+
+    _assert_ninth_not_authorized(
+        (
+            ("tc = type.__call__\nnext(iter([tc.__call__])).__call__(Mut)", ""),
+            ("tc = type.__call__\nnext(iter([tc])).__call__(Mut)", ""),
+            (
+                "tc = type.__call__\nnext(reversed([tc.__call__])).__call__(Mut)",
+                "",
+            ),
+            (
+                "tc = type.__call__\np = [tc.__call__]\nnext(iter(p)).__call__(Mut)",
+                "",
+            ),
+            (
+                "tc = type.__call__\nlist(map(lambda f: f(Mut), [tc.__call__]))",
+                "",
+            ),
+            (
+                'tn = type.__new__\n'
+                'getattr(tn, "__call__").__call__(type, "C", (Base,), {})',
+                "",
+            ),
+            (
+                'tc = type.__call__\ngetattr(tc, "__call__").__call__(Mut)',
+                "",
+            ),
+            ("next(iter([Mut])).__call__()", ""),
+            (
+                'tn = type.__new__\nnext(iter([tn])).__call__(type, "C", (Base,), {})',
+                "",
+            ),
+            ("Mut.__call__.__call__()", ""),
+            (
+                'match {"c": Mut}:\n    case {**rest}:\n'
+                '        rest["c"].__call__.__call__()',
+                "",
+            ),
+            (
+                'tn = type.__new__\nmatch {"t": tn}:\n    case {**rest}:\n'
+                '        getattr(rest["t"], "__call__").__call__('
+                'type, "C", (Base,), {})',
+                "",
+            ),
+        )
+    )
+
+
+def test_tenth_pass_walrus_setdefault_and_alias_ns_never_authorized() -> None:
+    """Walrus as Call.func for setdefault; ns-view ``.__call__`` / Name key."""
+
+    _assert_ninth_not_authorized(
+        (
+            ('D = dict\n(g := D.setdefault)({}, "m", Mut)()', "import builtins"),
+            ('(g := dict.setdefault)({}, "m", Mut)()', "import builtins"),
+            (
+                '(g := vars(builtins)["dict"].setdefault)({}, "m", Mut)()',
+                "import builtins",
+            ),
+        )
+    )
+    alias_imports = "import types"
+    cases = (
+        'ns = types.__dict__\n'
+        'Proxy = getattr(ns, "setdefault").__call__("MappingProxyType")\n'
+        's = Proxy({"s": request.state})["s"]\ns.bypass_filter = bypass_filter',
+        'ns = types.__dict__\n'
+        'Proxy = getattr(ns, "get").__call__("MappingProxyType")\n'
+        's = Proxy({"s": request.state})["s"]\ns.bypass_filter = bypass_filter',
+        'ns = types.__dict__\nk = "MappingProxyType"\n'
+        'Proxy = getattr(ns, "setdefault")(k)\n'
+        's = Proxy({"s": request.state})["s"]\ns.bypass_filter = bypass_filter',
+        'match {"p": types.MappingProxyType}:\n'
+        '    case {**rest}:\n'
+        '        s = rest["p"]({"s": request.state})["s"]\n'
+        "        s.bypass_filter = bypass_filter",
+    )
+    _assert_ninth_not_authorized(tuple((c, alias_imports) for c in cases))
+
+
+def test_tenth_pass_cf_mapping_projection_never_authorized() -> None:
+    """AugAssign/getattr merge, Counter/ChainMap/copy/update/popitem/setitem/itertools."""
+
+    ex = _NINTH_EXEC
+    imp = (
+        "from collections import ChainMap, Counter, defaultdict\n"
+        "import copy, operator, itertools"
+    )
+    plain = (
+        f'getattr({{}}, "__or__")({{"e": exec}})["e"]({ex})',
+        f'getattr({{}}, "__ior__")({{"e": exec}})["e"]({ex})',
+        f'getattr({{"e": exec}}, "__ror__")({{}})["e"]({ex})',
+        f'Counter({{"e": exec}})["e"]({ex})',
+        f'cm = ChainMap({{"e": exec}})\ncm.maps[0]["e"]({ex})',
+        f'ChainMap().new_child({{"e": exec}})["e"]({ex})',
+        f'd = {{"e": exec}}\ncopy.copy(d)["e"]({ex})',
+        f'd = {{"e": exec}}\ncopy.deepcopy(d)["e"]({ex})',
+        f'd = {{}}\ndict.update(d, e=exec)\nd["e"]({ex})',
+        'd = {}\ngetattr(d, "update")(e=exec)\nd["e"](' + ex + ")",
+        f'd = {{}}\nu = d.update\nu(e=exec)\nd["e"]({ex})',
+        f'k, f = {{"e": exec}}.popitem()\nf({ex})',
+        f'd = {{}}\noperator.setitem(d, "e", exec)\nd["e"]({ex})',
+        f'for f in itertools.chain([exec]):\n    f({ex})',
+        f'for f in itertools.islice([exec], 1):\n    f({ex})',
+    )
+    _assert_ninth_not_authorized(tuple((c, imp) for c in plain))
+
+
+def test_tenth_pass_lexical_name_views_fromkeys_popitem_never_authorized() -> None:
+    """Name-bound items/fromkeys/AugAssign keys/next(iter)/popitem packing."""
+
+    _assert_ninth_not_authorized(
+        (
+            ('it = {"c": Mut}.items()\n(k, C), = it\nC()', ""),
+            ('it = {"c": Mut}.items()\nfor k, C in it:\n    C()', ""),
+            (
+                "class CM:\n"
+                "    def __enter__(self):\n"
+                '        return {"c": Mut}.items()\n'
+                "    def __exit__(self, *a):\n"
+                "        return False\n"
+                "with CM() as it:\n"
+                "    (k, C), = it\n"
+                "    C()",
+                "",
+            ),
+            ("C, = dict.fromkeys([Mut])\nC()", ""),
+            ("*xs, = dict.fromkeys([Mut])\nxs[0]()", ""),
+            ("for C in dict.fromkeys([Mut]):\n    C()", ""),
+            ("d = {Mut: 1}\nd |= {}\nC, = d.keys()\nC()", ""),
+            ("C = next(iter({Mut: 1}.keys()))\nC()", ""),
+            ('k, C = {"c": Mut}.popitem()\nC()', ""),
+            (
+                'match {"c": Mut}:\n    case {**rest}:\n'
+                "        k, C = rest.popitem()\n        C()",
+                "",
+            ),
+            (
+                "with ({Mut: 1}.keys()) as ks:\n    C, = ks\n    C()",
+                "",
+            ),
+            ('d = {Mut: 1}\nk = d.keys\nfor C in k():\n    C()', ""),
+            ('d = {"c": Mut}\nv = d.values\nfor C in v():\n    C()', ""),
+        )
+    )
+
+
+def test_tenth_pass_interproc_name_install_never_authorized() -> None:
+    """Name-bound / list-packed install peels (``f.__call__`` / ``fns[0]``)."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "f = n.install\n    f.__call__(evil)",
+        "f = n.install.__call__\n    f(evil)",
+        "fns = [n.install]\n    fns[0](evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_tenth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of the tenth-pass shapes remain authorized."""
+
+    for body in (
+        "tc = type.__call__\nnext(iter([tc])).__call__(int)",
+        'D = dict\n(g := D.setdefault)({}, "m", int)()',
+        "C, = dict.fromkeys([int])\nC()",
+        'd = {}\nd |= {"e": len}\nd["e"]("x")',
+        'ns = types.__dict__\nk = "MappingProxyType"\n'
+        'Proxy = getattr(ns, "setdefault")(k)\nProxy({})',
+    ):
+        src = (
+            "import helpers\nimport types\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_eleventh_pass_identity_higher_order_apply_never_authorized() -> None:
+    """filter/comp/genexp/any/all/sum/map/reduce/starmap/key= type.__call__."""
+
+    _assert_ninth_not_authorized(
+        (
+            ("list(filter(lambda f: f(Mut) or True, [type.__call__]))", ""),
+            ("any(f(Mut) for f in [type.__call__])", ""),
+            ("all(f(Mut) or True for f in [type.__call__])", ""),
+            ("sum(1 for f in [type.__call__] if f(Mut) or True)", ""),
+            ("[f(Mut) for f in [type.__call__]]", ""),
+            ("{f(Mut) for f in [type.__call__]}", ""),
+            ("{i: f(Mut) for i, f in enumerate([type.__call__])}", ""),
+            ("(lambda f: f(Mut))(type.__call__)", ""),
+            ("(lambda f, *a: f(Mut))(type.__call__)", ""),
+            ("(lambda f, **k: f(Mut))(type.__call__)", ""),
+            ("(lambda f=type.__call__: f(Mut))()", ""),
+            (
+                'getattr(type, "__new__").__call__(type, "C", (Base,), {})',
+                "",
+            ),
+            ("list(map(lambda t: t(Mut), [type]))", ""),
+            ('list(map(lambda t: t(Mut), {"c": type}.values()))', ""),
+            (
+                "from functools import reduce\n"
+                "reduce(lambda a, f: f(Mut) or a, [type.__call__], 0)",
+                "from functools import reduce",
+            ),
+            (
+                "import itertools\n"
+                "list(itertools.starmap(lambda f: f(Mut), [(type.__call__,)]))",
+                "import itertools",
+            ),
+            ("sorted([type.__call__], key=lambda f: f(Mut) or 0)", ""),
+            ("max([type.__call__], key=lambda f: f(Mut) or 0)", ""),
+            ("min([type.__call__], key=lambda f: f(Mut) or 0)", ""),
+        )
+    )
+
+
+def test_eleventh_pass_class_method_call_peel_never_authorized() -> None:
+    """``Mut.make.__call__()`` / getattr / next(iter) / match-rest peels."""
+
+    cases = (
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+Mut.make.__call__()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @staticmethod
+    def smake():
+        helpers.write_state = evil
+Mut.smake.__call__()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    def poke(self):
+        helpers.write_state = evil
+m = Mut.__new__(Mut)
+m.poke.__call__()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+next(iter([Mut.make])).__call__()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+match {"m": Mut.make}:
+    case {**rest}:
+        rest["m"].__call__()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+getattr(Mut, "make").__call__()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+fns = [Mut.make]
+fns[0].__call__()
+""".strip(),
+    )
+    for body in cases:
+        src = (
+            "import helpers\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            + "\n".join(f"    {ln}" if ln else ln for ln in body.split("\n"))
+            + "\n    helpers.write_state(request.state, bypass_filter)\n"
+            "    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_eleventh_pass_lexical_name_views_and_fromkeys_never_authorized() -> None:
+    """Dict-literal items Name, fromkeys Name, next(iter), copy.keys, popitem."""
+
+    _assert_ninth_not_authorized(
+        (
+            ('g={"c":Mut}.items; (k,C),=g(); C()', ""),
+            ("fk=dict.fromkeys; C,=fk([Mut]); C()", ""),
+            (
+                "fk=dict.fromkeys\nwith fk([Mut]) as ks:\n    C,=ks\n    C()",
+                "",
+            ),
+            ("C=next(iter({Mut:1})); C()", ""),
+            ('d={Mut:1}; d|={}; C,=copy.copy(d).keys(); C()', "import copy"),
+            ('k,C=dict.popitem({"c":Mut}); C()', ""),
+            ('k,C=getattr(dict,"popitem")({"c":Mut}); C()', ""),
+            (
+                'match {"c":Mut}:\n    case {**rest}:\n'
+                "        C=list(rest.items())[0][1]; C()",
+                "",
+            ),
+        )
+    )
+
+
+def test_eleventh_pass_alias_ns_bound_view_trusted_write_first() -> None:
+    """Trusted-write-first ns get/Name-key/walrus/itemgetter must not authorize."""
+
+    alias_imports = "import types"
+    cases = (
+        'ns=types.__dict__\n'
+        'Proxy=getattr(ns,"get").__call__((k:="MappingProxyType"))\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'g=getattr(ns,"get")\n'
+        'Proxy=g("MappingProxyType")\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        "g=ns.get\n"
+        'Proxy=g("MappingProxyType")\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'k="MappingProxyType"\n'
+        "Proxy=ns[k]\n"
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'keys=["MappingProxyType"]\n'
+        'Proxy=getattr(ns,"get")(keys[0])\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'Proxy=getattr(getattr(ns,"get"),"__call__")("MappingProxyType")\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        src = (
+            "import helpers\n"
+            f"{alias_imports}\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_eleventh_pass_cf_itertools_and_packs_never_authorized() -> None:
+    """Expanded itertools adapters, getattr copy/setitem, ChainMap, packs."""
+
+    ex = _NINTH_EXEC
+    imp = (
+        "from collections import ChainMap, deque\n"
+        "import copy, operator, itertools, types"
+    )
+    plain = (
+        f"ch=itertools.chain\nfor f in ch([exec]):\n    f({ex})",
+        f"for f in itertools.chain_from_iterable([[exec]]):\n    f({ex})",
+        f"for f in itertools.starmap(lambda x: x, [(exec,)]):\n    f({ex})",
+        f"for f in itertools.compress([exec], [1]):\n    f({ex})",
+        f"for f in itertools.filterfalse(lambda x: False, [exec]):\n    f({ex})",
+        f"for f in itertools.dropwhile(lambda x: False, [exec]):\n    f({ex})",
+        f"for f in itertools.takewhile(lambda x: True, [exec]):\n    f({ex})",
+        f"a,b=itertools.tee([exec])\nfor f in a:\n    f({ex})",
+        f"for f in itertools.zip_longest([exec]):\n    f[0]({ex})",
+        f"for f in itertools.cycle([exec]):\n    f({ex})\n    break",
+        f"for f in itertools.repeat(exec, 1):\n    f({ex})",
+        f"for t in itertools.permutations([exec], 1):\n    t[0]({ex})",
+        f"for t in itertools.combinations([exec], 1):\n    t[0]({ex})",
+        f"for t in itertools.product([exec]):\n    t[0]({ex})",
+        f'getattr(operator,"setitem")({{}}, "e", exec)["e"]({ex})',
+        f'd={{"e":exec}}\ngetattr(copy,"copy")(d)["e"]({ex})',
+        f'd={{"e":exec}}\ngetattr(copy,"deepcopy")(d)["e"]({ex})',
+        f'cm=ChainMap({{"e":exec}})\ncm.parents[0]["e"]({ex})',
+        f'cm=ChainMap()\ncm.maps.append({{"e":exec}})\ncm["e"]({ex})',
+        f'ns=types.SimpleNamespace(e=exec)\nns.e({ex})',
+        f"xs=[]\nxs+=[exec]\nxs[0]({ex})",
+        f"s=set()\ns.update([exec])\nlist(s)[0]({ex})",
+        f"for f in deque([exec]):\n    f({ex})",
+    )
+    _assert_ninth_not_authorized(tuple((c, imp) for c in plain))
+
+
+def test_eleventh_pass_interproc_name_view_and_install_never_authorized() -> None:
+    """Name-bound keys with/for, packed BoundMethod views, install packs."""
+
+    _assert_ninth_not_authorized(
+        (
+            ("d={Mut:1}\nk=d.keys; C=next(iter(k())); C()", ""),
+            (
+                'd={"c":Mut}\nk=d.values\nwith k() as ks:\n    C,=ks\n    C()',
+                "",
+            ),
+            (
+                "d={Mut:1}\nk=d.keys\nwith k() as ks:\n    C,=ks\n    C()",
+                "",
+            ),
+            ("d={Mut:1}\nviews=[d.keys]\nfor C in views[0]():\n    C()", ""),
+        )
+    )
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "fns={0:n.install}\n    fns[0](evil)",
+        "fns={0:n.install}\n    xs=list(fns.values())\n    xs[0](evil)",
+        "for f in [n.install]:\n        f(evil)",
+        "match [n.install]:\n        case [f]:\n            f(evil)",
+        "(lambda f: f(evil))(n.install)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_eleventh_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of the eleventh-pass shapes remain authorized."""
+
+    for body in (
+        "list(map(lambda t: t(int), [type]))",
+        "C=next(iter({int:1})); C()",
+        "fk=dict.fromkeys; C,=fk([int]); C()",
+        'd={}\nd|={"e": len}\nd["e"]("x")',
+        'ns=types.__dict__\ng=getattr(ns,"get")\nProxy=g("MappingProxyType")\nProxy({})',
+    ):
+        src = (
+            "import helpers\nimport types\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_twelfth_pass_lexical_copy_name_augassign_never_authorized() -> None:
+    """copy/deepcopy/getattr/dict()/d.copy into Name then |= preserves packs."""
+
+    _assert_ninth_not_authorized(
+        (
+            (
+                "d={Mut:1}\ne=copy.copy(d)\ne|={}\nC,=e.keys()\nC()",
+                "import copy",
+            ),
+            (
+                "d={Mut:1}\ne=copy.deepcopy(d)\ne|={}\nC,=e.keys()\nC()",
+                "import copy",
+            ),
+            (
+                'd={Mut:1}\ne=getattr(copy,"copy")(d)\ne|={}\nC,=e.keys()\nC()',
+                "import copy",
+            ),
+            ("d={Mut:1}\ne=dict(d)\ne|={}\nC,=e.keys()\nC()", ""),
+            ("d={Mut:1}\ne=d.copy()\ne|={}\nC,=e.keys()\nC()", ""),
+            (
+                'd={"c":Mut}\ne=copy.copy(d)\ne|={}\nC,=e.values()\nC()',
+                "import copy",
+            ),
+            (
+                'd={"c":Mut}\ne=copy.copy(d)\ne|={}\nk,C=e.popitem()\nC()',
+                "import copy",
+            ),
+            (
+                "d={Mut:1}\ne=copy.copy(d)\ne|={}\nfor C in e.keys():\n    C()",
+                "import copy",
+            ),
+            (
+                "d={Mut:1}\ne=copy.copy(d)\ne|={}\nC,=*e.keys(),\nC()",
+                "import copy",
+            ),
+            (
+                "d={Mut:1}\ne=copy.copy(d)\ne|={}\n"
+                "with e.keys() as ks:\n    C,=ks\n    C()",
+                "import copy",
+            ),
+        )
+    )
+
+
+def test_twelfth_pass_identity_inverted_key_starmap_never_authorized() -> None:
+    """key=/starmap type.__call__ / Name/getattr / builtins / star-kw / walrus."""
+
+    _assert_ninth_not_authorized(
+        (
+            ("sorted([Mut], key=type.__call__)", ""),
+            ("k=type.__call__\nsorted([Mut], key=k)", ""),
+            ('sorted([Mut], key=getattr(type,"__call__"))', ""),
+            ('sorted({"m":Mut}.values(), key=type.__call__)', ""),
+            ("max([Mut], key=type.__call__)", ""),
+            ("min([Mut], key=type.__call__)", ""),
+            ("xs=[Mut]\nxs.sort(key=type.__call__)", ""),
+            (
+                "import itertools\n"
+                "list(itertools.starmap(type.__call__, [(Mut,)]))",
+                "import itertools",
+            ),
+            (
+                "from itertools import starmap as sm\n"
+                "list(sm(type.__call__, [(Mut,)]))",
+                "from itertools import starmap as sm",
+            ),
+            (
+                'from functools import reduce\n'
+                'getattr(__import__("functools"),"reduce")'
+                "(lambda a, f: f(Mut) or a, [type.__call__], 0)",
+                "from functools import reduce",
+            ),
+            ("(lambda f: f(Mut))(*[type.__call__])", ""),
+            (
+                '(lambda **k: list(k.values())[0](Mut))(**{"f": type.__call__})',
+                "",
+            ),
+            (
+                'next(iter([getattr(type,"__new__")])).__call__('
+                'type, "C", (object,), {})',
+                "",
+            ),
+            (
+                "import builtins\n"
+                "builtins.max([type.__call__], key=lambda f: f(Mut) or 0)",
+                "import builtins",
+            ),
+            (
+                "import builtins\n"
+                "builtins.sorted([Mut], key=type.__call__)",
+                "import builtins",
+            ),
+            ("list(map(lambda t: t(Mut), [(t:=type)]))", ""),
+        )
+    )
+
+
+def test_twelfth_pass_alias_name_bound_key_never_authorized() -> None:
+    """``k=keys[0]`` / dict keys after indirection must not authorize."""
+
+    alias_imports = "import types"
+    cases = (
+        'ns=types.__dict__\n'
+        'keys=["MappingProxyType"]\n'
+        "k=keys[0]\n"
+        'Proxy=getattr(ns,"get")(k)\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'keys=["MappingProxyType"]\n'
+        "k=keys[0]\n"
+        "Proxy=ns[k]\n"
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'keys=["MappingProxyType"]\n'
+        "k=keys[0]\n"
+        "g=ns.get\n"
+        "Proxy=g(k)\n"
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'keys=["MappingProxyType"]\n'
+        "k=keys[0]\n"
+        'view=getattr(ns,"get")\n'
+        'Proxy=getattr(view,"__call__")(k)\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'keys={"x":"MappingProxyType"}\n'
+        'Proxy=getattr(ns,"get")(keys["x"])\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        src = (
+            "import helpers\n"
+            f"{alias_imports}\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_twelfth_pass_cf_itertools_inplace_ns_never_authorized() -> None:
+    """Real from_iterable, new adapters, iadd/ior, ChainMap maps, ns assign."""
+
+    ex = _NINTH_EXEC
+    imp = (
+        "from collections import ChainMap\n"
+        "import operator, itertools, types"
+    )
+    plain = (
+        f"for f in itertools.chain.from_iterable([[exec]]):\n    f({ex})",
+        f'for f in getattr(itertools,"chain")([exec]):\n    f({ex})',
+        f'for f in getattr(itertools,"starmap")(lambda x: x, [(exec,)]):\n'
+        f"    f({ex})",
+        f'for f in getattr(itertools,"compress")([exec], [1]):\n    f({ex})',
+        f'for f in getattr(itertools,"cycle")([exec]):\n    f({ex})\n    break',
+        f'a,b=getattr(itertools,"tee")([exec])\nfor f in a:\n    f({ex})',
+        f'for f in getattr(itertools,"repeat")(exec, 1):\n    f({ex})',
+        f'for f in getattr(itertools,"chain").from_iterable([[exec]]):\n'
+        f"    f({ex})",
+        f"for _,g in itertools.groupby([exec]):\n    for f in g:\n        f({ex})",
+        f"for f in itertools.accumulate([exec], lambda a,b: b):\n    f({ex})",
+        f"for t in itertools.combinations_with_replacement([exec], 1):\n"
+        f"    t[0]({ex})",
+        f"for a,b in itertools.pairwise([exec, exec]):\n    a({ex})",
+        f"for t in itertools.batched([exec], 1):\n    t[0]({ex})",
+        f"xs=[]\noperator.iadd(xs, [exec])\nxs[0]({ex})",
+        f"xs=[]\nxs.__iadd__([exec])\nxs[0]({ex})",
+        f"xs=[]\nlist.__iadd__(xs, [exec])\nxs[0]({ex})",
+        f"s=set()\noperator.ior(s, {{exec}})\nlist(s)[0]({ex})",
+        f"s=set()\ns.__ior__({{exec}})\nlist(s)[0]({ex})",
+        f'cm=ChainMap()\ncm.maps += [{{"e":exec}}]\ncm["e"]({ex})',
+        f'cm=ChainMap()\ncm.maps.__iadd__([{{"e":exec}}])\ncm["e"]({ex})',
+        f'cm=ChainMap({{}})\ncm.maps[0].update({{"e":exec}})\ncm["e"]({ex})',
+        f'cm=ChainMap({{}})\ncm.maps[0]["e"]=exec\ncm["e"]({ex})',
+        f"ns=types.SimpleNamespace()\nns.e=exec\nns.e({ex})",
+    )
+    _assert_ninth_not_authorized(tuple((c, imp) for c in plain))
+
+
+def test_twelfth_pass_class_factory_bare_call_never_authorized() -> None:
+    """``mk=Mut.make; mk()`` / walrus / __func__ / getattribute / NS packs."""
+
+    cases = (
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+mk=Mut.make
+mk()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+(mk:=Mut.make)()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+getattr(Mut.make,"__call__")()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+c=Mut.make.__call__
+c()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+object.__getattribute__(Mut,"make").__call__()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+Mut.make.__func__(Mut)
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @staticmethod
+    def smake():
+        helpers.write_state = evil
+Mut.smake.__func__()
+""".strip(),
+        """
+import types
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+types.SimpleNamespace(m=Mut.make).m.__call__()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    def poke(self):
+        helpers.write_state = evil
+m=Mut.__new__(Mut)
+packs=[m.poke]
+for p in packs:
+    p()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    def poke(self):
+        helpers.write_state = evil
+m=Mut.__new__(Mut)
+packs={"p":m.poke}
+next(iter(packs.values()))()
+""".strip(),
+    )
+    for body in cases:
+        src = (
+            "import helpers\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            + "\n".join(f"    {ln}" if ln else ln for ln in body.split("\n"))
+            + "\n    helpers.write_state(request.state, bypass_filter)\n"
+            "    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_twelfth_pass_interproc_pack_depth_never_authorized() -> None:
+    """Dict-packed BoundMethod / fromkeys packs / install installers."""
+
+    _assert_ninth_not_authorized(
+        (
+            (
+                "d={Mut:1}\nviews={'v':d.keys}\nfor C in views['v']():\n    C()",
+                "",
+            ),
+            (
+                "d={Mut:1}\nviews=[d.keys]\nnext(iter(views))()\n"
+                "C,=views[0]()\nC()",
+                "",
+            ),
+            (
+                "d={Mut:1}\nviews=[d.keys]\n"
+                "getattr(views[0],'__call__')()\n"
+                "C,=list(views[0]())\nC()",
+                "",
+            ),
+            ("d={Mut:1}\nk=d.keys\nC=list(k())[0]\nC()", ""),
+            ("d={Mut:1}\nk=d.keys\nC=next(k().__iter__())\nC()", ""),
+            ("fk=dict.fromkeys\nviews=[fk]\nC,=views[0]([Mut])\nC()", ""),
+        )
+    )
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "dict(e=n.install)['e'](evil)",
+        'match n:\n        case x if getattr(x,"install"):\n            x.install(evil)',
+        "f=n.install\n    f(*(evil,))",
+        "f=n.install\n    f(**{'fn': evil})",
+        "(lambda: n.install)()(evil)",
+        "fns={0:n.install}\n    for _,f in fns.items():\n        f(evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_twelfth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of the twelfth-pass shapes remain authorized."""
+
+    for body in (
+        "d={}\ne=copy.copy(d)\ne|={}\nlen(e)",
+        "sorted([int], key=type.__call__)",
+        "xs=[1]\nxs.sort(key=lambda x: x)",
+        'ns=types.__dict__\nkeys=["MappingProxyType"]\nk=keys[0]\n'
+        'Proxy=getattr(ns,"get")(k)\nProxy({})',
+        "import itertools\nlist(itertools.chain.from_iterable([[1]]))",
+        "xs=[]\nlist.__iadd__(xs, [1])\nxs[0]",
+        "mk=int\nmk(0)",
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_thirteenth_pass_identity_getattr_import_key_never_authorized() -> None:
+    """getattr/import-as/reduce-as/star-lambda/list.sort key= peels."""
+
+    _assert_ninth_not_authorized(
+        (
+            (
+                'import builtins\n'
+                'getattr(builtins,"sorted")([Mut], key=type.__call__)',
+                "import builtins",
+            ),
+            (
+                'import builtins\n'
+                'getattr(builtins,"max")([Mut], key=type.__call__)',
+                "import builtins",
+            ),
+            (
+                'import builtins\n'
+                'getattr(builtins,"min")([Mut], key=type.__call__)',
+                "import builtins",
+            ),
+            (
+                "from builtins import sorted as s\ns([Mut], key=type.__call__)",
+                "from builtins import sorted as s",
+            ),
+            (
+                "from functools import reduce as rd\n"
+                "rd(lambda a,f: f(Mut) or a, [type.__call__], 0)",
+                "from functools import reduce as rd",
+            ),
+            ("(lambda *a: a[0](Mut))(*[type.__call__])", ""),
+            ("xs=[Mut]\nlist.sort(xs, key=type.__call__)", ""),
+            ("xs=[Mut]\ng=list.sort\ng(xs, key=type.__call__)", ""),
+        )
+    )
+
+
+def test_thirteenth_pass_cf_getattr_maps_ns_for_iter_never_authorized() -> None:
+    """getattr ChainMap maps, vars/setitem/AnnAssign NS, For/Match iadd."""
+
+    ex = _NINTH_EXEC
+    imp = (
+        "from collections import ChainMap\n"
+        "import operator, types"
+    )
+    plain = (
+        f'cm=ChainMap()\ngetattr(cm,"maps").append({{"e":exec}})\ncm["e"]({ex})',
+        f'cm=ChainMap()\ngetattr(cm.maps,"append")({{"e":exec}})\ncm["e"]({ex})',
+        f'cm=ChainMap()\ngetattr(cm.maps,"extend")([{{"e":exec}}])\ncm["e"]({ex})',
+        f'cm=ChainMap()\ngetattr(cm.maps,"insert")(0, {{"e":exec}})\ncm["e"]({ex})',
+        f'cm=ChainMap()\ngetattr(cm.maps,"__iadd__")([{{"e":exec}}])\ncm["e"]({ex})',
+        f'ns=types.SimpleNamespace()\nvars(ns)["e"]=exec\nns.e({ex})',
+        f'ns=types.SimpleNamespace()\n'
+        f'operator.setitem(ns.__dict__,"e",exec)\nns.e({ex})',
+        f'ns=types.SimpleNamespace()\n'
+        f'operator.setitem(vars(ns),"e",exec)\nns.e({ex})',
+        f"ns=types.SimpleNamespace()\nns.e: object = exec\nns.e({ex})",
+        f"xs=[]\nfor f in operator.iadd(xs,[exec]):\n    f({ex})",
+        f"xs=[]\nfor f in operator.iconcat(xs,[exec]):\n    f({ex})",
+        f"xs=[]\nfor f in xs.__iadd__([exec]):\n    f({ex})",
+        f"xs=[]\nmatch operator.iadd(xs,[exec]):\n    case [f]:\n        f({ex})",
+        f"xs=[]\nmatch operator.iconcat(xs,[exec]):\n    case [f]:\n        f({ex})",
+    )
+    _assert_ninth_not_authorized(tuple((c, imp) for c in plain))
+
+
+def test_thirteenth_pass_alias_key_peel_never_authorized() -> None:
+    """.get/__getitem__/getitem/Name-index/itemgetter/pop/nested/getattr."""
+
+    alias_imports = "import types"
+    cases = (
+        'ns=types.__dict__\n'
+        'keys={"x":"MappingProxyType"}\n'
+        'k=keys.get("x")\n'
+        'Proxy=getattr(ns,"get")(k)\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'keys=["MappingProxyType"]\n'
+        "k=keys.__getitem__(0)\n"
+        'Proxy=getattr(ns,"get")(k)\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'keys={"x":"MappingProxyType"}\n'
+        'k=keys.__getitem__("x")\n'
+        'Proxy=getattr(ns,"get")(k)\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'keys=["MappingProxyType"]\n'
+        "import operator\n"
+        "k=operator.getitem(keys,0)\n"
+        'Proxy=getattr(ns,"get")(k)\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'keys=["MappingProxyType"]\n'
+        "idx=0\n"
+        "k=keys[idx]\n"
+        'Proxy=getattr(ns,"get")(k)\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'keys={"x":"MappingProxyType"}\n'
+        'xk="x"\n'
+        "k=keys[xk]\n"
+        'Proxy=getattr(ns,"get")(k)\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'keys={"x":"MappingProxyType"}\n'
+        "import operator\n"
+        'k=operator.itemgetter("x")(keys)\n'
+        'Proxy=getattr(ns,"get")(k)\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'keys=[["MappingProxyType"]]\n'
+        "k=keys[0][0]\n"
+        'Proxy=getattr(ns,"get")(k)\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'keys={"x":"MappingProxyType"}\n'
+        'k=keys.pop("x")\n'
+        'Proxy=getattr(ns,"get")(k)\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'keys={"x":"MappingProxyType"}\n'
+        'k=getattr(keys,"get")("x")\n'
+        'Proxy=getattr(ns,"get")(k)\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'keys=["MappingProxyType"]\n'
+        'k=getattr(keys,"__getitem__")(0)\n'
+        'Proxy=getattr(ns,"get")(k)\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        src = (
+            "import helpers\n"
+            f"{alias_imports}\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_thirteenth_pass_lexical_copy_peels_never_authorized() -> None:
+    """import-as/module alias/dict.copy/packed/deepcopy/methodcaller peels."""
+
+    _assert_ninth_not_authorized(
+        (
+            (
+                "import copy as cp\nd={Mut:1}\ne=cp.copy(d)\ne|={}\nC,=e.keys()\nC()",
+                "import copy as cp",
+            ),
+            (
+                "import copy\nm=copy\nd={Mut:1}\ne=m.copy(d)\ne|={}\nC,=e.keys()\nC()",
+                "import copy",
+            ),
+            ("d={Mut:1}\ne=dict.copy(d)\ne|={}\nC,=e.keys()\nC()", ""),
+            (
+                'd={Mut:1}\ne=getattr(dict,"copy")(d)\ne|={}\nC,=e.keys()\nC()',
+                "",
+            ),
+            (
+                "import copy\nd={Mut:1}\ne=[copy.copy][0](d)\ne|={}\nC,=e.keys()\nC()",
+                "import copy",
+            ),
+            (
+                "import copy\nd={Mut:1}\ne=next(iter([copy.copy]))(d)\ne|={}\n"
+                "C,=e.keys()\nC()",
+                "import copy",
+            ),
+            (
+                "import copy\nd={Mut:1}\ne={0:copy.copy}[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "import copy",
+            ),
+            (
+                "import copy\nd={Mut:1}\ne=[copy.deepcopy][0](d)\ne|={}\n"
+                "C,=e.keys()\nC()",
+                "import copy",
+            ),
+            (
+                "import copy\nfrom operator import methodcaller\n"
+                "d={Mut:1}\ne=methodcaller('copy')(d)\ne|={}\nC,=e.keys()\nC()",
+                "import copy\nfrom operator import methodcaller",
+            ),
+            (
+                "import copy\nfrom operator import methodcaller\n"
+                "d={Mut:1}\ne=copy.copy(d)\ne|={}\n"
+                "C,=methodcaller('keys')(e)\nC()",
+                "import copy\nfrom operator import methodcaller",
+            ),
+            (
+                "import copy\nfrom operator import methodcaller\n"
+                'd={"c":Mut}\ne=copy.copy(d)\ne|={}\n'
+                "C,=methodcaller('values')(e)\nC()",
+                "import copy\nfrom operator import methodcaller",
+            ),
+            (
+                "import copy\nfrom operator import methodcaller\n"
+                'd={"c":Mut}\ne=copy.copy(d)\ne|={}\n'
+                "k,C=methodcaller('popitem')(e)\nC()",
+                "import copy\nfrom operator import methodcaller",
+            ),
+        )
+    )
+
+
+def test_thirteenth_pass_class_func_ns_never_authorized() -> None:
+    """Name-bound __func__ / __func__.__call__ / bare/Name/setattr/match NS."""
+
+    cases = (
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+mk=Mut.make
+mk.__func__(Mut)
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+Mut.make.__func__.__call__(Mut)
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @staticmethod
+    def smake():
+        helpers.write_state = evil
+mk=Mut.smake
+mk.__func__()
+""".strip(),
+        """
+import types
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+types.SimpleNamespace(m=Mut.make).m()
+""".strip(),
+        """
+import types
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+ns=types.SimpleNamespace(m=Mut.make)
+ns.m()
+""".strip(),
+        """
+import types
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+ns=types.SimpleNamespace()
+setattr(ns,"m",Mut.make)
+ns.m()
+""".strip(),
+        """
+import types
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+ns=types.SimpleNamespace(m=Mut.make)
+match ns:
+    case types.SimpleNamespace(m=mk):
+        mk()
+""".strip(),
+        """
+import types
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    def poke(self):
+        helpers.write_state = evil
+m=Mut.__new__(Mut)
+types.SimpleNamespace(p=m.poke).p()
+""".strip(),
+    )
+    for body in cases:
+        src = (
+            "import helpers\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            + "\n".join(f"    {ln}" if ln else ln for ln in body.split("\n"))
+            + "\n    helpers.write_state(request.state, bypass_filter)\n"
+            "    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_thirteenth_pass_interproc_pack_depth_never_authorized() -> None:
+    """Nested/dict()/star/|/copy/ChainMap/MPT/__iter__/fromkeys + install."""
+
+    _assert_ninth_not_authorized(
+        (
+            (
+                "d={Mut:1}\nviews={'outer':{'v':d.keys}}\n"
+                "for C in views['outer']['v']():\n    C()",
+                "",
+            ),
+            (
+                "d={Mut:1}\nviews=dict(v=d.keys)\nfor C in views['v']():\n    C()",
+                "",
+            ),
+            (
+                "d={Mut:1}\nviews=dict(**{'v':d.keys})\n"
+                "for C in views['v']():\n    C()",
+                "",
+            ),
+            (
+                "d={Mut:1}\nviews={}|{'v':d.keys}\nfor C in views['v']():\n    C()",
+                "",
+            ),
+            ("d={Mut:1}\nviews=[[d.keys]]\nC,=views[0][0]()\nC()", ""),
+            (
+                "d={Mut:1}\nviews=[{'v':d.keys}]\nC,=views[0]['v']()\nC()",
+                "",
+            ),
+            ("d={Mut:1}\nk=d.__iter__\nC=next(k())\nC()", ""),
+            ("d={Mut:1}\nk=getattr(d,'__iter__')\nC=next(k())\nC()", ""),
+            (
+                "fk=getattr(dict,'fromkeys')\nviews=[fk]\nC,=views[0]([Mut])\nC()",
+                "",
+            ),
+            (
+                "from collections import ChainMap\n"
+                "d={Mut:1}\nviews=ChainMap({'v':d.keys})\n"
+                "for C in views['v']():\n    C()",
+                "from collections import ChainMap",
+            ),
+            (
+                "import copy\nd={Mut:1}\nviews=copy.copy({'v':d.keys})\n"
+                "for C in views['v']():\n    C()",
+                "import copy",
+            ),
+            (
+                "import types\nd={Mut:1}\n"
+                "views=types.MappingProxyType({'v':d.keys})\n"
+                "for C in views['v']():\n    C()",
+                "import types",
+            ),
+        )
+    )
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "d=dict(); d.update({'e':n.install}); d['e'](evil)",
+        "d=dict(list({'e':n.install}.items())); d['e'](evil)",
+        "d=dict(); it=iter({'e':n.install}.items()); "
+        "d.update([next(it)]); d['e'](evil)",
+        "(lambda: getattr(n,'install'))()(evil)",
+        "packs={'outer':{'e':n.install}}; packs['outer']['e'](evil)",
+        "import types; types.SimpleNamespace(e=n.install).e(evil)",
+        "d=dict(); d|={'e':n.install}; d['e'](evil)",
+        "(lambda *a: a[0](evil))(*[n.install])",
+        "import copy; copy.copy([n.install])[0](evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_thirteenth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of the thirteenth-pass shapes remain authorized."""
+
+    for body in (
+        'import builtins\ngattrattr=getattr\n'
+        'getattr(builtins,"sorted")([1], key=lambda x: x)',
+        "from builtins import sorted as s\ns([1], key=lambda x: x)",
+        "xs=[1]\nlist.sort(xs, key=lambda x: x)",
+        "import copy as cp\nd={}\ne=cp.copy(d)\ne|={}\nlen(e)",
+        "d={}\ne=dict.copy(d)\ne|={}\nlen(e)",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'k=keys.get("x")\nProxy=getattr(ns,"get")(k)\nProxy({})',
+        "from collections import ChainMap\n"
+        'cm=ChainMap()\ngetattr(cm,"maps").append({})\nlen(cm)',
+        "mk=int\nmk(0)",
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_fourteenth_pass_lexical_packed_methodcaller_partial_never_authorized() -> None:
+    """Call-in-pack methodcaller/partial copy and view peels."""
+
+    _assert_ninth_not_authorized(
+        (
+            (
+                "from operator import methodcaller\n"
+                "d={Mut:1}\ne=[methodcaller('copy')][0](d)\ne|={}\nC,=e.keys()\nC()",
+                "from operator import methodcaller",
+            ),
+            (
+                "from operator import methodcaller\n"
+                "d={Mut:1}\ne=next(iter([methodcaller('copy')]))(d)\ne|={}\n"
+                "C,=e.keys()\nC()",
+                "from operator import methodcaller",
+            ),
+            (
+                "from operator import methodcaller\n"
+                "d={Mut:1}\ne={0:methodcaller('copy')}[0](d)\ne|={}\n"
+                "C,=e.keys()\nC()",
+                "from operator import methodcaller",
+            ),
+            (
+                "import operator\n"
+                "d={Mut:1}\ne=[operator.methodcaller('copy')][0](d)\ne|={}\n"
+                "C,=e.keys()\nC()",
+                "import operator",
+            ),
+            (
+                "import copy\nfrom operator import methodcaller\n"
+                "d={Mut:1}\ne=copy.copy(d)\ne|={}\n"
+                "C,=[methodcaller('keys')][0](e)\nC()",
+                "import copy\nfrom operator import methodcaller",
+            ),
+            (
+                "import copy\nfrom operator import methodcaller\n"
+                'd={"c":Mut}\ne=copy.copy(d)\ne|={}\n'
+                "C,=[methodcaller('values')][0](e)\nC()",
+                "import copy\nfrom operator import methodcaller",
+            ),
+            (
+                "import copy\nfrom operator import methodcaller\n"
+                'd={"c":Mut}\ne=copy.copy(d)\ne|={}\n'
+                "k,C=[methodcaller('popitem')][0](e)\nC()",
+                "import copy\nfrom operator import methodcaller",
+            ),
+            (
+                "from functools import partial\nimport copy\n"
+                "d={Mut:1}\ne=[partial(copy.copy)][0](d)\ne|={}\n"
+                "C,=e.keys()\nC()",
+                "from functools import partial\nimport copy",
+            ),
+            (
+                "from functools import partial\nimport copy\n"
+                "d={Mut:1}\ne=next(iter([partial(copy.copy)]))(d)\ne|={}\n"
+                "C,=e.keys()\nC()",
+                "from functools import partial\nimport copy",
+            ),
+        )
+    )
+
+
+def test_fourteenth_pass_identity_key_applicator_packs_never_authorized() -> None:
+    """Packed/BoolOp/IfExp/__call__/bound-sort key= applicator peels."""
+
+    _assert_ninth_not_authorized(
+        (
+            (
+                'import builtins\n'
+                '[getattr(builtins,"sorted")][0]([Mut], key=type.__call__)',
+                "import builtins",
+            ),
+            (
+                'import builtins\n'
+                '(False or getattr(builtins,"max"))([Mut], key=type.__call__)',
+                "import builtins",
+            ),
+            (
+                'import builtins\n'
+                '(getattr(builtins,"min") if True else len)'
+                "([Mut], key=type.__call__)",
+                "import builtins",
+            ),
+            (
+                'import builtins\n'
+                '{0:getattr(builtins,"sorted")}[0]([Mut], key=type.__call__)',
+                "import builtins",
+            ),
+            (
+                'import builtins\n'
+                'next(iter([getattr(builtins,"sorted")]))'
+                "([Mut], key=type.__call__)",
+                "import builtins",
+            ),
+            (
+                "from builtins import sorted as s\n"
+                "s.__call__([Mut], key=type.__call__)",
+                "from builtins import sorted as s",
+            ),
+            (
+                "from builtins import max as mx\n"
+                "mx.__call__([Mut], key=type.__call__)",
+                "from builtins import max as mx",
+            ),
+            (
+                "from builtins import sorted as s\n"
+                "[s][0]([Mut], key=type.__call__)",
+                "from builtins import sorted as s",
+            ),
+            (
+                "from builtins import sorted as s\n"
+                "(False or s)([Mut], key=type.__call__)",
+                "from builtins import sorted as s",
+            ),
+            (
+                "from functools import reduce as rd\n"
+                "[rd][0](lambda a,f: f(Mut) or a, [type.__call__], 0)",
+                "from functools import reduce as rd",
+            ),
+            (
+                'import functools\n'
+                '[getattr(functools,"reduce")][0]'
+                "(lambda a,f: f(Mut) or a, [type.__call__], 0)",
+                "import functools",
+            ),
+            (
+                'xs=[Mut]\ngattrattr=getattr\n'
+                'getattr(list,"sort")(xs, key=type.__call__)',
+                "",
+            ),
+            ("xs=[Mut]\n[list.sort][0](xs, key=type.__call__)", ""),
+            (
+                "xs=[Mut]\n(list.sort if True else len)(xs, key=type.__call__)",
+                "",
+            ),
+            ("xs=[Mut]\n(False or list.sort)(xs, key=type.__call__)", ""),
+            ("xs=[Mut]\ng=xs.sort\ng(key=type.__call__)", ""),
+        )
+    )
+
+
+def test_fourteenth_pass_cf_maps_vars_boolop_iadd_never_authorized() -> None:
+    """ChainMap Name/unbound maps, vars update, BoolOp/IfExp iadd."""
+
+    ex = _NINTH_EXEC
+    imp = "from collections import ChainMap\nimport operator, types"
+    cases = (
+        f'cm=ChainMap()\nlist.append(getattr(cm,"maps"), {{"e":exec}})\n'
+        f'cm["e"]({ex})',
+        f'cm=ChainMap()\nlist.extend(getattr(cm,"maps"), [{{"e":exec}}])\n'
+        f'cm["e"]({ex})',
+        f'cm=ChainMap()\nm=cm.maps\nm.append({{"e":exec}})\ncm["e"]({ex})',
+        f'cm=ChainMap()\n'
+        f'object.__getattribute__(cm,"maps").append({{"e":exec}})\n'
+        f'cm["e"]({ex})',
+        f'cm=ChainMap()\nfrom operator import methodcaller\n'
+        f'methodcaller("append", {{"e":exec}})(getattr(cm,"maps"))\n'
+        f'cm["e"]({ex})',
+        f'ns=types.SimpleNamespace()\nvars(ns).update({{"e":exec}})\n'
+        f"ns.e({ex})",
+        f'ns=types.SimpleNamespace()\nvars(ns).setdefault("e",exec)\n'
+        f"ns.e({ex})",
+        f'ns=types.SimpleNamespace()\n'
+        f'ns.__dict__.__setitem__("e",exec)\nns.e({ex})',
+        f'ns=types.SimpleNamespace()\nd=vars(ns)\nd["e"]=exec\nns.e({ex})',
+        f"xs=[]\nfor f in (True and operator.iadd(xs,[exec])):\n    f({ex})",
+        f"xs=[]\nfor f in (operator.iadd(xs,[exec]) if True else xs):\n"
+        f"    f({ex})",
+        f"xs=[]\nmatch (True and operator.iadd(xs,[exec])):\n"
+        f"    case [f]:\n        f({ex})",
+        f"xs=[]\nmatch (operator.iconcat(xs,[exec]) if True else xs):\n"
+        f"    case [f]:\n        f({ex})",
+    )
+    _assert_ninth_not_authorized(tuple((c, imp) for c in cases))
+    _assert_ninth_not_authorized(
+        (
+            (
+                'ns=types.SimpleNamespace()\nvars(ns)["m"]=Mut\nns.m()',
+                "import types",
+            ),
+        )
+    )
+
+
+def test_fourteenth_pass_alias_name_nested_mutate_never_authorized() -> None:
+    """Name-bound itemgetter, nested chains, mutate-then-project peels."""
+
+    alias_imports = "import types, operator"
+    cases = (
+        'ns=types.__dict__\n'
+        'keys={"x":"MappingProxyType"}\n'
+        'ig=operator.itemgetter("x")\n'
+        "k=ig(keys)\n"
+        'Proxy=getattr(ns,"get")(k)\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'keys={"x":{"y":"MappingProxyType"}}\n'
+        'k=operator.getitem(operator.getitem(keys,"x"),"y")\n'
+        'Proxy=getattr(ns,"get")(k)\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'keys={"x":{"y":"MappingProxyType"}}\n'
+        'k=operator.itemgetter("y")(operator.itemgetter("x")(keys))\n'
+        'Proxy=getattr(ns,"get")(k)\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'keys={"x":{"y":"MappingProxyType"}}\n'
+        'k=keys.get("x").get("y")\n'
+        'Proxy=getattr(ns,"get")(k)\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'keys={"x":"MappingProxyType"}\n'
+        'keys["z"]=keys.pop("x")\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\n'
+        'keys={"x":"MappingProxyType"}\n'
+        'keys["z"]=keys["x"]\n'
+        'del keys["x"]\n'
+        'k=keys.__getitem__("z")\n'
+        'Proxy=getattr(ns,"get")(k)\n'
+        's=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        src = (
+            "import helpers\n"
+            f"{alias_imports}\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_fourteenth_pass_class_func_sn_packs_never_authorized() -> None:
+    """getattr/packed __func__ and SN IfExp/BoolOp/copy/builtins.setattr."""
+
+    cases = (
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+mk=Mut.make
+getattr(mk,"__func__")(Mut)
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+mk=Mut.make
+[mk][0].__func__(Mut)
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+mk=Mut.make
+next(iter([mk])).__func__(Mut)
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+getattr(Mut,"make").__func__(Mut)
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+(types.SimpleNamespace(m=Mut.make) if True else None).m()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+(False or types.SimpleNamespace(m=Mut.make)).m()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+[types.SimpleNamespace(m=Mut.make)][0].m()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+import copy
+ns=types.SimpleNamespace(m=Mut.make)
+copy.copy(ns).m()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+import copy
+ns=types.SimpleNamespace(m=Mut.make)
+copy.deepcopy(ns).m()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+types.SimpleNamespace(**dict(m=Mut.make)).m()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+    @classmethod
+    def make(cls):
+        return cls()
+import builtins
+ns=types.SimpleNamespace()
+builtins.setattr(ns,"m",Mut.make)
+ns.m()
+""".strip(),
+        """
+class Mut:
+    def __init__(self):
+        helpers.write_state = evil
+ns=types.SimpleNamespace()
+vars(ns)["m"]=Mut
+ns.m()
+""".strip(),
+    )
+    for body in cases:
+        findings = _unit(_ninth_src(body, imports="import types\nimport copy\nimport builtins"))
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_fourteenth_pass_interproc_list_carrier_ior_never_authorized() -> None:
+    """List-carrier copy/deepcopy/list and install __ior__/items peels."""
+
+    _assert_ninth_not_authorized(
+        (
+            (
+                "import copy\nd={Mut:1}\nviews=copy.copy([{'v':d.keys}])\n"
+                "C,=views[0]['v']()\nC()",
+                "import copy",
+            ),
+            (
+                "import copy\nd={Mut:1}\nviews=copy.deepcopy([{'v':d.keys}])\n"
+                "C,=views[0]['v']()\nC()",
+                "import copy",
+            ),
+            (
+                "import copy as cp\nd={Mut:1}\nviews=cp.copy([{'v':d.keys}])\n"
+                "C,=views[0]['v']()\nC()",
+                "import copy as cp",
+            ),
+            (
+                "d={Mut:1}\nviews=[{'v':d.keys}].copy()\n"
+                "C,=views[0]['v']()\nC()",
+                "",
+            ),
+            (
+                "d={Mut:1}\nviews=list([{'v':d.keys}])\n"
+                "C,=views[0]['v']()\nC()",
+                "",
+            ),
+            (
+                "import copy\nd={Mut:1}\nviews=copy.copy([[d.keys]])\n"
+                "C,=views[0][0]()\nC()",
+                "import copy",
+            ),
+        )
+    )
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "import copy; copy.deepcopy([n.install])[0](evil)",
+        "d=dict(); d.__ior__({'e':n.install}); d['e'](evil)",
+        "import operator; d=dict(); operator.ior(d, {'e':n.install}); "
+        "d['e'](evil)",
+        "d=dict(); getattr(d,'__ior__')({'e':n.install}); d['e'](evil)",
+        "fns={'e':n.install}; list(fns.items())[0][1](evil)",
+        "fns={'e':n.install}; tuple(fns.items())[0][1](evil)",
+        "fns={'e':n.install}; [*fns.items()][0][1](evil)",
+        "fns={'e':n.install}; next(iter(fns.items()))[1](evil)",
+        "import copy; copy.copy({'outer':[n.install]})['outer'][0](evil)",
+        "import copy; (lambda xs: xs[0](evil))(copy.copy([n.install]))",
+        "list([{'e':n.install}])[0]['e'](evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_fourteenth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of the fourteenth-pass shapes remain authorized."""
+
+    for body in (
+        "from operator import methodcaller\nd={}\n"
+        "e=[methodcaller('copy')][0](d)\ne|={}\nlen(e)",
+        "from functools import partial\nimport copy\nd={}\n"
+        "e=[partial(copy.copy)][0](d)\ne|={}\nlen(e)",
+        'import builtins\n'
+        '[getattr(builtins,"sorted")][0]([1], key=lambda x: x)',
+        "from builtins import sorted as s\ns.__call__([1], key=lambda x: x)",
+        "xs=[1]\ng=xs.sort\ng(key=lambda x: x)",
+        "import copy\nd={}\nviews=copy.copy([{'v':d.keys}])\nlen(views)",
+        "from collections import ChainMap\n"
+        'cm=ChainMap()\nlist.append(getattr(cm,"maps"), {})\nlen(cm)',
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'ig=operator.itemgetter("x")\nk=ig(keys)\n'
+        'Proxy=getattr(ns,"get")(k)\nProxy({})',
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_fifteenth_pass_alias_mid_name_and_mutate_never_authorized() -> None:
+    """Mid-Name get/itemgetter + setitem/update/|=/methodcaller get peels."""
+
+    cases = (
+        'ns=types.__dict__\nkeys={"x":{"y":"MappingProxyType"}}\n'
+        'mid=keys.get("x")\nk=mid.get("y")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":{"y":"MappingProxyType"}}\n'
+        'mid=operator.itemgetter("x")(keys)\nk=operator.itemgetter("y")(mid)\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'operator.setitem(keys,"z",keys.pop("x"))\nk=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'keys.__setitem__("z",keys.pop("x"))\nk=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'keys.update(z=keys.pop("x"))\nk=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'keys |= {"z": keys.pop("x")}\nk=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'k=getattr(operator,"itemgetter")("x")(keys)\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":{"y":"MappingProxyType"}}\n'
+        'mid=operator.methodcaller("get","x")(keys)\n'
+        'k=operator.methodcaller("get","y")(mid)\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'c=keys\nc["z"]=c.pop("x")\nk=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_fifteenth_pass_lexical_getattr_partial_never_authorized() -> None:
+    """getattr(methodcaller)/partial(copy)/partial(getattr(copy)) packs."""
+
+    _assert_ninth_not_authorized(
+        (
+            (
+                "import operator\nd={Mut:1}\n"
+                "e=[getattr(operator,'methodcaller')('copy')][0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "import operator",
+            ),
+            (
+                "from functools import partial\nimport copy\nd={Mut:1}\n"
+                "e=[partial(copy.copy,d)][0]()\ne|={}\nC,=e.keys()\nC()",
+                "from functools import partial\nimport copy",
+            ),
+            (
+                "from functools import partial\nimport copy\nd={Mut:1}\n"
+                "e=[partial(getattr(copy,'copy'))][0](d)\ne|={}\nC,=e.keys()\nC()",
+                "from functools import partial\nimport copy",
+            ),
+        )
+    )
+
+
+def test_fifteenth_pass_class_setattr_sn_vars_never_authorized() -> None:
+    """setattr import-as/getattr/packed, SN list/next, vars setdefault/setitem."""
+
+    mut = (
+        "class Mut:\n"
+        "    def __init__(self):\n"
+        "        helpers.write_state = evil\n"
+        "    @classmethod\n"
+        "    def make(cls):\n"
+        "        return cls()\n"
+    )
+    cases = (
+        mut
+        + 'ns=types.SimpleNamespace()\nsa(ns,"m",Mut.make)\nns.m()',
+        mut
+        + 'ns=types.SimpleNamespace()\ngattrattr=getattr\n'
+        'gattrattr(builtins,"setattr")(ns,"m",Mut.make)\nns.m()',
+        mut
+        + 'ns=types.SimpleNamespace()\n'
+        '[getattr(builtins,"setattr")][0](ns,"m",Mut.make)\nns.m()',
+        mut
+        + 'ns=types.SimpleNamespace()\nvars(ns).setdefault("m",Mut.make)\nns.m()',
+        mut
+        + 'ns=types.SimpleNamespace()\nvars(ns).__setitem__("m",Mut.make)\nns.m()',
+        mut + "SN=types.SimpleNamespace\n[SN][0](m=Mut.make).m()",
+        mut + "next(iter([types.SimpleNamespace(m=Mut.make)])).m()",
+        f'(types.SimpleNamespace(e=exec) if True else None).e({_NINTH_EXEC})',
+        f'(types.SimpleNamespace(e=exec) or None).e({_NINTH_EXEC})',
+        f'[types.SimpleNamespace(e=exec)][0].e({_NINTH_EXEC})',
+        f'import copy\ncopy.copy(types.SimpleNamespace(e=exec)).e({_NINTH_EXEC})',
+    )
+    for body in cases:
+        findings = _unit(
+            _ninth_src(
+                body,
+                imports=(
+                    "import types\nimport builtins\nimport copy\n"
+                    "from builtins import setattr as sa"
+                ),
+            )
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_fifteenth_pass_cf_packed_append_attrgetter_ior_never_authorized() -> None:
+    """Packed list.append, attrgetter(maps), methodcaller/vars ior peels."""
+
+    ex = _NINTH_EXEC
+    imp = (
+        "from collections import ChainMap\nimport operator, types\n"
+        "from operator import methodcaller, attrgetter\n"
+        "from builtins import list as L"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, imp)
+            for c in (
+                f'cm=ChainMap()\n[list.append][0](getattr(cm,"maps"), {{"e":exec}})\n'
+                f'cm["e"]({ex})',
+                f'cm=ChainMap()\n(0 or list.append)(getattr(cm,"maps"), {{"e":exec}})\n'
+                f'cm["e"]({ex})',
+                f'cm=ChainMap()\nL.append(getattr(cm,"maps"), {{"e":exec}})\n'
+                f'cm["e"]({ex})',
+                f'cm=ChainMap()\nattrgetter("maps")(cm).append({{"e":exec}})\n'
+                f'cm["e"]({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'methodcaller("update", {{"e":exec}})(vars(ns))\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'methodcaller("setdefault", "e", exec)(vars(ns))\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'operator.ior(vars(ns), {{"e":exec}})\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'dict.__ior__(vars(ns), {{"e":exec}})\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'ns.__dict__.__ior__({{"e":exec}})\nns.e({ex})',
+            )
+        )
+    )
+
+
+def test_fifteenth_pass_interproc_copy_slice_values_never_authorized() -> None:
+    """Name-carrier copy/from-import/slice/pop/values/fn/packed deepcopy."""
+
+    _assert_ninth_not_authorized(
+        (
+            (
+                "import copy\nd={Mut:1}\ncarrier=[{'v':d.keys}]\n"
+                "views=copy.copy(carrier)\nC,=views[0]['v']()\nC()",
+                "import copy",
+            ),
+            (
+                "from copy import copy as c\nd={Mut:1}\n"
+                "views=c([{'v':d.keys}])\nC,=views[0]['v']()\nC()",
+                "from copy import copy as c",
+            ),
+            (
+                "from copy import deepcopy as dc\nd={Mut:1}\n"
+                "views=dc([{'v':d.keys}])\nC,=views[0]['v']()\nC()",
+                "from copy import deepcopy as dc",
+            ),
+            (
+                "import copy\nd={Mut:1}\n"
+                "views=copy.copy([{'v':d.keys}])[:]\nC,=views[0]['v']()\nC()",
+                "import copy",
+            ),
+            (
+                "import copy\nd={Mut:1}\ntmp=copy.copy([{'v':d.keys}])\n"
+                "views=tmp[:]\nC,=views[0]['v']()\nC()",
+                "import copy",
+            ),
+            (
+                "import copy\nd={Mut:1}\nviews=copy.copy([{'v':d.keys}])\n"
+                "C,=views.pop()['v']()\nC()",
+                "import copy",
+            ),
+            (
+                'import copy\nd={"c":Mut}\nviews=copy.copy([d])\n'
+                "C,=list(views[0].values())[0]\nC()",
+                "import copy",
+            ),
+            (
+                "import copy\nd={Mut:1}\nfn=copy.copy\n"
+                "views=fn([{'v':d.keys}])\nC,=views[0]['v']()\nC()",
+                "import copy",
+            ),
+            (
+                "import copy\nd={Mut:1}\n"
+                "views=[copy.copy][0]([{'v':d.keys}])\nC,=views[0]['v']()\nC()",
+                "import copy",
+            ),
+            ("import copy\n[copy.deepcopy][0]([Mut])[0]()", "import copy"),
+        )
+    )
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "from operator import methodcaller; d=dict(); "
+        "methodcaller('__ior__', {'e':n.install})(d); d['e'](evil)",
+        "fns={'e':n.install}; [x for x in fns.items()][0][1](evil)",
+        "import copy; [copy.deepcopy][0]([n.install])[0](evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_fifteenth_pass_identity_call_sort_packs_never_authorized() -> None:
+    """sorted/list.sort __call__ packs, methodcaller sort, list-as-L peels."""
+
+    _assert_ninth_not_authorized(
+        (
+            (
+                'import builtins\ngattrattr=getattr\n'
+                'gattrattr(builtins,"sorted").__call__([Mut], key=type.__call__)',
+                "import builtins",
+            ),
+            (
+                "import builtins\nbuiltins.sorted.__call__([Mut], key=type.__call__)",
+                "import builtins",
+            ),
+            (
+                'import builtins\ngattrattr=getattr\n'
+                'g=gattrattr(builtins,"sorted").__call__\n'
+                "g([Mut], key=type.__call__)",
+                "import builtins",
+            ),
+            (
+                "from builtins import sorted as s\n"
+                "s.__call__.__call__([Mut], key=type.__call__)",
+                "from builtins import sorted as s",
+            ),
+            (
+                "xs=[Mut]\nlist.sort.__call__(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "xs=[Mut]\n[getattr(xs,'sort')][0](key=type.__call__)",
+                "",
+            ),
+            (
+                "xs=[Mut]\n(0 or getattr(xs,'sort'))(key=type.__call__)",
+                "",
+            ),
+            (
+                "from operator import methodcaller\nxs=[Mut]\n"
+                "methodcaller('sort', key=type.__call__)(xs)",
+                "from operator import methodcaller",
+            ),
+            (
+                "from builtins import list as L\nxs=[Mut]\n"
+                "L.sort(xs, key=type.__call__)",
+                "from builtins import list as L",
+            ),
+            (
+                "from builtins import list as L\nxs=[Mut]\n"
+                "[L.sort][0](xs, key=type.__call__)",
+                "from builtins import list as L",
+            ),
+        )
+    )
+
+
+def test_fifteenth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of fifteenth-pass shapes remain authorized."""
+
+    for body in (
+        "from functools import partial\nimport copy\nd={}\n"
+        "e=[partial(copy.copy,d)][0]()\ne|={}\nlen(e)",
+        'import builtins\ngattrattr=getattr\n'
+        'gattrattr(builtins,"sorted")([1], key=lambda x: x)',
+        "from builtins import list as L\nxs=[1]\nL.sort(xs, key=lambda x: x)",
+        "import copy\nd={}\nfn=copy.copy\nviews=fn([{'v':d.keys}])\nlen(views)",
+        "import copy\nd={}\nviews=copy.copy([{'v':d.keys}])[:]\nlen(views)",
+        "from collections import ChainMap\nfrom builtins import list as L\n"
+        'cm=ChainMap()\nL.append(getattr(cm,"maps"), {})\nlen(cm)',
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'keys.update({"z": keys.pop("x")})\nk=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\nProxy({})',
+        "import types\nns=types.SimpleNamespace()\n"
+        'from builtins import setattr as sa\nsa(ns,"x",1)\nns.x',
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_sixteenth_pass_lexical_slice_pack_never_authorized() -> None:
+    """Slice-then-index packing of getattr/methodcaller/partial copy peels."""
+
+    _assert_ninth_not_authorized(
+        (
+            (
+                "import operator\nd={Mut:1}\n"
+                "e=[getattr(operator,'methodcaller')('copy')][:1][0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "import operator",
+            ),
+            (
+                "import operator\nd={Mut:1}\n"
+                "e=[getattr(operator,'methodcaller')('copy')][0:1][0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "import operator",
+            ),
+            (
+                "import operator\nd={Mut:1}\n"
+                "e=[getattr(operator,'methodcaller')('copy')][::][0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "import operator",
+            ),
+            (
+                "from functools import partial\nimport copy\nd={Mut:1}\n"
+                "e=[partial(copy.copy,d)][:1][0]()\ne|={}\nC,=e.keys()\nC()",
+                "from functools import partial\nimport copy",
+            ),
+            (
+                "from functools import partial\nimport copy\nd={Mut:1}\n"
+                "e=[partial(copy.deepcopy,d)][:1][0]()\ne|={}\nC,=e.keys()\nC()",
+                "from functools import partial\nimport copy",
+            ),
+            (
+                "from functools import partial\nimport copy\nd={Mut:1}\n"
+                "e=[partial(getattr(copy,'copy'))][:1][0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "from functools import partial\nimport copy",
+            ),
+            (
+                "from functools import partial\nimport copy\nd={Mut:1}\n"
+                "e=[partial(getattr(copy,'copy'))][0:1][0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "from functools import partial\nimport copy",
+            ),
+        )
+    )
+
+
+def test_sixteenth_pass_alias_packed_getattr_mutate_never_authorized() -> None:
+    """Packed getattr itemgetter + Assign/packed/methodcaller/ior/copy mutate."""
+
+    cases = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'k=[getattr(operator,"itemgetter")][0]("x")(keys)\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'k=(0 or getattr(operator,"itemgetter"))("x")(keys)\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'k=(getattr(operator,"itemgetter") if True else None)("x")(keys)\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'k=next(iter([getattr(operator,"itemgetter")]))("x")(keys)\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'mut=operator.setitem\nmut(keys,"z",keys.pop("x"))\nk=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        '[operator.setitem][0](keys,"z",keys.pop("x"))\nk=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'operator.methodcaller("__setitem__","z",keys.pop("x"))(keys)\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'operator.ior(keys, {"z": keys.pop("x")})\nk=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'c=copy.copy(keys)\nc["z"]=c.pop("x")\nk=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_sixteenth_pass_identity_name_bound_list_sort_never_authorized() -> None:
+    """Name-bound unbound L.sort after from-import list as L (+ packs)."""
+
+    _assert_ninth_not_authorized(
+        (
+            (
+                "from builtins import list as L\nxs=[Mut]\n"
+                "g=L.sort\ng(xs, key=type.__call__)",
+                "from builtins import list as L",
+            ),
+            (
+                "from builtins import list as L\nxs=[Mut]\n"
+                "g=L.sort\ng.__call__(xs, key=type.__call__)",
+                "from builtins import list as L",
+            ),
+            (
+                "from builtins import list as L\nxs=[Mut]\n"
+                "g=L.sort\n[g][0](xs, key=type.__call__)",
+                "from builtins import list as L",
+            ),
+            (
+                "from builtins import list as L\nxs=[Mut]\n"
+                "g=L.sort\n(False or g)(xs, key=type.__call__)",
+                "from builtins import list as L",
+            ),
+            (
+                "from builtins import list as L\nxs=[Mut]\n"
+                "g=L.sort\n(g if True else len)(xs, key=type.__call__)",
+                "from builtins import list as L",
+            ),
+            (
+                "from builtins import list as L\nxs=[Mut]\n"
+                "g=L.sort\n{0:g}[0](xs, key=type.__call__)",
+                "from builtins import list as L",
+            ),
+            (
+                "from builtins import list as L\nxs=[Mut]\n"
+                "g=L.sort\nnext(iter([g]))(xs, key=type.__call__)",
+                "from builtins import list as L",
+            ),
+            (
+                "from builtins import list as L\nxs=[Mut]\n"
+                "g: object = L.sort\ng(xs, key=type.__call__)",
+                "from builtins import list as L",
+            ),
+            (
+                "from builtins import list as L\nxs=[Mut]\n"
+                "h=L\ng=h.sort\ng(xs, key=type.__call__)",
+                "from builtins import list as L",
+            ),
+            (
+                "from builtins import list as List\nxs=[Mut]\n"
+                "g=List.sort\ng(xs, key=type.__call__)",
+                "from builtins import list as List",
+            ),
+            (
+                "from builtins import list as lst\nxs=[Mut]\n"
+                "g=lst.sort\ng(xs, key=type.__call__)",
+                "from builtins import list as lst",
+            ),
+        )
+    )
+
+
+def test_sixteenth_pass_interproc_pop_slice_never_authorized() -> None:
+    """Negative/bitwise pop + methodcaller getitem + copy|deepcopy slice packs."""
+
+    _assert_ninth_not_authorized(
+        (
+            (
+                "import copy\nd={Mut:1}\nviews=copy.copy([{'v':d.keys}])\n"
+                "C,=views.pop(-1)['v']()\nC()",
+                "import copy",
+            ),
+            (
+                "import copy\nd={Mut:1}\nviews=copy.copy([{'v':d.keys}])\n"
+                "C,=views.pop(~0)['v']()\nC()",
+                "import copy",
+            ),
+            (
+                "import copy\nd={Mut:1}\nviews=copy.copy([{'v':d.keys}])\n"
+                "C,=list.pop(views,-1)['v']()\nC()",
+                "import copy",
+            ),
+            (
+                "from operator import methodcaller\nimport copy\n"
+                "d={Mut:1}\nviews=copy.copy([{'v':d.keys}])\n"
+                "C,=methodcaller('pop',-1)(views)['v']()\nC()",
+                "from operator import methodcaller\nimport copy",
+            ),
+        )
+    )
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "from operator import methodcaller; import copy; "
+        "views=copy.copy([n.install]); methodcaller('__getitem__',0)(views)(evil)",
+        "from operator import methodcaller; import copy; "
+        "views=copy.copy([n.install]); "
+        "[methodcaller('__getitem__',0)][0](views)(evil)",
+        "import copy; copy.deepcopy([n.install])[:][0](evil)",
+        "import copy; copy.copy([n.install])[:][0](evil)",
+        "import copy; [copy.deepcopy][0]([n.install])[:][0](evil)",
+        "import copy; [copy.deepcopy([n.install])][:1][0](evil)",
+        "import copy; [copy.deepcopy([n.install])][0:1][0](evil)",
+        "import copy; [copy.deepcopy([n.install])][::][0](evil)",
+        "import copy; list(copy.deepcopy([n.install]))[:][0](evil)",
+        "from copy import deepcopy as dc; dc([n.install])[:][0](evil)",
+        "import copy; fn=copy.deepcopy; fn([n.install])[:][0](evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_sixteenth_pass_cf_packed_attrgetter_ior_setitem_never_authorized() -> None:
+    """Packed attrgetter/__ior__/setitem/__dict__/partial(setitem) CF peels."""
+
+    ex = _NINTH_EXEC
+    imp = (
+        "from collections import ChainMap\nimport operator, types\n"
+        "from operator import methodcaller, attrgetter\n"
+        "from functools import partial\nfrom builtins import list as L"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, imp)
+            for c in (
+                f'cm=ChainMap()\n[attrgetter("maps")][0](cm).append({{"e":exec}})\n'
+                f'cm["e"]({ex})',
+                f'cm=ChainMap()\n(0 or attrgetter("maps"))(cm).append({{"e":exec}})\n'
+                f'cm["e"]({ex})',
+                f'cm=ChainMap()\n'
+                f'(attrgetter("maps") if True else None)(cm).append({{"e":exec}})\n'
+                f'cm["e"]({ex})',
+                f'cm=ChainMap()\n'
+                f'[operator.attrgetter("maps")][0](cm).append({{"e":exec}})\n'
+                f'cm["e"]({ex})',
+                f'cm=ChainMap()\n'
+                f'(0 or operator.attrgetter)("maps")(cm).append({{"e":exec}})\n'
+                f'cm["e"]({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'operator.__ior__(vars(ns), {{"e":exec}})\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'[operator.__ior__][0](vars(ns), {{"e":exec}})\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'[getattr(operator,"__ior__")][0](vars(ns), {{"e":exec}})\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'[operator.setitem][0](vars(ns), "e", exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'(0 or operator.setitem)(vars(ns), "e", exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'(operator.setitem if True else None)(vars(ns), "e", exec)\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'object.__getattribute__(ns,"__dict__").update({{"e":exec}})\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'attrgetter("__dict__")(ns).update({{"e":exec}})\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'[partial(operator.setitem, vars(ns), "e")][0](exec)\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'(0 or partial(operator.setitem, vars(ns), "e"))(exec)\n'
+                f'ns.e({ex})',
+            )
+        )
+    )
+
+
+def test_sixteenth_pass_class_methodcaller_kwargs_vars_never_authorized() -> None:
+    """methodcaller __setattr__/kwargs update/Name-bound mc/vars |= peels."""
+
+    mut = (
+        "class Mut:\n"
+        "    def __init__(self):\n"
+        "        helpers.write_state = evil\n"
+        "    @classmethod\n"
+        "    def make(cls):\n"
+        "        return cls()\n"
+    )
+    cases = (
+        mut
+        + 'ns=types.SimpleNamespace()\n'
+        + 'methodcaller("__setattr__","m",Mut.make)(ns)\nns.m()',
+        mut
+        + 'ns=types.SimpleNamespace()\n'
+        + 'methodcaller("__setattr__","e",exec)(ns)\n'
+        + f'ns.e({_NINTH_EXEC})',
+        mut
+        + 'ns=types.SimpleNamespace()\n'
+        + 'methodcaller("update", m=Mut.make)(vars(ns))\nns.m()',
+        mut
+        + 'ns=types.SimpleNamespace()\n'
+        + 'methodcaller("update", m=Mut.make)(ns.__dict__)\nns.m()',
+        mut
+        + 'ns=types.SimpleNamespace()\n'
+        + 'mc=operator.methodcaller\n'
+        + 'mc("__setattr__","m",Mut.make)(ns)\nns.m()',
+        mut
+        + 'ns=types.SimpleNamespace()\n'
+        + 'd=vars(ns)\nd|={"m": Mut.make}\nns.m()',
+    )
+    for body in cases:
+        findings = _unit(
+            _ninth_src(
+                body,
+                imports=(
+                    "import types\nimport operator\n"
+                    "from operator import methodcaller"
+                ),
+            )
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_sixteenth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of sixteenth-pass shapes remain authorized."""
+
+    for body in (
+        "from functools import partial\nimport copy\nd={}\n"
+        "e=[partial(copy.copy,d)][:1][0]()\ne|={}\nlen(e)",
+        "from builtins import list as L\nxs=[1]\ng=L.sort\ng(xs, key=lambda x: x)",
+        "import copy\nd={}\nviews=copy.copy([{'v':d.keys}])\nlen(views.pop(-1))",
+        "from collections import ChainMap\nfrom operator import attrgetter\n"
+        'cm=ChainMap()\n[attrgetter("maps")][0](cm).append({})\nlen(cm)',
+        "import types, operator\nns=types.SimpleNamespace()\n"
+        'operator.__ior__(vars(ns), {"x":1})\nns.x',
+        "import types\nfrom operator import methodcaller\n"
+        'ns=types.SimpleNamespace()\n'
+        'methodcaller("__setattr__","x",1)(ns)\nns.x',
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'k=[getattr(operator,"itemgetter")][0]("x")(keys)\n'
+        'Proxy=getattr(ns,"get")(k)\nProxy({})',
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_seventeenth_pass_lexical_slice_object_pack_never_authorized() -> None:
+    """Call/Name ``slice`` products + getitem/__getitem__ packing peels."""
+
+    _assert_ninth_not_authorized(
+        (
+            (
+                "import operator\nd={Mut:1}\n"
+                "e=[getattr(operator,'methodcaller')('copy')][slice(0,1)][0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "import operator",
+            ),
+            (
+                "import operator\nd={Mut:1}\n"
+                "e=operator.getitem([getattr(operator,'methodcaller')('copy')], "
+                "slice(0,1))[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "import operator",
+            ),
+            (
+                "import operator\nd={Mut:1}\n"
+                "e=list.__getitem__([getattr(operator,'methodcaller')('copy')], "
+                "slice(0,1))[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "import operator",
+            ),
+            (
+                "import operator\nd={Mut:1}\n"
+                "xs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=xs.__getitem__(slice(0,1))[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "import operator",
+            ),
+            (
+                "import operator\nd={Mut:1}\ns=slice(0,1)\n"
+                "e=[getattr(operator,'methodcaller')('copy')][s][0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "import operator",
+            ),
+            (
+                "import operator\nimport builtins\nd={Mut:1}\n"
+                "e=[getattr(operator,'methodcaller')('copy')]"
+                "[builtins.slice(0,1)][0](d)\ne|={}\nC,=e.keys()\nC()",
+                "import operator\nimport builtins",
+            ),
+            (
+                "import operator\nimport builtins\nd={Mut:1}\n"
+                "e=[getattr(operator,'methodcaller')('copy')]"
+                "[getattr(builtins,'slice')(0,1)][0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "import operator\nimport builtins",
+            ),
+            (
+                "from functools import partial\nimport copy\nd={Mut:1}\n"
+                "e=[partial(getattr(copy,'copy'))][slice(0,1)][0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "from functools import partial\nimport copy",
+            ),
+            (
+                "import operator\nd={Mut:1}\n"
+                "e=next(iter([getattr(operator,'methodcaller')('copy')]"
+                "[slice(None,1)]))(d)\ne|={}\nC,=e.keys()\nC()",
+                "import operator",
+            ),
+            (
+                "import operator\nd={Mut:1}\n"
+                "e=[*([getattr(operator,'methodcaller')('copy')]"
+                "[slice(0,1)])][0](d)\ne|={}\nC,=e.keys()\nC()",
+                "import operator",
+            ),
+        )
+    )
+
+
+def test_seventeenth_pass_identity_list_sort_seed_never_authorized() -> None:
+    """getattr/builtins.list/dict-mid/BoolOp/IfExp/attrgetter sort packs."""
+
+    _assert_ninth_not_authorized(
+        (
+            (
+                "from builtins import list as L\nxs=[Mut]\n"
+                "g=getattr(L,'sort')\n[g][0](xs, key=type.__call__)",
+                "from builtins import list as L",
+            ),
+            (
+                "from builtins import list as L\nxs=[Mut]\n"
+                "g=getattr(L,'sort')\n(0 or g)(xs, key=type.__call__)",
+                "from builtins import list as L",
+            ),
+            (
+                "from builtins import list as L\nxs=[Mut]\n"
+                "g=getattr(L,'sort')\n{0:g}[0](xs, key=type.__call__)",
+                "from builtins import list as L",
+            ),
+            (
+                "from builtins import list as L\nxs=[Mut]\n"
+                "g=getattr(L,'sort')\nnext(iter([g]))(xs, key=type.__call__)",
+                "from builtins import list as L",
+            ),
+            (
+                "import builtins\nL=builtins.list\nxs=[Mut]\n"
+                "g=L.sort\ng(xs, key=type.__call__)",
+                "import builtins",
+            ),
+            (
+                "import builtins\nL=getattr(builtins,'list')\nxs=[Mut]\n"
+                "g=L.sort\ng(xs, key=type.__call__)",
+                "import builtins",
+            ),
+            (
+                "import builtins\nL=builtins.__dict__['list']\nxs=[Mut]\n"
+                "L.sort(xs, key=type.__call__)",
+                "import builtins",
+            ),
+            (
+                "from builtins import list as L\nxs=[Mut]\n"
+                "p={0:L.sort}\ng=p[0]\ng(xs, key=type.__call__)",
+                "from builtins import list as L",
+            ),
+            (
+                "from builtins import list as L\nxs=[Mut]\n"
+                "p={0:getattr(L,'sort')}\ng=p[0]\ng(xs, key=type.__call__)",
+                "from builtins import list as L",
+            ),
+            (
+                "from builtins import list as L\nxs=[Mut]\n"
+                "g=(0 or L).sort\ng(xs, key=type.__call__)",
+                "from builtins import list as L",
+            ),
+            (
+                "from builtins import list as L\nxs=[Mut]\n"
+                "g=(L if True else list).sort\ng(xs, key=type.__call__)",
+                "from builtins import list as L",
+            ),
+            (
+                "from operator import attrgetter\nfrom builtins import list as L\n"
+                "xs=[Mut]\ng=attrgetter('sort')(L)\n[g][0](xs, key=type.__call__)",
+                "from operator import attrgetter\nfrom builtins import list as L",
+            ),
+        )
+    )
+
+
+def test_seventeenth_pass_class_kwargs_update_never_authorized() -> None:
+    """methodcaller/update ``**kwargs`` on vars/__dict__/attrgetter peels."""
+
+    mut = (
+        "class Mut:\n"
+        "    def __init__(self):\n"
+        "        helpers.write_state = evil\n"
+        "    @classmethod\n"
+        "    def make(cls):\n"
+        "        return cls()\n"
+    )
+    cases = (
+        mut
+        + 'ns=types.SimpleNamespace()\n'
+        + 'methodcaller("update", **{"m": Mut.make})(vars(ns))\nns.m()',
+        mut
+        + 'ns=types.SimpleNamespace()\n'
+        + 'methodcaller("update", **{"m": Mut.make})(ns.__dict__)\nns.m()',
+        mut
+        + 'ns=types.SimpleNamespace()\n'
+        + 'from operator import attrgetter\n'
+        + 'methodcaller("update", **{"m": Mut.make})(attrgetter("__dict__")(ns))\n'
+        + "ns.m()",
+        mut
+        + 'ns=types.SimpleNamespace()\nkw={"m": Mut.make}\n'
+        + 'methodcaller("update", **kw)(vars(ns))\nns.m()',
+        mut
+        + 'ns=types.SimpleNamespace()\n'
+        + 'mc=operator.methodcaller\n'
+        + 'mc("update", **{"m": Mut.make})(vars(ns))\nns.m()',
+        mut
+        + 'ns=types.SimpleNamespace()\n'
+        + 'mc=(0 or operator.methodcaller)\n'
+        + 'mc("update", **{"m": Mut.make})(vars(ns))\nns.m()',
+        mut
+        + 'ns=types.SimpleNamespace()\nkw={"m": Mut.make}\n'
+        + "d=vars(ns)\nd.update(**kw)\nns.m()",
+        mut
+        + 'ns=types.SimpleNamespace()\nkw={"m": Mut.make}\n'
+        + "(d:=vars(ns)).update(**kw)\nns.m()",
+        mut
+        + 'ns=types.SimpleNamespace()\nkw={"m": Mut.make}\n'
+        + "dict.update(vars(ns), **kw)\nns.m()",
+        mut
+        + 'ns=types.SimpleNamespace()\nkw={"m": Mut.make}\n'
+        + "builtins.dict.update(vars(ns), **kw)\nns.m()",
+    )
+    for body in cases:
+        findings = _unit(
+            _ninth_src(
+                body,
+                imports=(
+                    "import types\nimport operator\nimport builtins\n"
+                    "from operator import methodcaller"
+                ),
+            )
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_seventeenth_pass_interproc_pop_partial_never_authorized() -> None:
+    """BoolOp/IfExp/Name/walrus ``.pop`` + packed partial(copy) slice peels."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "import copy; views=copy.copy([n.install]); (0 or views.pop)(-1)(evil)",
+        "import copy; views=copy.copy([n.install]); "
+        "(views.pop if True else None)(-1)(evil)",
+        "import copy; views=copy.copy([n.install]); p=views.pop; p(-1)(evil)",
+        "import copy; views=copy.copy([n.install]); (p:=views.pop)(-1)(evil)",
+        "from functools import partial; import copy; "
+        "[partial(copy.deepcopy)][0]([n.install])[:][0](evil)",
+        "from functools import partial; import copy; "
+        "[partial(copy.copy)][0]([n.install])[:][0](evil)",
+        "from functools import partial; import copy; "
+        "(0 or partial(copy.deepcopy))([n.install])[:][0](evil)",
+        "from functools import partial; import copy; "
+        "(partial(copy.deepcopy) if True else None)([n.install])[:][0](evil)",
+        "from functools import partial; import copy; "
+        "next(iter([partial(copy.deepcopy)]))([n.install])[:][0](evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_seventeenth_pass_cf_packed_partial_setattr_never_authorized() -> None:
+    """Packed/BoolOp/IfExp/slice/next partial(setattr|object.__setattr__) CF."""
+
+    ex = _NINTH_EXEC
+    imp = (
+        "import types\nfrom functools import partial\n"
+        "from builtins import setattr as SA\nimport builtins"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f'[partial(setattr, ns, "e")][0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'(0 or partial(setattr, ns, "e"))(exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'(partial(setattr, ns, "e") if True else None)(exec)\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'[partial(setattr, ns, "e")][slice(0,1)][0](exec)\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'next(iter([partial(setattr, ns, "e")]))(exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'[*([partial(setattr, ns, "e")])][0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'[partial(object.__setattr__, ns, "e")][0](exec)\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'[partial(SA, ns, "e")][0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'[partial(getattr(builtins,"setattr"), ns, "e")][0](exec)\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'if [partial(setattr, ns, "e")][0](exec):\n    pass\n'
+                f'ns.e({ex})',
+            )
+        )
+    )
+
+
+def test_seventeenth_pass_alias_name_bind_copy_mutate_never_authorized() -> None:
+    """Assign packed itemgetter / Name-bound mc / __ior__ / copy-then-mutate."""
+
+    cases = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'ig=[getattr(operator,"itemgetter")][0]("x")\nk=ig(keys)\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'ig: object = [getattr(operator,"itemgetter")][0]("x")\nk=ig(keys)\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'prod=[getattr(operator,"itemgetter")][0]("x")\nk=prod(keys)\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'ig=next(iter([getattr(operator,"itemgetter")]))("x")\nk=ig(keys)\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'mc=operator.methodcaller("__setitem__","z",keys.pop("x"))\nmc(keys)\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'mc=getattr(operator,"methodcaller")("__setitem__","z",keys.pop("x"))\n'
+        'mc(keys)\nk=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'mc=[operator.methodcaller][0]("__setitem__","z",keys.pop("x"))\n'
+        'mc(keys)\nk=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'keys.__ior__({"z": keys.pop("x")})\nk=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'mut=getattr(operator,"__ior__"); mut(keys, {"z": keys.pop("x")})\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'c=getattr(copy,"copy")(keys)\nc["z"]=c.pop("x")\nk=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'c=[copy.copy][0](keys)\nc["z"]=c.pop("x")\nk=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'c=(0 or copy.copy)(keys)\nc["z"]=c.pop("x")\nk=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'c=next(iter([copy.copy]))(keys)\nc["z"]=c.pop("x")\nk=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'c=operator.methodcaller("copy")(keys)\nc["z"]=c.pop("x")\nk=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'from functools import partial\n'
+        'c=partial(copy.copy,keys)()\nc["z"]=c.pop("x")\nk=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'c=dict(keys)\nc["z"]=c.pop("x")\nk=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'c=getattr(dict,"copy")(keys)\nc["z"]=c.pop("x")\nk=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_seventeenth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of seventeenth-pass shapes remain authorized."""
+
+    for body in (
+        "import operator\nd={}\n"
+        "e=[getattr(operator,'methodcaller')('copy')][slice(0,1)][0](d)\n"
+        "e|={}\nlen(e)",
+        "from builtins import list as L\nxs=[1]\n"
+        "g=getattr(L,'sort')\n[g][0](xs, key=lambda x: x)",
+        "import types\nfrom operator import methodcaller\n"
+        'ns=types.SimpleNamespace()\n'
+        'methodcaller("update", **{"x":1})(vars(ns))\nns.x',
+        "import copy\nviews=copy.copy([{'v':1}])\n"
+        "p=views.pop; len(p(-1))",
+        "import types\nfrom functools import partial\n"
+        'ns=types.SimpleNamespace()\n'
+        '[partial(setattr, ns, "x")][0](1)\nns.x',
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'ig=[getattr(operator,"itemgetter")][0]("x")\nk=ig(keys)\n'
+        'Proxy=getattr(ns,"get")(k)\nProxy({})',
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_eighteenth_pass_identity_getattr_list_partial_get_never_authorized() -> None:
+    """BoolOp/IfExp getattr, ns.get list, applied attrgetter, partial/__get__."""
+
+    _assert_ninth_not_authorized(
+        (
+            (
+                "from builtins import list as L\nxs=[Mut]\n"
+                "(0 or getattr)(L,'sort')(xs, key=type.__call__)",
+                "from builtins import list as L",
+            ),
+            (
+                "from builtins import list as L\nxs=[Mut]\n"
+                "(getattr if True else None)(L,'sort')(xs, key=type.__call__)",
+                "from builtins import list as L",
+            ),
+            (
+                "import builtins\nL=vars(builtins).get('list')\nxs=[Mut]\n"
+                "L.sort(xs, key=type.__call__)",
+                "import builtins",
+            ),
+            (
+                "import builtins\nL=builtins.__dict__.get('list')\nxs=[Mut]\n"
+                "L.sort(xs, key=type.__call__)",
+                "import builtins",
+            ),
+            (
+                "import builtins\nL=builtins.__dict__.__getitem__('list')\n"
+                "xs=[Mut]\nL.sort(xs, key=type.__call__)",
+                "import builtins",
+            ),
+            (
+                "import builtins\ng=builtins.__dict__.get\nL=g('list')\n"
+                "xs=[Mut]\nL.sort(xs, key=type.__call__)",
+                "import builtins",
+            ),
+            (
+                "import builtins\nL=(0 or builtins.__dict__.get)('list')\n"
+                "xs=[Mut]\nL.sort(xs, key=type.__call__)",
+                "import builtins",
+            ),
+            (
+                "import builtins\nL=getattr(builtins.__dict__,'get')('list')\n"
+                "xs=[Mut]\nL.sort(xs, key=type.__call__)",
+                "import builtins",
+            ),
+            (
+                "from operator import attrgetter\nfrom builtins import list as L\n"
+                "xs=[Mut]\nnext(iter([attrgetter('sort')(L)]))(xs, key=type.__call__)",
+                "from operator import attrgetter\nfrom builtins import list as L",
+            ),
+            (
+                "from operator import attrgetter\nfrom builtins import list as L\n"
+                "xs=[Mut]\n[*([attrgetter('sort')(L)])][0](xs, key=type.__call__)",
+                "from operator import attrgetter\nfrom builtins import list as L",
+            ),
+            (
+                "from operator import attrgetter\nfrom builtins import list as L\n"
+                "xs=[Mut]\n[attrgetter('sort')(L)][:1][0](xs, key=type.__call__)",
+                "from operator import attrgetter\nfrom builtins import list as L",
+            ),
+            (
+                "from functools import partial\nfrom builtins import list as L\n"
+                "xs=[Mut]\n[partial(L.sort, xs)][0](key=type.__call__)",
+                "from functools import partial\nfrom builtins import list as L",
+            ),
+            (
+                "from functools import partial\nxs=[Mut]\n"
+                "(0 or partial(list.sort, xs))(key=type.__call__)",
+                "from functools import partial",
+            ),
+            (
+                "from functools import partial\nfrom builtins import list as L\n"
+                "xs=[Mut]\n(partial(L.sort, xs) if True else None)(key=type.__call__)",
+                "from functools import partial\nfrom builtins import list as L",
+            ),
+            (
+                "from functools import partial\nxs=[Mut]\n"
+                "next(iter([partial(list.sort, xs)]))(key=type.__call__)",
+                "from functools import partial",
+            ),
+            (
+                "g=list.sort.__get__(None, list)\nxs=[Mut]\n"
+                "g(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=list.__dict__['sort'].__get__(None, list)\nxs=[Mut]\n"
+                "g(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=(0 or list.sort.__get__)(None, list)\nxs=[Mut]\n"
+                "g(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=getattr(list.sort,'__get__')(None, list)\nxs=[Mut]\n"
+                "g(xs, key=type.__call__)",
+                "",
+            ),
+        )
+    )
+
+
+def test_eighteenth_pass_lexical_packed_partial_getitem_never_authorized() -> None:
+    """Packed partial(getitem|__getitem__, xs, slice) / methodcaller peels."""
+
+    lex_imp = "import operator\nfrom functools import partial"
+    _assert_ninth_not_authorized(
+        (
+            (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(operator.getitem, xs, slice(0,1))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=next(iter([partial(operator.getitem, xs, slice(0,1))]))()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=(0 or partial(operator.getitem, xs, slice(0,1)))()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=(partial(operator.getitem, xs, slice(0,1)) if True else None)"
+                "()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[*([partial(operator.getitem, xs, slice(0,1))])][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(list.__getitem__, xs, slice(0,1))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(getattr(operator,'getitem'), xs, slice(0,1))][0]()"
+                "[0](d)\ne|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(operator.getitem, xs)][0](slice(0,1))[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(operator.methodcaller('__getitem__', slice(0,1)), xs)]"
+                "[0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(operator.getitem, xs, 0)][0]()(d)\ne|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+        )
+    )
+
+
+def test_eighteenth_pass_cf_name_binop_partial_setattr_never_authorized() -> None:
+    """Name→next/reversed/values and BinOp/concat peels after partial(setattr)."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial\n"
+        "from builtins import setattr as SA\nimport builtins\nimport operator"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\np=partial(setattr, ns, "e")\n'
+                f"next(iter([p]))(exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\np=partial(setattr, ns, "e")\n'
+                f"next(reversed([p]))(exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\np=partial(setattr, ns, "e")\n'
+                f"next(iter({{0:p}}.values()))(exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'([partial(setattr, ns, "e")]+[])[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'([]+[partial(setattr, ns, "e")])[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'([partial(setattr, ns, "e")]*1)[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'((partial(setattr, ns, "e"),)+())[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'operator.concat([partial(setattr, ns, "e")], [])[0](exec)\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'[partial(setattr, ns, "e")].__add__([])[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'[partial(operator.methodcaller("__setattr__","e",exec))][0](ns)\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'if next(iter([p:=partial(setattr, ns, "e")]))(exec):\n'
+                f"    pass\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_eighteenth_pass_alias_name_product_copy_setitem_never_authorized() -> None:
+    """Name-bound ig/mc/partial apply, walrus copy-mutate, getattr/partial setitem."""
+
+    cases = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'ig=[getattr(operator,"itemgetter")][0]("x"); k=next(iter([ig]))(keys)\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'ig=[getattr(operator,"itemgetter")][0]("x")\n'
+        "k=next(iter([(ig if True else None)]))(keys)\n"
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'mc=operator.methodcaller("copy"); c=mc(keys); c["z"]=c.pop("x")\n'
+        'k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'mc: object = operator.methodcaller("copy"); c=mc(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'mc=getattr(operator,"methodcaller")("copy"); c=(0 or mc)(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'p=partial(copy.copy,keys); c=p(); c["z"]=c.pop("x")\n'
+        'k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'p: object = partial(copy.copy,keys); c=(0 or p)()\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        '(c:=getattr(copy,"copy")(keys))["z"]=c.pop("x")\n'
+        'k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        '(c:=[copy.copy][0](keys))["z"]=c.pop("x")\n'
+        'k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'getattr(keys,"__setitem__")("z", keys.pop("x"))\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'partial(operator.setitem, keys, "z")(keys.pop("x"))\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_eighteenth_pass_class_getattr_update_spread_never_authorized() -> None:
+    """getattr(dict,\"update\") + **(IfExp|BoolOp) kwargs spreads."""
+
+    mut = (
+        "class Mut:\n"
+        "    def __init__(self):\n"
+        "        helpers.write_state = evil\n"
+        "    @classmethod\n"
+        "    def make(cls):\n"
+        "        return cls()\n"
+    )
+    cases = (
+        mut
+        + 'ns=types.SimpleNamespace()\n'
+        + 'getattr(dict,"update")(vars(ns), **{"m": Mut.make})\nns.m()',
+        mut
+        + 'ns=types.SimpleNamespace()\nd=vars(ns)\n'
+        + 'getattr(dict,"update")(d, m=Mut.make)\nns.m()',
+        mut
+        + 'ns=types.SimpleNamespace()\n'
+        + 'getattr(dict,"update")(ns.__dict__, **{"m": Mut.make})\nns.m()',
+        mut
+        + 'ns=types.SimpleNamespace()\nfrom operator import attrgetter\n'
+        + 'getattr(dict,"update")(attrgetter("__dict__")(ns), m=Mut.make)\nns.m()',
+        mut
+        + 'ns=types.SimpleNamespace()\nkw={"m": Mut.make}\n'
+        + 'methodcaller("update", **(kw if True else {}))(vars(ns))\nns.m()',
+        mut
+        + 'ns=types.SimpleNamespace()\nkw={"m": Mut.make}\n'
+        + 'methodcaller("update", **(kw or {}))(vars(ns))\nns.m()',
+        mut
+        + 'ns=types.SimpleNamespace()\n'
+        + 'methodcaller("update", **({"m": Mut.make} if True else {}))'
+        "(vars(ns))\nns.m()",
+        mut
+        + 'ns=types.SimpleNamespace()\nkw={"m": Mut.make}\n'
+        + "d=vars(ns)\nd.update(**(kw if True else {}))\nns.m()",
+        mut
+        + 'ns=types.SimpleNamespace()\nkw={"m": Mut.make}\n'
+        + "dict.update(vars(ns), **(kw if True else {}))\nns.m()",
+        mut
+        + 'ns=types.SimpleNamespace()\nkw={"m": Mut.make}\n'
+        + "builtins.dict.update(vars(ns), **(kw or {}))\nns.m()",
+    )
+    for body in cases:
+        findings = _unit(
+            _ninth_src(
+                body,
+                imports=(
+                    "import types\nimport operator\nimport builtins\n"
+                    "from operator import methodcaller"
+                ),
+            )
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_eighteenth_pass_interproc_seventeenth_stays_closed() -> None:
+    """Interproc seventeenth BoolOp/Name/walrus pop + packed partial copy."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "import copy; views=copy.copy([n.install]); (0 or views.pop)(-1)(evil)",
+        "import copy; views=copy.copy([n.install]); "
+        "(views.pop if True else None)(-1)(evil)",
+        "import copy; views=copy.copy([n.install]); p=views.pop; p(-1)(evil)",
+        "import copy; views=copy.copy([n.install]); (p:=views.pop)(-1)(evil)",
+        "from functools import partial; import copy; "
+        "[partial(copy.deepcopy)][0]([n.install])[:][0](evil)",
+        "from functools import partial; import copy; "
+        "[partial(copy.copy)][0]([n.install])[:][0](evil)",
+        "from functools import partial; import copy; "
+        "(0 or partial(copy.deepcopy))([n.install])[:][0](evil)",
+        "from functools import partial; import copy; "
+        "(partial(copy.deepcopy) if True else None)([n.install])[:][0](evil)",
+        "from functools import partial; import copy; "
+        "next(iter([partial(copy.deepcopy)]))([n.install])[:][0](evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_eighteenth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of eighteenth-pass shapes remain authorized."""
+
+    for body in (
+        "from builtins import list as L\nxs=[1]\n"
+        "(0 or getattr)(L,'sort')(xs, key=lambda x: x)",
+        "import operator\nfrom functools import partial\nd={}\n"
+        "xs=[getattr(operator,'methodcaller')('copy')]\n"
+        "e=[partial(operator.getitem, xs, slice(0,1))][0]()[0](d)\n"
+        "e|={}\nlen(e)",
+        "import types\nfrom functools import partial\n"
+        'ns=types.SimpleNamespace()\n'
+        'p=partial(setattr, ns, "x"); next(iter([p]))(1)\nns.x',
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'ig=[getattr(operator,"itemgetter")][0]("x")\n'
+        "k=next(iter([ig]))(keys)\n"
+        'Proxy=getattr(ns,"get")(k)\nProxy({})',
+        "import types\nfrom operator import methodcaller\n"
+        'ns=types.SimpleNamespace()\nkw={"x":1}\n'
+        'methodcaller("update", **(kw if True else {}))(vars(ns))\nns.x',
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_nineteenth_pass_cf_name_methodcaller_list_grow_never_authorized() -> None:
+    """Name-bound bare methodcaller via next/BinOp + list grow of partial(setattr)."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial\n"
+        "import operator\nfrom builtins import setattr as SA"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f'mc=operator.methodcaller("__setattr__","e",exec)\n'
+                f"next(iter([mc]))(ns)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'mc=operator.methodcaller("__setattr__","e",exec)\n'
+                f"next(reversed([mc]))(ns)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'mc=operator.methodcaller("__setattr__","e",exec)\n'
+                f"next(iter({{0:mc}}.values()))(ns)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'mc=operator.methodcaller("__setattr__","e",exec)\n'
+                f"next(iter([mc]+[]))(ns)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'mc=operator.methodcaller("__setattr__","e",exec)\n'
+                f"next(iter(operator.concat([mc],[])))(ns)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'mc=operator.methodcaller("__setattr__","e",exec)\n'
+                f"next(iter([mc].__add__([])))(ns)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'mc=operator.methodcaller("__setattr__","e",exec)\n'
+                f"next(iter([mc]*1))(ns)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'mc=getattr(operator,"methodcaller")("__setattr__","e",exec)\n'
+                f"next(iter([mc]))(ns)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'xs.append(partial(setattr, ns, "e"))\nxs[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'xs.extend([partial(setattr, ns, "e")])\nxs[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'xs.insert(0, partial(setattr, ns, "e"))\nxs[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'xs += [partial(setattr, ns, "e")]\nxs[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'p=partial(setattr, ns, "e")\nxs=[]\nxs.append(p)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'[operator.methodcaller("__setattr__","e",exec)][0](ns)\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'mc=operator.methodcaller("__setattr__","e",exec)\n'
+                f"if True:\n    next(iter([mc]))(ns)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'mc=operator.methodcaller("__setattr__","e",exec)\n'
+                f"c=1\nwhile c:\n    next(iter([mc]))(ns)\n    c=0\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_nineteenth_pass_identity_getitem_get_nested_get_never_authorized() -> None:
+    """Identity getitem/from-import __dict__ + packed/nested __get__ peels."""
+
+    _assert_ninth_not_authorized(
+        (
+            (
+                "import operator\nimport builtins\n"
+                "L=operator.getitem(vars(builtins),'list')\n"
+                "xs=[Mut]\nL.sort(xs, key=type.__call__)",
+                "import operator\nimport builtins",
+            ),
+            (
+                "import operator\nimport builtins\n"
+                "L=operator.getitem(builtins.__dict__,'list')\n"
+                "xs=[Mut]\nL.sort(xs, key=type.__call__)",
+                "import operator\nimport builtins",
+            ),
+            (
+                "from builtins import __dict__ as D\n"
+                "L=D.get('list')\nxs=[Mut]\nL.sort(xs, key=type.__call__)",
+                "from builtins import __dict__ as D",
+            ),
+            (
+                "from builtins import __dict__ as D\n"
+                "L=D.__getitem__('list')\nxs=[Mut]\nL.sort(xs, key=type.__call__)",
+                "from builtins import __dict__ as D",
+            ),
+            (
+                "from builtins import __dict__ as D\n"
+                "L=(0 or D.get)('list')\nxs=[Mut]\nL.sort(xs, key=type.__call__)",
+                "from builtins import __dict__ as D",
+            ),
+            (
+                "g=next(iter([list.sort.__get__]))(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=next(reversed([list.sort.__get__]))(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=next(iter({0:list.sort.__get__}.values()))(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=object.__getattribute__(list.sort,'__get__')(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=getattr(getattr(list,'sort'),'__get__')(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "inner=getattr(list,'sort')\n"
+                "g=getattr(inner,'__get__')(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=list.__dict__.get('sort').__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=vars(list).get('sort').__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=vars(list).pop('sort').__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=(0 or list.__dict__.get)('sort').__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=[list.sort.__get__][0](None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=list.__dict__['sort'].__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+        )
+    )
+
+
+def test_nineteenth_pass_alias_name_product_via_next_setitem_never_authorized() -> None:
+    """Alias Name-bound product via next + unbound partial + Name-bound setitem."""
+
+    cases = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'mc=operator.methodcaller("copy"); c=next(iter([mc]))(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'mc=operator.methodcaller("copy"); c=next(reversed([mc]))(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'mc=getattr(operator,"methodcaller")("copy")\n'
+        "c=next(iter({0:mc}.values()))(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'p=partial(copy.copy,keys); c=next(iter([p]))()\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'p=partial(copy.copy); c=p(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'p=partial(copy.deepcopy); c=p(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'si=getattr(keys,"__setitem__"); si("z", keys.pop("x"))\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'si=keys.__setitem__; si("z", keys.pop("x"))\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'p=partial(operator.setitem, keys, "z"); p(keys.pop("x"))\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'p=partial(operator.setitem, keys, "z"); (0 or p)(keys.pop("x"))\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'p=partial(operator.setitem, keys, "z"); next(iter([p]))(keys.pop("x"))\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'partial(operator.setitem, keys)("z", keys.pop("x"))\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'partial(getattr(keys,"__setitem__"), "z")(keys.pop("x"))\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_nineteenth_pass_class_positional_ifexp_ior_never_authorized() -> None:
+    """Positional IfExp|BoolOp into update/ior + next(iter methodcaller **)."""
+
+    ex = _NINTH_EXEC
+    class_imp = "import types\nimport operator\nimport builtins"
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f'getattr(dict,"update")(vars(ns), (kw if True else {{}}))\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f'getattr(dict,"update")(vars(ns), (kw or {{}}))\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f'dict.update(vars(ns), (kw if True else {{}}))\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f'builtins.dict.update(vars(ns), (kw or {{}}))\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f'd=vars(ns)\nd.update((kw if True else {{}}))\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f'operator.methodcaller("update", (kw if True else {{}}))'
+                f"(vars(ns))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f'next(iter([operator.methodcaller('
+                f'"update", **(kw if True else {{}}))]))(vars(ns))\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"d=vars(ns)\nd |= (kw if True else {{}})\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"d=vars(ns)\nd.__ior__((kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"dict.__ior__(vars(ns), (kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f'getattr(dict,"__ior__")(vars(ns), (kw if True else {{}}))\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f'operator.methodcaller("__ior__", (kw if True else {{}}))'
+                f"(vars(ns))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"ns.__dict__ |= (kw if True else {{}})\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_nineteenth_pass_interproc_getattr_copy_nullcontext_never_authorized() -> None:
+    """Interproc getattr(copy) packs + mutating sequence seed + nullcontext."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "import copy; (0 or getattr(copy,'deepcopy'))([n.install])[:][0](evil)",
+        "import copy; (0 or getattr(copy,'copy'))([n.install])[:][0](evil)",
+        "import copy; (getattr(copy,'deepcopy') if True else None)"
+        "([n.install])[:][0](evil)",
+        "import copy; [getattr(copy,'deepcopy')][0]([n.install])[:][0](evil)",
+        "views=[]; views.insert(0,n.install); views[0](evil)",
+        "views=[]; views.append(n.install); views[0](evil)",
+        "views=[]; views.extend([n.install]); views[0](evil)",
+        "views=[]; views += [n.install]; views[0](evil)",
+        "from functools import partial; import operator; "
+        "[partial(operator.methodcaller('copy'))][0]([{'v':n.install}])"
+        "[0]['v'](evil)",
+        "import contextlib\n"
+        "    with contextlib.nullcontext(n.install) as f:\n"
+        "        f(evil)",
+        "from contextlib import nullcontext\n"
+        "    with nullcontext(n.install) as f:\n"
+        "        f(evil)",
+        "import copy; (0 or copy.deepcopy)([n.install])[:][0](evil)",
+        "import copy; views=copy.copy([n.install]); views.pop()(evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_nineteenth_pass_lexical_factory_peel_nested_star_never_authorized() -> None:
+    """Lexical factory-peeled partial / bound __getitem__ / nested / *args."""
+
+    lex_imp = "import operator\nfrom functools import partial"
+    _assert_ninth_not_authorized(
+        (
+            (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[(0 or partial)(operator.getitem, xs, slice(0,1))][0]()"
+                "[0](d)\ne|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[(partial if True else None)(operator.getitem, xs, "
+                "slice(0,1))][0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[[partial][0](operator.getitem, xs, slice(0,1))][0]()"
+                "[0](d)\ne|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[next(iter([partial]))(operator.getitem, xs, slice(0,1))]"
+                "[0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(xs.__getitem__, slice(0,1))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[(0 or partial(xs.__getitem__, slice(0,1)))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(getattr(xs,'__getitem__'), slice(0,1))][0]()"
+                "[0](d)\ne|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(partial(operator.getitem, xs), slice(0,1))][0]()"
+                "[0](d)\ne|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "args=(operator.getitem, xs, slice(0,1))\n"
+                "e=[partial(*args)][0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(operator.getitem, xs, slice(0,1))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+        )
+    )
+
+
+def test_nineteenth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of nineteenth-pass shapes remain authorized."""
+
+    for body in (
+        "from builtins import list as L\nxs=[1]\n"
+        "(0 or getattr)(L,'sort')(xs, key=lambda x: x)",
+        "import operator\nfrom functools import partial\nd={}\n"
+        "xs=[getattr(operator,'methodcaller')('copy')]\n"
+        "e=[(0 or partial)(operator.getitem, xs, slice(0,1))][0]()[0](d)\n"
+        "e|={}\nlen(e)",
+        "import types\nfrom functools import partial\n"
+        'ns=types.SimpleNamespace()\n'
+        'p=partial(setattr, ns, "x"); next(iter([p]))(1)\nns.x',
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'ig=[getattr(operator,"itemgetter")][0]("x")\n'
+        "k=next(iter([ig]))(keys)\n"
+        'Proxy=getattr(ns,"get")(k)\nProxy({})',
+        "import types\nfrom operator import methodcaller\n"
+        'ns=types.SimpleNamespace()\nkw={"x":1}\n'
+        'methodcaller("update", **(kw if True else {}))(vars(ns))\nns.x',
+        "import types\nimport operator\n"
+        'ns=types.SimpleNamespace()\nkw={"x":1}\n'
+        "d=vars(ns)\nd |= (kw if True else {})\nns.x",
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_twentieth_pass_identity_boolop_getitem_get_never_authorized() -> None:
+    """Identity BoolOp/IfExp namespace, getitem(*args), IfExp keys before __get__."""
+
+    _assert_ninth_not_authorized(
+        (
+            (
+                "import operator\nimport builtins\n"
+                "L=operator.getitem((0 or vars(builtins)),'list')\n"
+                "xs=[Mut]\nL.sort(xs, key=type.__call__)",
+                "import operator\nimport builtins",
+            ),
+            (
+                "import operator\nimport builtins\n"
+                "L=operator.getitem((vars(builtins) if True else {}),'list')\n"
+                "xs=[Mut]\nL.sort(xs, key=type.__call__)",
+                "import operator\nimport builtins",
+            ),
+            (
+                "from builtins import __dict__ as D\n"
+                "import operator\n"
+                "L=operator.getitem((0 or D),'list')\n"
+                "xs=[Mut]\nL.sort(xs, key=type.__call__)",
+                "from builtins import __dict__ as D\nimport operator",
+            ),
+            (
+                "import operator\n"
+                "g=operator.getitem(list.__dict__,'sort').__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "import operator",
+            ),
+            (
+                "import operator\n"
+                "g=operator.getitem(vars(list),'sort').__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "import operator",
+            ),
+            (
+                "import operator\n"
+                "g=operator.getitem((0 or list.__dict__),'sort').__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "import operator",
+            ),
+            (
+                "import operator\nimport builtins\n"
+                "args=(vars(builtins),'list')\n"
+                "L=operator.getitem(*args)\n"
+                "xs=[Mut]\nL.sort(xs, key=type.__call__)",
+                "import operator\nimport builtins",
+            ),
+            (
+                "from builtins import __dict__ as D\n"
+                "import operator\n"
+                "args=(D,'list')\n"
+                "L=operator.getitem(*args)\n"
+                "xs=[Mut]\nL.sort(xs, key=type.__call__)",
+                "from builtins import __dict__ as D\nimport operator",
+            ),
+            (
+                "g=list.__dict__.get('sort' if True else 'x').__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=vars(list).get('sort' if True else 'x').__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=vars(list).pop('sort' if True else 'x').__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=list.__dict__.__getitem__('sort' if True else 'x')"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "import operator\n"
+                "g=operator.getitem(list.__dict__, ('sort' if True else 'x'))"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "import operator",
+            ),
+            (
+                "import operator\n"
+                "g=operator.getitem(list.__dict__, (0 or 'sort'))"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "import operator",
+            ),
+            # Nineteenth keep-closed anchors.
+            (
+                "import operator\nimport builtins\n"
+                "L=operator.getitem(vars(builtins),'list')\n"
+                "xs=[Mut]\nL.sort(xs, key=type.__call__)",
+                "import operator\nimport builtins",
+            ),
+            (
+                "g=list.__dict__.get('sort').__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+        )
+    )
+
+
+def test_twentieth_pass_lexical_name_nested_star_getitem_never_authorized() -> None:
+    """Lexical Name-bound / nested / 2-elt *args getitem peels."""
+
+    lex_imp = "import operator\nfrom functools import partial"
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, lex_imp)
+            for c in (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(xs.__getitem__)][0](slice(0,1))[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "gi=xs.__getitem__\n"
+                "e=[partial(gi, slice(0,1))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "gi=getattr(xs,'__getitem__')\n"
+                "e=[partial(gi, slice(0,1))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(partial(operator.getitem, xs))][0](slice(0,1))"
+                "[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(partial(xs.__getitem__), slice(0,1))][0]()"
+                "[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "args=(operator.getitem, xs)\n"
+                "e=[partial(*args)][0](slice(0,1))[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "args=(getattr(operator,'getitem'), xs, slice(0,1))\n"
+                "e=[partial(*args)][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "args=(xs.__getitem__, slice(0,1))\n"
+                "e=[partial(*args)][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                # Nineteenth keep-closed anchor.
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(operator.getitem, xs, slice(0,1))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+            )
+        )
+    )
+
+
+def test_twentieth_pass_cf_unbound_list_iadd_never_authorized() -> None:
+    """CF unbound list.append|extend|insert + operator.iadd|iconcat peels."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial\n"
+        "import operator\nimport builtins\nfrom builtins import setattr as SA"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f'list.append(xs:=[], partial(setattr, ns, "e")); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'list.extend(xs:=[], [partial(setattr, ns, "e")]); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'list.insert(xs:=[], 0, partial(setattr, ns, "e")); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'builtins.list.append(xs:=[], partial(setattr, ns, "e")); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'g=getattr(list,"append"); '
+                f'g(xs:=[], partial(setattr, ns, "e")); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'LA=list.append; LA(xs:=[], partial(setattr, ns, "e")); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'[list.append][0](xs, partial(setattr, ns, "e")); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'(0 or list.append)(xs, partial(setattr, ns, "e")); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'(list.append if True else None)'
+                f'(xs, partial(setattr, ns, "e")); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'next(iter([list.append]))(xs, partial(setattr, ns, "e")); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'partial(list.append, xs)(partial(setattr, ns, "e")); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f"if True:\n"
+                f'    list.append(xs, partial(setattr, ns, "e"))\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'operator.iadd(xs, [partial(setattr, ns, "e")]); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'operator.iconcat(xs, [partial(setattr, ns, "e")]); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'xs.__iadd__([partial(setattr, ns, "e")]); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'g=getattr(operator,"iadd"); '
+                f'g(xs, [partial(setattr, ns, "e")]); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f"from operator import iadd\n"
+                f'iadd(xs, [partial(setattr, ns, "e")]); '
+                f"xs[0](exec)\nns.e({ex})",
+                # Keep-closed bound append.
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'xs.append(partial(setattr, ns, "e")); '
+                f"xs[0](exec)\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_twentieth_pass_alias_unbound_partial_setitem_never_authorized() -> None:
+    """Alias unbound partial via next + Name-bound setitem + zero-bound setitem."""
+
+    cases = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "p=partial(copy.copy); c=next(iter([p]))(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "p=partial(copy.copy); c=next(reversed([p]))(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "p=partial(copy.copy); c=next(iter({0:p}.values()))(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "p=partial(copy.copy); c=(0 or p)(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "p=partial(copy.copy); c=(p if True else None)(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'si=getattr(keys,"__setitem__"); next(iter([si]))("z", keys.pop("x"))\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'si=keys.__setitem__; next(iter([si]))("z", keys.pop("x"))\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'si=getattr(keys,"__setitem__"); (0 or si)("z", keys.pop("x"))\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'si=getattr(keys,"__setitem__"); si.__call__("z", keys.pop("x"))\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'p=partial(operator.setitem); p(keys, "z", keys.pop("x"))\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'p=partial(operator.setitem); next(iter([p]))(keys, "z", keys.pop("x"))\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'p=partial(operator.setitem); (0 or p)(keys, "z", keys.pop("x"))\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        # Nineteenth keep-closed anchors.
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "p=partial(copy.copy); c=p(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        'si=getattr(keys,"__setitem__"); si("z", keys.pop("x"))\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'p=partial(operator.setitem, keys, "z"); p(keys.pop("x"))\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_twentieth_pass_class_packed_partial_update_ior_never_authorized() -> None:
+    """Class packed partial(dict.update|__ior__|operator.ior) peels."""
+
+    ex = _NINTH_EXEC
+    class_imp = "import types\nimport operator\nfrom functools import partial"
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(dict.update, vars(ns))]))"
+                f"((kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"[partial(dict.update, vars(ns))][0]"
+                f"((kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"(0 or partial(dict.update, vars(ns)))"
+                f"((kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(dict.update, vars(ns))]))"
+                f"(**(kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(dict.__ior__, vars(ns))]))"
+                f"((kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(operator.ior, vars(ns))]))"
+                f"((kw if True else {{}}))\nns.e({ex})",
+                # Nineteenth keep-closed anchors.
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"partial(dict.update, vars(ns))((kw if True else {{}}))\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f'next(iter([operator.methodcaller('
+                f'"update", **(kw if True else {{}}))]))(vars(ns))\n'
+                f"ns.e({ex})",
+            )
+        )
+    )
+
+
+def test_twentieth_pass_interproc_unbound_list_nullcontext_never_authorized() -> None:
+    """Interproc unbound list seed / iadd / nullcontext alias peels."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "views=[]; list.append(views, n.install); views[0](evil)",
+        "views=[]; list.insert(views, 0, n.install); views[0](evil)",
+        "views=[]; list.extend(views, [n.install]); views[0](evil)",
+        "views=[]; getattr(list,'append')(views, n.install); views[0](evil)",
+        "views=[]; (0 or list.append)(views, n.install); views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "methodcaller('append',n.install)(views); views[0](evil)",
+        "views=[]; views.__iadd__([n.install]); views[0](evil)",
+        "from operator import iadd; views=[]; iadd(views,[n.install]); "
+        "views[0](evil)",
+        "from contextlib import nullcontext as nc\n"
+        "    with nc(n.install) as f:\n"
+        "        f(evil)",
+        "from contextlib import nullcontext\n"
+        "    NC=nullcontext\n"
+        "    with NC(n.install) as f:\n"
+        "        f(evil)",
+        "import contextlib\n"
+        "    with contextlib.nullcontext((0 or n.install)) as f:\n"
+        "        f(evil)",
+        "import contextlib\n"
+        "    with contextlib.nullcontext((n.install if True else None)) as f:\n"
+        "        f(evil)",
+        "import contextlib\n"
+        "    f=contextlib.nullcontext(n.install).__enter__()\n"
+        "    f(evil)",
+        # Keep-closed anchors.
+        "views=[]; views.append(n.install); views[0](evil)",
+        "import contextlib\n"
+        "    with contextlib.nullcontext(n.install) as f:\n"
+        "        f(evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_twentieth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of twentieth-pass shapes remain authorized."""
+
+    for body in (
+        "import operator\nimport builtins\n"
+        "L=operator.getitem((0 or vars(builtins)),'list')\n"
+        "xs=[1]\nL.sort(xs, key=lambda x: x)",
+        "import operator\nfrom functools import partial\nd={}\n"
+        "xs=[getattr(operator,'methodcaller')('copy')]\n"
+        "e=[partial(xs.__getitem__)][0](slice(0,1))[0](d)\n"
+        "e|={}\nlen(e)",
+        "import types\nfrom functools import partial\n"
+        'ns=types.SimpleNamespace()\nxs=[]\n'
+        'list.append(xs, partial(setattr, ns, "x")); xs[0](1)\nns.x',
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "p=partial(copy.copy); c=next(iter([p]))(keys)\n"
+        'k=c.get("x")\n'
+        'Proxy=getattr(ns,"get")(k)\nProxy({})',
+        "import types\nfrom functools import partial\n"
+        'ns=types.SimpleNamespace()\nkw={"x":1}\n'
+        "next(iter([partial(dict.update, vars(ns))]))((kw if True else {}))\n"
+        "ns.x",
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_twenty_first_pass_alias_inline_partial_star_copy_never_authorized() -> None:
+    """Alias inline packed partial(copy) / setitem(*args) / keys.copy peels."""
+
+    cases = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=next(iter([partial(copy.copy)]))(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=next(iter([(0 or partial(copy.copy))]))(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=next(iter([(partial(copy.copy) if True else None)]))(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem); p(*args)\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem); '
+        "next(iter([p]))(*args)\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "p=partial(keys.copy); c=next(iter([p]))()\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "p=partial(keys.copy); c=p()\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'c=partial(getattr(keys,"copy"))()\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        # Twentieth keep-closed anchors.
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "p=partial(copy.copy); c=next(iter([p]))(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'p=partial(operator.setitem); p(keys, "z", keys.pop("x"))\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_twenty_first_pass_class_underapplied_packed_partial_never_authorized() -> None:
+    """Class under-applied packed partial / packed ior+** / partial(*args)."""
+
+    ex = _NINTH_EXEC
+    class_imp = "import types\nimport operator\nfrom functools import partial"
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(dict.update)]))(vars(ns), "
+                f"(kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"[partial(dict.update)][0](vars(ns), (kw if True else {{}}))\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"(0 or partial(dict.update))(vars(ns), (kw if True else {{}}))\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(dict.update)]))(vars(ns), "
+                f"**(kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(dict.__ior__)]))(vars(ns), "
+                f"(kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(operator.ior)]))(vars(ns), "
+                f"(kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(dict.__ior__, vars(ns))]))"
+                f"(**(kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(operator.ior, vars(ns))]))"
+                f"(**(kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"args=(dict.update, vars(ns)); "
+                f"next(iter([partial(*args)]))((kw if True else {{}}))\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"args=(dict.update, vars(ns)); "
+                f"[partial(*args)][0]((kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"args=(dict.__ior__, vars(ns)); "
+                f"next(iter([partial(*args)]))(**(kw if True else {{}}))\n"
+                f"ns.e({ex})",
+                # Twentieth keep-closed anchors.
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(dict.update, vars(ns))]))"
+                f"((kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"partial(dict.update)(vars(ns), (kw if True else {{}}))\n"
+                f"ns.e({ex})",
+            )
+        )
+    )
+
+
+def test_twenty_first_pass_identity_star_named_getattr_dict_never_authorized() -> None:
+    """Identity getitem(*args) / Name-bound .get / getattr(__dict__) before __get__."""
+
+    _assert_ninth_not_authorized(
+        (
+            (
+                "import operator\n"
+                "args=(list.__dict__, ('sort' if True else 'x')); "
+                "g=operator.getitem(*args).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "import operator",
+            ),
+            (
+                "import operator\n"
+                "args=(list.__dict__, 'sort'); "
+                "g=operator.getitem(*args).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "import operator",
+            ),
+            (
+                "import operator\n"
+                "args=((0 or list.__dict__), 'sort'); "
+                "g=operator.getitem(*args).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "import operator",
+            ),
+            (
+                "d=list.__dict__; g=d.get('sort' if True else 'x')"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=list.__dict__; g=d.get('sort').__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=vars(list); g=d.pop('sort' if True else 'x')"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=list.__dict__; g=d.__getitem__('sort')"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=getattr(list,'__dict__').get('sort').__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=getattr(list,'__dict__').get('sort' if True else 'x')"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "import operator\n"
+                "g=operator.getitem(getattr(list,'__dict__'),'sort')"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "import operator",
+            ),
+            # Keep-closed anchors.
+            (
+                "g=list.__dict__['sort' if True else 'x'].__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=getattr(list,'__dict__')['sort'].__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=list.__dict__.get('sort').__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+        )
+    )
+
+
+def test_twenty_first_pass_cf_map_star_reduce_zip_never_authorized() -> None:
+    """CF map / star-args / reduce(iadd|iconcat) / zip+f(*a) applicators."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial, reduce\n"
+        "import operator\nimport builtins"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f'list(map(list.append, [xs:=[]], [partial(setattr, ns, "e")])); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'list(builtins.map(list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'list(getattr(builtins,"map")(list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'list([map][0](list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'list((0 or map)(list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'list(map(list.extend, [xs:=[]], '
+                f'[[partial(setattr, ns, "e")]])); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'list(map(list.insert, [xs:=[]], [0], '
+                f'[partial(setattr, ns, "e")])); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'list.append(*[xs, partial(setattr, ns, "e")]); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'operator.iadd(*[xs, [partial(setattr, ns, "e")]]); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'reduce(operator.iadd, [[partial(setattr, ns, "e")]], xs); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'reduce(operator.iconcat, [[partial(setattr, ns, "e")]], xs); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in zip([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                # Twentieth keep-closed anchors.
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'list.append(xs, partial(setattr, ns, "e")); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'operator.iadd(xs, [partial(setattr, ns, "e")]); '
+                f"xs[0](exec)\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_twenty_first_pass_lexical_boolop_triple_star_never_authorized() -> None:
+    """Lexical BoolOp/IfExp heads + triple nest + BoolOp star getitem peels."""
+
+    lex_imp = "import operator\nfrom functools import partial"
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, lex_imp)
+            for c in (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "gi=(0 or xs.__getitem__)\n"
+                "e=[partial(gi, slice(0,1))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "gi=(xs.__getitem__ if True else None)\n"
+                "e=[partial(gi, slice(0,1))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial((0 or xs.__getitem__), slice(0,1))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial((xs.__getitem__ if True else None), slice(0,1))]"
+                "[0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(partial(partial(operator.getitem, xs)), "
+                "slice(0,1))][0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "args=((0 or operator.getitem), xs, slice(0,1)); "
+                "e=[partial(*args)][0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "args=((operator.getitem if True else None), xs, slice(0,1)); "
+                "e=[partial(*args)][0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "inner=(0 or partial(operator.getitem, xs)); "
+                "e=[partial(inner, slice(0,1))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                # Twentieth keep-closed anchors.
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "gi=xs.__getitem__\n"
+                "e=[partial(gi, slice(0,1))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(partial(operator.getitem, xs))][0](slice(0,1))"
+                "[0](d)\ne|={}\nC,=e.keys()\nC()",
+            )
+        )
+    )
+
+
+def test_twenty_first_pass_interproc_methodcaller_nullcontext_assign_never_authorized() -> None:
+    """Interproc IfExp methodcaller name + Assign nullcontext.__enter__ last-wins."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "from operator import methodcaller; views=[]; "
+        "methodcaller(('append' if True else 'x'), n.install)(views); "
+        "views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "methodcaller(('append' and 'append'), n.install)(views); "
+        "views[0](evil)",
+        "from operator import methodcaller as m; views=[]; "
+        "m('append', n.install)(views); views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "methodcaller(('extend' if True else 'x'), [n.install])(views); "
+        "views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "methodcaller(('insert' if True else 'x'), 0, n.install)(views); "
+        "views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "methodcaller(('__iadd__' if True else 'x'), [n.install])(views); "
+        "views[0](evil)",
+        "import contextlib\n"
+        "    f=contextlib.nullcontext((n.install if True else None))"
+        ".__enter__()\n"
+        "    f(evil)",
+        "import contextlib\n"
+        "    f=contextlib.nullcontext((n.install or 0)).__enter__()\n"
+        "    f(evil)",
+        "import contextlib\n"
+        "    f=getattr(contextlib.nullcontext(n.install),'__enter__')()\n"
+        "    f(evil)",
+        "from contextlib import nullcontext as nc\n"
+        "    f=nc(n.install).__enter__()\n"
+        "    f(evil)",
+        "from contextlib import nullcontext\n"
+        "    NC=nullcontext\n"
+        "    f=NC(n.install).__enter__()\n"
+        "    f(evil)",
+        # Keep-closed anchors.
+        "from operator import methodcaller; views=[]; "
+        "methodcaller('append',n.install)(views); views[0](evil)",
+        "import contextlib\n"
+        "    with contextlib.nullcontext((n.install if True else None)) as f:\n"
+        "        f(evil)",
+        "import contextlib\n"
+        "    with contextlib.nullcontext((0 or n.install)) as f:\n"
+        "        f(evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_twenty_first_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of twenty-first-pass shapes remain authorized."""
+
+    for body in (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=next(iter([partial(copy.copy)]))(keys)\n"
+        'k=c.get("x")\n'
+        'Proxy=getattr(ns,"get")(k)\nProxy({})',
+        "import types\nfrom functools import partial\n"
+        'ns=types.SimpleNamespace()\nkw={"x":1}\n'
+        "next(iter([partial(dict.update)]))(vars(ns), (kw if True else {}))\n"
+        "ns.x",
+        "import operator\n"
+        "args=(list.__dict__, 'sort'); "
+        "g=operator.getitem(*args).__get__(None, list)\n"
+        "xs=[1]\ng(xs, key=lambda x: x)",
+        "import types\nfrom functools import partial, reduce\n"
+        "import operator\n"
+        'ns=types.SimpleNamespace()\n'
+        'list(map(list.append, [xs:=[]], [partial(setattr, ns, "x")])); '
+        "xs[0](1)\nns.x",
+        "import operator\nfrom functools import partial\nd={}\n"
+        "xs=[getattr(operator,'methodcaller')('copy')]\n"
+        "gi=(0 or xs.__getitem__)\n"
+        "e=[partial(gi, slice(0,1))][0]()[0](d)\n"
+        "e|={}\nlen(e)",
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_twenty_second_pass_alias_list0_boolop_star_never_authorized() -> None:
+    """Alias list0 / bare BoolOp Call.func / keys.copy pack / star IfExp."""
+
+    cases = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=[partial(copy.copy)][0](keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=(partial(copy.copy),)[0](keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=[(p := partial(copy.copy))][0](keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=(0 or partial(copy.copy))(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=(partial(copy.copy) if True else None)(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=[partial(keys.copy)][0]()\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=[(0 or partial(keys.copy))][0]()\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem); '
+        "p(*(args if True else ()))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem); '
+        "p(*(0 or args))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        # Twenty-first keep-closed anchors.
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=next(iter([partial(copy.copy)]))(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem); p(*args)\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_twenty_second_pass_class_fullbind_nested_partial_never_authorized() -> None:
+    """Class fully-bound packed *args () and nested packed partial peels."""
+
+    ex = _NINTH_EXEC
+    class_imp = "import types\nimport operator\nfrom functools import partial"
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"args=(dict.update, vars(ns), (kw if True else {{}})); "
+                f"next(iter([partial(*args)]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"args=(dict.update, vars(ns), (kw if True else {{}})); "
+                f"[partial(*args)][0]()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"args=(dict.update, vars(ns), (kw if True else {{}})); "
+                f"(0 or partial(*args))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"args=(dict.__ior__, vars(ns), (kw if True else {{}})); "
+                f"next(iter([partial(*args)]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"args=(operator.ior, vars(ns), (kw if True else {{}})); "
+                f"next(iter([partial(*args)]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(dict.update, vars(ns), "
+                f"(kw if True else {{}}))]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(dict.update, vars(ns), "
+                f"**(kw if True else {{}}))]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(partial(dict.update), vars(ns))]))"
+                f"((kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"[partial(partial(dict.update), vars(ns))][0]"
+                f"((kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(partial(dict.__ior__), vars(ns))]))"
+                f"((kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(partial(partial(dict.update), "
+                f"vars(ns)))]))((kw if True else {{}}))\nns.e({ex})",
+                # Twenty-first keep-closed anchors.
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"args=(dict.update, vars(ns)); "
+                f"next(iter([partial(*args)]))((kw if True else {{}}))\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(dict.update, vars(ns))]))"
+                f"((kw if True else {{}}))\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_twenty_second_pass_identity_star_midbind_slice_never_authorized() -> None:
+    """Identity starred keys / mid-bind __get__ / getattr IfExp / *args slice."""
+
+    _assert_ninth_not_authorized(
+        (
+            (
+                "d=list.__dict__; g=d.get(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=list.__dict__; keys=('sort',); g=d.get(*keys).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=list.__dict__.get(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=getattr(list,'__dict__').get(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=list.__dict__; g=d.pop(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=list.__dict__; g=d.__getitem__(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=getattr(list, ('__dict__' if True else 'x')).get('sort')"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=getattr(list, (0 or '__dict__')).get('sort')"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "attr='__dict__'; g=getattr(list, attr).get('sort')"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=list.__dict__; m=d.get('sort'); g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=list.__dict__; m=d.get('sort'); "
+                "g=getattr(m,'__get__')(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "import operator\n"
+                "args=(list.__dict__,'sort'); "
+                "g=operator.getitem(*args[0:2]).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "import operator",
+            ),
+            (
+                "import operator\n"
+                "args=(list.__dict__,'sort'); "
+                "g=operator.getitem(*(*args,)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "import operator",
+            ),
+            (
+                "import operator\n"
+                "args=(list.__dict__,'sort'); "
+                "g=operator.getitem(*tuple(args)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "import operator",
+            ),
+            # Twenty-first keep-closed anchors.
+            (
+                "d=list.__dict__; g=d.get('sort').__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "import operator\n"
+                "args=(list.__dict__, 'sort'); "
+                "g=operator.getitem(*args).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "import operator",
+            ),
+        )
+    )
+
+
+def test_twenty_second_pass_cf_packed_zip_name_map_never_authorized() -> None:
+    """CF packed/aliased zip For.iter and Name-aliased map applicators."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial, reduce\n"
+        "import operator\nimport builtins"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in [zip][0]([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in getattr(builtins,"zip")([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in (0 or zip)([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in (zip if True else None)([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in next(iter([zip]))([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f"Z=zip\n"
+                f'for f,a in Z([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in [builtins.zip][0]([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in zip.__call__([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"M=map\n"
+                f'list(M(list.append, [xs:=[]], [partial(setattr, ns, "e")])); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"M=map\n"
+                f'if list(M(list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])):\n'
+                f"    xs[0](exec)\nns.e({ex})",
+                # Twenty-first keep-closed anchors.
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in zip([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'list(map(list.append, [xs:=[]], [partial(setattr, ns, "e")])); '
+                f"xs[0](exec)\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_twenty_second_pass_lexical_packed_boolop_head_never_authorized() -> None:
+    """Lexical packed BoolOp/IfExp getitem heads and Name-bound packs."""
+
+    lex_imp = "import operator\nfrom functools import partial"
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, lex_imp)
+            for c in (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial([0 or xs.__getitem__][0], slice(0,1))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial([(xs.__getitem__ if True else None)][0], slice(0,1))]"
+                "[0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "args=([0 or operator.getitem][0], xs, slice(0,1))\n"
+                "e=[partial(*args)][0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(partial(partial([0 or operator.getitem][0], xs)), "
+                "slice(0,1))][0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "heads=[0 or xs.__getitem__]\n"
+                "e=[partial(heads[0], slice(0,1))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(next(iter([0 or xs.__getitem__])), slice(0,1))]"
+                "[0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial([xs.__getitem__][0], slice(0,1))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                # Twenty-first keep-closed anchors.
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial((0 or xs.__getitem__), slice(0,1))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "gi=xs.__getitem__\n"
+                "e=[partial(gi, slice(0,1))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+            )
+        )
+    )
+
+
+def test_twenty_second_pass_interproc_orelse_star_name_never_authorized() -> None:
+    """Interproc orelse/empty-or / star / Name methodcaller + nullcontext *."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "from operator import methodcaller; views=[]; "
+        "methodcaller(('x' if False else 'append'), n.install)(views); "
+        "views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "methodcaller(('' or 'append'), n.install)(views); "
+        "views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "(0 or methodcaller)('append', n.install)(views); "
+        "views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "methodcaller(*('append', n.install))(views); views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "methodcaller(*(('append' if True else 'x'), n.install))(views); "
+        "views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "nm='append'; methodcaller(nm, n.install)(views); views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "nm=('append' if True else 'x'); methodcaller(nm, n.install)(views); "
+        "views[0](evil)",
+        "import contextlib\n"
+        "    f=contextlib.nullcontext(*(n.install,)).__enter__()\n"
+        "    f(evil)",
+        "import contextlib\n"
+        "    f=contextlib.nullcontext(*((n.install if True else None),))"
+        ".__enter__()\n"
+        "    f(evil)",
+        # Twenty-first keep-closed anchors.
+        "from operator import methodcaller; views=[]; "
+        "methodcaller(('append' if True else 'x'), n.install)(views); "
+        "views[0](evil)",
+        "import contextlib\n"
+        "    f=contextlib.nullcontext((n.install if True else None))"
+        ".__enter__()\n"
+        "    f(evil)",
+        "import contextlib\n"
+        "    with contextlib.nullcontext((n.install if True else None)) as f:\n"
+        "        f(evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_twenty_second_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of twenty-second-pass shapes remain authorized."""
+
+    for body in (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=[partial(copy.copy)][0](keys)\n"
+        'k=c.get("x")\n'
+        'Proxy=getattr(ns,"get")(k)\nProxy({})',
+        "import types\nfrom functools import partial\n"
+        'ns=types.SimpleNamespace()\nkw={"x":1}\n'
+        "args=(dict.update, vars(ns), (kw if True else {})); "
+        "next(iter([partial(*args)]))()\n"
+        "ns.x",
+        "import operator\n"
+        "args=(list.__dict__, 'sort'); "
+        "g=operator.getitem(*args[0:2]).__get__(None, list)\n"
+        "xs=[1]\ng(xs, key=lambda x: x)",
+        "import types\nfrom functools import partial\n"
+        "import builtins\n"
+        'ns=types.SimpleNamespace()\nxs=[]\n'
+        'for f,a in [zip][0]([list.append],'
+        '[(xs, partial(setattr, ns, "x"))]): f(*a)\n'
+        "xs[0](1)\nns.x",
+        "import operator\nfrom functools import partial\nd={}\n"
+        "xs=[getattr(operator,'methodcaller')('copy')]\n"
+        "e=[partial([0 or xs.__getitem__][0], slice(0,1))][0]()[0](d)\n"
+        "e|={}\nlen(e)",
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_twenty_third_pass_alias_list0_method_star_never_authorized() -> None:
+    """Alias list0 method peels / Name keys.copy / star siblings."""
+
+    cases = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=[partial(copy.copy)].pop(0)(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=[partial(copy.copy)].__getitem__(0)(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=operator.getitem([partial(copy.copy)],0)(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c={partial(copy.copy)}.pop()(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=operator.itemgetter(0)([partial(copy.copy)])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "p=partial(keys.copy); c=[p][0]()\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'c=[partial(getattr(keys,"copy"))][0]()\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem); '
+        "p(*(() if False else args))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem); '
+        "star=(args if True else ()); p(*star)\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=partial(*((copy.copy, keys) if True else ()))()\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=partial(*(0 or (copy.copy, keys)))()\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=[partial(*((copy.copy, keys) if True else ()))][0]()\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=[partial(operator.setitem)][0]; '
+        "p(*(args if True else ()))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); '
+        "p=next(iter([partial(operator.setitem)])); "
+        "p(*(args if True else ()))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        # Twenty-second keep-closed anchors.
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=[partial(copy.copy)][0](keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=[partial(keys.copy)][0]()\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_twenty_third_pass_class_boolop_star_partial_never_authorized() -> None:
+    """Class star BoolOp/IfExp partial packs and bound update/setdefault."""
+
+    ex = _NINTH_EXEC
+    class_imp = "import types\nimport operator\nfrom functools import partial"
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"args=(dict.update, vars(ns), (kw if True else {{}})); "
+                f"next(iter([partial(*(args if True else ()))]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"args=(dict.update, vars(ns), (kw if True else {{}})); "
+                f"[partial(*(args if True else ()))][0]()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"args=(dict.update, vars(ns), (kw if True else {{}})); "
+                f"next(iter([partial(*(args or ()))]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"args=(dict.__ior__, vars(ns), (kw if True else {{}})); "
+                f"next(iter([partial(*(args if True else ()))]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"args=(dict.update, vars(ns)); "
+                f"next(iter([partial(*(args if True else ()))]))"
+                f"((kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"args=(partial(dict.update), vars(ns)); "
+                f"next(iter([partial(*(args if True else ()))]))"
+                f"((kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(vars(ns).update)]))"
+                f"((kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'args=(dict.setdefault, vars(ns), "e", exec); '
+                f"next(iter([partial(*args)]))()\nns.e({ex})",
+                # Twenty-second keep-closed anchors.
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"args=(dict.update, vars(ns), (kw if True else {{}})); "
+                f"next(iter([partial(*args)]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(dict.update, vars(ns))]))"
+                f"((kw if True else {{}}))\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_twenty_third_pass_identity_name_slice_pack_never_authorized() -> None:
+    """Identity Name-bound getattr attr / Name slice / nested pack / mid-bind."""
+
+    _assert_ninth_not_authorized(
+        (
+            (
+                "attr='__dict__'; d=getattr(list, attr); m=d.get('sort'); "
+                "g=getattr(m,'__get__')(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "attr='__dict__'; d=getattr(list, attr); m=d.get('sort'); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "import operator\n"
+                "args=(list.__dict__,'sort'); s=slice(0,2); "
+                "g=operator.getitem(*args[s]).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "import operator",
+            ),
+            (
+                "import operator\n"
+                "args=(list.__dict__,'sort'); "
+                "g=operator.getitem(*((*args,),)[0]).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "import operator",
+            ),
+            (
+                "import operator\n"
+                "args=(list.__dict__,'sort'); pack=((*args,),); "
+                "g=operator.getitem(*pack[0]).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "import operator",
+            ),
+            (
+                "import operator\n"
+                "args=(list.__dict__,'sort'); "
+                "g=operator.getitem(*[(*args,)][0]).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "import operator",
+            ),
+            (
+                "d=list.__dict__; m=d['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=list.__dict__; m=d[('sort' if True else 'x')]; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=list.__dict__; m=d[('' or 'sort')]; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=list.__dict__; k='sort'; m=d[k]; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            # Relaunch: getattr star packs + dict() mid-bind pop/setdefault.
+            (
+                "d=getattr(list, *('__dict__',)); m=d.get('sort'); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=getattr(list, *['__dict__']); m=d.get('sort'); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=getattr(list, *(0 or ('__dict__',))); m=d.get('sort'); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "attrs=('__dict__',)\n"
+                "d=getattr(list, *tuple(attrs)); m=d.get('sort'); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "attrs=('__dict__',)\n"
+                "d=getattr(list, *attrs); m=d.get('sort'); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=builtins.getattr(list, *('__dict__',)); m=d.get('sort'); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "import builtins",
+            ),
+            (
+                "d=dict(list.__dict__); m=d.pop(*('sort',)); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=dict(list.__dict__); m=d.setdefault(*('sort',)); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "import operator\n"
+                "args=(list.__dict__, 'sort')\n"
+                "m=operator.getitem(*args); nm='__get__'; "
+                "g=getattr(m, nm)(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "import operator",
+            ),
+            # Twenty-second keep-closed anchors.
+            (
+                "attr='__dict__'; g=getattr(list, attr).get('sort')"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=list.__dict__; m=d.get('sort'); g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=list.__dict__; m=d.get('sort'); nm='__get__'; "
+                "g=getattr(m, nm)(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+        )
+    )
+
+
+def test_twenty_third_pass_cf_importfrom_star_copy_never_authorized() -> None:
+    """CF ImportFrom zip/map, star packs, copy([zip]), Name-bound [zip]."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial, reduce\n"
+        "import operator\nimport builtins\nimport copy"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f"from builtins import zip as Z\n"
+                f'for f,a in Z([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"from builtins import map as M\n"
+                f'list(M(list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in zip(*([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))])): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f"args=([list.append],[(xs, partial(setattr, ns, \"e\"))])\n"
+                f"for f,a in zip(*args): f(*a)\n"
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f"Z=zip\n"
+                f"args=([list.append],[(xs, partial(setattr, ns, \"e\"))])\n"
+                f"for f,a in Z(*args): f(*a)\n"
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f"args=([list.append],[(xs, partial(setattr, ns, \"e\"))])\n"
+                f"for f,a in [zip][0](*args): f(*a)\n"
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'list(map(list.append, *([xs:=[]], '
+                f'[partial(setattr, ns, "e")]))); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"M=map\n"
+                f'list(M(list.append, *([xs:=[]], '
+                f'[partial(setattr, ns, "e")]))); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in copy.copy([zip])[0]([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in copy.deepcopy([zip])[0]([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in getattr(copy,"copy")([zip])[0]([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f"p=[zip]\n"
+                f'for f,a in p[0]([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                # Relaunch: Attribute builtins.map + packed partial(zip).
+                f'ns=types.SimpleNamespace()\n'
+                f"M=builtins.map\n"
+                f'list(M(list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"M=builtins.map\n"
+                f'if list(M(list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])): pass\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in [partial(zip)][0]([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in (0 or partial(zip))([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in next(iter([partial(zip)]))([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in [partial([zip][0])][0]([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                # Twenty-second / relaunch keep-closed anchors.
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f"Z=zip\n"
+                f'for f,a in Z([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'list(map(list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f"Z=builtins.zip\n"
+                f'for f,a in Z([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in partial(zip)([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'Z=getattr(builtins,"zip")\n'
+                f'for f,a in Z([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_twenty_third_pass_lexical_star_itemgetter_never_authorized() -> None:
+    """Lexical star BoolOp/IfExp over getitem + itemgetter(slice) packs."""
+
+    lex_imp = "import operator\nfrom functools import partial"
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, lex_imp)
+            for c in (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(*(0 or (xs.__getitem__, slice(0,1))))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(*((xs.__getitem__, slice(0,1)) if True else ()))][0]"
+                "()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(*(0 or (operator.getitem, xs, slice(0,1))))][0]"
+                "()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "args=(0 or (xs.__getitem__, slice(0,1)))\n"
+                "e=[partial(*args)][0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "args=(xs.__getitem__, slice(0,1))\n"
+                "e=[partial(*(0 or args))][0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "args=([0 or operator.getitem][0], xs, slice)\n"
+                "e=[partial(*(args if True else ()))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial([0 or operator.itemgetter(slice(0,1))][0], xs)][0]"
+                "()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(operator.itemgetter(slice(0,1)), xs)][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial((0 or operator.itemgetter(slice(0,1))), xs)][0]"
+                "()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(getattr(operator,'itemgetter')(slice(0,1)), xs)][0]"
+                "()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                # Twenty-second keep-closed anchors.
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial([0 or xs.__getitem__][0], slice(0,1))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial((0 or xs.__getitem__), slice(0,1))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+            )
+        )
+    )
+
+
+def test_twenty_third_pass_interproc_name_seed_str_never_authorized() -> None:
+    """Interproc Name-bound orelse/empty-or method str via shared seed."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "from operator import methodcaller; views=[]; "
+        "nm=('x' if False else 'append'); methodcaller(nm, n.install)(views); "
+        "views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "nm=('' or 'append'); methodcaller(nm, n.install)(views); "
+        "views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "nm=(0 or 'append'); methodcaller(nm, n.install)(views); "
+        "views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "nm=(None or 'append'); methodcaller(nm, n.install)(views); "
+        "views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "nm=(False or 'append'); methodcaller(nm, n.install)(views); "
+        "views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "nm=('x' if False else ('y' if False else 'append')); "
+        "methodcaller(nm, n.install)(views); views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "nm=('x' if False else 'extend'); methodcaller(nm, n.install)(views); "
+        "views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "a=('' or 'append'); nm=a; methodcaller(nm, n.install)(views); "
+        "views[0](evil)",
+        # Relaunch: methodcaller/nullcontext star packs + Name seeds.
+        "from operator import methodcaller; views=[]; "
+        "methodcaller(*(() if False else ('append', n.install)))(views); "
+        "views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "args=(0 or ('append', n.install)); methodcaller(*args)(views); "
+        "views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "args=('' or ('append', n.install)); methodcaller(*args)(views); "
+        "views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "args=('append', n.install); "
+        "methodcaller(*(() if False else args))(views); views[0](evil)",
+        "from contextlib import nullcontext; args=(n.install,); "
+        "f=nullcontext(*args).__enter__(); f(evil)",
+        "from contextlib import nullcontext; "
+        "f=nullcontext(*(0 or (n.install,))).__enter__(); f(evil)",
+        "from contextlib import nullcontext; "
+        "f=nullcontext(*((n.install,) if True else ())).__enter__(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,); "
+        "f=nullcontext(*(() if False else args)).__enter__(); f(evil)",
+        # Keep-closed anchors.
+        "from operator import methodcaller; views=[]; "
+        "methodcaller(('x' if False else 'append'), n.install)(views); "
+        "views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "nm='append'; methodcaller(nm, n.install)(views); views[0](evil)",
+        "from operator import methodcaller; views=[]; "
+        "nm=('append' if True else 'x'); methodcaller(nm, n.install)(views); "
+        "views[0](evil)",
+        "from contextlib import nullcontext; "
+        "f=nullcontext(*(n.install,)).__enter__(); f(evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_twenty_third_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of twenty-third-pass shapes remain authorized."""
+
+    for body in (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=[partial(copy.copy)].pop(0)(keys)\n"
+        'k=c.get("x")\n'
+        'Proxy=getattr(ns,"get")(k)\nProxy({})',
+        "import types\nfrom functools import partial\n"
+        'ns=types.SimpleNamespace()\nkw={"x":1}\n'
+        "args=(dict.update, vars(ns), (kw if True else {})); "
+        "next(iter([partial(*(args if True else ()))]))()\n"
+        "ns.x",
+        "import operator\n"
+        "args=(list.__dict__, 'sort'); s=slice(0,2); "
+        "g=operator.getitem(*args[s]).__get__(None, list)\n"
+        "xs=[1]\ng(xs, key=lambda x: x)",
+        "import types\nfrom functools import partial\n"
+        "import builtins\n"
+        'ns=types.SimpleNamespace()\nxs=[]\n'
+        "from builtins import zip as Z\n"
+        'for f,a in Z([list.append],'
+        '[(xs, partial(setattr, ns, "x"))]): f(*a)\n'
+        "xs[0](1)\nns.x",
+        "import types\nfrom functools import partial\nimport builtins\n"
+        'ns=types.SimpleNamespace()\n'
+        "M=builtins.map\n"
+        'list(M(list.append, [xs:=[]], [partial(setattr, ns, "x")])); '
+        "xs[0](1)\nns.x",
+        "import types\nfrom functools import partial\n"
+        'ns=types.SimpleNamespace()\nxs=[]\n'
+        'for f,a in [partial(zip)][0]([list.append],'
+        '[(xs, partial(setattr, ns, "x"))]): f(*a)\n'
+        "xs[0](1)\nns.x",
+        "d=getattr(list, *('__dict__',)); m=d.get('sort'); "
+        "g=m.__get__(None, list)\nxs=[1]\ng(xs, key=lambda x: x)",
+        "import operator\nfrom functools import partial\nd={}\n"
+        "xs=[getattr(operator,'methodcaller')('copy')]\n"
+        "e=[partial(*(0 or (xs.__getitem__, slice(0,1))))][0]()[0](d)\n"
+        "e|={}\nlen(e)",
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_twenty_fourth_pass_cf_map_star_fn_pack_never_authorized() -> None:
+    """CF map(*iters) fn-in-pack + packed partial(map) siblings."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial, reduce\n"
+        "import operator\nimport builtins\nimport copy"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f'iters=(list.append, [xs:=[]], [partial(setattr, ns, "e")])\n'
+                f"list(map(*iters)); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'iters=(list.append, [xs:=[]], [partial(setattr, ns, "e")])\n'
+                f"list(map(*(0 or iters))); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'iters=(list.append, [xs:=[]], [partial(setattr, ns, "e")])\n'
+                f"list(map(*(iters if True else ()))); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nM=map\n'
+                f'iters=(list.append, [xs:=[]], [partial(setattr, ns, "e")])\n'
+                f"list(M(*(0 or iters))); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'iters=(list.append, [xs:=[]], [partial(setattr, ns, "e")])\n'
+                f"list(builtins.map(*(0 or iters))); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'iters=(list.append, [xs:=[]], [partial(setattr, ns, "e")])\n'
+                f"list([map][0](*(0 or iters))); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"from builtins import map as M\n"
+                f'iters=(list.append, [xs:=[]], [partial(setattr, ns, "e")])\n'
+                f"list(M(*(0 or iters))); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'if list(map(*(0 or (list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])))): pass\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'list([partial(map)][0](list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])); xs[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'list((0 or partial(map))(list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])); xs[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'list(next(iter([partial(map)]))(list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])); xs[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'list([partial(builtins.map)][0](list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])); xs[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'list([partial([map][0])][0](list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])); xs[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'list(copy.copy([partial(map)])[0](list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])); xs[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'if list([partial(map)][0](list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])): pass\n'
+                f"xs[0](exec)\nns.e({ex})",
+                # Keep-closed anchors.
+                f'ns=types.SimpleNamespace()\n'
+                f'list(map(list.append, *([xs:=[]], '
+                f'[partial(setattr, ns, "e")]))); xs[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'list(partial(map)(list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])); xs[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in [partial(zip)][0]([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_twenty_fourth_pass_identity_chained_expr_never_authorized() -> None:
+    """Identity chained/expression-form dict peels without mid-bind."""
+
+    _assert_ninth_not_authorized(
+        (
+            (
+                "d=dict(list.__dict__); "
+                "g=d.setdefault(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=d.setdefault('sort').__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=dict(list.__dict__); keys=('sort',); "
+                "g=d.setdefault(*keys).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=getattr(d,'setdefault')(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=d.setdefault(*(0 or ('sort',))).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=(0 or d.setdefault)(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[d.setdefault][0](*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=next(iter([d.setdefault]))(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=dict(list.__dict__).pop(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=dict(list.__dict__).get(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "g=dict(list.__dict__).__getitem__(*('sort',))"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "import operator\n"
+                "g=operator.getitem(dict(list.__dict__),'sort')"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "import operator",
+            ),
+            (
+                "g=dict(getattr(list,*('__dict__',))).pop(*('sort',))"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            # Keep-closed anchors.
+            (
+                "d=dict(list.__dict__); m=d.pop(*('sort',)); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+            (
+                "d=dict(list.__dict__); m=d.setdefault(*('sort',)); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "",
+            ),
+        )
+    )
+
+
+def test_twenty_fourth_pass_lexical_itemgetter_star_never_authorized() -> None:
+    """Lexical star-packed itemgetter / Name ig / nested partial getitem."""
+
+    lex_imp = "import operator\nfrom functools import partial"
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, lex_imp)
+            for c in (
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(*(0 or (operator.itemgetter(slice(0,1)), xs)))][0]"
+                "()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(*((operator.itemgetter(slice(0,1)), xs) "
+                "if True else ()))][0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(*('' or (operator.itemgetter(slice(0,1)), xs)))][0]"
+                "()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "args=(operator.itemgetter(slice(0,1)), xs)\n"
+                "e=[partial(*args)][0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "args=(operator.itemgetter(slice(0,1)), xs)\n"
+                "e=[partial(*(0 or args))][0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "ig=operator.itemgetter(slice(0,1)); "
+                "e=[partial(ig, xs)][0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "from operator import itemgetter\n"
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "ig=itemgetter(slice(0,1)); e=[partial(ig, xs)][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(getattr(operator,'itemgetter')"
+                "(*(0 or (slice(0,1),))), xs)][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(partial(*(0 or (xs.__getitem__,))), slice(0,1))][0]"
+                "()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(*(0 or (partial(xs.__getitem__), slice(0,1))))][0]"
+                "()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                # Keep-closed anchors.
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(*(0 or (xs.__getitem__, slice(0,1))))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+                "e=[partial(operator.itemgetter(slice(0,1)), xs)][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+            )
+        )
+    )
+
+
+def test_twenty_fourth_pass_alias_getattr_call_never_authorized() -> None:
+    """Alias getattr/methodcaller/Name itemgetter/operator.call peels."""
+
+    cases = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'c=getattr([partial(copy.copy)],"pop")(0)(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\nimport builtins\n"
+        'c=builtins.getattr([partial(copy.copy)],"pop")(0)(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'c=operator.methodcaller("pop",0)([partial(copy.copy)])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "ig=operator.itemgetter(0); c=ig([partial(copy.copy)])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=[operator.itemgetter(0)][0]([partial(copy.copy)])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=(0 or operator.itemgetter(0))([partial(copy.copy)])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem); '
+        "p(*(next(iter([(args if True else ())]))))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem); '
+        "p(*(iter([(args if True else ())]).__next__()))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=[partial(*((copy.copy, keys) if True else ()))].pop(0)()\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=[partial(*((copy.copy, keys) if True else ()))].__getitem__(0)()\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=operator.itemgetter(0)("
+        "[partial(*((copy.copy, keys) if True else ()))])()\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=next(iter([partial(*((copy.copy, keys) if True else ()))]))()\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=[operator.call].pop(0)(partial(copy.copy), keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "args=(partial(copy.copy), keys)\n"
+        "c=operator.call(*(args if True else ()))\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        # Keep-closed anchors.
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=[partial(copy.copy)][0](keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=operator.itemgetter(0)([partial(copy.copy)])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=[partial(*((copy.copy, keys) if True else ()))][0]()\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_twenty_fourth_pass_class_bound_fullbind_never_authorized() -> None:
+    """Class bound update fullbind / **kw / getattr / setdefault / setitem."""
+
+    ex = _NINTH_EXEC
+    class_imp = "import types\nimport operator\nfrom functools import partial"
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(vars(ns).update, "
+                f"(kw if True else {{}}))]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(vars(ns).update)]))"
+                f"(**(kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f'next(iter([partial(getattr(vars(ns),"update"))]))'
+                f"((kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f'attr=("update" if True else "x")\n'
+                f"next(iter([partial(getattr(vars(ns), attr))]))"
+                f"((kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f'next(iter([partial(getattr(vars(ns), '
+                f'(0 or "update")))]))((kw if True else {{}}))\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'next(iter([partial(vars(ns).setdefault, "e", exec)]))()\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'args=(operator.setitem, vars(ns), "e", exec); '
+                f"next(iter([partial(*args)]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'args=(dict.__setitem__, vars(ns), "e", exec); '
+                f"next(iter([partial(*args)]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'next(iter([partial(vars(ns).__setitem__, "e", exec)]))()\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"args=(vars(ns).__ior__, (kw if True else {{}})); "
+                f"next(iter([partial(*args)]))()\nns.e({ex})",
+                # Keep-closed anchors.
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(vars(ns).update)]))"
+                f"((kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"args=(dict.update, vars(ns), (kw if True else {{}})); "
+                f"next(iter([partial(*args)]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'args=(dict.setdefault, vars(ns), "e", exec); '
+                f"next(iter([partial(*args)]))()\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_twenty_fourth_pass_interproc_with_as_star_never_authorized() -> None:
+    """Interproc With.as nullcontext Name-star packs (sequence_aliases)."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    with nullcontext(*args) as f:\n"
+        "        f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    with nullcontext(*(0 or args)) as f:\n"
+        "        f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    with nullcontext(*('' or args)) as f:\n"
+        "        f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    with nullcontext(*(() if False else args)) as f:\n"
+        "        f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    with nullcontext(*(args if True else ())) as f:\n"
+        "        f(evil)",
+        "from contextlib import nullcontext; args=[n.install]\n"
+        "    with nullcontext(*args) as f:\n"
+        "        f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    with nullcontext(*tuple(args)) as f:\n"
+        "        f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    with nullcontext(*args[0:1]) as f:\n"
+        "        f(evil)",
+        "from contextlib import nullcontext; NC=nullcontext; "
+        "args=(n.install,)\n"
+        "    with NC(*args) as f:\n"
+        "        f(evil)",
+        "import contextlib; args=(n.install,)\n"
+        "    with contextlib.nullcontext(*args) as f:\n"
+        "        f(evil)",
+        "import contextlib; args=(n.install,)\n"
+        "    with getattr(contextlib,'nullcontext')(*args) as f:\n"
+        "        f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    with (0 or nullcontext)(*args) as f:\n"
+        "        f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    with [nullcontext][0](*args) as f:\n"
+        "        f(evil)",
+        # Keep-closed anchors.
+        "from contextlib import nullcontext\n"
+        "    with nullcontext(*(n.install,)) as f:\n"
+        "        f(evil)",
+        "from contextlib import nullcontext; args=(n.install,); "
+        "f=nullcontext(*args).__enter__(); f(evil)",
+        # Relaunch digs: deferred enter / nested star / nested BoolOp star.
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); f=cm.__enter__(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*(0 or args)); f=cm.__enter__(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*(args if True else ())); f=cm.__enter__(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,); "
+        "f=nullcontext(*(*(args,),)).__enter__(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    with nullcontext(*(*(args,),)) as f:\n"
+        "        f(evil)",
+        "from contextlib import nullcontext; "
+        "f=nullcontext(*(('' or (n.install,)),)).__enter__(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,); "
+        "f=nullcontext(*(('' or args),)).__enter__(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,); "
+        "f=nullcontext(*((0 or args),)).__enter__(); f(evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_twenty_fourth_pass_interproc_methodcaller_nested_star_never_authorized() -> None:
+    """Interproc methodcaller nested star / Name method-str constructions."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "import operator; views=[]; args=('append', n.install); "
+        "operator.methodcaller(*(*(args,),))(views); views[0](evil)",
+        "import operator; views=[]; "
+        "operator.methodcaller(*(('' or ('append', n.install)),))(views); "
+        "views[0](evil)",
+        "import operator; views=[]; args=('append', n.install); "
+        "operator.methodcaller(*(('' or args),))(views); views[0](evil)",
+        "import operator; views=[]; args=('append', n.install); "
+        "operator.methodcaller(*((0 or args),))(views); views[0](evil)",
+        # Keep-closed bare star.
+        "import operator; views=[]; args=('append', n.install); "
+        "operator.methodcaller(*args)(views); views[0](evil)",
+        # Name method-str constructions (runtime poison).
+        "import operator; views=[]; nm=''.join(['ap','pend']); "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; x='append'; nm=f'{x}'; "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; nm='ap'+'pend'; "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; nm='{}'.format('append'); "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; nm='%s' % 'append'; "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; nm=str('append'); "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; nm=b'append'.decode(); "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_twenty_fourth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of twenty-fourth-pass shapes remain authorized."""
+
+    for body in (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'c=getattr([partial(copy.copy)],"pop")(0)(keys)\n'
+        'k=c.get("x")\n'
+        'Proxy=getattr(ns,"get")(k)\nProxy({})',
+        "import types\nfrom functools import partial\n"
+        'ns=types.SimpleNamespace()\nkw={"x":1}\n'
+        "next(iter([partial(vars(ns).update, (kw if True else {}))]))()\n"
+        "ns.x",
+        "import types\nfrom functools import partial\nimport builtins\n"
+        'ns=types.SimpleNamespace()\n'
+        "iters=(list.append, [xs:=[]], [partial(setattr, ns, 'x')])\n"
+        "list(map(*(0 or iters))); xs[0](1)\nns.x",
+        "import types\nfrom functools import partial\n"
+        'ns=types.SimpleNamespace()\n'
+        "list([partial(map)][0](list.append, [xs:=[]], "
+        "[partial(setattr, ns, 'x')])); xs[0](1)\nns.x",
+        "d=dict(list.__dict__); "
+        "g=d.setdefault(*('sort',)).__get__(None, list)\n"
+        "xs=[1]\ng(xs, key=lambda x: x)",
+        "import operator\nfrom functools import partial\nd={}\n"
+        "xs=[getattr(operator,'methodcaller')('copy')]\n"
+        "e=[partial(*(0 or (operator.itemgetter(slice(0,1)), xs)))][0]"
+        "()[0](d)\ne|={}\nlen(e)",
+        "import operator\nfrom functools import partial\n"
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "c=[operator.call].pop(0)(partial(copy.copy), keys)\n"
+        'k=c.get("x")\n'
+        'Proxy=getattr(ns,"get")(k)\nProxy({})',
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_twenty_fifth_pass_cf_partial_map_zip_filter_never_authorized() -> None:
+    """CF partial(map|zip) mid-bind + filter(*pack) star flatten."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial\n"
+        "import operator\nimport builtins\nimport copy"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f'list(partial(map, list.append)([xs:=[]], '
+                f'[partial(setattr, ns, "e")])); xs[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'list([partial(map, list.append)][0]([xs:=[]], '
+                f'[partial(setattr, ns, "e")])); xs[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'list((0 or partial(map, list.append))([xs:=[]], '
+                f'[partial(setattr, ns, "e")])); xs[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'list(next(iter([partial(map, list.append)]))([xs:=[]], '
+                f'[partial(setattr, ns, "e")])); xs[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'list(copy.copy([partial(map, list.append)])[0]([xs:=[]], '
+                f'[partial(setattr, ns, "e")])); xs[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'rest=([xs:=[]], [partial(setattr, ns, "e")])\n'
+                f"list(partial(map, list.append)(*rest)); "
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"from builtins import map as M\n"
+                f'list(partial(M, list.append)([xs:=[]], '
+                f'[partial(setattr, ns, "e")])); xs[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'list(partial(builtins.map, list.append)([xs:=[]], '
+                f'[partial(setattr, ns, "e")])); xs[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'list(partial([map][0], list.append)([xs:=[]], '
+                f'[partial(setattr, ns, "e")])); xs[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'if list(partial(map, list.append)([xs:=[]], '
+                f'[partial(setattr, ns, "e")])): pass\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'for _ in list(partial(map, list.append)([xs:=[]], '
+                f'[partial(setattr, ns, "e")])): pass\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in [partial(zip, [list.append])][0]'
+                f'([(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in (0 or partial(zip, [list.append]))'
+                f'([(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in next(iter([partial(zip, [list.append])]))'
+                f'([(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in [partial(builtins.zip, [list.append])][0]'
+                f'([(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in [partial(zip, *([list.append],))][0]'
+                f'([(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'iters=(xs.append, [partial(setattr, ns, "e")])\n'
+                f"list(filter(*iters)); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'iters=(xs.append, [partial(setattr, ns, "e")])\n'
+                f"list(filter(*(0 or iters))); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'iters=(xs.append, [partial(setattr, ns, "e")])\n'
+                f"list([filter][0](*iters)); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'iters=(xs.append, [partial(setattr, ns, "e")])\n'
+                f"list(builtins.filter(*iters)); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]; F=filter\n'
+                f'iters=(xs.append, [partial(setattr, ns, "e")])\n'
+                f"list(F(*iters)); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'list([partial(filter)][0](xs.append, '
+                f'[partial(setattr, ns, "e")])); xs[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'if list(filter(*(xs.append, '
+                f'[partial(setattr, ns, "e")]))): pass\n'
+                f"xs[0](exec)\nns.e({ex})",
+                # Keep-closed anchors.
+                f'ns=types.SimpleNamespace()\n'
+                f'iters=(list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])\n'
+                f"list(map(*iters)); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'list([partial(map)][0](list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])); xs[0](exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'for f,a in [partial(zip)][0]([list.append],'
+                f'[(xs, partial(setattr, ns, "e"))]): f(*a)\n'
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nxs=[]\n'
+                f'list(filter(xs.append, [partial(setattr, ns, "e")])); '
+                f"xs[0](exec)\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_twenty_fifth_pass_identity_dict_peels_never_authorized() -> None:
+    """Identity BoolOp/dict ctor + unbound pop + copy + getattr*attrs."""
+
+    id_imp = "import copy\nfrom functools import partial"
+    _assert_ninth_not_authorized(
+        (
+            (
+                "g=(0 or dict)(list.__dict__).setdefault(*('sort',))"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "g=next(iter([dict]))(list.__dict__).pop(*('sort',))"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=dict(list.__dict__)['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "g=dict.pop(dict(list.__dict__), *('sort',))"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=dict.pop(*(d,'sort')).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=dict(list.__dict__).pop('sort'); attrs=('__get__',); "
+                "g=getattr(m, *attrs)(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=d.copy().pop(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=copy.copy(d).pop(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(d.pop)][0](*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            # Keep-closed anchors.
+            (
+                "d=dict(list.__dict__); "
+                "g=d.setdefault(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); m=d.pop(*('sort',)); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+        )
+    )
+
+
+def test_twenty_fifth_pass_lexical_methodcaller_itemgetter_never_authorized() -> None:
+    """Lexical methodcaller getitem star + nested partial(ig) + lambda mid-bind."""
+
+    lex_imp = "import operator\nfrom functools import partial"
+    sc = "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, lex_imp)
+            for c in (
+                sc
+                + "e=[partial(*(0 or (operator.methodcaller('__getitem__', "
+                "slice(0,1)), xs)))][0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                sc
+                + "e=[partial(*((operator.methodcaller('__getitem__', "
+                "slice(0,1)), xs) if True else ()))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                "e=[partial(*(mc, xs))][0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                sc
+                + "e=[partial(*(0 or (getattr(operator,'methodcaller')"
+                "('__getitem__', slice(0,1)), xs)))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "e=[partial(partial(*(0 or (operator.itemgetter"
+                "(slice(0,1)),))), xs)][0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                sc
+                + "ig=operator.itemgetter(slice(0,1)); "
+                "e=[partial(partial(ig), xs)][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "ig=operator.itemgetter(slice(0,1)); "
+                "e=[partial(*(partial(ig), xs))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "ig=operator.itemgetter(slice(0,1)); "
+                "e=[partial((lambda: ig)(), xs)][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "ig=operator.itemgetter(slice(0,1)); "
+                "e=[partial((lambda ig=ig: ig)(), xs)][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "e=[partial((lambda: operator.itemgetter(slice(0,1)))(), "
+                "xs)][0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                # Keep-closed anchors.
+                sc
+                + "ig=operator.itemgetter(slice(0,1)); "
+                "e=[partial(ig, xs)][0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+                sc
+                + "ig=operator.itemgetter(slice(0,1)); p=partial(ig); "
+                "e=[partial(p, xs)][0]()[0](d)\ne|={}\nC,=e.keys()\nC()",
+            )
+        )
+    )
+
+
+def test_twenty_fifth_pass_alias_getattr_methodcaller_call_never_authorized() -> None:
+    """Alias Name-attr getattr / Name methodcaller / packed operator.call."""
+
+    cases = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'n="pop"; c=getattr([partial(copy.copy)], n)(0)(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'c=[getattr][0]([partial(copy.copy)], "pop")(0)(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'c=(0 or getattr)([partial(copy.copy)], "pop")(0)(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\nimport builtins\n"
+        'c=getattr(builtins,"getattr")([partial(copy.copy)], "pop")'
+        "(0)(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'c=partial(getattr,[partial(copy.copy)],"pop")()(0)(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'mc=operator.methodcaller("pop",0); '
+        "c=mc([partial(copy.copy)])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=("pop",0); '
+        "c=operator.methodcaller(*args)([partial(copy.copy)])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=("pop",0); '
+        "c=operator.methodcaller(*(args if True else ()))"
+        "([partial(copy.copy)])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'c=operator.attrgetter("pop")([partial(copy.copy)])(0)(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=[operator.call][0](partial(copy.copy), keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=(0 or operator.call)(partial(copy.copy), keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=next(iter([operator.call]))(partial(copy.copy), keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=operator.call.__call__(partial(copy.copy), keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'c=[getattr(operator,"call")][0](partial(copy.copy), keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        # Keep-closed anchors.
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'c=getattr([partial(copy.copy)],"pop")(0)(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "c=[operator.call].pop(0)(partial(copy.copy), keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_twenty_fifth_pass_class_factory_kw_setitem_never_authorized() -> None:
+    """Class factory **kw update + bound __setitem__ apply + nested star."""
+
+    ex = _NINTH_EXEC
+    class_imp = "import types\nimport operator\nfrom functools import partial"
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(vars(ns).update, "
+                f"**(kw if True else {{}}))]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(vars(ns).update, "
+                f"**(0 or kw))]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f'next(iter([partial(getattr(vars(ns),"update"), '
+                f"**(kw if True else {{}}))]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(ns.__dict__.update, "
+                f"**(kw if True else {{}}))]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'next(iter([partial(vars(ns).__setitem__)]))'
+                f'("e", exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'kv=("e", exec); '
+                f'next(iter([partial(vars(ns).__setitem__)]))(*kv)\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'kv=("e", exec); '
+                f'next(iter([partial(vars(ns).__setitem__)]))'
+                f"(*(kv if True else ()))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"next(iter([partial(getattr(vars(ns), '__setitem__'))]))"
+                f'("e", exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'next(iter([partial(ns.__dict__.__setitem__)]))'
+                f'("e", exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"args=(vars(ns).update, (kw if True else {{}})); "
+                f"next(iter([partial(*(*(args,),))]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'args=(vars(ns).__setitem__, "e", exec); '
+                f"next(iter([partial(*(*(args,),))]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'args=(vars(ns).setdefault, "e", exec); '
+                f"next(iter([partial(*(*(args,),))]))()\nns.e({ex})",
+                # Keep-closed anchors.
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(vars(ns).update, "
+                f"(kw if True else {{}}))]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(vars(ns).update)]))"
+                f"(**(kw if True else {{}}))\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'next(iter([partial(vars(ns).__setitem__, "e", exec)]))()\n'
+                f"ns.e({ex})",
+            )
+        )
+    )
+
+
+def test_twenty_fifth_pass_interproc_cm_encode_never_authorized() -> None:
+    """Interproc deferred cm peels + encode/decode method-str mid-bind."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); f=(0 or cm).__enter__(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); f=(False or cm).__enter__(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); f=(None or cm).__enter__(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); f=('' or cm).__enter__(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); f=(cm if True else None).__enter__(); "
+        "f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); f=[cm][0].__enter__(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); f=next(iter([cm])).__enter__(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); f=(cm,)[0].__enter__(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); f=getattr(cm,'__enter__')(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*(*(args,),)); f=(0 or cm).__enter__(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); f=[cm][0].__enter__(); f(evil)",
+        # Keep-closed bare enter.
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); f=cm.__enter__(); f(evil)",
+        "import operator; views=[]; b=b'append'; nm=b.decode(); "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; nm='append'.encode().decode(); "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; nm=b'append'.decode('utf-8'); "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; b=b'append'; "
+        "nm=getattr(b,'decode')(); "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; "
+        "nm='append'.encode('utf-8').decode(); "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; nm=bytes(b'append').decode(); "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; "
+        "nm=memoryview(b'append').tobytes().decode(); "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        # Keep-closed inline decode.
+        "import operator; views=[]; nm=b'append'.decode(); "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_twenty_fifth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of twenty-fifth-pass shapes remain authorized."""
+
+    for body in (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'n="pop"; c=getattr([partial(copy.copy)], n)(0)(keys)\n'
+        'k=c.get("x")\n'
+        'Proxy=getattr(ns,"get")(k)\nProxy({})',
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'c=operator.attrgetter("pop")([partial(copy.copy)])(0)(keys)\n'
+        'k=c.get("x")\n'
+        'Proxy=getattr(ns,"get")(k)\nProxy({})',
+        "import types\nfrom functools import partial\n"
+        'ns=types.SimpleNamespace()\nkw={"x":1}\n'
+        "next(iter([partial(vars(ns).update, "
+        "**(kw if True else {}))]))()\n"
+        "ns.x",
+        "import types\nfrom functools import partial\n"
+        'ns=types.SimpleNamespace()\n'
+        "list(partial(map, list.append)([xs:=[]], "
+        "[partial(setattr, ns, 'x')])); xs[0](1)\nns.x",
+        "import types\nfrom functools import partial\n"
+        'ns=types.SimpleNamespace()\nxs=[]\n'
+        "list(filter(xs.append, [partial(setattr, ns, 'x')])); "
+        "xs[0](1)\nns.x",
+        "d=dict(list.__dict__); "
+        "g=dict.pop(*(d,'sort')).__get__(None, list)\n"
+        "xs=[1]\ng(xs, key=lambda x: x)",
+        "import operator\nfrom functools import partial\nd={}\n"
+        "xs=[getattr(operator,'methodcaller')('copy')]\n"
+        "e=[partial(*(0 or (operator.methodcaller('__getitem__', "
+        "slice(0,1)), xs)))][0]()[0](d)\ne|={}\nlen(e)",
+        "import operator\nfrom functools import partial\n"
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "c=[operator.call][0](partial(copy.copy), keys)\n"
+        'k=c.get("x")\n'
+        'Proxy=getattr(ns,"get")(k)\nProxy({})',
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_twenty_fifth_pass_relaunch_digs_never_authorized() -> None:
+    """Twenty-fifth-pass relaunch digs closed via shared peel/seed."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial\n"
+        "import operator\nimport builtins\nimport copy"
+    )
+    # CF packed fullbind / star-prebind (keep-closed bare fullbind).
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f'list([partial(*(map, list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")]))][0]()); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'list((0 or partial(*(map, list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])))()); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'list(next(iter([partial(*(map, list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")]))]))()); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'list([partial(map, list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])][0]()); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'list(partial(*(map, list.append))([xs:=[]], '
+                f'[partial(setattr, ns, "e")])); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'list(partial(*(0 or (map, list.append)))([xs:=[]], '
+                f'[partial(setattr, ns, "e")])); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'list(partial(map, list.append, [xs:=[]], '
+                f'[partial(setattr, ns, "e")])()); '
+                f"xs[0](exec)\nns.e({ex})",
+            )
+        )
+    )
+    class_imp = "import types\nimport operator\nfrom functools import partial"
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f"next(iter([partial(vars(ns).update, e=exec)]))()\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"next(iter([partial(getattr(vars(ns),'update'), "
+                f"e=exec)]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"next(iter([partial(ns.__dict__.update, e=exec)]))()\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"next(iter([partial(dict.update, vars(ns), "
+                f"e=exec)]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(partial(vars(ns).update), "
+                f"**(kw if True else {{}}))]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"next(iter([partial(partial(vars(ns).update), "
+                f"e=exec)]))()\nns.e({ex})",
+            )
+        )
+    )
+    lex_imp = "import operator\nfrom functools import partial"
+    sc = "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, lex_imp)
+            for c in (
+                sc
+                + "e=[partial(operator.methodcaller("
+                "*('__getitem__', slice(0,1))), xs)][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "e=[partial(operator.methodcaller("
+                "*(0 or ('__getitem__', slice(0,1)))), xs)][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "e=[partial(*(operator.methodcaller("
+                "*('__getitem__', slice(0,1))), xs))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "e=[partial(*(0 or (operator.call, "
+                "operator.itemgetter(slice(0,1)), xs)))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "e=[partial(*(operator.call, "
+                "operator.itemgetter(slice(0,1)), xs))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "e=[partial(*((operator.call, "
+                "operator.itemgetter(slice(0,1)), xs) "
+                "if True else ()))][0]()[0](d)\n"
+                "e|={}\nC,=e.keys()\nC()",
+            )
+        )
+    )
+    # Alias relaunch digs.
+    for body in (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'attrs=("pop",); c=getattr([partial(copy.copy)], *attrs)(0)(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'attrs=("pop",); '
+        "c=getattr([partial(copy.copy)], *(0 or attrs))(0)(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'c=next(iter([getattr([partial(copy.copy)],"pop")]))(0)(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'c=operator.methodcaller("__call__", partial(copy.copy), keys)'
+        "(operator.call)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem); '
+        "p(*([(args if True else ())].pop(0)))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    ):
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+    # Interproc relaunch digs.
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(); f(evil)",
+        "from contextlib import nullcontext\n"
+        "    f=nullcontext(*(0 or (n.install,))); e=f.__enter__; "
+        "g=e(); g(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    f=nullcontext(*args[::-1][::-1]).__enter__(); f(evil)",
+        "import operator; views=[]; nm='APPEND'.lower(); "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; nm='Xappend'.replace('X',''); "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; nm='xappend'.removeprefix('x'); "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; nm='append|x'.partition('|')[0]; "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; nm='append x'.split()[0]; "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; "
+        "nm=b''.join([b'ap',b'pend']).decode(); "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; nm=ascii('append')[1:-1]; "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+        "import operator; views=[]; "
+        "nm=getattr(str,'__call__')('append'); "
+        "operator.methodcaller(nm, n.install)(views); views[0](evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_twenty_sixth_pass_cf_name_bound_partial_map_never_authorized() -> None:
+    """CF Name-bound ``pm=partial(map, fn); pm(iters)`` + packing/__call__."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial\n"
+        "import operator\nimport builtins\nimport copy"
+    )
+    fn = "list.append"
+    vals = '[partial(setattr, ns, "e")]'
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\npm=partial(map, {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\npm=partial(map, {fn})\n'
+                f"list([pm][0]([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\npm=partial(map, {fn})\n'
+                f"list(next(iter([pm]))([xs:=[]], {vals})); "
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\npm=partial(map, {fn})\n'
+                f"list(copy.copy(pm)([xs:=[]], {vals})); "
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\npm=partial(map, {fn})\n'
+                f"packs=[pm]\nlist(packs.pop(0)([xs:=[]], {vals})); "
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\npm=partial(map, {fn})\n'
+                f'd={{"p":pm}}\nlist(d["p"]([xs:=[]], {vals})); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\npm=partial(*(map, {fn}))\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\npm=partial(map, {fn})\n'
+                f"if list(pm([xs:=[]], {vals})): pass\n"
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\npm=partial(map, {fn})\n'
+                f"match list(pm([xs:=[]], {vals})):\n    case _:\n        pass\n"
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\npm=partial(map, {fn})\n'
+                f"list(pm.__call__([xs:=[]], {vals})); "
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\npm=partial(map, {fn})\n'
+                f'list(getattr(pm,"__call__")([xs:=[]], {vals})); '
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\npm=partial(map, {fn})\n'
+                f"q=pm\nlist(q([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\npm=partial(map, {fn})\n'
+                f"q: object = pm\nlist(q([xs:=[]], {vals})); "
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\npm=partial(map, {fn})\n'
+                f"q, = (pm,)\nlist(q([xs:=[]], {vals})); "
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nfrom builtins import map as M\n'
+                f"pm=partial(M, {fn})\nlist(pm([xs:=[]], {vals})); "
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"pm=partial(builtins.map, {fn})\n"
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                # Keep-closed anchors.
+                f'ns=types.SimpleNamespace()\n'
+                f"list(partial(map, {fn})([xs:=[]], {vals})); "
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"pm=partial(map, {fn}, [xs:=[]], {vals})\n"
+                f"list(pm()); xs[0](exec)\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_twenty_sixth_pass_identity_packed_dict_never_authorized() -> None:
+    """Identity packed constructed-dict + getattr-copy peels."""
+
+    id_imp = "import copy\nfrom functools import partial"
+    _assert_ninth_not_authorized(
+        (
+            (
+                "m=[dict(list.__dict__)][0]['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); m=[d][0]['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m={0:dict(list.__dict__)}[0]['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=next(iter([dict(list.__dict__)]))['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=(0 or [dict(list.__dict__)])[0]['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=getattr(d,'copy')().pop(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=getattr(d,*('copy',))().pop(*('sort',))"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[getattr(d,'copy')][0]().pop(*('sort',))"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=copy.copy([d])[0].pop(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[d].copy()[0].pop(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            # Keep-closed anchors.
+            (
+                "m=dict(list.__dict__)['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=d.copy().pop(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+        )
+    )
+
+
+def test_twenty_sixth_pass_lexical_lambda_nested_never_authorized() -> None:
+    """Lexical lambda mid-bind methodcaller + double-nest + star nested partial."""
+
+    lex_imp = "import operator\nfrom functools import partial"
+    sc = "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, lex_imp)
+            for c in (
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial((lambda: mc)(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial(*((lambda: mc)(), xs))][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "ig=operator.itemgetter(slice(0,1))\n"
+                + "e=[partial((lambda: (lambda: ig)())(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "ig=operator.itemgetter(slice(0,1))\n"
+                + "e=[partial(*(partial(partial(ig)), xs))][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial(*(partial(partial(mc)), xs))][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                # Keep-closed anchors.
+                sc
+                + "ig=operator.itemgetter(slice(0,1))\n"
+                + "e=[partial((lambda: ig)(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "ig=operator.itemgetter(slice(0,1))\n"
+                + "e=[partial(partial(ig), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+            )
+        )
+    )
+
+
+def test_twenty_sixth_pass_alias_call_packing_never_authorized() -> None:
+    """Alias getattr/methodcaller __call__ packing + setitem star peels."""
+
+    cases = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'c=getattr([partial(copy.copy)],"pop").__call__(0)(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'c=[getattr([partial(copy.copy)],"pop")][0].__call__(0)(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "p=partial(copy.copy)\n"
+        'c=[operator.methodcaller("__call__", p, keys)][0](operator.call)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "p=partial(copy.copy)\n"
+        'c=(0 or operator.methodcaller("__call__", p, keys))(operator.call)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "p(*([(args if True else ())].__getitem__(0)))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "operator.call(p, *([(args if True else ())].pop(0)))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x"))\n'
+        'operator.methodcaller("__call__", *([args].pop(0)))'
+        "(operator.setitem)\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        # Keep-closed anchors.
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'c=operator.methodcaller("__call__", partial(copy.copy), keys)'
+        "(operator.call)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "p(*([(args if True else ())].pop(0)))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_twenty_sixth_pass_class_half_bind_never_authorized() -> None:
+    """Class bound __setitem__/setdefault half-bind + nested inner-fullbind."""
+
+    ex = _NINTH_EXEC
+    class_imp = "import types\nimport operator\nfrom functools import partial"
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f'next(iter([partial(vars(ns).__setitem__, "e")]))(exec)\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'next(iter([partial(getattr(vars(ns),"__setitem__"), "e")]))'
+                f"(exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'next(iter([partial(ns.__dict__.__setitem__, "e")]))(exec)\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'next(iter([partial(vars(ns).__setitem__, *("e",))]))(exec)\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'(partial(vars(ns).__setitem__, "e") if True else None)'
+                f"(exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'next(iter([partial(partial(vars(ns).__setitem__, "e"))]))'
+                f"(exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"next(iter([partial(partial(vars(ns).__setitem__, "
+                f'"e", exec))]))()\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'next(iter([partial(vars(ns).setdefault, "e")]))(exec)\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"next(iter([partial(partial(vars(ns).setdefault, "
+                f'"e", exec))]))()\nns.e({ex})',
+                # Keep-closed anchors.
+                f'ns=types.SimpleNamespace()\n'
+                f'next(iter([partial(vars(ns).__setitem__)]))("e", exec)\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'next(iter([partial(vars(ns).__setitem__, "e", exec)]))()\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'p=partial(vars(ns).__setitem__, "e", exec)\n'
+                f"p()\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_twenty_sixth_pass_interproc_cm_peels_never_authorized() -> None:
+    """Interproc deferred-cm With peels + starred getattr enter + packed apply."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); f=getattr(*(cm,'__enter__'))(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); "
+        "f=getattr(*(0 or (cm,'__enter__')))(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args)\n"
+        "    with (0 or cm) as f: f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args)\n"
+        "    with [cm][0] as f: f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args)\n"
+        "    with next(iter([cm])) as f: f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=(0 or e)(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=[e][0](); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=getattr(cm,'__enter__'); "
+        "f=(0 or e)(); f(evil)",
+        # Keep-closed anchors.
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); f=cm.__enter__(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    with nullcontext(*args) as f: f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(); f(evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_twenty_sixth_pass_class_relaunch_never_authorized() -> None:
+    """Class relaunch: reduce identity peel, Name-seeded mutator, midbound setitem."""
+
+    ex = _NINTH_EXEC
+    class_imp = "import types\nimport operator\nfrom functools import partial, reduce"
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"reduce(lambda a,b: a, [partial(vars(ns).update, **kw)])()\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"reduce(lambda a,b: a, [partial(vars(ns).update, e=exec)])()\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"reduce(lambda a,b: a, [partial(partial(vars(ns).update), "
+                f"**kw)])()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'reduce(lambda a,b: a, [partial(vars(ns).__setitem__)])'
+                f'("e", exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"u=vars(ns).update\n"
+                f"next(iter([partial(u, **kw)]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f'u=getattr(vars(ns),"update")\n'
+                f"next(iter([partial(u, **kw)]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"u=ns.__dict__.update\n"
+                f"next(iter([partial(u, **kw)]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"si=vars(ns).__setitem__\n"
+                f'next(iter([partial(si)]))("e", exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'next(iter([partial(dict.__setitem__, vars(ns))]))'
+                f'("e", exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'next(iter([partial(operator.setitem, vars(ns))]))'
+                f'("e", exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'[partial(operator.setitem, vars(ns))][0]("e", exec)\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'(0 or partial(operator.setitem, vars(ns)))("e", exec)\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'next(iter([partial(partial(operator.setitem, vars(ns)), "e")]))'
+                f"(exec)\nns.e({ex})",
+                # Keep-closed anchors.
+                f'ns=types.SimpleNamespace()\n'
+                f'next(iter([partial(operator.setitem, vars(ns), "e")]))(exec)\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"next(iter([partial(dict.update, vars(ns))]))(**kw)\n"
+                f"ns.e({ex})",
+            )
+        )
+    )
+
+
+def test_twenty_sixth_pass_identity_relaunch_never_authorized() -> None:
+    """Identity relaunch: packed unbound pop, getattr star-concat, partial getattr."""
+
+    id_imp = "import copy\nfrom functools import partial"
+    _assert_ninth_not_authorized(
+        (
+            (
+                "g=next(iter([dict.pop]))(dict(list.__dict__),'sort')"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=dict(list.__dict__).pop('sort'); attrs=('__get__',); "
+                "g=getattr(*( (m,) + attrs ))(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[d.copy()][0].pop(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=next(iter([d.copy()])).pop(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[d.copy()].pop(0).pop(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(getattr(d,'pop'))][0](*('sort',))"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=(0 or partial(getattr(d,'pop')))(*('sort',))"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=next(iter([partial(getattr(d,'pop'))]))(*('sort',))"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(getattr(d,'get'))][0]('sort')"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            # Keep-closed / already-closed anchors.
+            (
+                "d=dict(list.__dict__); "
+                "g=getattr(d,'copy')().pop(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "g=dict.pop(dict(list.__dict__),'sort').__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=d.copy().pop(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+        )
+    )
+
+
+def test_twenty_sixth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of twenty-sixth-pass shapes remain authorized."""
+
+    for body in (
+        "import types\nfrom functools import partial\n"
+        'ns=types.SimpleNamespace()\npm=partial(map, list.append)\n'
+        "list(pm([xs:=[]], [partial(setattr, ns, 'x')])); xs[0](1)\nns.x",
+        "d=dict(list.__dict__); "
+        "g=getattr(d,'copy')().pop(*('sort',)).__get__(None, list)\n"
+        "xs=[1]\ng(xs, key=lambda x: x)",
+        "import operator\nfrom functools import partial\nd={}\n"
+        "xs=[getattr(operator,'methodcaller')('copy')]\n"
+        "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+        "e=[partial((lambda: mc)(), xs)][0]()[0](d)\ne|={}\nlen(e)",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'c=getattr([partial(copy.copy)],"pop").__call__(0)(keys)\n'
+        'k=c.get("x")\n'
+        'Proxy=getattr(ns,"get")(k)\nProxy({})',
+        "import types\nfrom functools import partial\n"
+        'ns=types.SimpleNamespace()\n'
+        'next(iter([partial(vars(ns).__setitem__, "x")]))(1)\nns.x',
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_twenty_seventh_pass_cf_nested_partial_map_never_authorized() -> None:
+    """CF nested idle partial(map) + vars(builtins) map heads."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial\n"
+        "import operator\nimport builtins\nimport copy"
+    )
+    fn = "list.append"
+    vals = '[partial(setattr, ns, "e")]'
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(partial(map), {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(partial(map, {fn}))\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(partial(partial(map), {fn}))\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(partial(map), {fn})\n'
+                f"list([pm][0]([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(partial(map), {fn})\n'
+                f"list(next(iter([pm]))([xs:=[]], {vals})); "
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(partial(map), {fn})\n'
+                f"list((0 or pm)([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(copy.copy(partial(map)), {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(partial(map), {fn})\n'
+                f"list(pm.__call__([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(vars(builtins)["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(builtins.__dict__["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(vars(builtins).get("map"), {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(operator.getitem(vars(builtins), "map"), {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=vars(builtins)\npm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                # Keep-closed anchors.
+                f'ns=types.SimpleNamespace()\n'
+                f"list(partial(partial(map), {fn})([xs:=[]], {vals})); "
+                f"xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\npm=partial(map, {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_twenty_seventh_pass_identity_getattribute_concat_never_authorized() -> None:
+    """Identity getattribute copy/pop, star-concat getattr, packed partial, vars(list)."""
+
+    id_imp = "import copy\nfrom functools import partial\nimport operator"
+    _assert_ninth_not_authorized(
+        (
+            (
+                "d=dict(list.__dict__); "
+                "g=object.__getattribute__(d,'copy')().pop(*('sort',))"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=object.__getattribute__(d,'pop')(*('sort',))"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=dict(list.__dict__).pop('sort'); attrs=('__get__',); "
+                "g=getattr(*((m,).__add__(attrs)))(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=dict(list.__dict__).pop('sort'); attrs=('__get__',); "
+                "g=getattr(*(tuple.__add__((m,), attrs)))(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=dict(list.__dict__).pop('sort'); attrs=('__get__',); "
+                "g=getattr(*(operator.concat((m,), attrs)))(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=dict(list.__dict__).pop('sort'); attrs=('__get__',); "
+                "g=getattr(*((m,).__add__(*(attrs,))))(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=dict(list.__dict__).pop('sort'); attrs=('__get__',); "
+                "g=getattr(*((m,)*1 + attrs))(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(getattr(d,'pop'), *('sort',))][0]()"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(d.pop, *('sort',))][0]().__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=[vars(list)][0]['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            # Keep-closed anchors.
+            (
+                "d=dict(list.__dict__); "
+                "g=getattr(d,'copy')().pop(*('sort',)).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=dict(list.__dict__).pop('sort'); attrs=('__get__',); "
+                "g=getattr(*( (m,) + attrs ))(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(getattr(d,'pop'))][0](*('sort',))"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+        )
+    )
+
+
+def test_twenty_seventh_pass_lexical_packed_lambda_never_authorized() -> None:
+    """Lexical packed/Name/BoolOp lambda + Name-bound nested-partial star."""
+
+    lex_imp = "import operator\nfrom functools import partial"
+    sc = "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, lex_imp)
+            for c in (
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial([lambda: mc][0](), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "f=lambda: mc\ne=[partial(f(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "f: object = lambda: mc\n"
+                + "e=[partial(f(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "ig=operator.itemgetter(slice(0,1))\n"
+                + "e=[partial([lambda: (lambda: ig)()][0](), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "ig=operator.itemgetter(slice(0,1))\n"
+                + "e=[partial((lambda: (lambda: ig)())(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "ig=operator.itemgetter(slice(0,1))\n"
+                + "p=partial(partial(ig))\n"
+                + "e=[partial(*(p, xs))][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "ig=operator.itemgetter(slice(0,1))\n"
+                + "e=[partial(*(partial((lambda: ig)()), xs))][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                # Keep-closed anchors.
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial((lambda: mc)(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "ig=operator.itemgetter(slice(0,1))\n"
+                + "e=[partial(partial(ig), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+            )
+        )
+    )
+
+
+def test_twenty_seventh_pass_alias_star_call_never_authorized() -> None:
+    """Alias star/BoolOp/IfExp __call__/getitem + Name-bound methodcaller."""
+
+    cases = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'c=getattr([partial(copy.copy)],"pop").__call__(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'c=getattr([partial(copy.copy)],"pop").__call__(*(0,))(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=g.__call__(0)(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop").__call__\n'
+        'c=g(0)(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'c=operator.call(getattr([partial(copy.copy)],"pop"), 0)(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "p=partial(copy.copy)\n"
+        'mc=operator.methodcaller("__call__", p, keys)\n'
+        "c=mc(operator.call)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "p(*([args].__getitem__(*[0])))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "i=0\np(*([args].__getitem__(i)))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "p(*(operator.getitem([args], 0)))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "p(*(list.__getitem__([args], 0)))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "partial(operator.call, p)(*([args].pop(0)))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        # Keep-closed anchors.
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'c=getattr([partial(copy.copy)],"pop").__call__(0)(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "p(*([args].__getitem__(0)))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_twenty_seventh_pass_class_max_ior_chainmap_never_authorized() -> None:
+    """Class max/min/nlargest, __ior__/ChainMap, outer-wrap/reduce/__get__ digs."""
+
+    ex = _NINTH_EXEC
+    class_imp = (
+        "import types\nimport operator\nimport heapq\n"
+        "from functools import partial, reduce\nfrom collections import ChainMap"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"max([partial(vars(ns).update, **kw)])()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"min([partial(vars(ns).update, **kw)])()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'max([partial(vars(ns).__setitem__, "e")])(exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'max([partial(operator.setitem, vars(ns))])("e", exec)\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"from builtins import max as M\n"
+                f"M([partial(vars(ns).update, **kw)])()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"heapq.nlargest(1, [partial(vars(ns).update, **kw)])[0]()\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"u=vars(ns).__ior__\n"
+                f"next(iter([partial(u, kw)]))()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"ChainMap(vars(ns))['e']=exec\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"ChainMap(vars(ns)).update(**kw)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'operator.setitem(ChainMap(vars(ns)), "e", exec)\n'
+                f"ns.e({ex})",
+                # Outer-wrap halfbind / list0 / BoolOp.
+                f'ns=types.SimpleNamespace()\nsi=vars(ns).__setitem__\n'
+                f'partial(partial(si, "e"), exec)()\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\nu=vars(ns).setdefault\n'
+                f'partial(partial(u, "e"), exec)()\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\nsi=vars(ns).__setitem__\n'
+                f'partial(partial(si, "e"), (exec if True else None))()\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nsi=vars(ns).__setitem__\n'
+                f'[partial(partial(si, "e"), exec)][0]()\nns.e({ex})',
+                # Reduce empty-iterable initializer seed.
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"reduce(lambda a,b: b, [], partial(vars(ns).update, **kw))()\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'reduce(lambda a,b: b, [], '
+                f'partial(vars(ns).__setitem__, "e"))(exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f"reduce(lambda a,b: b, [], "
+                f'partial(operator.setitem, vars(ns)))("e", exec)\n'
+                f"ns.e({ex})",
+                # Descriptor __get__ Name-seed.
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"u=dict.update.__get__(vars(ns))\n"
+                f"partial(u, **kw)()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"si=dict.__setitem__.__get__(vars(ns))\n"
+                f'partial(si)("e", exec)\nns.e({ex})',
+                # Outer-wrap midbound setitem + Name/getattr unbound midbind.
+                f'ns=types.SimpleNamespace()\n'
+                f'partial(partial(operator.setitem, vars(ns), "e"))(exec)\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'partial(partial(dict.__setitem__, vars(ns), "e"))(exec)\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'si=getattr(dict,"__setitem__")\n'
+                f'partial(si, vars(ns))("e", exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\nsi=dict.__setitem__\n'
+                f'partial(si, vars(ns))("e", exec)\nns.e({ex})',
+                # Keep-closed anchors.
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"reduce(lambda a,b: a, [partial(vars(ns).update, **kw)])()\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"d=vars(ns); d |= kw\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_twenty_seventh_pass_interproc_empty_pack_enter_never_authorized() -> None:
+    """Interproc Assign-enter empty packs must seed like bare e()."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(**{}); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*[], **{}); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*(0 or ())); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*(() if True else (1,))); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=(0 or e)(*()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=[e][0](*()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=next(iter([e]))(*()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e.__call__(*()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=getattr(e,'__call__')(*()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*{}.keys()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; kw={}; f=e(**kw); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; empty=(); "
+        "f=e(*empty); f(evil)",
+        # Keep-closed anchors.
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); f=cm.__enter__(*()); f(evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_twenty_seventh_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of twenty-seventh-pass shapes remain authorized."""
+
+    for body in (
+        "import types\nfrom functools import partial\n"
+        'ns=types.SimpleNamespace()\npm=partial(partial(map), list.append)\n'
+        "list(pm([xs:=[]], [partial(setattr, ns, 'x')])); xs[0](1)\nns.x",
+        "d=dict(list.__dict__); "
+        "g=object.__getattribute__(d,'copy')().pop(*('sort',))"
+        ".__get__(None, list)\n"
+        "xs=[1]\ng(xs, key=lambda x: x)",
+        "import operator\nfrom functools import partial\nd={}\n"
+        "xs=[getattr(operator,'methodcaller')('copy')]\n"
+        "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+        "e=[partial([lambda: mc][0](), xs)][0]()[0](d)\ne|={}\nlen(e)",
+        "import types\nfrom functools import partial\n"
+        'ns=types.SimpleNamespace()\nkw={"x":1}\n'
+        "max([partial(vars(ns).update, **kw)])()\nns.x",
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_twenty_eighth_pass_cf_packed_ns_map_never_authorized() -> None:
+    """CF packed/copy/BoolOp vars(builtins) map heads + getattr views + partial.__new__."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial\n"
+        "import operator\nimport builtins\nimport copy\n"
+        "import functools\nfrom types import MappingProxyType\n"
+        "from collections import ChainMap"
+    )
+    fn = "list.append"
+    vals = '[partial(setattr, ns, "e")]'
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial([vars(builtins)][0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(next(iter([vars(builtins)]))["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial((0 or vars(builtins))["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial((vars(builtins) if True else {{}})["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(copy.copy(vars(builtins))["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(copy.deepcopy(vars(builtins))["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(vars(builtins).copy()["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(dict({{**vars(builtins)}})["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(builtins.__dict__["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(operator.getitem(copy.copy(vars(builtins)), "map"), {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(MappingProxyType(vars(builtins))["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(ChainMap(vars(builtins))["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(getattr(vars(builtins), "get")("map"), {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(getattr(vars(builtins), "__getitem__")("map"), {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(dict(vars(builtins)).pop("map"), {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=functools.partial.__new__(functools.partial, map, {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial.__new__(partial, partial, map)\n'
+                f"list(pm({fn})([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                # Keep-closed anchors.
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(partial(map), {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(vars(builtins)["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_twenty_eighth_pass_identity_copy_star_never_authorized() -> None:
+    """Identity copy-wrapped star-concat, packed nested partial, dict(vars(list))."""
+
+    id_imp = "import copy\nfrom functools import partial\nimport operator"
+    _assert_ninth_not_authorized(
+        (
+            (
+                "m=dict(list.__dict__).pop('sort'); attrs=('__get__',); "
+                "g=getattr(*(copy.copy((m,))+attrs))(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=dict(list.__dict__).pop('sort'); attrs=('__get__',); "
+                "g=getattr(*(copy.deepcopy((m,))+attrs))(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=dict(list.__dict__).pop('sort'); attrs=('__get__',); "
+                "g=getattr(*([copy.copy][0]((m,))+attrs))(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=dict(list.__dict__).pop('sort'); attrs=('__get__',); "
+                "g=getattr(*(copy.copy((m,)).__add__(attrs)))(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=dict(list.__dict__).pop('sort'); attrs=('__get__',); "
+                "g=getattr(*(tuple(copy.copy((m,)))+attrs))(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(operator.getitem, d, 'sort')][0]()"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(operator.getitem, d, *('sort',))][0]()"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(partial(d.pop), *('sort',))][0]()"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[copy.copy(partial(d.pop, *('sort',)))][0]()"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[copy.deepcopy(partial(d.pop, *('sort',)))][0]()"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=[dict(vars(list))][0]['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=vars(list).copy()['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=getattr(vars(list),'copy')()['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=dict.copy(dict(vars(list)))['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            # Keep-closed anchors.
+            (
+                "m=dict(list.__dict__).pop('sort'); attrs=('__get__',); "
+                "g=getattr(*((m,).__add__(attrs)))(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(d.pop, *('sort',))][0]().__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+        )
+    )
+
+
+def test_twenty_eighth_pass_lexical_packed_partial_star_never_authorized() -> None:
+    """Lexical packed/BoolOp Name-bound nested-partial star and lambda relaunch."""
+
+    lex_imp = "import operator\nfrom functools import partial"
+    sc = "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, lex_imp)
+            for c in (
+                sc
+                + "ig=operator.itemgetter(slice(0,1))\n"
+                + "p=partial(partial(ig))\n"
+                + "e=[partial(*([p][0], xs))][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "ig=operator.itemgetter(slice(0,1))\n"
+                + "p=partial(partial(ig))\n"
+                + "e=[partial(*(0 or p, xs))][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "ig=operator.itemgetter(slice(0,1))\n"
+                + "p=partial(partial(ig))\n"
+                + "e=[partial(*((p if True else None), xs))][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                # Keep-closed anchors.
+                sc
+                + "ig=operator.itemgetter(slice(0,1))\n"
+                + "p=partial(partial(ig))\n"
+                + "e=[partial(*(p, xs))][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial([lambda: mc][0](), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                # Relaunch: lambda-body BoolOp/IfExp, Name-bound packed lambda,
+                # getattr/list.__getitem__, trailing *[xs].
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial((lambda: (0 or mc))(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial((lambda: mc or 0)(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial((lambda: (mc if True else None))(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial((lambda: mc and mc)(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "ig=operator.itemgetter(slice(0,1))\n"
+                + "e=[partial((lambda: (0 or ig))(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "pack=[lambda: mc]\n"
+                + "e=[partial(pack[0](), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "f,=[lambda: mc]\n"
+                + "e=[partial(f(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "f=[lambda: mc][0]\n"
+                + "e=[partial(f(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "pack=(lambda: mc,)\n"
+                + "e=[partial(pack[0](), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "pack=[lambda: mc]\n"
+                + "e=[partial(next(iter(pack))(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "pack: list = [lambda: mc]\n"
+                + "e=[partial(pack[0](), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial(*((0 or (lambda: mc)(), xs)))][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial(*(((lambda: mc)() or 0, xs)))][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial(*(((lambda: mc)() if True else None, xs)))][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial(getattr([lambda: mc],'__getitem__')(0)(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial(list.__getitem__([lambda: mc], 0)(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial((lambda: mc)(), *[xs])][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "f=lambda: mc\n"
+                + "e=[partial(f(), *[xs])][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "ig=operator.itemgetter(slice(0,1))\n"
+                + "p=partial(partial(ig))\n"
+                + "e=[partial(*(p,), *[xs])][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial([lambda: mc].__getitem__(0)(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial(operator.getitem([lambda: mc], 0)(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+            )
+        )
+    )
+
+
+def test_twenty_eighth_pass_alias_star_call_never_authorized() -> None:
+    """Alias Name-bound/packed g.__call__ star + packed getitem + operator.call."""
+
+    cases = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=g.__call__(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=g.__call__(*(0 or 0))(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=[g][0].__call__(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=(0 or g).__call__(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "p=partial(copy.copy)\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "p(*([args].__getitem__((0 or 0))))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "gi=operator.getitem; p(*(gi([args], 0)))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "p(*([operator.getitem][0]([args], 0)))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "p(*((0 or operator.getitem)([args], 0)))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "p(*(list.__getitem__([args], (0 or 0))))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "p(*(getattr(list,\"__getitem__\")([args], 0)))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "[partial(operator.call, p)][0](*([args].pop(0)))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "poc=partial(operator.call, p); poc(*([args].pop(0)))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "p=partial(copy.copy)\n"
+        'n=("__call__" if True else "x")\n'
+        'c=operator.methodcaller(n, p, keys)(operator.call)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        # Keep-closed anchors.
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=g.__call__(0)(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "partial(operator.call, p)(*([args].pop(0)))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_twenty_eighth_pass_class_nsmallest_chainmap_never_authorized() -> None:
+    """Class nsmallest/aliased nlargest, max/min key=, ChainMap.maps/Name setitem."""
+
+    ex = _NINTH_EXEC
+    class_imp = (
+        "import types\nimport operator\nimport heapq\n"
+        "from functools import partial\nfrom collections import ChainMap"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"heapq.nsmallest(1, [partial(vars(ns).update, **kw)])[0]()\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"from heapq import nlargest as NL\n"
+                f"NL(1, [partial(vars(ns).update, **kw)])[0]()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"NL=heapq.nlargest\n"
+                f"NL(1, [partial(vars(ns).update, **kw)])[0]()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f'getattr(heapq, "nlargest")(1, [partial(vars(ns).update, **kw)])[0]()\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"max([partial(vars(ns).update, **kw)], key=id)()\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"min([partial(vars(ns).update, **kw)], key=lambda z: 0)()\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"ChainMap(vars(ns)).maps[0]['e']=exec\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"ChainMap(vars(ns)).maps[0].update(**kw)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap(vars(ns)); maps=cm.maps; maps[0]['e']=exec\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); getattr(cm, "maps")[0]["e"]=exec\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); operator.setitem(cm, "e", exec)\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); getattr(operator, "setitem")(cm, "e", exec)\n'
+                f"ns.e({ex})",
+                # Keep-closed anchors.
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"from heapq import nlargest\n"
+                f"nlargest(1, [partial(vars(ns).update, **kw)])[0]()\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'operator.setitem(ChainMap(vars(ns)), "e", exec)\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"max([partial(vars(ns).update, **kw)])()\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_twenty_eighth_pass_interproc_empty_ctor_never_authorized() -> None:
+    """Interproc empty-constructor stars, BoolOp ** maps, star-getattr __call__."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*set()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*frozenset()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*range(0)); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*bytes()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*bytearray()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*filter(None,())); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*map(int,())); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*sorted(())); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    import copy; cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*copy.copy(())); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    import copy; cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(**copy.copy({})); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(**{}.copy()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(**dict.fromkeys(())); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(**(0 or {})); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(**(False or {})); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(**({} if True else dict(x=1))); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=getattr(*(e,'__call__'))(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=getattr(*()) ; f=e(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=getattr(*(0 or (e,'__call__')))(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e.__call__(*set()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=(0 or e)(*set()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=[e][0](*set()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*[x for x in ()]); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*(x for x in ())); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*().__iter__()); f(evil)",
+        # Keep-closed anchors.
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(**{}); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*tuple()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*list()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*dict()); f(evil)",
+    ):
+        if "f=getattr(*())" in call:
+            continue
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_twenty_eighth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of twenty-eighth-pass shapes remain authorized."""
+
+    for body in (
+        "import types\nfrom functools import partial\nimport builtins\n"
+        'ns=types.SimpleNamespace()\npm=partial([vars(builtins)][0]["map"], list.append)\n'
+        "list(pm([xs:=[]], [partial(setattr, ns, 'x')])); xs[0](1)\nns.x",
+        "import types\nfrom functools import partial\nimport heapq\n"
+        'ns=types.SimpleNamespace()\nkw={"x":1}\n'
+        "heapq.nsmallest(1, [partial(vars(ns).update, **kw)])[0]()\nns.x",
+        "import types\nfrom functools import partial\n"
+        'ns=types.SimpleNamespace()\nkw={"x":1}\n'
+        "max([partial(vars(ns).update, **kw)], key=id)()\nns.x",
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_twenty_ninth_pass_cf_ns_wrapper_never_authorized() -> None:
+    """CF Name-bound copy/dict wrappers, unbound views, get default, __new__."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial\n"
+        "import operator\nimport builtins\nimport copy\n"
+        "import functools\nfrom types import MappingProxyType\n"
+        "from collections import OrderedDict"
+    )
+    fn = "list.append"
+    vals = '[partial(setattr, ns, "e")]'
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f'd=copy.copy(vars(builtins)); pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=copy.deepcopy(vars(builtins)); pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=vars(builtins).copy(); pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=dict(vars(builtins)); pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=MappingProxyType(vars(builtins)); pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=OrderedDict(vars(builtins)); pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(dict.get(vars(builtins), "map"), {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(dict.pop(dict(vars(builtins)), "map"), {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(dict.setdefault(copy.copy(vars(builtins)), "map"), {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(vars(builtins).get("map", map), {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(getattr(vars(builtins), "get")("map", map), {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(list.__getitem__([vars(builtins)], 0)["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(tuple.__getitem__((vars(builtins),), 0)["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(list.pop([vars(builtins)], 0)["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial.__new__.__call__(partial, map, {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'new=partial.__new__; pm=new(partial, map, {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                # Keep-closed anchors.
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial([vars(builtins)][0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial((0 or vars(builtins))["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(copy.copy(vars(builtins))["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(getattr(vars(builtins), "get")("map"), {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=functools.partial.__new__(functools.partial, map, {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(partial(map), {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(vars(builtins)["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_twenty_ninth_pass_identity_packed_itemgetter_never_authorized() -> None:
+    """Identity packed itemgetter / unbound partial / MappingProxyType / copy."""
+
+    id_imp = (
+        "import copy\nfrom functools import partial\nimport operator\n"
+        "from types import MappingProxyType"
+    )
+    _assert_ninth_not_authorized(
+        (
+            (
+                "d=dict(list.__dict__); "
+                "g=[operator.itemgetter('sort')][0](d).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(operator.itemgetter('sort'), d)][0]()"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(dict.get, d, 'sort')][0]().__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(dict.__getitem__, d, 'sort')][0]()"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=dict({**vars(list)})['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=MappingProxyType(vars(list))['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=MappingProxyType(vars(list).copy())['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=list.__dict__.copy()['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(dict.get, d)][0]('sort').__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(dict.__getitem__, d)][0]('sort')"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=next(iter([operator.itemgetter('sort')]))(d)"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=(0 or operator.itemgetter('sort'))(d).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=operator.methodcaller('__getitem__','sort')(d)"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=MappingProxyType(list.__dict__)['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=MappingProxyType(dict(vars(list)))['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=getattr(list.__dict__,'copy')()['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=object.__getattribute__(list.__dict__,'copy')()['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=[list.__dict__.copy()][0]['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(dict.pop, d, 'sort')][0]().__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(dict.setdefault, d, 'sort')][0]()"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(vars(list)); m=d['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=vars(list).copy(); m=d['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "mp=vars(list); m=mp.copy()['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=getattr(dict(vars(list)),'copy')()['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=dict(vars(list)).copy()['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=[partial(dict.copy, dict(vars(list)))][0]()['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(vars(list)); m=d.get('sort'); g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(vars(list)); m=d.pop('sort'); g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(vars(list)); m=d.__getitem__('sort'); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(vars(list)); m=operator.getitem(d,'sort'); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(vars(list)); m=[d][0]['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(vars(list)); m=next(iter([d]))['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(vars(list)); m=(0 or d)['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=getattr(dict(list.__dict__),'copy')()['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=object.__getattribute__(dict(vars(list)),'copy')()"
+                "['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=[getattr(dict(vars(list)),'copy')][0]()['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            # Keep-closed anchors.
+            (
+                "m=dict(vars(list))['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=vars(list).copy()['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=operator.itemgetter('sort')(d).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+        )
+    )
+
+
+def test_twenty_ninth_pass_lexical_partial_new_nest_never_authorized() -> None:
+    """Lexical partial.__new__ star and 8-deep nested empty lambda applies."""
+
+    lex_imp = "import operator\nfrom functools import partial\nimport functools"
+    sc = "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+    nest8 = "(lambda: (lambda: (lambda: (lambda: (lambda: (lambda: (lambda: (lambda: mc)())())())())())())())()"
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, lex_imp)
+            for c in (
+                sc
+                + "ig=operator.itemgetter(slice(0,1))\n"
+                + "p=partial(partial(ig))\n"
+                + "e=[partial.__new__(partial, *(p, xs))][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "ig=operator.itemgetter(slice(0,1))\n"
+                + "p=partial(partial(ig))\n"
+                + "e=[functools.partial.__new__(functools.partial, *(p, xs))][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "ig=operator.itemgetter(slice(0,1))\n"
+                + "p=partial(partial(ig))\n"
+                + "e=[partial.__new__(partial, *(p,), *[xs])][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + f"e=[partial({nest8}, xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial.__new__(partial, (lambda: (0 or mc))(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial.__new__(partial, [lambda: mc][0](), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "f=lambda: mc\n"
+                + "e=[partial.__new__(partial, f(), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                # Keep-closed anchors.
+                sc
+                + "ig=operator.itemgetter(slice(0,1))\n"
+                + "p=partial(partial(ig))\n"
+                + "e=[partial(*(p, xs))][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial([lambda: mc][0](), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+            )
+        )
+    )
+
+
+def test_twenty_ninth_pass_alias_star_call_never_authorized() -> None:
+    """Alias BoolOp star index and packed operator.call factory applies."""
+
+    cases = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=g.__call__(*[0 or 0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=[g][0].__call__(*[0 or 0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=(0 or g).__call__(*[0 or 0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=g.__call__(*[False or 0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=g.__call__(*[0 if True else 1])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=g(*[0 or 0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=next(iter([g.__call__]))(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=next(iter([g])).__call__(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "next(iter([partial(operator.call, p)]))(*([args].pop(0)))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "[partial(operator.call, p)].pop(0)(*([args].pop(0)))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "[partial(operator.call, p)].__getitem__(0)(*([args].pop(0)))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        # Keep-closed anchors.
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=g.__call__(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=g.__call__(*(0 or 0))(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "[partial(operator.call, p)][0](*([args].pop(0)))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_twenty_ninth_pass_class_chainmap_maps_never_authorized() -> None:
+    """Class ChainMap maps-element peels, non-zero index, aliased/star ctors."""
+
+    ex = _NINTH_EXEC
+    class_imp = (
+        "import types\nimport operator\nimport copy\n"
+        "from functools import partial\nfrom collections import ChainMap\n"
+        "from operator import attrgetter"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap(vars(ns)); cm.maps.__getitem__(0)['e']=exec\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap(vars(ns)); list.__getitem__(cm.maps, 0)['e']=exec\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap(vars(ns)); operator.getitem(cm.maps, 0)['e']=exec\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap(vars(ns)); next(iter(cm.maps))['e']=exec\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap(vars(ns)); list(cm.maps)[0]['e']=exec\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap(vars(ns)); cm.maps.copy()[0]['e']=exec\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap(vars(ns)); cm.maps[0:1][0]['e']=exec\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); attrgetter("maps")(cm)[0]["e"]=exec\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap(vars(ns)); copy.copy(cm.maps)[0]['e']=exec\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap({{}}, vars(ns)); cm.maps[1]['e']=exec\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap(vars(ns)); cm.maps[-1]['e']=exec\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap({{}}, vars(ns)); cm.maps[True]['e']=exec\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"from collections import ChainMap as CM; CM(vars(ns))['e']=exec\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"C=ChainMap; C(vars(ns))['e']=exec\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nkw={{"e":exec}}\n'
+                f"C=ChainMap; C(vars(ns)).update(**kw)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'C=ChainMap; operator.setitem(C(vars(ns)), "e", exec)\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"from collections import ChainMap as CM\n"
+                f"CM(vars(ns)).maps[0]['e']=exec\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"ChainMap(*[vars(ns)])['e']=exec\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"ChainMap(*(vars(ns),))['e']=exec\nns.e({ex})",
+                # Keep-closed anchors.
+                f'ns=types.SimpleNamespace()\n'
+                f"ChainMap(vars(ns)).maps[0]['e']=exec\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap(vars(ns)); maps=cm.maps; maps[0]['e']=exec\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); getattr(cm, "maps")[0]["e"]=exec\n'
+                f"ns.e({ex})",
+            )
+        )
+    )
+
+
+def test_twenty_ninth_pass_interproc_empty_pack_never_authorized() -> None:
+    """Interproc range/bytes empty stars, BoolOp And maps, Name-bound packs."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*range(0,0)); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*bytes(0)); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(**(1 and {})); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "empty=(); f=e(*empty); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "empty=range(0,0); f=e(*empty); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "empty=bytes(0); f=e(*empty); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "kw=(1 and {}); f=e(**kw); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "pack=(e,'__call__'); f=getattr(*pack)(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "pack=(); f=getattr(*pack) if False else e(); f(evil)",
+        # Keep-closed anchors.
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(**{}); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*range(0)); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(**(0 or {})); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=getattr(*(e,'__call__'))(); f(evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_twenty_ninth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of twenty-ninth-pass shapes remain authorized."""
+
+    for body in (
+        "import types\nfrom functools import partial\nimport builtins\nimport copy\n"
+        "ns=types.SimpleNamespace()\n"
+        'd=copy.copy(vars(builtins)); pm=partial(d["map"], list.append)\n'
+        "list(pm([xs:=[]], [partial(setattr, ns, 'x')])); xs[0](1)\nns.x",
+        "import types\nfrom collections import ChainMap\n"
+        "ns=types.SimpleNamespace()\n"
+        "cm=ChainMap(vars(ns)); cm.maps.__getitem__(0)['x']=1\nns.x",
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_thirtieth_pass_cf_never_authorized() -> None:
+    """CF Name-bound copy/vars, packed get, mapping merge, defaultdict."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial\n"
+        "import operator\nimport builtins\nimport copy\n"
+        "from collections import defaultdict, Counter"
+    )
+    fn = "list.append"
+    vals = '[partial(setattr, ns, "e")]'
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f'c=copy.copy; d=c(vars(builtins)); pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial((0 or dict.get)(vars(builtins), "map"), {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'V=vars; pm=partial(V(builtins)["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial([vars][0](builtins)["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(getattr(builtins, "vars")(builtins)["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial((dict(vars(builtins)) | {{}})["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=defaultdict(None, vars(builtins)); pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(dict(vars(builtins).items())["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=Counter(vars(builtins)); pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(operator.or_(dict(vars(builtins)), {{}})["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                # Keep-closed 27–29 CF anchors.
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(copy.copy(vars(builtins))["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial((0 or vars(builtins))["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(vars(builtins)["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_thirtieth_pass_identity_never_authorized() -> None:
+    """Identity packed getattr/partial/methodcaller and Name-bound wrappers."""
+
+    id_imp = (
+        "import copy\nfrom functools import partial\nimport operator\n"
+        "from types import MappingProxyType"
+    )
+    _assert_ninth_not_authorized(
+        (
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(getattr(dict,'get'), d, 'sort')][0]()"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(getattr(dict,'pop'), d, 'sort')][0]()"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(getattr(dict,'__getitem__'), d, 'sort')][0]()"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(getattr(dict,'setdefault'), d, 'sort')][0]()"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict({**vars(list)}); m=d['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=dict(**vars(list))['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "mp=MappingProxyType(vars(list)); m=mp['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "p=partial(dict.copy, dict(vars(list))); m=p()['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(vars(list)); "
+                "m=[operator.methodcaller('get','sort')][0](d); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(vars(list)); "
+                "m=[operator.methodcaller('pop','sort')][0](d); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(vars(list)); "
+                "m=[operator.methodcaller('__getitem__','sort')][0](d); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=dict(vars(list))['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(dict.get, d, 'sort')][0]().__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=vars(list).copy()['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+        )
+    )
+
+
+def test_thirtieth_pass_lexical_never_authorized() -> None:
+    """Lexical Name-bound idle-lambda apply result and peel-budget overflow."""
+
+    lex_imp = "import operator\nfrom functools import partial\nimport functools"
+    sc = "d={Mut:1}\nxs=[getattr(operator,'methodcaller')('copy')]\n"
+    nest8 = "(lambda: (lambda: (lambda: (lambda: (lambda: (lambda: (lambda: (lambda: mc)())())())())())())())()"
+    nest18 = "(lambda: " * 18 + "mc" + ")()" * 18
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, lex_imp)
+            for c in (
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "f=(lambda: mc)(); e=[partial(f, xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "f=[lambda: mc][0](); e=[partial(f, xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "g=lambda: mc; h=g(); e=[partial(h, xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "f=(lambda: mc)(); "
+                + "e=[partial.__new__(partial, f, xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + f"e=[partial({nest18}, xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + f"e=[partial({nest8}, xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "mc=operator.methodcaller('__getitem__', slice(0,1))\n"
+                + "e=[partial([lambda: mc][0](), xs)][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+                sc
+                + "ig=operator.itemgetter(slice(0,1))\n"
+                + "p=partial(partial(ig))\n"
+                + "e=[partial.__new__(partial, *(p, xs))][0]()[0](d)\n"
+                + "e|={}\nC,=e.keys()\nC()",
+            )
+        )
+    )
+
+
+def test_thirtieth_pass_alias_never_authorized() -> None:
+    """Alias packed getitem/copy/next/star-index/attrgetter __call__."""
+
+    cases = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=list.__getitem__([g.__call__], 0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "list.__getitem__([partial(operator.call, p)], 0)(*([args].pop(0)))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=[g.__call__].copy()[0](*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=next(reversed([g.__call__]))(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=next(map(lambda x: x, [g.__call__]))(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=[g].pop().__call__(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=g.__call__(*[None or 0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=g.__call__(*[0|0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=g.__call__(*[int()])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=g.__call__(*range(1))(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=g.__call__(*bytes(1))(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=operator.attrgetter("__call__")(g)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=(lambda: g.__call__)()(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=g.__call__(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        "[partial(operator.call, p)][0](*([args].pop(0)))\n"
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_thirtieth_pass_class_never_authorized() -> None:
+    """Class ChainMap parents, methodcaller maps, new_child, insert, vars maps."""
+
+    ex = _NINTH_EXEC
+    class_imp = (
+        "import types\nimport operator\nimport copy\n"
+        "from functools import partial\nfrom collections import ChainMap\n"
+        "from operator import attrgetter, methodcaller\n"
+        "from heapq import nlargest"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}, vars(ns)); getattr(cm,"parents")["e"]=exec\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}, vars(ns)); cm.parents.update(**{{"e":exec}})\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap({{}}, vars(ns)); cm.parents.maps[0]['e']=exec\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap(vars(ns)); "
+                f"methodcaller('__getitem__', 0)(cm.maps)['e']=exec\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); getattr(cm.maps,"__getitem__")(0)["e"]=exec\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap(vars(ns)); [*cm.maps][0]['e']=exec\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap(vars(ns)); next(cm.maps.__iter__())['e']=exec\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap(vars(ns)); cm.maps.pop()['e']=exec\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap(vars(ns)); next(reversed(cm.maps))['e']=exec\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap(vars(ns)); max(cm.maps)['e']=exec\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap(vars(ns)); nlargest(1, cm.maps)[0]['e']=exec\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap().new_child(vars(ns)); cm['e']=exec\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap({{}}, vars(ns)); cm.maps[+1]['e']=exec\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap(vars(ns)); "
+                f"operator.getitem(cm.maps, slice(0,1))[0]['e']=exec\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); vars(cm)["maps"][0]["e"]=exec\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap({{}}); cm.maps.insert(0, vars(ns)); "
+                f"cm.maps[0]['e']=exec\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"ChainMap(vars(ns)).maps[0]['e']=exec\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f"cm=ChainMap(vars(ns)); maps=cm.maps; maps[0]['e']=exec\n"
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); getattr(cm, "maps")[0]["e"]=exec\n'
+                f"ns.e({ex})",
+            )
+        )
+    )
+
+
+def test_thirtieth_pass_interproc_never_authorized() -> None:
+    """Interproc aliased empty ctors, constants, split getattr, And maps."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "R=range; f=e(*R(0,0)); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*[range][0](0)); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*''); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*b''); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*bytes(b'')); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*zip()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*iter(range(0,0))); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*str()); f(evil)",
+        "from contextlib import nullcontext\n"
+        "    from collections import deque, OrderedDict, Counter, ChainMap\n"
+        "    args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*deque()); f(evil)",
+        "from contextlib import nullcontext\n"
+        "    from collections import OrderedDict, Counter, ChainMap\n"
+        "    args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(**OrderedDict()); f(evil)",
+        "from contextlib import nullcontext\n"
+        "    from collections import Counter, ChainMap\n"
+        "    args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(**Counter()); f(evil)",
+        "from contextlib import nullcontext\n"
+        "    from collections import ChainMap\n"
+        "    args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(**ChainMap()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "pack=(e,'__call__'); gc=getattr(*pack); f=gc(); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(**({} and {'x':1})); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(**{**{}}); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(**dict(**{})); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*(() * 0)); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(**{}); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(*range(0)); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=getattr(*(e,'__call__'))(); f(evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_thirtieth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of thirtieth-pass shapes remain authorized."""
+
+    for body in (
+        "import types\nfrom functools import partial\nimport builtins\nimport copy\n"
+        "ns=types.SimpleNamespace()\n"
+        'c=copy.copy; d=c(vars(builtins)); pm=partial(d["map"], list.append)\n'
+        "list(pm([xs:=[]], [partial(setattr, ns, 'x')])); xs[0](1)\nns.x",
+        "import types\nfrom collections import ChainMap\n"
+        "ns=types.SimpleNamespace()\n"
+        "cm=ChainMap(vars(ns)); [*cm.maps][0]['x']=1\nns.x",
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_thirty_first_pass_cf_never_authorized() -> None:
+    """CF Name-bound mapping factories, items, update, idle packed copy."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial\n"
+        "import operator\nimport builtins\nimport copy\n"
+        "from collections import defaultdict, Counter, UserDict, OrderedDict\n"
+        "from types import MappingProxyType"
+    )
+    fn = "list.append"
+    vals = '[partial(setattr, ns, "e")]'
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f'DD=defaultdict; d=DD(None, vars(builtins)); '
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'C=Counter; d=C(vars(builtins)); pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'UD=UserDict; d=UD(vars(builtins)); '
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'OD=OrderedDict; d=OD(vars(builtins)); '
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'MPT=MappingProxyType; d=dict(MPT(vars(builtins))); '
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'it=vars(builtins).items; '
+                f'pm=partial(dict(it())["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'pm=partial(dict(getattr(vars(builtins),"items")())["map"], '
+                f'{fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd={{}}; d.update(vars(builtins)); '
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=vars(builtins); '
+                f'pm=partial([partial(copy.copy,d)][0]()["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'args=(vars(builtins)["map"], {fn}); '
+                f'pm=partial.__new__(partial, *args)\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'DD=defaultdict\nif True:\n'
+                f'    d=DD(None, vars(builtins)); '
+                f'pm=partial(d["map"], {fn})\n'
+                f'    list(pm([xs:=[]], {vals})); xs[0](exec)\n'
+                f'ns.e({ex})',
+            )
+        )
+    )
+
+
+def test_thirty_first_pass_identity_never_authorized() -> None:
+    """Identity late-key getattr/partial, MPT Name, dict.copy star/kwargs."""
+
+    id_imp = (
+        "import copy\nfrom functools import partial\nimport operator\n"
+        "from types import MappingProxyType"
+    )
+    _assert_ninth_not_authorized(
+        (
+            (
+                "d=dict(list.__dict__); "
+                "g=[partial(getattr(dict,'get'), d)][0]('sort')"
+                ".__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(list.__dict__); "
+                "p=partial(getattr(dict,'get'), d, 'sort'); "
+                "g=p().__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "MPT=MappingProxyType; mp=MPT(vars(list)); "
+                "m=mp['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "p=partial(dict.copy, dict({**vars(list)})); "
+                "m=p()['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "p=partial(dict.copy, dict(**vars(list))); "
+                "m=p()['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=(dict(vars(list)) | {})['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=operator.or_(dict(vars(list)), {})['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "p=partial(list.__dict__.copy); m=p()['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=operator.itemgetter('sort')({**vars(list)}); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "d=dict(vars(list)); m=next(iter([d['sort']])); "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "p=partial(dict.copy, dict(vars(list))); "
+                "m=[p][0]()['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=[list.__dict__.copy][0]()['sort']; "
+                "g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+        )
+    )
+
+
+def test_thirty_first_pass_lexical_never_authorized() -> None:
+    """Lexical itemgetter/reduce/BoolOp packs keep 15th–16th closed."""
+
+    lex_imp = (
+        "import operator\nfrom functools import partial\n"
+        "import functools\nimport copy"
+    )
+    _assert_ninth_not_authorized(
+        (
+            (
+                "d={Mut:1}\n"
+                "e=operator.itemgetter(0)([partial(copy.copy,d)])()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "e=operator.itemgetter(0)([partial(copy.deepcopy,d)])()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                'd={Mut:1}\n'
+                'e=getattr(operator,"itemgetter")(0)([partial(copy.copy,d)])()\n'
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "e=(0 or operator.itemgetter(0))([partial(copy.copy,d)])()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "e=(operator.itemgetter(0) if True else None)"
+                "([partial(copy.copy,d)])()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "e=operator.itemgetter(slice(0,1))"
+                "([partial(copy.copy,d)])()[0]()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "e=functools.reduce(lambda a,b: b, "
+                "[None, partial(copy.copy,d)])()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "e=functools.reduce(operator.getitem, "
+                "[[partial(copy.copy,d)], 0])()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\ne=[partial(copy.copy,d)][0]()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\ne=[partial(copy.copy,d)][:1][0]()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+        )
+    )
+
+
+def test_thirty_first_pass_alias_never_authorized() -> None:
+    """Alias F3–F7 methodcaller/pop/BoolOp getitem/sorted/enumerate/zip."""
+
+    alias_prefix = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+    )
+    cases = (
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=operator.methodcaller("__call__",0)(g)(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "c=list.pop([g],0).__call__(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "c=(0 or list.__getitem__)([g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "c=(list.__getitem__ if True else list.pop)"
+        "([g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "i=0; c=list.__getitem__([g.__call__], i)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'args=(keys,"z",keys.pop("x")); p=partial(operator.setitem)\n'
+        'c=[partial(operator.call,p)]; getattr(c,"pop")()(*([args].pop(0)))\n'
+        'k=keys.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "c=sorted([g.__call__],key=lambda x:0)[0](*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "c=next(enumerate([g.__call__]))[1](*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "c=next(zip([g.__call__]))[0](*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_thirty_first_pass_class_never_authorized() -> None:
+    """Class ChainMap sorted/maps+=/methodcaller/new_child/partial getitem."""
+
+    ex = _NINTH_EXEC
+    class_imp = (
+        "import types\nimport operator\nimport copy\n"
+        "from functools import partial\nfrom collections import ChainMap\n"
+        "from operator import attrgetter, methodcaller, iconcat"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); cm.maps[1//1]["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); sorted(cm.maps)[0]["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}); cm.maps += [vars(ns)]; '
+                f'cm.maps[0]["e"]=exec\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}); iconcat(cm.maps, [vars(ns)]); '
+                f'cm.maps[0]["e"]=exec\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}); list.__iadd__(cm.maps, [vars(ns)]); '
+                f'cm.maps[0]["e"]=exec\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}); '
+                f'methodcaller("insert",0,vars(ns))(cm.maps); '
+                f'cm.maps[0]["e"]=exec\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}); '
+                f'methodcaller("append",vars(ns))(cm.maps); '
+                f'cm.maps[0]["e"]=exec\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}); '
+                f'methodcaller("__setitem__",0,vars(ns))(cm.maps); '
+                f'cm.maps[0]["e"]=exec\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(); nc=cm.new_child; c2=nc(vars(ns)); '
+                f'c2["e"]=exec\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); '
+                f'partial(operator.getitem, cm.maps, 0)()["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); (cm.maps+[])[0]["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); (cm.maps*1)[0]["e"]=exec\n'
+                f'ns.e({ex})',
+            )
+        )
+    )
+
+
+def test_thirty_first_pass_interproc_never_authorized() -> None:
+    """Interproc empty packs: memoryview/enumerate/|/or_/fromhex/encode/array."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*enumerate(())); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*memoryview(b'')); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; f=e(**({}|{})); f(evil)",
+        "import operator\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(**operator.or_({},{})); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "R=range; empty=R(0,0); f=e(*empty); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(**(0 and {'x':1} or {})); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*bytes.fromhex('')); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*bytearray.fromhex('')); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*''.encode()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*''.encode('utf-8')); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*b''.decode()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*bytes('','utf-8')); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*''.join([])); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*bytes().join([])); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*''.format()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*''.replace('a','b')); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*b''.replace(b'a',b'b')); f(evil)",
+        "from array import array\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*array('b')); f(evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_thirty_first_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of thirty-first-pass shapes remain authorized."""
+
+    for body in (
+        "import types\nfrom functools import partial\nimport builtins\n"
+        "ns=types.SimpleNamespace()\n"
+        'd=vars(builtins); pm=partial(d["map"], list.append)\n'
+        "list(pm([xs:=[]], [partial(setattr, ns, 'x')])); xs[0](1)\nns.x",
+        "import types\nfrom collections import ChainMap\n"
+        "ns=types.SimpleNamespace()\n"
+        "cm=ChainMap(vars(ns)); cm.maps[0]['x']=1\nns.x",
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_thirty_second_pass_cf_never_authorized() -> None:
+    """CF Name-bound idle partial / UserDict.data / ChainMap.maps / dict rebuilds."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial\n"
+        "import operator\nimport builtins\nimport copy\n"
+        "from collections import defaultdict, Counter, UserDict, OrderedDict, "
+        "ChainMap\n"
+        "from types import MappingProxyType"
+    )
+    fn = "list.append"
+    vals = '[partial(setattr, ns, "e")]'
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f'd=vars(builtins); p=partial(copy.copy,d)\n'
+                f'pm=partial(p()["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=vars(builtins); p=partial(copy.deepcopy,d)\n'
+                f'pm=partial(p()["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=vars(builtins); p=partial(dict.copy,d)\n'
+                f'pm=partial(p()["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=UserDict(vars(builtins))\n'
+                f'pm=partial(d.data["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=UserDict(vars(builtins))\n'
+                f'pm=partial(getattr(d,"data")["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(builtins))\n'
+                f'pm=partial(cm.maps[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=dict(zip(vars(builtins).keys(), vars(builtins).values()))\n'
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd={{k:v for k,v in vars(builtins).items()}}\n'
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                # Keep 31st packed idle copy closed.
+                f'ns=types.SimpleNamespace()\n'
+                f'd=vars(builtins); '
+                f'pm=partial([partial(copy.copy,d)][0]()["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_thirty_second_pass_identity_never_authorized() -> None:
+    """Identity packed itemgetter product / partial(getattr copy) / partial.__new__."""
+
+    id_imp = (
+        "import copy\nfrom functools import partial\nimport operator\n"
+        "from types import MappingProxyType"
+    )
+    _assert_ninth_not_authorized(
+        (
+            (
+                "m=[operator.itemgetter('sort')][0]({**vars(list)})\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=[operator.itemgetter('sort')][0](vars(list))\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "MPT=MappingProxyType\n"
+                "m=[operator.itemgetter('sort')][0](MPT(vars(list)))\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "p=partial(getattr(dict,'copy'), dict(vars(list))); "
+                "m=p()['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "p=partial.__new__(partial, dict.copy, dict(vars(list)))\n"
+                "m=[p][0]()['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+        )
+    )
+
+
+def test_thirty_second_pass_lexical_never_authorized() -> None:
+    """Lexical re-pack applied idle product / partial.__new__ through adapters."""
+
+    lex_imp = (
+        "import operator\nfrom functools import partial\n"
+        "import functools\nimport copy"
+    )
+    _assert_ninth_not_authorized(
+        (
+            (
+                "d={Mut:1}\n"
+                "e=[operator.itemgetter(0)([partial(copy.copy,d)])][0]()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "e=[(0 or operator.itemgetter(0))([partial(copy.copy,d)])][0]()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "e=[(operator.itemgetter(0) if True else None)"
+                "([partial(copy.copy,d)])][0]()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "e=(operator.itemgetter(0)([partial(copy.copy,d)]),)[0]()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "e=next(iter([operator.itemgetter(0)([partial(copy.copy,d)])]))()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "e=functools.reduce(lambda a,b: b, "
+                "[None, operator.itemgetter(0)([partial(copy.copy,d)])])()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "e=operator.itemgetter(0)("
+                "[partial.__new__(partial, copy.copy, d)])()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "e=functools.reduce(lambda a,b: b, "
+                "[None, partial.__new__(partial, copy.copy, d)])()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "e=next(iter([partial.__new__(partial, copy.copy, d)]))()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            # Direct itemgetter stays closed (do not regress).
+            (
+                "d={Mut:1}\n"
+                "e=operator.itemgetter(0)([partial(copy.copy,d)])()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+        )
+    )
+
+
+def test_thirty_second_pass_alias_never_authorized() -> None:
+    """Alias Name-bound pop/sorted/getitem / methodcaller / True+0 / max|min."""
+
+    alias_prefix = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+    )
+    cases = (
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "pop=list.pop\n"
+        "c=pop([g],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "c=list.pop([g])(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=operator.methodcaller(*("__call__",0))(g)(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "srt=sorted\n"
+        "c=srt([g.__call__],key=lambda x:0)[0](*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "mx=max\n"
+        "c=mx([g.__call__])[0](*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "srt=sorted\n"
+        "p=srt([g.__call__],key=lambda _:0)[0](*[0]); c=p(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "gi=list.__getitem__\n"
+        "c=gi([g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=getattr(list,"pop")([g],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=operator.methodcaller("__call__")(g)(0)(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "c=list.__getitem__([None, g.__call__], True+0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "c=list.__getitem__([g.__call__], False+0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "c=partial(operator.call, list.__getitem__, [g.__call__], 0)()"
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "c=operator.call(list.__getitem__, [g.__call__], 0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "c=operator.getitem(sorted([g.__call__],key=lambda _:0),0)"
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "c=max([g.__call__],key=lambda x:0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "c=min([g.__call__],key=lambda x:0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "c=operator.itemgetter(1)(next(enumerate([g.__call__])))(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_thirty_second_pass_class_never_authorized() -> None:
+    """Class partial(new_child) / maps.__add__|mul / list(sorted|reversed) / maps=."""
+
+    ex = _NINTH_EXEC
+    class_imp = (
+        "import types\nimport operator\nimport copy\n"
+        "from functools import partial\nfrom collections import ChainMap\n"
+        "from operator import attrgetter, methodcaller, iconcat"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(); c2=partial(cm.new_child, vars(ns))(); '
+                f'c2["e"]=exec\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); cm.maps.__add__([])[0]["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); cm.maps.__mul__(1)[0]["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); list.__add__(cm.maps,[])[0]["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); list.__mul__(cm.maps,1)[0]["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); operator.add(cm.maps,[])[0]["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); operator.mul(cm.maps,1)[0]["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); '
+                f'methodcaller("__add__", [])(cm.maps)[0]["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); '
+                f'partial(getattr(operator,"getitem"), cm.maps, 0)()["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); list(sorted(cm.maps))[0]["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); list(reversed(cm.maps))[0]["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}); cm.maps=[vars(ns)]; '
+                f'cm.maps[0]["e"]=exec\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}); cm.maps = cm.maps + [vars(ns)]; '
+                f'cm.maps[0]["e"]=exec\nns.e({ex})',
+            )
+        )
+    )
+
+
+def test_thirty_second_pass_interproc_never_authorized() -> None:
+    """Interproc Name/getattr fromhex / unbound encode|decode|format|replace / array as."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "fh=bytes.fromhex; f=e(*fh('')); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*getattr(bytes,'fromhex')('')); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*str.encode('')); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*bytes.decode(b'')); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*format('')); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*str.format('')); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*str.replace('','a','b')); f(evil)",
+        "from array import array as A\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*A('i')); f(evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_thirty_second_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of thirty-second-pass shapes remain authorized."""
+
+    for body in (
+        "import types\nfrom functools import partial\nimport builtins\n"
+        "ns=types.SimpleNamespace()\n"
+        'd=vars(builtins); pm=partial(d["map"], list.append)\n'
+        "list(pm([xs:=[]], [partial(setattr, ns, 'x')])); xs[0](1)\nns.x",
+        "import types\nfrom collections import ChainMap\n"
+        "ns=types.SimpleNamespace()\n"
+        "cm=ChainMap(vars(ns)); cm.maps[0]['x']=1\nns.x",
+        "srt=sorted\nxs=srt([1, 2])\nlen(xs)",
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_thirty_third_pass_cf_never_authorized() -> None:
+    """CF BoolOp/IfExp/pack idle partial / UserDict.data mid / ChainMap.maps mid."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial\n"
+        "import operator\nimport builtins\nimport copy\n"
+        "from collections import UserDict, ChainMap\n"
+    )
+    fn = "list.append"
+    vals = '[partial(setattr, ns, "e")]'
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f'd=vars(builtins); p=partial(copy.copy,d)\n'
+                f'pm=partial((0 or p)()["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=vars(builtins); p=partial(copy.copy,d)\n'
+                f'pm=partial((p if True else None)()["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=vars(builtins); p=partial(copy.copy,d)\n'
+                f'pm=partial([p][0]()["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=vars(builtins); p=partial(copy.copy,d)\n'
+                f'pm=partial(next(iter([p]))()["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=vars(builtins); p=partial(copy.copy,d)\n'
+                f'pm=partial(next(reversed([p]))()["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=UserDict(vars(builtins))\n'
+                f'data=d.data; pm=partial(data["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(builtins))\n'
+                f'm=cm.maps; pm=partial(m[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(builtins))\n'
+                f'pm=partial(operator.getitem(cm.maps,0)["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(builtins))\n'
+                f'pm=partial(sorted(cm.maps)[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_thirty_third_pass_identity_never_authorized() -> None:
+    """Identity packed/BoolOp/next(iter) list.sort.__get__ peels."""
+
+    id_imp = (
+        "import copy\nfrom functools import partial\nimport operator\n"
+        "from types import MappingProxyType\nimport builtins"
+    )
+    _assert_ninth_not_authorized(
+        (
+            (
+                "args=(partial, dict.copy, dict(vars(list)))\n"
+                "p=partial.__new__(*args)\n"
+                "m=[p][0]()['sort']; g=m.__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "m=(0 or dict(vars(list))['sort'])\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "g=[list.sort][0].__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "g=(0 or list.sort).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+            (
+                "g=next(iter([list.sort])).__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                id_imp,
+            ),
+        )
+    )
+
+
+def test_thirty_third_pass_lexical_never_authorized() -> None:
+    """Lexical outer BoolOp/IfExp + Name-bound partial.__new__ idle apply."""
+
+    lex_imp = (
+        "import operator\nfrom functools import partial\n"
+        "import functools\nimport copy"
+    )
+    _assert_ninth_not_authorized(
+        (
+            (
+                "d={Mut:1}\n"
+                "e=(0 or [operator.itemgetter(0)([partial(copy.copy,d)])][0])()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "e=([operator.itemgetter(0)([partial(copy.copy,d)])][0] "
+                "if True else None)()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "new=partial.__new__\n"
+                "e=new(partial, copy.copy, d)()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "new=partial.__new__\n"
+                "e=new(partial, copy.deepcopy, d)()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "new: object = partial.__new__\n"
+                "e=new(partial, copy.copy, d)()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+        )
+    )
+
+
+def test_thirty_third_pass_alias_never_authorized() -> None:
+    """Alias Name-bound methodcaller/list.pop/partial/call/True+0 peels."""
+
+    alias_prefix = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+    )
+    cases = (
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        'mc_args=("__call__",0)\n'
+        "c=operator.methodcaller(*mc_args)(g)(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "mc=operator.methodcaller\n"
+        'c=mc("__call__",0)(g)(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "i=True+0\n"
+        "c=list.__getitem__([None, g.__call__], i)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "lp=list.pop\n"
+        "c=[lp][0]([g],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "lp=list.pop\n"
+        "p=lp([g],0)(*[0]); c=p(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "c=partial(list.__getitem__,[g.__call__],0)()(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=partial(getattr(list,"__getitem__"),[g.__call__],0)()'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        'c=operator.methodcaller("pop")([g]).__call__(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "pfn=partial\n"
+        "c=pfn(list.__getitem__,[g.__call__],0)()(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "c=oc(list.__getitem__,[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_thirty_third_pass_class_never_authorized() -> None:
+    """Class getattr/concat/Name-bound add|reversed + Reaudit31 parents/maps digs."""
+
+    ex = _NINTH_EXEC
+    class_imp = (
+        "import types\nimport operator\nimport copy\n"
+        "from functools import partial\nfrom collections import ChainMap\n"
+        "from operator import attrgetter, methodcaller, iconcat, concat"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); getattr(cm.maps,"__add__")([])[0]["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); getattr(list,"__add__")(cm.maps,[])[0]["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); getattr(operator,"add")(cm.maps,[])[0]["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); partial(operator.add, cm.maps, [])()[0]["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); concat(cm.maps,[])[0]["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); operator.concat(cm.maps,[])[0]["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); rev=reversed; list(rev(cm.maps))[0]["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); la=list.__add__; la(cm.maps,[])[0]["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}); cm.maps=partial(operator.add, [vars(ns)], cm.maps)(); '
+                f'cm.maps[0]["e"]=exec\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}, vars(ns)); getattr(cm.parents,"__add__")([])[0]["e"]=exec\n'
+                f'ns.e({ex})',
+                # Reaudit31 parents writes / maps reverse / unbound insert.
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}, vars(ns)); '
+                f'methodcaller("__setitem__","e",exec)(cm.parents)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}, vars(ns)); '
+                f'getattr(cm.parents,"__setitem__")("e",exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}, vars(ns)); cm.parents.__ior__({{"e":exec}})\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}, vars(ns)); '
+                f'methodcaller("__ior__", {{"e":exec}})(cm.parents)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}, vars(ns)); '
+                f'methodcaller("update", e=exec)(cm.parents)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}, vars(ns)); '
+                f'methodcaller("setdefault","e",exec)(cm.parents)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); next(cm.maps.__reversed__())["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); [*reversed(cm.maps)][0]["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); sorted(cm.maps, key=id)[0]["e"]=exec\n'
+                f'ns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); '
+                f'next(getattr(cm.maps,"__reversed__")())["e"]=exec\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); '
+                f'next(methodcaller("__reversed__")(cm.maps))["e"]=exec\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}); list.insert(cm.maps, 0, vars(ns)); '
+                f'cm.maps[0]["e"]=exec\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}); methodcaller("insert", 0, vars(ns))(cm.maps); '
+                f'cm.maps[0]["e"]=exec\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}); getattr(cm.maps,"insert")(0, vars(ns)); '
+                f'cm.maps[0]["e"]=exec\nns.e({ex})',
+            )
+        )
+    )
+
+
+def test_thirty_third_pass_interproc_never_authorized() -> None:
+    """Interproc empty hex/strip/memoryview/partial fromhex/methodcaller/codecs."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call, extras in (
+        (
+            "from contextlib import nullcontext; args=(n.install,)\n"
+            "    cm=nullcontext(*args); e=cm.__enter__; "
+            "f=e(*b''.hex()); f(evil)",
+            "",
+        ),
+        (
+            "from contextlib import nullcontext; args=(n.install,)\n"
+            "    cm=nullcontext(*args); e=cm.__enter__; "
+            "f=e(*''.strip()); f(evil)",
+            "",
+        ),
+        (
+            "from contextlib import nullcontext; args=(n.install,)\n"
+            "    cm=nullcontext(*args); e=cm.__enter__; "
+            "f=e(*memoryview(b'').tobytes()); f(evil)",
+            "",
+        ),
+        (
+            "from functools import partial\n"
+            "    from contextlib import nullcontext; args=(n.install,)\n"
+            "    cm=nullcontext(*args); e=cm.__enter__; "
+            "f=e(*partial(bytes.fromhex,'')()); f(evil)",
+            "",
+        ),
+        (
+            "from operator import methodcaller\n"
+            "    from contextlib import nullcontext; args=(n.install,)\n"
+            "    cm=nullcontext(*args); e=cm.__enter__; "
+            "f=e(*methodcaller('hex')(b'')); f(evil)",
+            "",
+        ),
+        (
+            "import codecs\n"
+            "    from contextlib import nullcontext; args=(n.install,)\n"
+            "    cm=nullcontext(*args); e=cm.__enter__; "
+            "f=e(*codecs.encode('','utf-8')); f(evil)",
+            "",
+        ),
+        (
+            "from contextlib import nullcontext; args=(n.install,)\n"
+            "    cm=nullcontext(*args); e=cm.__enter__; "
+            "f=e(*bytes.__new__(bytes)); f(evil)",
+            "",
+        ),
+        (
+            "import operator\n"
+            "    from contextlib import nullcontext; args=(n.install,)\n"
+            "    cm=nullcontext(*args); e=cm.__enter__; "
+            "f=e(*operator.mul((),3)); f(evil)",
+            "",
+        ),
+        (
+            "from contextlib import nullcontext; args=(n.install,)\n"
+            "    cm=nullcontext(*args); e=cm.__enter__; "
+            "f=e(*f'{chr(0)[:0]}'); f(evil)",
+            "",
+        ),
+        (
+            "from array import array\n"
+            "    from functools import partial\n"
+            "    from contextlib import nullcontext; args=(n.install,)\n"
+            "    cm=nullcontext(*args); e=cm.__enter__; "
+            "f=e(*partial(array,'b')()); f(evil)",
+            "",
+        ),
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_thirty_third_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of thirty-third-pass shapes remain authorized."""
+
+    for body in (
+        "import types\nfrom functools import partial\nimport builtins\n"
+        "ns=types.SimpleNamespace()\n"
+        'd=vars(builtins); pm=partial(d["map"], list.append)\n'
+        "list(pm([xs:=[]], [partial(setattr, ns, 'x')])); xs[0](1)\nns.x",
+        "import types\nfrom collections import ChainMap\n"
+        "ns=types.SimpleNamespace()\n"
+        "cm=ChainMap(vars(ns)); cm.maps[0]['x']=1\nns.x",
+        "rev=reversed\nxs=list(rev([1, 2]))\nlen(xs)",
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_thirty_fourth_pass_cf_never_authorized() -> None:
+    """CF dual-getattr rebuild / ChainMap materialize / UserDict.data getitem."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial\n"
+        "import operator\nimport builtins\nimport copy\n"
+        "from collections import UserDict, ChainMap\n"
+        "from operator import methodcaller, attrgetter\n"
+    )
+    fn = "list.append"
+    vals = '[partial(setattr, ns, "e")]'
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f'd=vars(builtins)\n'
+                f'pm=partial(dict(zip(getattr(d,"keys")(), getattr(d,"values")()))'
+                f'["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=vars(builtins); p=getattr(copy,"copy")\n'
+                f'pm=partial(p(d)["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=vars(builtins); g=getattr; p=g(copy,"copy")\n'
+                f'pm=partial(p(d)["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(builtins))\n'
+                f'pm=partial(next(iter(cm.maps))["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(builtins))\n'
+                f'pm=partial(next(cm.maps.__reversed__())["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(builtins))\n'
+                f'pm=partial([*cm.maps][0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(builtins))\n'
+                f'pm=partial(cm.maps.copy()[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(builtins))\n'
+                f'pm=partial(methodcaller("__getitem__",0)(cm.maps)["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(builtins))\n'
+                f'pm=partial(attrgetter("maps")(cm)[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=vars(builtins).__or__({{}})\n'
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=UserDict(vars(builtins))\n'
+                f'data=d.data; pm=partial(operator.getitem(data,"map"), {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'd=UserDict(vars(builtins))\n'
+                f'data=d.data; pm=partial(attrgetter("__getitem__")(data)("map"), '
+                f'{fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_thirty_fourth_pass_identity_never_authorized() -> None:
+    """Identity packed/next(iter) list.__dict__/vars/getattr sort.__get__."""
+
+    id_imp = (
+        "import copy\nfrom functools import partial\nimport operator\n"
+        "from types import MappingProxyType\nimport builtins"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (body, id_imp)
+            for body in (
+                "m=[list.__dict__['sort']][0]\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=[vars(list)['sort']][0]\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=[getattr(list,'sort')][0]\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=next(iter([list.__dict__['sort']]))\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=next(iter([vars(list)['sort']]))\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=next(iter([getattr(list,'sort')]))\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=(list.__dict__['sort'],)[0]\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=next(reversed([list.__dict__['sort']]))\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=next(iter({'s': list.__dict__['sort']}.values()))\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=[(0 or list.__dict__['sort'])][0]\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=[(list.__dict__['sort'] if True else None)][0]\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=[list.sort][0].__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+            )
+        )
+    )
+
+
+def test_thirty_fourth_pass_lexical_never_authorized() -> None:
+    """Lexical truthy-and BoolOp itemgetter/partial.__new__ peels."""
+
+    lex_imp = (
+        "import operator\nfrom functools import partial\n"
+        "import functools\nimport copy"
+    )
+    _assert_ninth_not_authorized(
+        (
+            (
+                "d={Mut:1}\n"
+                "e=(True and [operator.itemgetter(0)([partial(copy.copy,d)])][0])()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "new=partial.__new__\n"
+                "e=(True and new)(partial, copy.copy, d)()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "e=(1 and [operator.itemgetter(0)([partial(copy.copy,d)])][0])()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "t=True; new=partial.__new__\n"
+                "e=(t and new)(partial, copy.copy, d)()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "new=partial.__new__\n"
+                "e=(bool(1) and new)(partial, copy.copy, d)()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "new=partial.__new__\n"
+                "e=(all([1]) and new)(partial, copy.copy, d)()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "new=partial.__new__\n"
+                "e=(len('x') and new)(partial, copy.copy, d)()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "new=partial.__new__\n"
+                "e=((t:=True) and new)(partial, copy.copy, d)()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "new=partial.__new__\n"
+                "e=(True and True and new)(partial, copy.copy, d)()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "new=partial.__new__\n"
+                "e=(True and new)(partial, copy.deepcopy, d)()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+        )
+    )
+
+
+def test_thirty_fourth_pass_alias_never_authorized() -> None:
+    """Alias operator.call + getattr/Name/attrgetter list.__getitem__ peels."""
+
+    alias_prefix = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+    )
+    cases = (
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(getattr(list,"__getitem__"),[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "gi=list.__getitem__\n"
+        "c=oc(gi,[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(operator.attrgetter("__getitem__")(list),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "gi=list.__getitem__\n"
+        "c=[oc][0](gi,[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "import builtins\n"
+        'c=oc(builtins.getattr(list,"__getitem__"),[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "ga=getattr\n"
+        'c=oc(ga(list,"__getitem__"),[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "c=oc(list.__getitem__,[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_thirty_fourth_pass_class_never_authorized() -> None:
+    """Class ChainMap concat/reversed/__class__/partial insert/mc copy peels."""
+
+    ex = _NINTH_EXEC
+    class_imp = (
+        "import types\nimport operator\nimport copy\n"
+        "from functools import partial\nfrom collections import ChainMap\n"
+        "from operator import attrgetter, methodcaller, iconcat, concat"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}, vars(ns)); '
+                f'(cm.maps + [])[1]["e"]=exec\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}})\n'
+                f'([] + [vars(ns)] + cm.maps)[0]["e"]=exec\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}, vars(ns)); '
+                f'getattr(cm.parents,"update")(e=exec)\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); '
+                f'list(cm.maps.__reversed__())[0]["e"]=exec\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); '
+                f'[*cm.maps.__reversed__()][0]["e"]=exec\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); '
+                f'list(list.__reversed__(cm.maps))[0]["e"]=exec\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); '
+                f'cm.maps.__class__.__getitem__(cm.maps,0)["e"]=exec\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); [cm.maps][0][0]["e"]=exec\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}); '
+                f'partial(list.insert, cm.maps, 0)(vars(ns)); '
+                f'cm.maps[0]["e"]=exec\nns.e({ex})',
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); '
+                f'methodcaller("copy")(cm.maps)[0]["e"]=exec\nns.e({ex})',
+            )
+        )
+    )
+
+
+def test_thirty_fourth_pass_interproc_never_authorized() -> None:
+    """Interproc Name-bound empty encode/replace/memoryview/partial/getitem."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "enc=''.encode; f=e(*enc()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "rp=''.replace; f=e(*rp('a','a')); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "mv=memoryview(b''); tb=mv.tobytes; f=e(*tb()); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "mv=memoryview(b''); cs=mv.cast; f=e(*cs('B')); f(evil)",
+        "from functools import partial\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "p=partial(bytes.fromhex,''); f=e(*p()); f(evil)",
+        "import codecs as C\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*C.encode('','utf-8')); f(evil)",
+        "import operator\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*operator.getitem((), slice(0))); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*''.split()); f(evil)",
+        "import operator\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*getattr(operator,'mul')((),3)); f(evil)",
+        "import operator\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "xs=[]; f=e(*operator.imul(xs,0)); f(evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_thirty_fourth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of thirty-fourth-pass shapes remain authorized."""
+
+    for body in (
+        "import types\nfrom functools import partial\nimport builtins\n"
+        "ns=types.SimpleNamespace()\n"
+        'd=vars(builtins); pm=partial(d["map"], list.append)\n'
+        "list(pm([xs:=[]], [partial(setattr, ns, 'x')])); xs[0](1)\nns.x",
+        "import types\nfrom collections import ChainMap\n"
+        "ns=types.SimpleNamespace()\n"
+        "cm=ChainMap(vars(ns)); cm.maps[0]['x']=1\nns.x",
+        "xs=[1,2]; xs.sort()\nlen(xs)",
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_thirty_fifth_pass_cf_never_authorized() -> None:
+    """CF partial(getattr(copy))/maps copy/mid maps/view-mid/data.__getitem__."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial\n"
+        "import operator\nimport builtins\nimport copy\n"
+        "from collections import UserDict, ChainMap\n"
+        "from operator import methodcaller, attrgetter\n"
+    )
+    fn = "list.append"
+    vals = '[partial(setattr, ns, "e")]'
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\nd=vars(builtins)\n'
+                f'p=partial(getattr(copy,"copy"),d)\n'
+                f'pm=partial(p()["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nd=vars(builtins)\n'
+                f'p=partial(getattr(copy,"deepcopy"),d)\n'
+                f'pm=partial(p()["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nd=vars(builtins)\n'
+                f'p=partial(getattr(dict,"copy"),d)\n'
+                f'pm=partial(p()["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nd=vars(builtins)\n'
+                f'g=getattr; p=partial(g(copy,"copy"),d)\n'
+                f'pm=partial(p()["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nd=vars(builtins)\n'
+                f'p=partial((0 or getattr)(copy,"copy"),d)\n'
+                f'pm=partial(p()["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nd=vars(builtins)\n'
+                f'pm=partial(partial(getattr(copy,"copy"),d)()["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nd=vars(builtins)\n'
+                f'p=[partial(getattr(copy,"copy"),d)][0]()\n'
+                f'pm=partial(p["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nd=vars(builtins)\n'
+                f'p=(0 or partial(getattr(copy,"copy"),d))()\n'
+                f'pm=partial(p["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nd=vars(builtins)\n'
+                f'p=partial.__new__(partial, getattr(copy,"copy"), d)()\n'
+                f'pm=partial(p["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\ncm=ChainMap(vars(builtins))\n'
+                f'pm=partial(copy.copy(cm.maps)[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\ncm=ChainMap(vars(builtins))\n'
+                f'pm=partial(copy.deepcopy(cm.maps)[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\ncm=ChainMap(vars(builtins))\n'
+                f'pm=partial(list.copy(cm.maps)[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\ncm=ChainMap(vars(builtins))\n'
+                f'pm=partial(getattr(copy,"copy")(cm.maps)[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\ncm=ChainMap(vars(builtins))\n'
+                f'pm=partial((0 or copy.copy)(cm.maps)[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\ncm=ChainMap(vars(builtins))\n'
+                f'pm=partial([copy.copy(cm.maps)][0][0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\ncm=ChainMap(vars(builtins))\n'
+                f'pm=partial(getattr(cm.maps,"__getitem__")(0)["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\ncm=ChainMap(vars(builtins))\n'
+                f'm=getattr(cm,"maps"); pm=partial(m[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\ncm=ChainMap(vars(builtins))\n'
+                f'm=getattr(cm,"maps")\n'
+                f'pm=partial(operator.getitem(m,0)["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'vb=vars(builtins); ks=vb.keys(); vs=vb.values()\n'
+                f'pm=partial(dict(zip(ks,vs))["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nit=vars(builtins).items()\n'
+                f'pm=partial({{k:v for k,v in it}}["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'vb=vars(builtins); ks=vb.keys(); vs=vb.values()\n'
+                f'pm=partial(dict(zip(list(ks),list(vs)))["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'vb=vars(builtins); ks=vb.keys(); vs=vb.values()\n'
+                f'pm=partial({{**dict(zip(ks,vs))}}["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nd=UserDict(vars(builtins))\n'
+                f'data=d.data; pm=partial(data.__getitem__("map"), {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nd=UserDict(vars(builtins))\n'
+                f'pm=partial(attrgetter("data")(d)["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nd=UserDict(vars(builtins))\n'
+                f'pm=partial([attrgetter("data")][0](d)["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nd=UserDict(vars(builtins))\n'
+                f'data=d.data\n'
+                f'pm=partial(methodcaller("__getitem__","map")(data), {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_thirty_fifth_pass_identity_never_authorized() -> None:
+    """Identity reduce/pop/max/min/zip list.__dict__ sort.__get__ peels."""
+
+    id_imp = (
+        "import copy\nfrom functools import partial, reduce\n"
+        "import functools\nimport operator\n"
+        "from types import MappingProxyType\nimport builtins"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (body, id_imp)
+            for body in (
+                "m=functools.reduce(lambda a,b:b,[None,list.__dict__['sort']])\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=functools.reduce(lambda a,b:b,[None,vars(list)['sort']])\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=functools.reduce(lambda a,b:b,[None,getattr(list,'sort')])\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=functools.reduce(lambda a,b:b,[None,list.sort])\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=[list.__dict__['sort']].pop(0)\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=list.pop([list.__dict__['sort']],0)\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=getattr([list.__dict__['sort']],'pop')(0)\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=max([list.__dict__['sort']],key=id)\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=min([list.__dict__['sort']],key=id)\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=builtins.max([list.__dict__['sort']],key=id)\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=max([list.__dict__['sort']])\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=next(iter(zip([list.__dict__['sort']])))[0]\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+            )
+        )
+    )
+
+
+def test_thirty_fifth_pass_lexical_never_authorized() -> None:
+    """Lexical truthy Call-arm and / method-repack under True peels."""
+
+    lex_imp = (
+        "import operator\nfrom functools import partial\n"
+        "import functools\nimport copy\nimport builtins"
+    )
+    _assert_ninth_not_authorized(
+        (
+            (
+                "d={Mut:1}\nnew=partial.__new__\n"
+                "e=(any([0,1]) and new)(partial, copy.copy, d)()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nnew=partial.__new__\n"
+                "e=(sum([1]) and new)(partial, copy.copy, d)()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nnew=partial.__new__\n"
+                "e=(min([1]) and new)(partial, copy.copy, d)()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nnew=partial.__new__\n"
+                "e=(max([1]) and new)(partial, copy.copy, d)()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nnew=partial.__new__\n"
+                "e=(abs(1) and new)(partial, copy.copy, d)()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nnew=partial.__new__\n"
+                "e=(int(1) and new)(partial, copy.copy, d)()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nnew=partial.__new__\n"
+                "e=(float(1) and new)(partial, copy.copy, d)()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nnew=partial.__new__\n"
+                "e=(operator.truth(1) and new)(partial, copy.copy, d)()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nnew=partial.__new__\n"
+                "e=(pow(2,1) and new)(partial, copy.copy, d)()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nnew=partial.__new__\n"
+                "e=(ord('a') and new)(partial, copy.copy, d)()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\nnew=partial.__new__\n"
+                "e=(round(1.1) and new)(partial, copy.copy, d)()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "e=(True and [operator.itemgetter(0)([partial(copy.copy,d)])]"
+                ".pop(0))()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+            (
+                "d={Mut:1}\n"
+                "e=(1 and [operator.itemgetter(0)([partial(copy.copy,d)])]"
+                ".__getitem__(0))()\n"
+                "e|={}\nC,=e.keys()\nC()",
+                lex_imp,
+            ),
+        )
+    )
+
+
+def test_thirty_fifth_pass_alias_never_authorized() -> None:
+    """Alias packed attrgetter / oc getitem / Name nm / list.__dict__ peels."""
+
+    alias_prefix = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+    )
+    cases = (
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc([operator.attrgetter("__getitem__")][0](list),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "c=oc(operator.getitem,[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'nm="__getitem__"\n'
+        "c=oc(getattr(list,nm),[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'nm=(0 or "__getitem__")\n'
+        "c=oc(getattr(list,nm),[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(list.__dict__["__getitem__"],[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(vars(list)["__getitem__"],[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(getattr(list,"__dict__")["__getitem__"],[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "import builtins\n"
+        'c=oc(getattr(builtins,"getattr")(list,"__getitem__"),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "import builtins\n"
+        'c=oc(builtins.__dict__["getattr"](list,"__getitem__"),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "import builtins\n"
+        'c=oc(vars(builtins)["getattr"](list,"__getitem__"),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_thirty_fifth_pass_class_never_authorized() -> None:
+    """Class ChainMap methodcaller __add__ / partial concat|add front-pad."""
+
+    ex = _NINTH_EXEC
+    class_imp = (
+        "import types\nimport operator\nimport copy\n"
+        "from functools import partial\nfrom collections import ChainMap\n"
+        "from operator import attrgetter, methodcaller, iconcat, concat"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap(vars(ns)); '
+                f'methodcaller("__add__", [{{}}])(cm.maps)[0]["e"]=exec\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}, vars(ns)); '
+                f'partial(operator.concat, [{{}}], cm.maps)()[2]["e"]=exec\n'
+                f"ns.e({ex})",
+                f'ns=types.SimpleNamespace()\n'
+                f'cm=ChainMap({{}}, vars(ns)); '
+                f'partial(operator.add, [{{}}], cm.maps)()[2]["e"]=exec\n'
+                f"ns.e({ex})",
+            )
+        )
+    )
+
+
+def test_thirty_fifth_pass_interproc_never_authorized() -> None:
+    """Interproc methodcaller-as / imul / mul-as / itertools / codecs empty."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "from operator import methodcaller as mc\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*mc('fromhex','')(bytes)); f(evil)",
+        "from operator import methodcaller as mc\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*mc('hex','')(bytes)); f(evil)",
+        "from operator import methodcaller as mc\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*mc('encode','')(bytes)); f(evil)",
+        "import operator\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "im=operator.imul; xs=[]; f=e(*im(xs,0)); f(evil)",
+        "from operator import imul as im\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "xs=[]; f=e(*im(xs,0)); f(evil)",
+        "from operator import mul as mu\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*mu((),0)); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*it.chain()); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*it.chain(())); f(evil)",
+        "import itertools\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*itertools.chain.from_iterable(())); f(evil)",
+        "from itertools import chain\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*chain.from_iterable(())); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(bytes,'fromhex')('')); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "fm=format; f=e(*fm('')); f(evil)",
+        "from operator import methodcaller\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*methodcaller('tobytes')(memoryview(b''))); f(evil)",
+        "from operator import methodcaller\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*methodcaller('tolist')(memoryview(b''))); f(evil)",
+        "from operator import methodcaller\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*methodcaller('cast','B')(memoryview(b''))); f(evil)",
+        "import base64\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*base64.a85encode(b'')); f(evil)",
+        "import base64\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*base64.b85encode(b'')); f(evil)",
+        "import base64\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*base64.standard_b64encode(b'')); f(evil)",
+        "import base64\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*base64.urlsafe_b64encode(b'')); f(evil)",
+        "import binascii\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*binascii.b2a_base64(b'')); f(evil)",
+        "import binascii\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*binascii.a2b_base64(b'')); f(evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_thirty_fifth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of thirty-fifth-pass shapes remain authorized."""
+
+    for body in (
+        "import types\nfrom functools import partial\nimport builtins\n"
+        "ns=types.SimpleNamespace()\n"
+        'd=vars(builtins); pm=partial(d["map"], list.append)\n'
+        "list(pm([xs:=[]], [partial(setattr, ns, 'x')])); xs[0](1)\nns.x",
+        "import types\nfrom collections import ChainMap\n"
+        "ns=types.SimpleNamespace()\n"
+        "cm=ChainMap(vars(ns)); cm.maps[0]['x']=1\nns.x",
+        "xs=[1,2]; xs.sort()\nlen(xs)",
+        "from functools import reduce\n"
+        "reduce(lambda a,b:a+b,[1,2,3])",
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_thirty_sixth_pass_cf_never_authorized() -> None:
+    """CF Name-bound getattr copy / methodcaller maps / idle partial / parents / view-mid."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial\n"
+        "import operator\nimport builtins\nimport copy\n"
+        "from collections import UserDict, ChainMap\n"
+        "from operator import methodcaller, attrgetter\n"
+    )
+    fn = "list.append"
+    vals = '[partial(setattr, ns, "e")]'
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f'ns=types.SimpleNamespace()\nd=vars(builtins)\na="copy"\n'
+                f'p=partial(getattr(copy,a),d)\npm=partial(p()["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nd=vars(builtins)\na="deepcopy"\n'
+                f'p=partial(getattr(copy,a),d)\npm=partial(p()["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nd=vars(builtins)\na="copy"\n'
+                f'p=partial(getattr(dict,a),d)\npm=partial(p()["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\nd=vars(builtins)\na=(0 or "copy")\n'
+                f'p=partial(getattr(copy,a),d)\npm=partial(p()["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap(vars(builtins))\n"
+                f'pm=partial(methodcaller("copy")(cm.maps)[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap(vars(builtins))\n"
+                f'pm=partial([methodcaller("copy")][0](cm.maps)[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap(vars(builtins))\n"
+                f'pm=partial((0 or methodcaller("copy"))(cm.maps)[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap(vars(builtins))\n"
+                f'pm=partial(partial(copy.copy, cm.maps)()[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap(vars(builtins))\n"
+                f'pm=partial(partial(copy.deepcopy, cm.maps)()[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap(vars(builtins))\n"
+                f'pm=partial(partial(list.copy, cm.maps)()[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap(vars(builtins))\n"
+                f'pm=partial(partial(getattr(copy,"copy"), cm.maps)()[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap({{}}, vars(builtins))\n"
+                f'pm=partial(copy.copy(cm.parents.maps)[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap({{}}, vars(builtins))\n"
+                f'pm=partial(copy.deepcopy(cm.parents.maps)[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap({{}}, vars(builtins))\n"
+                f'pm=partial(list.copy(cm.parents.maps)[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"vb=vars(builtins); ks=vb.keys(); vs=vb.values()\n"
+                f"z=zip(ks,vs)\n"
+                f'pm=partial(dict(z)["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"vb=vars(builtins); ks=vb.keys(); vs=vb.values()\n"
+                f"z=zip(ks,vs)\n"
+                f'pm=partial({{k:v for k,v in z}}["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"ks=list(vb.keys()); vs=list(vb.values())\n"
+                f'pm=partial(dict(zip(ks,vs))["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f'it=getattr(vars(builtins),"items")()\n'
+                f'pm=partial({{k:v for k,v in it}}["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"vb=vars(builtins); ks=vb.keys(); vs=vb.values()\n"
+                f'pm=partial(dict([*zip(ks,vs)])["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"vb=vars(builtins); ks=vb.keys(); vs=vb.values()\n"
+                f'pm=partial(dict(list(zip(ks,vs)))["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"vb=vars(builtins); ks=vb.keys(); vs=vb.values()\n"
+                f'pm=partial(dict(tuple(zip(ks,vs)))["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"vb=vars(builtins); ks=vb.keys(); vs=vb.values()\n"
+                f"z=zip(ks,vs); d=dict(z)\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_thirty_sixth_pass_identity_never_authorized() -> None:
+    """Identity partial/pop/getitem/methodcaller/reduce/max list.__dict__ sort.__get__."""
+
+    id_imp = (
+        "import copy\nfrom functools import partial, reduce\n"
+        "import functools\nimport operator\n"
+        "from types import MappingProxyType\nimport builtins\n"
+        "from operator import methodcaller\n"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (body, id_imp)
+            for body in (
+                "m=partial(list.pop,[list.__dict__['sort']])(0)\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=operator.getitem([list.__dict__['sort']],0)\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=methodcaller('pop',0)([list.__dict__['sort']])\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=list.pop(*([list.__dict__['sort']],0))\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=getattr(functools,'reduce')(lambda a,b:b,[None,list.__dict__['sort']])\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=[list.__dict__.get('sort')].pop(0)\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=next(iter(zip([list.__dict__['sort']])))[0].__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "m=partial(max,[list.__dict__['sort']])()\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=functools.reduce(lambda a,b:b,[None,operator.getitem(list.__dict__,'sort')])\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+            )
+        )
+    )
+
+
+def test_thirty_sixth_pass_lexical_never_authorized() -> None:
+    """Lexical truthy Call-arm hash/complex/chr/bin/…/operator.neg|inv and new."""
+
+    lex_imp = (
+        "import operator\nfrom functools import partial\n"
+        "import functools\nimport copy\nimport builtins"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (
+                f"d={{Mut:1}}\nnew=partial.__new__\n"
+                f"e=({arm} and new)(partial, copy.copy, d)()\n"
+                f"e|={{}}\nC,=e.keys()\nC()",
+                lex_imp,
+            )
+            for arm in (
+                "hash(1)",
+                "complex(1)",
+                "ord(chr(97))",
+                "chr(97)",
+                "bin(1)",
+                "oct(1)",
+                "hex(1)",
+                "ascii(1)",
+                "repr(1)",
+                "str(1)",
+                "bytes(1)",
+                "bytearray(1)",
+                "id(1)",
+                "format(1)",
+                "builtins.hash(1)",
+                "operator.index(1)",
+                "operator.pos(1)",
+                "operator.neg(-1)",
+                "operator.inv(0)",
+            )
+        )
+    )
+
+
+def test_thirty_sixth_pass_alias_never_authorized() -> None:
+    """Alias oc getattr(operator)/dict(list.__dict__)/partial(getitem) peels."""
+
+    alias_prefix = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+    )
+    cases = (
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(getattr(operator,"getitem"),[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(getattr(operator,(0 or "getitem")),[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(operator.__dict__["getitem"],[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(vars(operator)["getitem"],[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(dict(list.__dict__)["__getitem__"],[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + "from types import MappingProxyType\n"
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(MappingProxyType(list.__dict__)["__getitem__"],[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(list.__dict__.get("__getitem__"),[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(vars(list).get("__getitem__"),[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(list.__dict__.__getitem__("__getitem__"),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(list.__dict__.copy()["__getitem__"],[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "import builtins\n"
+        'c=oc(getattr(getattr(builtins,"getattr"),"__call__")'
+        '(list,"__getitem__"),[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "c=oc(partial(operator.getitem),[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "og=operator.getitem\n"
+        "c=oc(partial(og),[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_thirty_sixth_pass_class_never_authorized() -> None:
+    """Class ChainMap packed methodcaller / deferred partial / parents front-pad."""
+
+    ex = _NINTH_EXEC
+    class_imp = (
+        "import types\nimport operator\nimport copy\n"
+        "from functools import partial\nfrom collections import ChainMap\n"
+        "from operator import attrgetter, methodcaller, iconcat, concat"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap(vars(ns)); "
+                f'[methodcaller("__add__", [{{}}])][0](cm.maps)[0]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap(vars(ns)); "
+                f'next(iter([methodcaller("__add__", [{{}}])]))(cm.maps)[0]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'partial(operator.concat)([{{}}], cm.maps)[2]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'partial(operator.add)([{{}}], cm.maps)[2]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'partial(operator.concat, [{{}}])(cm.maps)[2]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'partial(concat, [{{}}], copy.copy(cm.maps))()[2]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'partial(concat, [{{}}], list.copy(cm.maps))()[2]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap(vars(ns)); "
+                f'cm.maps=methodcaller("__add__", [vars(ns)])(cm.maps); '
+                f'cm.maps[0]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'([{{}}]+cm.parents.maps)[1]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'operator.concat([{{}}], cm.parents.maps)[1]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'operator.add([{{}}], cm.parents.maps)[1]["e"]=exec\n'
+                f"ns.e({ex})",
+            )
+        )
+    )
+
+
+def test_thirty_sixth_pass_interproc_never_authorized() -> None:
+    """Interproc Name-bound getattr mul / codec Name+from-import / decode / qp."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "import operator\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(operator,'mul')((),0)); f(evil)",
+        "import operator\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; xs=[]; f=e(*g(operator,'imul')(xs,0)); f(evil)",
+        "import base64\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "enc=base64.a85encode; f=e(*enc(b'')); f(evil)",
+        "from base64 import b85encode\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*b85encode(b'')); f(evil)",
+        "import base64\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "enc=base64.b64encode; f=e(*enc(b'')); f(evil)",
+        "import base64\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "enc=base64.urlsafe_b64encode; f=e(*enc(b'')); f(evil)",
+        "from base64 import standard_b64encode\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*standard_b64encode(b'')); f(evil)",
+        "import base64\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "enc=base64.encodebytes; f=e(*enc(b'')); f(evil)",
+        "import binascii\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "dec=binascii.a2b_base64; f=e(*dec(b'')); f(evil)",
+        "from binascii import hexlify\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*hexlify(b'')); f(evil)",
+        "import binascii\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "enc=binascii.b2a_hex; f=e(*enc(b'')); f(evil)",
+        "import base64\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*base64.a85decode(b'')); f(evil)",
+        "import base64\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*base64.b85decode(b'')); f(evil)",
+        "import base64\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*base64.urlsafe_b64decode(b'')); f(evil)",
+        "import base64\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*base64.standard_b64decode(b'')); f(evil)",
+        "import binascii\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*binascii.b2a_qp(b'')); f(evil)",
+        "import binascii\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*binascii.a2b_qp(b'')); f(evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_thirty_sixth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of thirty-sixth-pass shapes remain authorized."""
+
+    for body in (
+        "import types\nfrom functools import partial\nimport builtins\n"
+        "ns=types.SimpleNamespace()\n"
+        'd=vars(builtins); pm=partial(d["map"], list.append)\n'
+        "list(pm([xs:=[]], [partial(setattr, ns, 'x')])); xs[0](1)\nns.x",
+        "import types\nfrom collections import ChainMap\n"
+        "ns=types.SimpleNamespace()\n"
+        "cm=ChainMap(vars(ns)); cm.maps[0]['x']=1\nns.x",
+        "xs=[1,2]; xs.sort()\nlen(xs)",
+        "from functools import reduce\n"
+        "reduce(lambda a,b:a+b,[1,2,3])",
+        "import base64\nbase64.b64encode(b'hi')",
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_thirty_seventh_pass_cf_never_authorized() -> None:
+    """CF parents mid-bind / maps slice / Name methodcaller / view-mid rebuild."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial\n"
+        "import operator\nimport builtins\nimport copy\n"
+        "from collections import ChainMap\n"
+        "from operator import methodcaller, attrgetter\n"
+    )
+    fn = "list.append"
+    vals = '[partial(setattr, ns, "e")]'
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f"ns=types.SimpleNamespace()\ncm=ChainMap({{}}, vars(builtins))\n"
+                f"p=cm.parents\n"
+                f'pm=partial(copy.copy(p.maps)[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap({{}}, vars(builtins))\n"
+                f'pm=partial(copy.copy(getattr(cm,"parents").maps)[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap({{}}, vars(builtins))\n"
+                f'pm=partial(copy.deepcopy(getattr(cm,"parents").maps)[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap({{}}, vars(builtins))\n"
+                f'pm=partial(list.copy(getattr(cm,"parents").maps)[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap({{}}, vars(builtins))\n"
+                f'pm=partial(methodcaller("copy")(getattr(cm,"parents").maps)'
+                f'[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap({{}}, vars(builtins))\n"
+                f'pm=partial(cm.parents.maps[:][0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap({{}}, vars(builtins))\n"
+                f'pm=partial(copy.copy(cm.parents.maps[:])[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\ncm=ChainMap(vars(builtins))\n'
+                f'a="copy"\n'
+                f'pm=partial(methodcaller(a)(cm.maps)[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\ncm=ChainMap(vars(builtins))\n'
+                f'a=(0 or "copy")\n'
+                f'pm=partial(methodcaller(a)(cm.maps)[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f'ns=types.SimpleNamespace()\ncm=ChainMap(vars(builtins))\n'
+                f'a="copy"\n'
+                f'pm=partial([methodcaller(a)][0](cm.maps)[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"vb=vars(builtins); ks=vb.keys(); vs=vb.values()\n"
+                f'pm=partial(dict((k,v) for k,v in zip(ks,vs))["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"vb=vars(builtins); ks=vb.keys(); vs=vb.values()\n"
+                f'pm=partial(dict([(k,v) for k,v in zip(ks,vs)])["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"ks=list(vb); vs=[vb[k] for k in ks]\n"
+                f'pm=partial(dict(zip(ks,vs))["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"vb=vars(builtins); ks=vb.keys(); vs=vb.values()\n"
+                f'pm=partial(dict(reversed(list(zip(ks,vs))))["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"vb=vars(builtins); ks=vb.keys(); vs=vb.values()\n"
+                f'pm=partial(dict(map(tuple, zip(ks,vs)))["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"vb=vars(builtins); ks=vb.keys(); vs=vb.values()\n"
+                f'pm=partial(dict(sorted(zip(ks,vs)))["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"vb=vars(builtins); ks=vb.keys(); vs=vb.values()\n"
+                f'pm=partial(dict(filter(None, zip(ks,vs)))["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"vb=vars(builtins); ks=vb.keys(); vs=vb.values()\n"
+                f"z=iter(zip(ks,vs))\n"
+                f'pm=partial(dict(z)["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"vb=vars(builtins); ks=vb.keys(); vs=vb.values()\n"
+                f"d={{}}; d.update(zip(ks,vs))\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_thirty_seventh_pass_identity_never_authorized() -> None:
+    """Identity partial getitem/pop/reduce / reversed zip / unpack list.sort."""
+
+    id_imp = (
+        "import copy\nfrom functools import partial, reduce\n"
+        "import functools\nimport operator\n"
+        "from types import MappingProxyType\nimport builtins\n"
+        "from operator import methodcaller\n"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (body, id_imp)
+            for body in (
+                "m=partial(operator.getitem,[list.__dict__['sort']],0)()\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=partial(getattr(operator,'getitem'),[list.__dict__['sort']],0)()\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=partial((0 or operator.getitem),[list.__dict__['sort']],0)()\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=[partial(operator.getitem,[list.__dict__['sort']],0)][0]()\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=getattr(list,'pop')(*([list.__dict__['sort']],0))\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "args=([list.__dict__['sort']],0)\nm=list.pop(*args)\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=next(reversed(list(zip([list.__dict__['sort']]))))[0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=next(reversed([*zip([list.__dict__['sort']])]))[0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m,=next(iter(zip([list.__dict__['sort']])))\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m,=next(zip([list.__dict__['sort']]))\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=partial(functools.reduce,lambda a,b:b,"
+                "[None,list.__dict__['sort']])()\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=partial(getattr(functools,'reduce'),lambda a,b:b,"
+                "[None,list.__dict__['sort']])()\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=partial((0 or functools.reduce),lambda a,b:b,"
+                "[None,list.__dict__['sort']])()\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=[partial(functools.reduce,lambda a,b:b,"
+                "[None,list.__dict__['sort']])][0]()\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=partial(functools.reduce,lambda a,b:b,"
+                "[None,operator.getitem(list.__dict__,'sort')])()\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+            )
+        )
+    )
+
+
+def test_thirty_seventh_pass_lexical_never_authorized() -> None:
+    """Lexical truthy Call-arm abs/bytes/divmod/object/range/operator and new."""
+
+    lex_imp = (
+        "import operator\nfrom functools import partial\n"
+        "import functools\nimport copy\nimport builtins"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (
+                f"d={{Mut:1}}\nnew=partial.__new__\n"
+                f"e=({arm} and new)(partial, copy.copy, d)()\n"
+                f"e|={{}}\nC,=e.keys()\nC()",
+                lex_imp,
+            )
+            for arm in (
+                "abs(-1)",
+                "abs(-2)",
+                "operator.abs(-1)",
+                "operator.pos(-1)",
+                "complex(0,1)",
+                "bytes([65])",
+                "bytes(b'a')",
+                "bytearray(b'a')",
+                "bytearray([65])",
+                "divmod(3,2)",
+                "builtins.divmod(3,2)",
+                "object()",
+                "builtins.object()",
+                "range(1)",
+                "slice(1)",
+                "frozenset([1])",
+                "set([1])",
+                "list((1,))",
+                "tuple([1])",
+                "dict(a=1)",
+                "sorted([1])",
+                "reversed([1])",
+                "enumerate([1])",
+                "zip([1])",
+                "filter(None,[1])",
+                "map(int,[1])",
+                "iter([1])",
+                "next(iter([1]))",
+                "memoryview(b'a')",
+                "callable(int)",
+                "isinstance(1,int)",
+                "issubclass(int,object)",
+                'hasattr("","strip")',
+                'getattr(1,"real")',
+                "dir(1)",
+                "vars().__len__()",
+                "locals().__len__()",
+                "operator.not_(False)",
+                "operator.floordiv(3,2)",
+                "operator.mul(1,1)",
+                "operator.add(0,1)",
+                "operator.sub(2,1)",
+                "operator.mod(3,2)",
+            )
+        )
+    )
+
+
+def test_thirty_seventh_pass_alias_never_authorized() -> None:
+    """Alias oc attrgetter/itemgetter/packed/partial/Name-subscript peels."""
+
+    alias_prefix = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+    )
+    cases = (
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(operator.attrgetter("getitem")(operator),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(operator.attrgetter((0 or "getitem"))(operator),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "import builtins\n"
+        'c=oc(getattr(builtins,"getattr")(operator,"getitem"),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "import builtins\n"
+        'c=oc(builtins.__dict__["getattr"](operator,"getitem"),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "import builtins\n"
+        'c=oc(vars(builtins)["getattr"](operator,"getitem"),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "c=oc([operator.getitem][0],[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "c=oc(next(iter([operator.getitem])),[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "from operator import itemgetter\n"
+        'c=oc(itemgetter("getitem")(operator.__dict__),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "from operator import itemgetter\n"
+        'c=oc(itemgetter("getitem")(vars(operator)),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "from operator import itemgetter\n"
+        'c=oc(itemgetter("__getitem__")(list.__dict__),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "from operator import itemgetter\n"
+        'c=oc(itemgetter("__getitem__")(dict(list.__dict__)),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + "from types import MappingProxyType\n"
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "from operator import itemgetter\n"
+        "c=oc(itemgetter('__getitem__')(MappingProxyType(list.__dict__)),"
+        "[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(partial(getattr(operator,"getitem")),[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "og=operator.getitem\n"
+        "c=oc([partial(og)][0],[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(partial(operator.__dict__["getitem"]),[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'nm=(0 or "__getitem__")\n'
+        "c=oc(list.__dict__[nm],[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'nm=(0 or "__getitem__")\n'
+        "c=oc(dict(list.__dict__)[nm],[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + "from types import MappingProxyType\n"
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'nm=(0 or "__getitem__")\n'
+        "c=oc(MappingProxyType(list.__dict__)[nm],[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "import builtins\n"
+        'c=oc(getattr(builtins.__dict__["getattr"],"__call__")'
+        '(list,"__getitem__"),[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "import builtins\n"
+        'c=oc(getattr(vars(builtins)["getattr"],"__call__")'
+        '(list,"__getitem__"),[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(methodcaller("__getitem__","__getitem__")(list.__dict__),'
+        "[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(attrgetter("__getitem__")(list.__dict__)("__getitem__"),'
+        "[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "from operator import methodcaller, attrgetter\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_thirty_seventh_pass_class_never_authorized() -> None:
+    """Class ChainMap BinOp + through copy wrappers on maps/parents."""
+
+    ex = _NINTH_EXEC
+    class_imp = (
+        "import types\nimport operator\nimport copy\n"
+        "from functools import partial\nfrom collections import ChainMap\n"
+        "from operator import attrgetter, methodcaller, iconcat, concat"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'([{{}}]+list.copy(cm.maps))[2]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'([{{}}]+getattr(list,"copy")(cm.maps))[2]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'([{{}}]+list.copy(attrgetter("maps")(cm)))[2]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f"m=list.copy(cm.maps); "
+                f'([{{}}]+m)[2]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'([{{}}]+copy.copy(cm.parents.maps))[1]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'([{{}}]+list.copy(cm.parents.maps))[1]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'([{{}}]+cm.parents.maps.copy())[1]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'([{{}}]+getattr(list,"copy")(cm.parents.maps))[1]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'([{{}}]+getattr(copy,"copy")(cm.parents.maps))[1]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'([{{}}]+copy.copy(attrgetter("maps")(cm.parents)))[1]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f"m=copy.copy(cm.parents.maps); "
+                f'([{{}}]+m)[1]["e"]=exec\n'
+                f"ns.e({ex})",
+            )
+        )
+    )
+
+
+def test_thirty_seventh_pass_interproc_never_authorized() -> None:
+    """Interproc Name-bound getattr codecs / a2b_uu / quopri / itertools empty."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "import base64\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(base64,'a85encode')(b'')); f(evil)",
+        "import base64\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(base64,'a85decode')(b'')); f(evil)",
+        "import base64\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(base64,'b85decode')(b'')); f(evil)",
+        "import base64\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(base64,'urlsafe_b64decode')(b'')); f(evil)",
+        "import base64\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(base64,'standard_b64decode')(b'')); f(evil)",
+        "import binascii\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(binascii,'b2a_qp')(b'')); f(evil)",
+        "import binascii\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(binascii,'a2b_qp')(b'')); f(evil)",
+        "import base64\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*[getattr][0](base64,'a85encode')(b'')); f(evil)",
+        "import base64\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*(0 or g)(base64,'a85encode')(b'')); f(evil)",
+        "import base64\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; a='a85encode'; f=e(*g(base64,a)(b'')); f(evil)",
+        "import binascii\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*binascii.a2b_uu(b'`\\n')); f(evil)",
+        "import binascii as ba\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "dec=ba.a2b_uu; f=e(*dec(b'`\\n')); f(evil)",
+        "from binascii import a2b_uu\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*a2b_uu(b'`\\n')); f(evil)",
+        "import quopri\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*quopri.encodestring(b'')); f(evil)",
+        "import quopri as qp\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "enc=qp.encodestring; f=e(*enc(b'')); f(evil)",
+        "from quopri import decodestring\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*decodestring(b'')); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*it.repeat(0,0)); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*it.islice((),0)); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*it.starmap(int,())); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*it.accumulate(())); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*it.compress((),())); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*it.dropwhile(bool,())); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*it.filterfalse(bool,())); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*it.groupby(())); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*it.takewhile(bool,())); f(evil)",
+        "import operator\n"
+        "    from functools import partial\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*partial(operator.mul,())(0)); f(evil)",
+        "import operator\n"
+        "    from functools import partial\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "xs=[]; f=e(*partial(operator.imul,xs)(0)); f(evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_thirty_seventh_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of thirty-seventh-pass shapes remain authorized."""
+
+    for body in (
+        "import types\nfrom functools import partial\nimport builtins\n"
+        "ns=types.SimpleNamespace()\n"
+        'd=vars(builtins); pm=partial(d["map"], list.append)\n'
+        "list(pm([xs:=[]], [partial(setattr, ns, 'x')])); xs[0](1)\nns.x",
+        "import types\nfrom collections import ChainMap\n"
+        "ns=types.SimpleNamespace()\n"
+        "cm=ChainMap(vars(ns)); cm.maps[0]['x']=1\nns.x",
+        "xs=[1,2]; xs.sort()\nlen(xs)",
+        "abs(-1) and len([1])",
+        "import base64\nbase64.a85encode(b'hi')",
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+
+
+def test_thirty_eighth_pass_cf_never_authorized() -> None:
+    """CF parents getattr/attrgetter/copy + view-mid dict(**)/setdefault."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial\n"
+        "import operator\nimport builtins\nimport copy\n"
+        "from collections import ChainMap\n"
+        "from operator import methodcaller, attrgetter\n"
+    )
+    fn = "list.append"
+    vals = '[partial(setattr, ns, "e")]'
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f"ns=types.SimpleNamespace()\ncm=ChainMap({{}}, vars(builtins))\n"
+                f"p=cm.parents\n"
+                f'pm=partial(copy.copy(getattr(p,"maps"))[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap({{}}, vars(builtins))\n"
+                f'pm=partial(copy.copy(attrgetter("parents")(cm).maps)[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap({{}}, vars(builtins))\n"
+                f'pm=partial(copy.deepcopy(attrgetter("parents")(cm).maps)[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap({{}}, vars(builtins))\n"
+                f'pm=partial(attrgetter("parents")(cm).maps[:][0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap({{}}, vars(builtins))\n"
+                f'pm=partial(copy.copy(cm.parents).maps[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap({{}}, vars(builtins))\n"
+                f'pm=partial(copy.deepcopy(cm.parents).maps[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap({{}}, vars(builtins))\n"
+                f'pm=partial(getattr(cm.parents,"maps")[:][0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap({{}}, vars(builtins))\n"
+                f'pm=partial(getattr(cm.parents,"maps")[0:1][0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\ncm=ChainMap({{}}, vars(builtins))\n"
+                f'pm=partial(copy.copy(getattr(cm.parents,"maps")[:])[0]["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d=dict(**{{k:vb[k] for k in vb}})\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{}}\nfor k,v in vb.items():\n    d.setdefault(k,v)\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_thirty_eighth_pass_identity_never_authorized() -> None:
+    """Identity Name-bound pop / zip materialize / next-star / max-min zip."""
+
+    id_imp = (
+        "import copy\nfrom functools import partial, reduce\n"
+        "import functools\nimport operator\n"
+        "from types import MappingProxyType\nimport builtins\n"
+        "from operator import methodcaller\n"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (body, id_imp)
+            for body in (
+                "pop=list.pop; m=pop(*([list.__dict__['sort']],0))\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "pop=list.pop; args=([list.__dict__['sort']],0); m=pop(*args)\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=list(reversed(list(zip([list.__dict__['sort']]))))[0][0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=list(zip([list.__dict__['sort']]))[0][0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=sorted(zip([list.__dict__['sort']]))[0][0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=tuple(reversed(list(zip([list.__dict__['sort']]))))[0][0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=sorted(zip([list.__dict__['sort']]), reverse=True)[0][0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=sorted(list(zip([list.__dict__['sort']])))[0][0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=list(reversed(sorted(zip([list.__dict__['sort']]))))[0][0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m,=next(zip(*[[list.__dict__['sort']]]))\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "m=next(zip(*[[list.__dict__['sort']]]))[0]\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=max(zip([list.__dict__['sort']]))[0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=min(zip([list.__dict__['sort']]))[0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+            )
+        )
+    )
+
+
+def test_thirty_eighth_pass_lexical_never_authorized() -> None:
+    """Lexical truthy Call-arm operator arith/bits/dunder/compare/inplace/seq."""
+
+    lex_imp = (
+        "import operator\nfrom functools import partial\n"
+        "import functools\nimport copy\nimport builtins"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (
+                f"d={{Mut:1}}\nnew=partial.__new__\n"
+                f"e=({arm} and new)(partial, copy.copy, d)()\n"
+                f"e|={{}}\nC,=e.keys()\nC()",
+                lex_imp,
+            )
+            for arm in (
+                "operator.truediv(2,1)",
+                "operator.lshift(1,1)",
+                "operator.rshift(2,1)",
+                "operator.and_(1,1)",
+                "operator.or_(0,1)",
+                "operator.xor(1,0)",
+                "operator.__abs__(-1)",
+                "operator.__pos__(-1)",
+                "operator.__neg__(-1)",
+                "operator.__invert__(0)",
+                "operator.eq(1,1)",
+                "operator.ne(1,0)",
+                "operator.lt(0,1)",
+                "operator.le(1,1)",
+                "operator.gt(1,0)",
+                "operator.ge(1,1)",
+                "operator.is_(True, True)",
+                "operator.is_not(True, False)",
+                "operator.contains([1],1)",
+                "operator.countOf([1],1)",
+                "operator.length_hint([1])",
+                "operator.iadd(0,1)",
+                "operator.imul(1,1)",
+                "operator.isub(2,1)",
+                "operator.imod(3,2)",
+                "operator.ifloordiv(3,2)",
+                "operator.concat([1],[])",
+                "operator.iconcat([1],[])",
+                "operator.getitem([1],0)",
+                "operator.mul([1],1)",
+                "operator.add([1],[])",
+                "issubclass(bool,int)",
+                "globals().__len__()",
+                "vars(object)",
+            )
+        )
+    )
+
+
+def test_thirty_eighth_pass_alias_never_authorized() -> None:
+    """Alias oc attrgetter/itemgetter/getattr/__call__/idle-partial peels."""
+
+    alias_prefix = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+    )
+    cases = (
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(operator.attrgetter("getitem")(operator.__dict__),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(operator.attrgetter("getitem")(vars(operator)),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "from operator import attrgetter\n"
+        'c=oc(attrgetter("getitem")(dict(operator.__dict__)),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "import builtins\n"
+        'c=oc([getattr(builtins,"getattr")][0](operator,"getitem"),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "import builtins\n"
+        'c=oc((0 or getattr(builtins,"getattr"))(operator,"getitem"),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "import builtins\n"
+        'c=oc(builtins.__dict__.get("getattr")(operator,"getitem"),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "import builtins\nfrom operator import itemgetter\n"
+        'c=oc(itemgetter("getattr")(builtins.__dict__)(operator,"getitem"),'
+        "[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "import builtins\nfrom operator import attrgetter\n"
+        'c=oc(attrgetter("getattr")(builtins)(operator,"getitem"),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "import builtins\nfrom operator import methodcaller\n"
+        'c=oc(methodcaller("__getitem__","getattr")(builtins.__dict__)'
+        '(operator,"getitem"),[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "c=oc({0:operator.getitem}[0],[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(getattr(operator,"getitem").__call__,[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "c=oc(operator.getitem.__call__,[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "c=oc(list.__getitem__.__call__,[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "og=operator.getitem\n"
+        "c=oc(partial(og).__call__,[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "from operator import itemgetter\n"
+        'nm=(0 or "__getitem__")\n'
+        "c=oc(itemgetter(nm)(list.__dict__),[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "from operator import itemgetter\n"
+        'c=oc(itemgetter("get")(list.__dict__)("__getitem__"),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "from operator import attrgetter\n"
+        'c=oc(partial(attrgetter("getitem")(operator)),[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "from operator import itemgetter\n"
+        'c=oc([partial(itemgetter("__getitem__")(list.__dict__))][0],'
+        "[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "import builtins\n"
+        'c=oc(builtins.__dict__["getattr"].__call__(list,"__getitem__"),'
+        "[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "import builtins\nfrom operator import attrgetter\n"
+        'c=oc(attrgetter("__call__")(builtins.getattr)(list,"__getitem__"),'
+        "[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "import builtins\nfrom operator import methodcaller\n"
+        'c=oc(methodcaller("__call__",list,"__getitem__")(builtins.getattr),'
+        "[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "import builtins\n"
+        'c=oc(partial(getattr(builtins,"getattr"),list,"__getitem__"),'
+        "[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "from operator import methodcaller, attrgetter\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_thirty_eighth_pass_class_never_authorized() -> None:
+    """Class ChainMap parents Name mid-bind / methodcaller / post-BinOp slice."""
+
+    ex = _NINTH_EXEC
+    class_imp = (
+        "import types\nimport operator\nimport copy\n"
+        "from functools import partial\nfrom collections import ChainMap\n"
+        "from operator import attrgetter, methodcaller, iconcat, concat"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); p=cm.parents; "
+                f'([{{}}]+p.maps)[1]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); p=cm.parents; "
+                f'([{{}}]+list.copy(p.maps))[1]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); p=cm.parents; "
+                f'([{{}}]+copy.copy(p.maps))[1]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'([{{}}]+getattr(cm,"parents").maps)[1]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'([{{}}]+copy.copy(getattr(cm,"parents").maps))[1]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'([{{}}]+methodcaller("copy")(cm.parents.maps))[1]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'([{{}}]+attrgetter("maps")(attrgetter("parents")(cm)))[1]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'methodcaller("__add__", list.copy(cm.maps))([{{}}])[2]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'methodcaller("__add__", copy.copy(cm.parents.maps))([{{}}])'
+                f'[1]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'([{{}}]+list.copy(cm.maps))[:][2]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'([{{}}]+copy.copy(cm.parents.maps))[:][1]["e"]=exec\n'
+                f"ns.e({ex})",
+            )
+        )
+    )
+
+
+def test_thirty_eighth_pass_interproc_never_authorized() -> None:
+    """Interproc pairwise/batched / Name getattr it / iconcat / json/ast empty."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*it.pairwise(())); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*it.batched((),1)); f(evil)",
+        "from itertools import pairwise\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*pairwise(())); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(it,'pairwise')(())); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(it,'repeat')(0,0)); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(it,'islice')((),0)); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(it,'accumulate')(())); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(it,'starmap')(int,())); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(it,'compress')((),())); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(it,'groupby')(())); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(it,'takewhile')(bool,())); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(it,'dropwhile')(bool,())); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(it,'filterfalse')(bool,())); f(evil)",
+        "import operator\n"
+        "    from functools import partial\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "xs=[]; f=e(*partial(operator.iconcat,xs)(())); f(evil)",
+        "import operator\n"
+        "    from functools import partial\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "xs=[]; f=e(*partial(operator.iadd,xs)(())); f(evil)",
+        "import json\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*json.loads('[]')); f(evil)",
+        "import json\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*json.loads('{}').keys()); f(evil)",
+        "import ast\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*ast.literal_eval('[]')); f(evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_thirty_eighth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of thirty-eighth-pass shapes remain authorized."""
+
+    for body in (
+        "import types\nfrom functools import partial\nimport builtins\n"
+        "ns=types.SimpleNamespace()\n"
+        'd=vars(builtins); pm=partial(d["map"], list.append)\n'
+        "list(pm([xs:=[]], [partial(setattr, ns, 'x')])); xs[0](1)\nns.x",
+        "import types\nfrom collections import ChainMap\n"
+        "ns=types.SimpleNamespace()\n"
+        "cm=ChainMap(vars(ns)); cm.maps[0]['x']=1\nns.x",
+        "xs=[1,2]; xs.sort()\nlen(xs)",
+        "operator.truediv(2,1) and len([1])",
+        "import json\njson.loads('[1,2]')",
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_thirty_ninth_pass_cf_never_authorized() -> None:
+    """CF map-head view-mid via ``vb.get(k)`` rebuild peels."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial\n"
+        "import operator\nimport builtins\nimport copy\n"
+        "from collections import ChainMap\n"
+        "from operator import methodcaller, attrgetter\n"
+    )
+    fn = "list.append"
+    vals = '[partial(setattr, ns, "e")]'
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{}}\nfor k in vb:\n    d.setdefault(k, vb.get(k))\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{}}\ng=vb.get\nfor k in vb:\n    d.setdefault(k, g(k))\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{}}\nfor k in vb.keys():\n    d.setdefault(k, vb.get(k))\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{}}\nfor k in vb:\n"
+                f"    methodcaller('setdefault', k, vb.get(k))(d)\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{}}\nfor k in vb:\n"
+                f"    partial(d.setdefault, k, vb.get(k))()\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{}}\nfor k in vb:\n    d.update({{k: vb.get(k)}})\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{}}\nfor k in vb:\n    d|={{k: vb.get(k)}}\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{k: vb.get(k) for k in vb}}\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_thirty_ninth_pass_identity_never_authorized() -> None:
+    """Identity star-zip / Name-iters / max-min / getitem / reduce / enumerate."""
+
+    id_imp = (
+        "import copy\nfrom functools import partial, reduce\n"
+        "import functools\nimport operator\n"
+        "from types import MappingProxyType\nimport builtins\n"
+        "from operator import methodcaller\n"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (body, id_imp)
+            for body in (
+                "g=[*zip([list.__dict__['sort']])][0][0].__get__(None, list)\n"
+                "xs=[Mut]\ng(xs, key=type.__call__)",
+                "g=list(reversed([*zip([list.__dict__['sort']])]))[0][0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=tuple(reversed([*zip([list.__dict__['sort']])]))[0][0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "iters=[[list.__dict__['sort']]]; m,=next(zip(*iters))\n"
+                "g=m.__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=max(list(zip([list.__dict__['sort']])))[0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=min(tuple(zip([list.__dict__['sort']])))[0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=max(sorted(zip([list.__dict__['sort']])))[0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=operator.getitem(list(zip([list.__dict__['sort']])),0)[0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=operator.getitem(max(zip([list.__dict__['sort']])),0)"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=partial(max, zip([list.__dict__['sort']]))()[0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=partial(min, zip([list.__dict__['sort']]))()[0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=partial(list, zip([list.__dict__['sort']]))()[0][0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=partial(sorted, zip([list.__dict__['sort']]))()[0][0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=functools.reduce(operator.getitem, [[list.__dict__['sort']], 0])"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=partial(functools.reduce, operator.getitem, "
+                "[[list.__dict__['sort']], 0])()"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=list(enumerate(zip([list.__dict__['sort']])))[0][1][0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+            )
+        )
+    )
+
+
+def test_thirty_ninth_pass_lexical_never_authorized() -> None:
+    """Lexical truthy Call arms: compare dunders / inplace / indexOf / len / issubclass."""
+
+    lex_imp = (
+        "import operator\nfrom functools import partial\n"
+        "import functools\nimport copy\nimport builtins"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (
+                f"d={{Mut:1}}\nnew=partial.__new__\n"
+                f"e=({arm} and new)(partial, copy.copy, d)()\n"
+                f"e|={{}}\nC,=e.keys()\nC()",
+                lex_imp,
+            )
+            for arm in (
+                "operator.__eq__(1,1)",
+                "operator.__ne__(1,0)",
+                "operator.__lt__(0,1)",
+                "operator.__le__(1,1)",
+                "operator.__gt__(1,0)",
+                "operator.__ge__(1,1)",
+                "operator.ior(0,1)",
+                "operator.ixor(1,0)",
+                "operator.iand(1,1)",
+                "operator.ilshift(1,1)",
+                "operator.irshift(2,1)",
+                "operator.ipow(2,1)",
+                "operator.indexOf([1],1)",
+                "operator.__contains__([1],1)",
+                'getattr(operator,"truediv")(2,1)',
+                "len(globals())",
+                "len(vars(object))",
+                "issubclass(str,object)",
+            )
+        )
+    )
+
+
+def test_thirty_ninth_pass_alias_never_authorized() -> None:
+    """Alias oc string-key dict / Name ig|p|ga / attrgetter __call__ / dict**."""
+
+    alias_prefix = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+    )
+    cases = (
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc({"gi":operator.getitem}["gi"],[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "from operator import itemgetter\n"
+        'ig=itemgetter("__getitem__"); '
+        "c=oc(ig(list.__dict__),[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "from operator import attrgetter\n"
+        'p=partial(attrgetter("getitem")(operator)); '
+        "c=oc(p,[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "import builtins\n"
+        'c=oc(partial(getattr(builtins,"getattr"),list,"__getitem__").__call__,'
+        "[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "import builtins\nfrom operator import attrgetter\n"
+        'ga=attrgetter("getattr")(builtins); '
+        'c=oc(partial(ga,list,"__getitem__"),[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "from operator import attrgetter\n"
+        'c=oc(attrgetter("__call__")(operator.getitem),[g.__call__],0)'
+        "(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(dict(**{"0":operator.getitem})["0"],[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "from operator import methodcaller, attrgetter\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_thirty_ninth_pass_class_never_authorized() -> None:
+    """Class ChainMap methodcaller(copy)/__add__/inplace iconcat|iadd grow."""
+
+    ex = _NINTH_EXEC
+    class_imp = (
+        "import types\nimport operator\nimport copy\n"
+        "from functools import partial\nfrom collections import ChainMap\n"
+        "from operator import attrgetter, methodcaller, iconcat, concat"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'methodcaller("__add__", methodcaller("copy")(cm.maps))([{{}}])'
+                f'[2]["e"]=exec\nns.e({ex})',
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'methodcaller("__add__", methodcaller("copy")(cm.parents.maps))'
+                f'([{{}}])[1]["e"]=exec\nns.e({ex})',
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'methodcaller("__add__", [methodcaller("copy")][0](cm.maps))'
+                f'([{{}}])[2]["e"]=exec\nns.e({ex})',
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'[{{}}].__add__(list.copy(cm.maps))[2]["e"]=exec\nns.e({ex})',
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'[{{}}].__add__(copy.copy(cm.parents.maps))[1]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'[{{}}].__add__(cm.parents.maps)[1]["e"]=exec\nns.e({ex})',
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'[{{}}].__add__(cm.parents.maps)[:][1]["e"]=exec\nns.e({ex})',
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+                f'xs.__add__(cm.parents.maps)[1]["e"]=exec\nns.e({ex})',
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'([{{}}]+[methodcaller("copy")][0](cm.parents.maps))[1]["e"]'
+                f"=exec\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'([{{}}]+(0 or methodcaller("copy"))(cm.parents.maps))[1]["e"]'
+                f"=exec\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'([{{}}]+{{0:methodcaller("copy")}}[0](cm.parents.maps))[1]'
+                f'["e"]=exec\nns.e({ex})',
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); "
+                f'([{{}}]+next(iter([methodcaller("copy")]))(cm.parents.maps))'
+                f'[1]["e"]=exec\nns.e({ex})',
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+                f'iconcat(xs, cm.parents.maps); xs[1]["e"]=exec\nns.e({ex})',
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+                f'operator.iadd(xs, cm.parents.maps); xs[1]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+                f'operator.iconcat(xs, cm.parents.maps); xs[1]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+                f'partial(iconcat,xs)(cm.parents.maps); xs[1]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+                f'xs.__iadd__(cm.parents.maps); xs[1]["e"]=exec\nns.e({ex})',
+            )
+        )
+    )
+
+
+def test_thirty_ninth_pass_interproc_never_authorized() -> None:
+    """Interproc nullcontext empty pack: json/ast Name/getattr/bytes/tee/iadd."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "import json\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "ld=json.loads; f=e(*ld('[]')); f(evil)",
+        "import json\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(json,'loads')('[]')); f(evil)",
+        "import json\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*[json.loads][0]('[]')); f(evil)",
+        "import json\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*(0 or json.loads)('[]')); f(evil)",
+        "import json\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "nm='loads'; f=e(*getattr(json,nm)('[]')); f(evil)",
+        "import ast\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "le=ast.literal_eval; f=e(*le('[]')); f(evil)",
+        "import ast\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(ast,'literal_eval')('[]')); f(evil)",
+        "import json\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*json.JSONDecoder().decode('[]')); f(evil)",
+        "import json\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*json.loads(b'[]')); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "xs=[]; f=e(*xs.__iadd__(())); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "xs=[]; ia=xs.__iadd__; f=e(*ia(())); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*it.tee(())[0]); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(it,'chain')()); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(it,'zip_longest')()); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*(*it.pairwise(()),)); f(evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_thirty_ninth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of thirty-ninth-pass shapes remain authorized."""
+
+    for body in (
+        "import types\nfrom functools import partial\nimport builtins\n"
+        "ns=types.SimpleNamespace()\n"
+        'd=vars(builtins); pm=partial(d["map"], list.append)\n'
+        "list(pm([xs:=[]], [partial(setattr, ns, 'x')])); xs[0](1)\nns.x",
+        "import types\nfrom collections import ChainMap\n"
+        "ns=types.SimpleNamespace()\n"
+        "cm=ChainMap({}, vars(ns)); xs=[{}]; "
+        "from operator import iconcat; iconcat(xs, cm.parents.maps)\n"
+        "len(xs)",
+        "xs=[1,2]; xs.sort()\nlen(xs)",
+        "operator.__eq__(1,1) and len([1])",
+        "import json\njson.loads(b'[1,2]')",
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_fortieth_pass_cf_never_authorized() -> None:
+    """CF map-head: setitem / unbound setdefault / ior / list iters / dict(dictcomp)."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial\n"
+        "import operator\nimport builtins\n"
+    )
+    fn = "list.append"
+    vals = '[partial(setattr, ns, "e")]'
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{}}\nfor k in vb:\n    operator.setitem(d, k, vb.get(k))\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{}}\nfor k in vb:\n    dict.setdefault(d, k, vb.get(k))\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{}}\nfor k in vb:\n"
+                f"    getattr(d, 'setdefault')(k, vb.get(k))\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{}}\nfor k in vb:\n    d.update([(k, vb.get(k))])\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{}}\nfor k in vb:\n    d.__ior__({{k: vb.get(k)}})\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{}}\nfor k in vb:\n    operator.ior(d, {{k: vb.get(k)}})\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{k: vb.get(k) for k in list(vb)}}\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d=dict({{k: vb.get(k) for k in vb}})\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{}}\nfor k in iter(vb):\n    d.setdefault(k, vb.get(k))\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{}}\nfor k in sorted(vb):\n    d.setdefault(k, vb.get(k))\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_fortieth_pass_identity_never_authorized() -> None:
+    """Identity getitem([*zip]) / [*enumerate] / filter|map zip materialize."""
+
+    id_imp = (
+        "import operator\nimport builtins\nfrom functools import partial\n"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (body, id_imp)
+            for body in (
+                "g=operator.getitem([*zip([list.__dict__['sort']])],0)[0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "xs=[*zip([list.__dict__['sort']])]; "
+                "g=operator.getitem(xs,0)[0].__get__(None, list)\n"
+                "ys=[Mut]\ng(ys, key=type.__call__)",
+                "g=builtins.list.__getitem__([*zip([list.__dict__['sort']])],0)[0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=[*enumerate(zip([list.__dict__['sort']]))][0][1][0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=list(filter(None, zip([list.__dict__['sort']])))[0][0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=list(map(lambda t: t, zip([list.__dict__['sort']])))[0][0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+            )
+        )
+    )
+
+
+def test_fortieth_pass_lexical_never_authorized() -> None:
+    """Lexical truthy Call arms: itruediv / __itruediv__ + getattr/pack/BoolOp."""
+
+    lex_imp = (
+        "import operator\nfrom functools import partial\n"
+        "import copy\nimport builtins"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (
+                f"d={{Mut:1}}\nnew=partial.__new__\n"
+                f"e=({arm} and new)(partial, copy.copy, d)()\n"
+                f"e|={{}}\nC,=e.keys()\nC()",
+                lex_imp,
+            )
+            for arm in (
+                "operator.itruediv(2,1)",
+                "operator.__itruediv__(2,1)",
+                'getattr(operator,"itruediv")(2,1)',
+                'getattr(operator,"__itruediv__")(2,1)',
+                "[operator.itruediv][0](2,1)",
+                "(0 or operator.itruediv)(2,1)",
+            )
+        )
+    )
+
+
+def test_fortieth_pass_alias_never_authorized() -> None:
+    """Alias Name/ctor/MPT/mutate packs and __call__ neighbors."""
+
+    alias_prefix = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "from types import MappingProxyType\n"
+    )
+    cases = (
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(dict({"gi":operator.getitem})["gi"],[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'd={"gi":operator.getitem}; '
+        "c=oc(d['gi'],[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(MappingProxyType({"gi":operator.getitem})["gi"],'
+        "[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        "from operator import attrgetter\n"
+        'ag=attrgetter("__call__"); '
+        "c=oc(ag(operator.getitem),[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(getattr(operator.getitem,"__call__"),[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\nfrom operator import itemgetter\n"
+        'ig=itemgetter("__getitem__"); gi=ig(list.__dict__); '
+        "c=oc(gi,[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\nfrom operator import attrgetter\n"
+        'p=partial(attrgetter("getitem")(operator)); '
+        "c=oc(p.__call__,[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\nimport builtins\nfrom operator import itemgetter\n"
+        'ga=itemgetter("getattr")(builtins.__dict__); '
+        'c=oc(partial(ga,list,"__getitem__"),[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\nimport builtins\nfrom operator import itemgetter\n"
+        'ga=itemgetter("getattr")(vars(builtins)); '
+        'c=oc(partial(ga,list,"__getitem__"),[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'd={}; d.update({"gi":operator.getitem}); '
+        'c=oc(d["gi"],[g.__call__],0)(*[0])(keys)\n'
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\n'
+        "oc=operator.call\n"
+        'c=oc(dict.copy({"gi":operator.getitem})["gi"],'
+        "[g.__call__],0)(*[0])(keys)\n"
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter",
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "from operator import methodcaller, attrgetter\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_fortieth_pass_class_never_authorized() -> None:
+    """Class ChainMap grow-then-index with list.copy RHS via iconcat|iadd|extend."""
+
+    ex = _NINTH_EXEC
+    class_imp = (
+        "import types\nimport operator\nimport copy\n"
+        "from functools import partial\nfrom collections import ChainMap\n"
+        "from operator import iconcat, methodcaller"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+                f'iconcat(xs, list.copy(cm.maps)); xs[2]["e"]=exec\nns.e({ex})',
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+                f'operator.iadd(xs, list.copy(cm.maps)); xs[2]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+                f'xs.__iadd__(list.copy(cm.maps)); xs[2]["e"]=exec\nns.e({ex})',
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+                f'iconcat(xs, list.copy(cm.parents.maps)); xs[1]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+                f'xs.extend(list.copy(cm.maps)); xs[2]["e"]=exec\nns.e({ex})',
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+                f'methodcaller("__iadd__", list.copy(cm.maps))(xs); '
+                f'xs[2]["e"]=exec\nns.e({ex})',
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+                f'[iconcat][0](xs, list.copy(cm.maps)); xs[2]["e"]=exec\n'
+                f"ns.e({ex})",
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+                f'(0 or iconcat)(xs, list.copy(cm.maps)); xs[2]["e"]=exec\n'
+                f"ns.e({ex})",
+            )
+        )
+    )
+
+
+def test_fortieth_pass_interproc_never_authorized() -> None:
+    """Interproc: unbound JSONDecoder.decode / from-import literal_eval / getattr iadd."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "import json\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*json.JSONDecoder.decode(json.JSONDecoder(),'[]')); f(evil)",
+        "import json\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "dec=json.JSONDecoder.decode; "
+        "f=e(*dec(json.JSONDecoder(),'[]')); f(evil)",
+        "from ast import literal_eval as le\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*le('[]')); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "xs=[]; f=e(*getattr(xs,'__iadd__')(())); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "xs=[]; g=getattr; f=e(*g(xs,'__iadd__')(())); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    from operator import methodcaller\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "xs=[]; f=e(*methodcaller('__iadd__',())(xs)); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*getattr(it.chain,'from_iterable')(())); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g(it.chain,'from_iterable')(())); f(evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_fortieth_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of fortieth-pass shapes remain authorized."""
+
+    for body in (
+        "import types\nfrom functools import partial\nimport builtins\n"
+        "ns=types.SimpleNamespace()\n"
+        'd=vars(builtins); pm=partial(d["map"], list.append)\n'
+        "list(pm([xs:=[]], [partial(setattr, ns, 'x')])); xs[0](1)\nns.x",
+        "import types\nfrom collections import ChainMap\n"
+        "from operator import iconcat\n"
+        "ns=types.SimpleNamespace()\n"
+        "cm=ChainMap({}, vars(ns)); xs=[{}]; "
+        "iconcat(xs, list.copy(cm.maps))\nlen(xs)",
+        "operator.itruediv(2,1) and len([1])",
+        "import json\njson.JSONDecoder().decode('[1]')",
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_forty_first_pass_cf_never_authorized() -> None:
+    """CF: partial/getattr/pack setitem|ior, update(copy), BitOr dictcomp, ior(dict)."""
+
+    ex = _NINTH_EXEC
+    cf_imp = (
+        "import types\nfrom functools import partial\n"
+        "import operator\nimport builtins\nimport copy\n"
+        "from collections import ChainMap\n"
+    )
+    fn = "list.append"
+    vals = '[partial(setattr, ns, "e")]'
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, cf_imp)
+            for c in (
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{}}\nfor k in vb:\n"
+                f"    partial(operator.setitem, d)(k, vb.get(k))\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{}}\nfor k in vb:\n"
+                f"    getattr(operator, '__setitem__')(d, k, vb.get(k))\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{}}\nfor k in vb:\n"
+                f"    [operator.ior][0](d, {{k: vb.get(k)}})\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{}}\nfor k in vb:\n"
+                f"    d.update(copy.copy({{k: vb.get(k)}}))\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{}} | {{k: vb.get(k) for k in vb}}\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{k: vb.get(k) for k in vb}} | {{}}\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{}}\noperator.ior(d, dict(vb))\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+                f"ns=types.SimpleNamespace()\nvb=vars(builtins)\n"
+                f"d={{}}\ncm=ChainMap(d)\n"
+                f"for k in vb:\n    cm.maps[0].setdefault(k, vb.get(k))\n"
+                f'pm=partial(d["map"], {fn})\n'
+                f"list(pm([xs:=[]], {vals})); xs[0](exec)\nns.e({ex})",
+            )
+        )
+    )
+
+
+def test_forty_first_pass_identity_never_authorized() -> None:
+    """Identity: partial/reduce getitem zip; itertools zip; filter(bool)|partial."""
+
+    id_imp = (
+        "import operator\nimport builtins\nfrom functools import partial, reduce\n"
+        "from itertools import filterfalse, islice, compress, chain, "
+        "dropwhile, takewhile, accumulate, starmap, zip_longest\n"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (body, id_imp)
+            for body in (
+                "g=partial(operator.getitem,[*zip([list.__dict__['sort']])],0)()[0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=reduce(operator.getitem,[[*zip([list.__dict__['sort']])],0])[0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=operator.getitem([*zip(*[[list.__dict__['sort']]])],0)[0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=list(filterfalse(lambda x: False, zip([list.__dict__['sort']])))"
+                "[0][0].__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=list(islice(zip([list.__dict__['sort']]), 1))[0][0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=list(starmap(lambda *t: t, zip([list.__dict__['sort']])))"
+                "[0][0].__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=list(zip_longest(zip([list.__dict__['sort']])))[0][0][0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=list(compress(zip([list.__dict__['sort']]), [1]))[0][0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=list(chain(zip([list.__dict__['sort']])))[0][0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=list(dropwhile(lambda x: False, zip([list.__dict__['sort']])))"
+                "[0][0].__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=list(takewhile(lambda x: True, zip([list.__dict__['sort']])))"
+                "[0][0].__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=list(accumulate(zip([list.__dict__['sort']]), lambda a,b: b))"
+                "[0][0].__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "f=partial(filter, None); "
+                "g=list(f(zip([list.__dict__['sort']])))[0][0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+                "g=list(filter(bool, zip([list.__dict__['sort']])))[0][0]"
+                ".__get__(None, list)\nxs=[Mut]\ng(xs, key=type.__call__)",
+            )
+        )
+    )
+
+
+def test_forty_first_pass_lexical_never_authorized() -> None:
+    """Lexical truthy Call: __ifloordiv__/iadd/__iconcat__/__index__ + adapters."""
+
+    lex_imp = (
+        "import operator\nfrom functools import partial\n"
+        "import copy\nimport builtins"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (
+                f"d={{Mut:1}}\nnew=partial.__new__\n"
+                f"e=({arm} and new)(partial, copy.copy, d)()\n"
+                f"e|={{}}\nC,=e.keys()\nC()",
+                lex_imp,
+            )
+            for arm in (
+                "operator.__ifloordiv__(2,1)",
+                'getattr(operator,"__ifloordiv__")(2,1)',
+                "operator.iadd([1],[1])",
+                "operator.__iadd__([1],[1])",
+                "(0 or operator.iadd)([1],[1])",
+                "operator.__iconcat__([1],[])",
+                "operator.__index__(1)",
+                'getattr(operator,"__index__")(1)',
+                "(0 or operator.imod)(5,3)",
+            )
+        )
+    )
+
+
+def test_forty_first_pass_alias_never_authorized() -> None:
+    """Alias: next/OD/CM/UD packs; Name copy/get/pop; getitem/partial leftovers."""
+
+    alias_prefix = (
+        'ns=types.__dict__\nkeys={"x":"MappingProxyType"}\n'
+        "from functools import partial\n"
+        "from types import MappingProxyType\n"
+        "from collections import OrderedDict, ChainMap, UserDict\n"
+    )
+    _alias_tail = (
+        'c["z"]=c.pop("x"); k=c.get("z")\n'
+        'Proxy=getattr(ns,"get")(k)\ns=Proxy({"s":request.state})["s"]\n'
+        "s.bypass_filter=bypass_filter"
+    )
+    cases = (
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'c=oc(next(iter([{"gi":operator.getitem}]))["gi"],'
+        "[g.__call__],0)(*[0])(keys)\n"
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'c=oc(next(reversed([{"gi":operator.getitem}]))["gi"],'
+        "[g.__call__],0)(*[0])(keys)\n"
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'c=oc([{"gi":operator.getitem}].__getitem__(0)["gi"],'
+        "[g.__call__],0)(*[0])(keys)\n"
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'c=oc(OrderedDict({"gi":operator.getitem})["gi"],'
+        "[g.__call__],0)(*[0])(keys)\n"
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'c=oc(ChainMap({"gi":operator.getitem})["gi"],'
+        "[g.__call__],0)(*[0])(keys)\n"
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'c=oc(UserDict({"gi":operator.getitem})["gi"],'
+        "[g.__call__],0)(*[0])(keys)\n"
+        + _alias_tail,
+        # 1.6.0 leftover pins (shared peels).
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'd={"gi":operator.getitem}; '
+        'c=oc(d.copy()["gi"],[g.__call__],0)(*[0])(keys)\n'
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'd={"gi":operator.getitem}; '
+        'c=oc(d.get("gi"),[g.__call__],0)(*[0])(keys)\n'
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'd={"gi":operator.getitem}; '
+        'c=oc(d.pop("gi"),[g.__call__],0)(*[0])(keys)\n'
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'd={"gi":operator.getitem}; '
+        'c=oc(getattr(d,"get")("gi"),[g.__call__],0)(*[0])(keys)\n'
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'c=oc(dict.__getitem__({"gi":operator.getitem},"gi"),'
+        "[g.__call__],0)(*[0])(keys)\n"
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'c=oc(operator.getitem({"gi":operator.getitem},"gi"),'
+        "[g.__call__],0)(*[0])(keys)\n"
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'd={"gi":operator.getitem}; gi=operator.getitem(d,"gi"); '
+        "c=oc(gi,[g.__call__],0)(*[0])(keys)\n"
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'c=oc(methodcaller("__getitem__","gi")({"gi":operator.getitem}),'
+        "[g.__call__],0)(*[0])(keys)\n"
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        'c=oc(partial(getattr,list,"__getitem__").__call__.__call__,'
+        "[g.__call__],0)(*[0])(keys)\n"
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        "from operator import itemgetter\n"
+        'ig=itemgetter("__getitem__"); '
+        'gi=getattr(ig(list.__dict__),"__call__"); '
+        "c=oc(gi,[g.__call__],0)(*[0])(keys)\n"
+        + _alias_tail,
+        alias_prefix
+        + 'g=getattr([partial(copy.copy)],"pop")\noc=operator.call\n'
+        "import builtins\n"
+        'ga=operator.getitem(builtins.__dict__,"getattr"); '
+        'c=oc(partial(ga,list,"__getitem__"),[g.__call__],0)(*[0])(keys)\n'
+        + _alias_tail,
+    )
+    for body in cases:
+        findings = _unit(
+            "import helpers\nimport types, operator, copy\n"
+            "from operator import methodcaller, attrgetter\n"
+            "def evil(state, value):\n"
+            "    state.bypass_filter = value\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        assert findings[0].status != "authorized", body
+        assert findings[0].reason != "source_proved_server_authority_write", body
+
+
+def test_forty_first_pass_class_never_authorized() -> None:
+    """Class: attrgetter/getattr maps grow; append(list.copy|maps) leftovers."""
+
+    ex = _NINTH_EXEC
+    class_imp = (
+        "import types\nimport operator\nimport copy\n"
+        "from functools import partial\nfrom collections import ChainMap\n"
+        "from operator import iconcat, methodcaller, attrgetter"
+    )
+    _assert_ninth_not_authorized(
+        tuple(
+            (c, class_imp)
+            for c in (
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+                f'iconcat(xs, list.copy(attrgetter("maps")(cm))); '
+                f'xs[2]["e"]=exec\nns.e({ex})',
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+                f'iconcat(xs, list.copy(getattr(cm,"maps"))); '
+                f'xs[2]["e"]=exec\nns.e({ex})',
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+                f'iconcat(xs, list.copy(methodcaller('
+                f'"__getattribute__","maps")(cm))); '
+                f'xs[2]["e"]=exec\nns.e({ex})',
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+                f'iconcat(xs, list.copy((0 or attrgetter("maps"))(cm))); '
+                f'xs[2]["e"]=exec\nns.e({ex})',
+                # 1.6.0 leftover pins (append maps / list.copy maps).
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+                f"xs.append(list.copy(cm.maps)); "
+                f'xs[1][0]["e"]=exec\nns.e({ex})',
+                f"ns=types.SimpleNamespace()\n"
+                f"cm=ChainMap({{}}, vars(ns)); xs=[{{}}]; "
+                f"xs.append(cm.maps); "
+                f'xs[1][0]["e"]=exec\nns.e({ex})',
+            )
+        )
+    )
+
+
+def test_forty_first_pass_interproc_never_authorized() -> None:
+    """Interproc: packed decode/raw_decode; pickle; slice0; from_iterable/csv leftovers."""
+
+    nested = """
+def install(fn):
+    global write_state
+    write_state = fn
+def write_state(state, value):
+    state.bypass_filter = True
+""".strip()
+    for call in (
+        "import json\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*[json.JSONDecoder.decode][0](json.JSONDecoder(),'[]')); f(evil)",
+        "import json\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*json.JSONDecoder().raw_decode('[]')[0]); f(evil)",
+        "import json\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "dec=json.JSONDecoder.raw_decode; "
+        "f=e(*dec(json.JSONDecoder(),'[]')[0]); f(evil)",
+        "import pickle\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*pickle.loads(pickle.dumps([]))); f(evil)",
+        "import marshal\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*marshal.loads(marshal.dumps([]))); f(evil)",
+        "import re\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*re.findall(r'a','b')); f(evil)",
+        "import struct\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*struct.unpack('', b'')); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*getattr((),'__getitem__')(slice(0))); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    from operator import methodcaller\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*methodcaller('__getitem__',slice(0))(())); f(evil)",
+        # 1.6.0 leftover pins (from_iterable / csv / Name-getattr slice0).
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*[it.chain.from_iterable][0](())); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    from operator import methodcaller\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*methodcaller('from_iterable',())(it.chain)); f(evil)",
+        "import itertools as it\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*getattr(it,'chain').from_iterable(())); f(evil)",
+        "import csv, io\n"
+        "    from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*csv.reader(io.StringIO(''))); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "g=getattr; f=e(*g((),'__getitem__')(slice(0))); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*[getattr][0]((),'__getitem__')(slice(0))); f(evil)",
+        "from contextlib import nullcontext; args=(n.install,)\n"
+        "    cm=nullcontext(*args); e=cm.__enter__; "
+        "f=e(*(0 or getattr)((),'__getitem__')(slice(0))); f(evil)",
+    ):
+        routes = f"""
+import pkg.nested as n
+def evil(state, value):
+    state.bypass_filter = value
+def handler(request, bypass_filter=False):
+    {call}
+    n.write_state(request.state, bypass_filter)
+    return request.state.bypass_filter
+"""
+        files = {
+            "app/helpers.py": _helpers_source(),
+            "app/pkg/__init__.py": "",
+            "app/pkg/nested.py": nested,
+            "app/routes.py": routes.strip(),
+        }
+        findings = analyze_bypass_authority_unit(
+            files,
+            entry_path="app/routes.py",
+            function_name="handler",
+            bypass_fields=frozenset({"bypass_filter"}),
+            scope_proof=_scope(*files, import_roots=("app",)),
+        )
+        assert findings[0].status != "authorized", call
+        assert findings[0].reason != "source_proved_server_authority_write", call
+
+
+def test_forty_first_pass_positive_authorized_smoke() -> None:
+    """Benign analogues of forty-first-pass shapes remain authorized."""
+
+    for body in (
+        "import types\nfrom functools import partial\nimport builtins\n"
+        "import copy\n"
+        "ns=types.SimpleNamespace()\n"
+        "d={}\nfor k in vars(builtins):\n"
+        "    d.update(copy.copy({k: vars(builtins).get(k)}))\n"
+        'pm=partial(d["map"], list.append)\n'
+        "list(pm([xs:=[]], [partial(setattr, ns, 'x')])); xs[0](1)\nns.x",
+        "import types\nfrom collections import ChainMap\n"
+        "from operator import iconcat, attrgetter\n"
+        "ns=types.SimpleNamespace()\n"
+        "cm=ChainMap({}, vars(ns)); xs=[{}]; "
+        'iconcat(xs, list.copy(attrgetter("maps")(cm)))\nlen(xs)',
+        "operator.__ifloordiv__(2,1) and len([1])",
+        "import json\njson.JSONDecoder().raw_decode('[]')[0]",
+    ):
+        src = (
+            "import helpers\nimport copy\nimport types\nimport operator\n"
+            "def handler(request, bypass_filter=False):\n"
+            "    request.state.bypass_filter = True\n"
+            + "\n".join(f"    {ln}" for ln in body.split("\n"))
+            + "\n    return request.state.bypass_filter"
+        )
+        findings = _unit(src)
+        assert findings[0].status == "authorized", body
+        assert findings[0].reason == "source_proved_server_authority_write", body
+
+
+def test_persistent_version_bumped_for_executed_expr_closure() -> None:
+    """Cache / semantic versions bump with PASS-semantics change."""
+
+    assert PERSISTENT_FASTAPI_STATE_IMPLEMENTATION_VERSION == "1.6.0"
