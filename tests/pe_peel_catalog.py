@@ -58,6 +58,13 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "dict_ior_unbound",
         "setdefault_copy_items",
         "chainmap_maps_getitem_getattr",
+        # Forty-fourth-pass atoms (shared peels).
+        "mapping_ctor_items_rebuild",
+        "partial_dict_setitem_half",
+        "partial_dict_ior_half",
+        "augassign_od_dictcomp",
+        "augassign_dict_src_items",
+        "defaultdict_factory_dictcomp_items",
     ),
     "identity": (
         "star_zip_getitem",
@@ -77,6 +84,13 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "getattr_from_iterable_zip",
         "filter_truth_zip",
         "partial_map_zip",
+        # Forty-fourth-pass atoms (shared peels).
+        "list_repeat0",
+        "islice_repeat",
+        "getattr_builtins_filter_truth",
+        "getattr_builtins_map",
+        "next_filter_truth",
+        "attrgetter_repeat",
     ),
     "lexical": (
         "itruediv",
@@ -110,6 +124,15 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "next_items_gi",
         "name_fromkeys_gi",
         "getattr_gi_call",
+        # Forty-fourth-pass atoms (shared peels).
+        "dict_chainmap_or_gi",
+        "getattr_or_gi",
+        "methodcaller_or_gi",
+        "od_ud_or_gi",
+        "list_star_items_gi",
+        "popitem_gi",
+        "getattr_fromkeys_gi",
+        "copy_or_gi",
     ),
     "class": (
         "iconcat_list_copy_maps",
@@ -127,6 +150,11 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "partial_add_list_maps",
         "sum_list_maps",
         "reduce_add_list_maps",
+        # Forty-fourth-pass atoms (shared peels).
+        "partial_getattr_add_maps",
+        "reduce_lambda_add_maps",
+        "reduce_add_init_maps",
+        "reduce_iadd_init_maps",
     ),
     "interproc": (
         "unbound_decoder_decode",
@@ -152,6 +180,13 @@ FAMILY_HEADS: dict[str, tuple[str, ...]] = {
         "unpickler_load",
         "decode_read",
         "loads_decode",
+        # Forty-fourth-pass atoms (shared peels).
+        "unpickler_getattr_load",
+        "unpickler_name_list0_mc_load",
+        "json_load_name_sio_bio",
+        "decode_name_read",
+        "loads_decode_peels",
+        "raw_decode_read",
     ),
 }
 
@@ -206,3 +241,6 @@ FORTY_SECOND_LEFTOVERS: tuple[str, ...] = ()
 
 # Closed at 1.8.0 via shared peels + catalog atoms (was FORTY_THIRD leftovers).
 FORTY_THIRD_LEFTOVERS: tuple[str, ...] = ()
+
+# Closed at 1.9.0 via shared peels + catalog atoms (was FORTY_FOURTH leftovers).
+FORTY_FOURTH_LEFTOVERS: tuple[str, ...] = ()
