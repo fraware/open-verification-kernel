@@ -46,7 +46,7 @@
     "matches_reported_census_cardinality": true,
     "matches_reported_census_sha256": true,
     "hard_stop_on_digest_mismatch": true,
-    "binding_claim": "CENSUS_AND_DOWNSTREAM_DIGESTS_BOUND; V1_BINDING_WAITS_ON_CI_SUCCESS"
+    "binding_claim": "SOURCE_EVIDENCE_V1_BOUND"
   },
   "ovk_digest_forensics": {
     "artifact": "forensics/CENSUS_DIGEST_FORENSICS.v0.json",
@@ -54,7 +54,7 @@
     "pipeline_recovery": "forensics/PIPELINE_MODULE_RECOVERY.v0.json",
     "anchors_materialized": true,
     "projection_materialized": true,
-    "source_evidence_v1_binding": "DRAFT_PENDING_CI_SUCCESS"
+    "source_evidence_v1_binding": "BOUND"
   },
   "materializer_executed_identity": {
     "git_blob_sha1": "f97e2826308342a9ac772d39aee794a781417113",

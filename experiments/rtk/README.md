@@ -62,5 +62,5 @@ predictions, baseline runs, or unblinding.
 - Materializer executed identity: `f97e2826…`.
 - Local pipeline matched frozen anchors `44cb1f27…` and semantic projection `7ea32cb2…`.
 - Tier A: 9 anchors / 3 transitions; Tier B v1: 161 anchors / 161 transitions.
-- `SOURCE_EVIDENCE_V1_BINDING.json` remains uncreated until repaired-workflow Actions success IDs are recorded (draft at `SOURCE_EVIDENCE_V1_BINDING.DRAFT.json`).
+- `SOURCE_EVIDENCE_V1_BINDING.json` **BOUND** at methodology SHA `831a589` via Actions run `37517623512` / job `112454498374` with frozen digests matched.
 - No oracle / RTK prediction / baseline / unblinding.

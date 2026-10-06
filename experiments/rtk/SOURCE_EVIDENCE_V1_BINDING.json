@@ -1,7 +1,7 @@
 {
   "schema_version": "source_evidence_v1_binding.v0",
-  "status": "DRAFT_PENDING_CI_SUCCESS",
-  "binding_rule": "Bind only after full pipeline success at one exact SHA with frozen census/anchors/semantic digests matched. Do not invent CI IDs.",
+  "status": "BOUND",
+  "binding_rule": "Bound only after full pipeline success at one exact SHA with frozen census/anchors/semantic digests matched. CI IDs are observed, not invented.",
   "methodology_commit_sha": "831a589ed5c01fe2f980d32a95c73b4c5d338b58",
   "authentic_modules": {
     "extract_historical_anchors.py": "f37323dfee0ebc40417eeee548c95de2debbd44f",
@@ -14,23 +14,24 @@
   "materializer_executed_identity": {
     "path": "experiments/p05_formalpr_bench/rtk_eval/materialize_source_evidence.py",
     "git_blob_sha1": "f97e2826308342a9ac772d39aee794a781417113",
-    "note": "Authoritative executed identity for v1 run 37420715584 and this reproduction. Older freeze references to any prior materializer blob are superseded."
+    "note": "Authoritative executed identity for historical v1 run 37420715584 and the repaired reproduction. Any earlier freeze entry naming an older materializer blob is superseded and was not what the v1 run executed."
   },
   "frozen_digests": {
     "transition_census_sha256": "b1816276176297adf345981fe5d9c8271cf00f5b71653d59a21d8261d64a6b11",
     "historical_anchors_sha256": "44cb1f2701705375e9354b4a51a07064d2dba2d33f757e0955fc03db00d4d5cc",
-    "source_evidence_semantic_projection_sha256": "7ea32cb2c579077f281a3356683a3e926872492b6e756b44c0c39d077358f1fe"
+    "source_evidence_semantic_projection_sha256": "7ea32cb2c579077f281a3356683a3e926872492b6e756b44c0c39d077358f1fe",
+    "verified_in_actions_artifact": true,
+    "verified_locally": true
   },
-  "local_reproduction": {
-    "status": "SUCCESS_DIGESTS_MATCHED",
-    "python": "3.11.16",
-    "rustc": "1.88.0",
-    "source_evidence_records_sha256": "20a4d48eea27915319e9cea5b05ba4e060863867d8613fa8fed0e522431d24cb",
-    "tiered_manifest_path": "experiments/rtk/sealed/frozen_outputs/SOURCE_EVIDENCE_TIERED_MANIFEST.json",
-    "tier_a_replay_verified_anchors": 9,
-    "tier_a_replay_verified_transitions": 3,
-    "tier_b_committed_native_attestation_anchors": 161,
-    "tier_b_committed_native_attestation_transitions": 161
+  "tier_counts": {
+    "tier_a_replay_verified": {
+      "anchor_count": 9,
+      "transition_count": 3
+    },
+    "tier_b_committed_native_attestation": {
+      "anchor_count": 161,
+      "transition_count": 161
+    }
   },
   "historical_pre_fix_failure": {
     "run_id": 37420715584,
@@ -38,18 +39,26 @@
     "head_sha": "0758dac59230cb8110c07c1cd6e5fc2e4bc11317",
     "failure_step": "Validate v1 tier separation and schema",
     "failure_reason": "ModuleNotFoundError: No module named 'jsonschema'",
-    "repository_label": "fraware/labtrust-portfolio"
+    "repository_label": "fraware/labtrust-portfolio",
+    "workflow_blob": "cc374b68685911d384e97e2e54acc9bbc9306560"
   },
-  "repaired_workflow_ci": {
-    "status": "PENDING",
-    "run_id": null,
-    "job_id": null,
-    "head_sha": null,
-    "url": null
+  "repaired_workflow_success": {
+    "repository": "fraware/open-verification-kernel",
+    "branch": "research/rtk-sealed-evaluation-507f",
+    "run_id": 37517623512,
+    "job_id": 112454498374,
+    "head_sha": "831a589ed5c01fe2f980d32a95c73b4c5d338b58",
+    "url": "https://github.com/fraware/open-verification-kernel/actions/runs/37517623512",
+    "workflow": "RTK source-native evidence materialization",
+    "conclusion": "success",
+    "validation_environment_path": "experiments/rtk/sealed/frozen_outputs/VALIDATION_ENVIRONMENT.txt"
   },
   "baseline_commit_sha": "d74189961e1076e8fc203a4951bccd20a59ebf0e",
   "repair_commit_sha": "df68928728bbd496b8726bea8ec86af9cf14f5fc",
   "clean_tree_ordering_fix_commit_sha": "831a589ed5c01fe2f980d32a95c73b4c5d338b58",
+  "sealed_outputs_path": "experiments/rtk/sealed/frozen_outputs/",
+  "mappings_status": "BOUND_FROM_SOURCE_EVIDENCE_V1",
+  "cdi_manifest_path": "experiments/rtk/sealed/frozen_outputs/CanonicalDecisionInput.v1.MANIFEST.json",
   "prohibitions_honored": [
     "NO_ORACLE",
     "NO_RTK_PREDICTION",

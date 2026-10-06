@@ -1,6 +1,6 @@
 {
   "schema_version": "pipeline_module_recovery.v0",
-  "status": "PIPELINE_MODULES_INSTALLED_FROM_AUTHENTIC_HANDOFF",
+  "status": "PIPELINE_MODULES_INSTALLED_AND_V1_BOUND",
   "generated_at_utc": "2026-10-06T19:16:00+00:00",
   "sealed_census_status": {
     "path": "experiments/rtk/sealed/TRANSITION_CENSUS.jsonl",
@@ -64,8 +64,8 @@
     "workflow_jsonschema_repair": "APPLIED_NOT_BYTE_IDENTICAL_TO_cc374b68",
     "tier_v1_unit_tests": "PRESENT_AND_PASSING",
     "local_pipeline_rerun": "SUCCESS_FROZEN_DIGESTS_MATCHED",
-    "SOURCE_EVIDENCE_V1_BINDING": "DRAFT_PENDING_CI_SUCCESS",
-    "reason": "Authentic modules installed and local pipeline matched frozen anchors/projection digests; binding waits for repaired-workflow Actions success IDs."
+    "SOURCE_EVIDENCE_V1_BINDING": "BOUND",
+    "reason": "Authentic modules installed; repaired workflow Actions succeeded; frozen digests matched; binding recorded with observed run/job IDs."
   },
   "immutable_downstream_targets": {
     "anchors_cardinality": 541,

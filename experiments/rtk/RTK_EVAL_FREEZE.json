@@ -1,6 +1,6 @@
 {
   "schema_version": "rtk.eval_freeze.v1",
-  "status": "SOURCE_EVIDENCE_V1_LOCAL_SUCCESS_BINDING_PENDING_CI",
+  "status": "SOURCE_EVIDENCE_V1_BOUND",
   "protocol_paths": {
     "readme": "experiments/rtk/README.md",
     "protocol": "experiments/rtk/PROTOCOL.md",
@@ -19,7 +19,8 @@
     "sealed_census_provenance": "experiments/rtk/sealed/SEALED_CENSUS_PROVENANCE.json",
     "v1_run_head_provenance": "experiments/rtk/sealed/v1_run_head_0758dac/",
     "frozen_outputs": "experiments/rtk/sealed/frozen_outputs/",
-    "source_evidence_v1_binding_draft": "experiments/rtk/SOURCE_EVIDENCE_V1_BINDING.DRAFT.json"
+    "source_evidence_v1_binding_draft": "experiments/rtk/SOURCE_EVIDENCE_V1_BINDING.DRAFT.json",
+    "source_evidence_v1_binding": "experiments/rtk/SOURCE_EVIDENCE_V1_BINDING.json"
   },
   "protocol_commit_sha": "1bff877e9f405c447d10304221f4d1509abe141d",
   "source_repositories": [
@@ -30,7 +31,7 @@
       "cutoff_timestamp": "2026-05-22T10:56:51-07:00",
       "history_rule": "FIRST_PARENT",
       "role": "SOURCE_UNIVERSE_V0",
-      "ovk_materialization_status": "AUTHENTIC_PIPELINE_REPRODUCED_LOCAL;_BINDING_PENDING_CI"
+      "ovk_materialization_status": "SOURCE_EVIDENCE_V1_BOUND"
     },
     {
       "repository": "pcs-core",
@@ -39,7 +40,7 @@
       "cutoff_timestamp": "2026-07-24T20:21:55+02:00",
       "history_rule": "FIRST_PARENT",
       "role": "SOURCE_UNIVERSE_V0",
-      "ovk_materialization_status": "AUTHENTIC_PIPELINE_REPRODUCED_LOCAL;_BINDING_PENDING_CI"
+      "ovk_materialization_status": "SOURCE_EVIDENCE_V1_BOUND"
     }
   ],
   "source_universe_v0_policy": {
@@ -78,19 +79,19 @@
     "tier_a_replay_verified": {
       "anchor_count": 9,
       "transition_count": 3,
-      "status": "LOCALLY_PRODUCED_DIGESTS_MATCHED"
+      "status": "BOUND_FROM_ACTIONS_AND_LOCAL"
     },
     "tier_b_v1_committed_native_attestation": {
       "anchor_count": 161,
       "transition_count": 161,
-      "status": "LOCALLY_PRODUCED"
+      "status": "BOUND_FROM_ACTIONS_AND_LOCAL"
     }
   },
   "pre_oracle_feasibility": {
     "gate_name": "minimum_eligible_transitions",
     "target_transitions": 20,
     "gate_kind": "FEASIBILITY_RULE_NOT_SCIENTIFIC_VALIDITY",
-    "status": "GATE_MET_LOCALLY_TIER_A_3_TRANSITIONS",
+    "status": "GATE_MET_TIER_A_3_TRANSITIONS_BOUND",
     "external_report": {
       "provenance": "LOCALLY_REPRODUCED_ON_OVK",
       "reported_anchors": 9,
@@ -130,6 +131,11 @@
       "amendment_id": "ovk_authentic_v1_modules_and_jsonschema_repair",
       "status": "SOURCE_EVIDENCE_V1_LOCAL_SUCCESS_BINDING_PENDING_CI",
       "summary": "Installed authentic v1 run-head modules (baseline d741899) from handoff transport de781bad\u2026; applied jsonschema==4.26.0 environment repair (df68928, clean-tree fix 831a589). Local pipeline matched frozen anchors 44cb1f27\u2026 and semantic projection 7ea32cb2\u2026. Materializer identity f97e2826\u2026 authoritative. SOURCE_EVIDENCE_V1_BINDING waits for repaired-workflow Actions success IDs. No oracle."
+    },
+    {
+      "amendment_id": "ovk_source_evidence_v1_bound",
+      "status": "SOURCE_EVIDENCE_V1_BOUND",
+      "summary": "SOURCE_EVIDENCE_V1_BINDING.json created after Actions run 37517623512 / job 112454498374 succeeded at 831a589 with frozen census/anchors/semantic digests matched. Tier A 9/3, Tier B 161/161. Materializer f97e2826\u2026. No oracle."
     }
   ],
   "canonical_decision_input": {
@@ -168,13 +174,15 @@
     "workflow": "REPAIRED_NOT_BYTE_IDENTICAL_TO_cc374b68",
     "tier_v1": "AUTHENTIC_BLOB_6010c44b",
     "unit_tests": "PASSING_SYNTHETIC_PREDICATE_SUITE",
-    "binding": "DRAFT_PENDING_CI_SUCCESS",
-    "reason": "Local full pipeline success with frozen digests matched; binding file remains draft until repaired workflow Actions run/job IDs are known.",
+    "binding": "experiments/rtk/SOURCE_EVIDENCE_V1_BINDING.json",
+    "reason": "Full repaired-workflow Actions success on 831a589 (run 37517623512 / job 112454498374) with frozen digests matched; historical failing pre-fix run 37420715584 recorded for provenance.",
     "authentic_pre_fix_workflow_blob": "cc374b68685911d384e97e2e54acc9bbc9306560",
     "materializer_blob": "f97e2826308342a9ac772d39aee794a781417113",
     "baseline_commit_sha": "d74189961e1076e8fc203a4951bccd20a59ebf0e",
     "repair_commit_sha": "df68928728bbd496b8726bea8ec86af9cf14f5fc",
-    "historical_failure_run_id": 37420715584
+    "historical_failure_run_id": 37420715584,
+    "successful_run_id": 37517623512,
+    "successful_job_id": 112454498374
   },
   "case_generator": {
     "repository": null,
