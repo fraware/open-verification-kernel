@@ -18,3 +18,5 @@ blob. Repair scope:
 
 tier_source_evidence_v1.py predicates are unchanged (blob
 6010c44bb6ee2d89a30927726b37c1b346be4e0f).
+
+Additional repair (post df68928): move jsonschema install + VALIDATION_ENVIRONMENT.txt write to AFTER the clean-tree assert, because writing into GITHUB_WORKSPACE before that assert made run 37517387966 fail at Verify methodology checkout.

@@ -59,28 +59,6 @@ jobs:
         with:
           python-version: "3.11.16"
 
-      - name: Install pinned jsonschema for v1 validation
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -m pip install --upgrade pip
-          python -m pip install 'jsonschema==4.26.0'
-          python - <<'PY'
-          import jsonschema
-          assert jsonschema.__version__ == "4.26.0", jsonschema.__version__
-          print(f"jsonschema={jsonschema.__version__}")
-          PY
-          {
-            echo "python=$(python -V 2>&1)"
-            echo "jsonschema=$(python -c 'import jsonschema; print(jsonschema.__version__)')"
-            echo "jsonschema_pin=4.26.0"
-            echo "workflow_repair=jsonschema_environment_only"
-            echo "authentic_pre_fix_workflow_blob=cc374b68685911d384e97e2e54acc9bbc9306560"
-            echo "repaired_workflow_not_byte_identical_to_handoff=true"
-            echo "method_sha=${METHOD_SHA}"
-          } > "${GITHUB_WORKSPACE}/VALIDATION_ENVIRONMENT.txt"
-          cat "${GITHUB_WORKSPACE}/VALIDATION_ENVIRONMENT.txt"
-
       - name: Set up CertifyEdge Rust toolchain
         shell: bash
         run: |
@@ -101,6 +79,30 @@ jobs:
             experiments/p05_formalpr_bench/rtk_eval/project_source_evidence_semantics.py \
             experiments/p05_formalpr_bench/rtk_eval/tier_source_evidence_v1.py \
             experiments/p05_formalpr_bench/rtk_eval/test_tier_source_evidence_v1.py
+
+      - name: Install pinned jsonschema for v1 validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Written under $RUNNER_TEMP so the clean-tree assert above stays valid.
+          python -m pip install --upgrade pip
+          python -m pip install 'jsonschema==4.26.0'
+          python - <<'PY'
+          import jsonschema
+          assert jsonschema.__version__ == "4.26.0", jsonschema.__version__
+          print(f"jsonschema={jsonschema.__version__}")
+          PY
+          {
+            echo "python=$(python -V 2>&1)"
+            echo "jsonschema=$(python -c 'import jsonschema; print(jsonschema.__version__)')"
+            echo "jsonschema_pin=4.26.0"
+            echo "workflow_repair=jsonschema_environment_only"
+            echo "authentic_pre_fix_workflow_blob=cc374b68685911d384e97e2e54acc9bbc9306560"
+            echo "repaired_workflow_not_byte_identical_to_handoff=true"
+            echo "method_sha=${METHOD_SHA}"
+          } > "${RUNNER_TEMP}/VALIDATION_ENVIRONMENT.txt"
+          cp "${RUNNER_TEMP}/VALIDATION_ENVIRONMENT.txt" "${GITHUB_WORKSPACE}/VALIDATION_ENVIRONMENT.txt"
+          cat "${GITHUB_WORKSPACE}/VALIDATION_ENVIRONMENT.txt"
 
       - name: Run synthetic tier_source_evidence_v1 predicate tests
         shell: bash
