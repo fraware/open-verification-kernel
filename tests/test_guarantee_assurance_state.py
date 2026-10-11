@@ -740,3 +740,31 @@ def test_guarantee_transport_rejects_snapshot_selector_forgery(tmp_path) -> None
     result = _transport_admission(source, corrupted, original, reused)
     assert result.eligible is False
     assert "target_snapshot_machine_claim_mismatch" in result.reason_codes
+
+
+def test_guarantee_transport_rejects_mutated_semantic_artifact(tmp_path) -> None:
+    """A contradictory semantic artifact invalidates even a signed claim record."""
+    source, target, original, reused, _ = _make_signed_transport_case(tmp_path)
+    from copy import deepcopy
+    from ovk.core.evidence_integrity import seal_evidence
+
+    modified = deepcopy(reused)
+    artifacts = [
+        item for item in modified.generated_artifacts
+        if item.get("kind") == "protected_effect_semantic_slice"
+    ]
+    assert len(artifacts) == 1
+    artifacts[0]["semantic_slice_digest"] = "sha256:wrong"
+    # Re-seal to isolate the semantic-admission invariant from cryptographic
+    # tampering. The signer is trusted, yet can still produce an inconsistent
+    # artifact: the gate must reject it.
+    modified = seal_evidence(
+        modified,
+        key=TEST_KEY,
+        policy_digest="policy-a",
+        configuration_digest=modified.configuration_digest,
+        relevant_file_digests=modified.relevant_file_digests,
+    )
+    result = _transport_admission(source, target, original, modified)
+    assert result.eligible is False
+    assert "target_semantic_artifact_mismatch" in result.reason_codes
