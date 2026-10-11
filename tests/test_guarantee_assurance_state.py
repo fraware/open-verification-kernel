@@ -17,6 +17,7 @@ from ovk.core.guarantee_assurance_state import (
     build_guarantee_assurance_snapshot,
 )
 from ovk.core.guarantee_graph import GuaranteeSelector, GuaranteeSpec
+from ovk.core.guarantee_transport import evaluate_guarantee_transport_admission
 from ovk.core.models import VerificationSubject
 from ovk.core.protected_effect_evaluation import (
     evaluate_protected_effect_integrity,
@@ -492,3 +493,169 @@ def test_effect_local_complete_coverage_establishes_guarantee_under_global_parti
     state = snapshot.state_for("G-REFUND")
     assert state.status == "established"
     assert state.reason_codes == []
+
+
+def _make_signed_transport_case(tmp_path):
+    """Create consecutive signed PE states with a direct evidence-reuse edge."""
+    base = _ir(head_sha="base")
+    head = _ir(head_sha="head-b")
+    spec = _specs()[0]
+    evaluation = evaluate_protected_effect_integrity(
+        base, protected_effect_ids=["pe:refund"]
+    )[0]
+    runtime = _runtime()
+    fingerprint = build_execution_fingerprint(
+        evaluation,
+        environment_digest=runtime.environment_digest,
+        tool_digest=runtime.tool_digest,
+        worker_image_digest=runtime.worker_image_digest,
+        native_execution=runtime.native_execution,
+    )
+    source_evidence = protected_effect_evaluation_to_evidence(
+        base,
+        evaluation,
+        policy_digest="policy-a",
+        execution_fingerprint=fingerprint,
+        signing_key=TEST_KEY,
+    )
+    cache = ProtectedEffectEvidenceCache(HardenedResultCache(tmp_path))
+    cache.put(
+        ir=base,
+        protected_effect_id="pe:refund",
+        policy_digest="policy-a",
+        execution_fingerprint=fingerprint,
+        evidence=source_evidence,
+        signature_key=TEST_KEY,
+    )
+    execution = execute_incremental_protected_effect_assurance(
+        base,
+        head,
+        policy_digest="policy-a",
+        runtime_fingerprint_provider=lambda _id: runtime,
+        evidence_cache=cache,
+        signature_key=TEST_KEY,
+        signing_key=TEST_KEY,
+    )
+    assert "pe:refund" in execution.reused_effects
+    target_evidence = next(
+        item for item in execution.evidence
+        if item.intent.get("protected_effect_id") == "pe:refund"
+    )
+    source_snapshot = build_guarantee_assurance_snapshot(
+        base,
+        [spec],
+        [source_evidence],
+        policy_digest="policy-a",
+        signature_key=TEST_KEY,
+    )
+    target_snapshot = build_guarantee_assurance_snapshot(
+        head,
+        [spec],
+        [target_evidence],
+        policy_digest="policy-a",
+        signature_key=TEST_KEY,
+    )
+    assert source_snapshot.state_for("G-REFUND").status == "established"
+    assert target_snapshot.state_for("G-REFUND").status == "established"
+    return source_snapshot, target_snapshot, source_evidence, target_evidence, head
+
+
+def _transport_admission(source, target, source_evidence, target_evidence, *, key=TEST_KEY):
+    return evaluate_guarantee_transport_admission(
+        source,
+        target,
+        guarantee_id="G-REFUND",
+        source_evidence=source_evidence,
+        target_evidence=target_evidence,
+        signature_key=key,
+    )
+
+
+def test_guarantee_transport_admits_direct_signed_same_definition(tmp_path) -> None:
+    source, target, original, reused, _ = _make_signed_transport_case(tmp_path)
+    decision = _transport_admission(source, target, original, reused)
+    assert decision.eligible is True
+    assert decision.reason_codes == []
+    assert decision.source_definition_digest == decision.target_definition_digest
+    assert decision.source_evidence_digest == original.evidence_digest
+
+
+def test_guarantee_transport_rejects_changed_declaration_even_with_pe_pass(tmp_path) -> None:
+    source, _target, original, reused, head = _make_signed_transport_case(tmp_path)
+    modified = _specs()[0].model_copy(
+        update={"statement": "An edited human-readable statement."}
+    )
+    target = build_guarantee_assurance_snapshot(
+        head,
+        [modified],
+        [reused],
+        policy_digest="policy-a",
+        signature_key=TEST_KEY,
+    )
+    # This current-state PASS is *only* about the identical typed PE claim.
+    assert target.state_for("G-REFUND").status == "established"
+    decision = _transport_admission(source, target, original, reused)
+    assert decision.eligible is False
+    assert "guarantee_definition_changed" in decision.reason_codes
+
+
+def test_guarantee_transport_rejects_changed_assumptions(tmp_path) -> None:
+    source, _target, original, reused, head = _make_signed_transport_case(tmp_path)
+    modified = _specs()[0].model_copy(
+        update={"assumptions": ["A newly required operating assumption."]}
+    )
+    target = build_guarantee_assurance_snapshot(
+        head,
+        [modified],
+        [reused],
+        policy_digest="policy-a",
+        signature_key=TEST_KEY,
+    )
+    result = _transport_admission(source, target, original, reused)
+    assert result.eligible is False
+    assert "guarantee_definition_changed" in result.reason_codes
+
+
+def test_guarantee_transport_rejects_missing_lineage_or_wrong_key(tmp_path) -> None:
+    source, target, original, reused, _ = _make_signed_transport_case(tmp_path)
+
+    untrusted = _transport_admission(source, target, original, reused, key=None)
+    assert untrusted.eligible is False
+    assert "source_signature_invalid_or_key_missing" in untrusted.reason_codes
+
+    tampered = reused.model_copy(update={"evidence_digest": "tampered"})
+    result = _transport_admission(source, target, original, tampered)
+    assert result.eligible is False
+    assert "target_evidence_digest_invalid" in result.reason_codes
+    assert "target_state_evidence_mismatch" in result.reason_codes
+
+    wrong_prior = reused.model_copy(
+        update={
+            "change_origin": {
+                "source": "reused_sealed_evidence",
+                "prior_evidence_digest": "incorrect-source-digest",
+                "head_assurance_ir_digest": target.assurance_ir_digest,
+            }
+        }
+    )
+    rejected = _transport_admission(source, target, original, wrong_prior)
+    assert rejected.eligible is False
+    assert "prior_evidence_lineage_mismatch" in rejected.reason_codes
+
+
+def test_guarantee_transport_rejects_revision_discontinuity(tmp_path) -> None:
+    source, target, original, reused, _ = _make_signed_transport_case(tmp_path)
+    broken = target.model_copy(update={"subject_base_sha": "other-commit"})
+    result = _transport_admission(source, broken, original, reused)
+    assert result.eligible is False
+    assert "revision_chain_discontinuous" in result.reason_codes
+
+
+def test_guarantee_transport_does_not_equate_fresh_evidence_with_reuse(tmp_path) -> None:
+    source, target, original, reused, _ = _make_signed_transport_case(tmp_path)
+    fresh_target = reused.model_copy(
+        update={"change_origin": {"source": "assurance_ir"}}
+    )
+    result = _transport_admission(source, target, original, fresh_target)
+    assert result.eligible is False
+    assert "target_origin_not_reused" in result.reason_codes
