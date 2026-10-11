@@ -104,7 +104,23 @@ A one-sided exact binomial bound assumes independent Bernoulli opportunities und
 
 Zero observed false reuse does not establish zero risk. Avoid unqualified `X% safely saved` claims until both oracle validity and measurement coverage are established.
 
-## 7. Holdout admission gate
+## 7. Protocol-version integrity
+
+Selection v0 has already been closed without qualifying repositories. Selection
+v1 has an existing frozen code-search design and discovery snapshot. This
+identifiability audit was written **after** those design records. It must not be
+misrepresented as part of their original preregistration.
+
+If any v1 oracle-family definition is insufficient to distinguish historical
+applicability from fresh target verification, the affected candidates must
+remain feasibility/development cases or be excluded under the original frozen
+rules. New qualification conditions, adapter semantics or outcome adjudication
+rules belong in an explicitly versioned **prospective** protocol (for example,
+selection v2). Never rewrite v1 selection/order or retroactively call a new
+oracle rule precommitted. Preserve the frozen v1 artifacts and record the
+methodological reason for the successor protocol.
+
+## 8. Holdout admission gate
 
 The next confirmatory run is blocked until its signed/versioned protocol includes:
 
