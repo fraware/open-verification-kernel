@@ -496,16 +496,14 @@ def test_effect_local_complete_coverage_establishes_guarantee_under_global_parti
     assert state.reason_codes == []
 
 
-def test_reused_protected_effect_evidence_does_not_establish_modified_guarantee(
+def test_modified_description_does_not_change_typed_pe_result(
     tmp_path,
 ) -> None:
-    """Pending invariant: guarantee-level reuse requires claim-compatibility evidence.
+    """Separate a changed declaration from the unchanged checked PE proposition.
 
-    This intentionally documents the distinction between protected-effect
-    semantic-slice reuse and durable guarantee-definition transport. The current
-    implementation reuses the PE evidence and marks the changed guarantee
-    established; the test is an expected failure until the refinement bridge
-    is implemented and justified.
+    The snapshot establishes the typed Protected Effect assertion. A changed
+    description changes the durable definition digest, so an independent
+    guarantee-level transport decision must not infer declaration continuity.
     """
     base = _ir(head_sha="head-a")
     head = _ir(head_sha="head-b")
@@ -571,15 +569,10 @@ def test_reused_protected_effect_evidence_does_not_establish_modified_guarantee(
     )
     assert snapshot.state_for("G-REFUND").evidence_origin == "reused"
 
-    # Guard the setup: we must actually reproduce the refinement gap before
-    # classifying the example as an expected failure. Unexpected setup failures
-    # still fail this test normally.
-    observed_status = snapshot.state_for("G-REFUND").status
-    if observed_status == "established":
-        pytest.xfail(
-            "The Protected Effect evidence has been reused for a changed "
-            "durable guarantee definition; guarantee-level refinement is pending."
-        )
-
-    # This assertion becomes an ordinary PASS once the boundary is enforced.
-    assert observed_status != "established"
+    # Establishment here is specifically for the unchanged typed Protected
+    # Effect assertion. It is not a guarantee-definition continuity verdict.
+    assert snapshot.state_for("G-REFUND").status == "established"
+    assert snapshot.state_for("G-REFUND").machine_claim == {
+        "guarantee_type": modified_spec.guarantee_type,
+        "selector": modified_spec.selector.model_dump(mode="json"),
+    }
