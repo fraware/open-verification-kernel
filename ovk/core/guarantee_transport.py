@@ -25,6 +25,7 @@ from ovk.core.guarantee_assurance_ledger import (
     validate_guarantee_assurance_snapshot_structure,
 )
 from ovk.core.guarantee_assurance_state import GuaranteeAssuranceSnapshot
+from ovk.core.guarantee_graph import GuaranteeSpec
 from ovk.core.models import VerificationEvidence, VerificationStatus
 from ovk.core.protected_effect_evidence import (
     PROTECTED_EFFECT_CHECKER_ID,
@@ -99,6 +100,8 @@ def evaluate_guarantee_transport_admission(
     target: GuaranteeAssuranceSnapshot,
     *,
     guarantee_id: str,
+    source_spec: GuaranteeSpec,
+    target_spec: GuaranteeSpec,
     source_evidence: VerificationEvidence,
     target_evidence: VerificationEvidence,
     signature_key: bytes | None,
@@ -108,6 +111,11 @@ def evaluate_guarantee_transport_admission(
     The caller must provide the *exact* source and target evidence records.
     Reuse chains skipping the supplied source snapshot are deliberately rejected;
     a longer-chain admission needs its own explicit, audited ancestry proof.
+
+    The caller supplies separately selected source/target declarations; their
+    authority as the governing manifests is an explicit external assumption.
+    We recompute their content digests and compare each against its snapshot.
+    This cannot authenticate a snapshot's originating repository revision.
 
     All rejection reasons are structural or cryptographic. Missing information
     does not license positive reuse. A rejection is not a proof of a violated
@@ -135,6 +143,19 @@ def evaluate_guarantee_transport_admission(
         # dependencies and descriptive metadata. Conservative by design.
         reasons.append("guarantee_definition_changed")
 
+    for role, snapshot, spec, recorded_digest in (
+        ("source", source, source_spec, source_digest),
+        ("target", target, target_spec, target_digest),
+    ):
+        if spec.guarantee_id != guarantee_id:
+            reasons.append(f"{role}_declaration_identity_mismatch")
+        if spec.definition_digest != recorded_digest:
+            reasons.append(f"{role}_declaration_digest_mismatch")
+        if sorted(snapshot.graph.dependency_edges.get(guarantee_id, [])) != sorted(
+            spec.dependencies
+        ):
+            reasons.append(f"{role}_declaration_dependency_mismatch")
+
     source_state = None
     target_state = None
     try:
@@ -142,6 +163,23 @@ def evaluate_guarantee_transport_admission(
         target_state = target.state_for(guarantee_id)
     except ValueError:
         reasons.append("guarantee_state_missing_or_ambiguous")
+
+    for role, spec, state in (
+        ("source", source_spec, source_state),
+        ("target", target_spec, target_state),
+    ):
+        if state is None:
+            continue
+        expected_machine_claim = {
+            "guarantee_type": spec.guarantee_type,
+            "selector": spec.selector.model_dump(mode="json"),
+        }
+        if state.machine_claim != expected_machine_claim:
+            reasons.append(f"{role}_snapshot_machine_claim_mismatch")
+        if state.display_statement != spec.statement:
+            reasons.append(f"{role}_snapshot_statement_mismatch")
+        if sorted(state.dependencies) != sorted(spec.dependencies):
+            reasons.append(f"{role}_snapshot_dependencies_mismatch")
 
     if source_state is not None and target_state is not None:
         if source_state.machine_claim != target_state.machine_claim:
