@@ -1,0 +1,131 @@
+{
+  "binding_status": "BOUND_FOR_PILOT_N10_V2_TIER_A",
+  "entries": [
+    {
+      "anchor_id": "3cc5bacb0d81502b5178e90f18d6088d0679833515d61821eed65206d07eb15b",
+      "claim_id": "ovk-consumer-pin-guard:v1.2.1",
+      "element_paths": [
+        "scripts/assert_ovk_pin.py"
+      ],
+      "evidence_class": "REPLAY_VERIFIED",
+      "footprint_digest": "3eafe09dc299db3c45ee7d62cc06279cc8e9a5d0bcfd2e3804f6fa352e0c146d",
+      "footprint_id": "f4dd151f84a3a63ad22ef8e32330f5b6c57cb724e2a456f473b226aba3308751",
+      "profile_class": "OVK_CONSUMER_SCENARIO_V1",
+      "profile_digest": "f6fe52ede8e6d67e7538b2641c80639955cb8760a77176b063e4edbc4419cfb4",
+      "profile_id": "f9bca4343ac13c8f13fe03d13e1927e93dcbd26b9dec927408baeb79984871be",
+      "repository": "fraware/ovk-consumer-express-actions",
+      "source_sha": "898203746115fb89eab2be8ee169f1d752fba77a",
+      "transition_id": "0ae93de9f05390aab8a5eeb497010de00f1f1526877e3f62a299ef7b11b72773",
+      "universe": "source_universe_v2"
+    },
+    {
+      "anchor_id": "98413e38e196e2cdefb1b8bbb08ae41eaa385047e4c3ad1bf8dbe843ecf4b5ae",
+      "claim_id": "ovk-consumer-pin-guard:v1.2.1",
+      "element_paths": [
+        "scripts/assert_ovk_pin.py"
+      ],
+      "evidence_class": "REPLAY_VERIFIED",
+      "footprint_digest": "3eafe09dc299db3c45ee7d62cc06279cc8e9a5d0bcfd2e3804f6fa352e0c146d",
+      "footprint_id": "d2b4127c154e4726a85dcac0bcbe6dc269688eace2a2adf2e3fabb159697410c",
+      "profile_class": "OVK_CONSUMER_SCENARIO_V1",
+      "profile_digest": "f6fe52ede8e6d67e7538b2641c80639955cb8760a77176b063e4edbc4419cfb4",
+      "profile_id": "beaccc71b839ab1a3c948c90215f38a3c389fbb87999184a3bc516dbb2408598",
+      "repository": "fraware/ovk-consumer-express-actions",
+      "source_sha": "b0d45015a6d175f3f2505c854584ad0eacaf9619",
+      "transition_id": "0dee0b9d86c1285f2c17c132759765a3a969e573759f9dabc2ea380f7a73431f",
+      "universe": "source_universe_v2"
+    },
+    {
+      "anchor_id": "73d14be5465f2a8a99e3c42cbb691f2847015f5aa1515467fb67e237c7009ade",
+      "claim_id": "ovk-consumer-pin-guard:v1.2.1",
+      "element_paths": [
+        "scripts/assert_ovk_pin.py"
+      ],
+      "evidence_class": "REPLAY_VERIFIED",
+      "footprint_digest": "3eafe09dc299db3c45ee7d62cc06279cc8e9a5d0bcfd2e3804f6fa352e0c146d",
+      "footprint_id": "cb57d19cd44b11adff8c3b51f6dbc89271e28a61c7cecee6b6d35962012417c3",
+      "profile_class": "OVK_CONSUMER_SCENARIO_V1",
+      "profile_digest": "f6fe52ede8e6d67e7538b2641c80639955cb8760a77176b063e4edbc4419cfb4",
+      "profile_id": "95ec0fae55de7b2ca22248dcc6ba4fb626fd10b5e1c698f0b17420a40a43fd76",
+      "repository": "fraware/ovk-consumer-express-actions",
+      "source_sha": "9333f1d62184c04cca67671f1cd33a67da4bbb23",
+      "transition_id": "a8606440a805b7eedbbdb0309c459b8425cf9302abe5581f202ec47870f5fd7a",
+      "universe": "source_universe_v2"
+    },
+    {
+      "anchor_id": "cdde999becc62aad18bf08fbce66756ffe370eff1b1b5599299433f57e93a365",
+      "claim_id": "ovk-consumer-pin-guard:v1.2.1",
+      "element_paths": [
+        "scripts/assert_ovk_pin.py"
+      ],
+      "evidence_class": "REPLAY_VERIFIED",
+      "footprint_digest": "3eafe09dc299db3c45ee7d62cc06279cc8e9a5d0bcfd2e3804f6fa352e0c146d",
+      "footprint_id": "304339ee660765daa48e00dfb38b7619b2e090ddcca20a5aeed747f3be2d2072",
+      "profile_class": "OVK_CONSUMER_SCENARIO_V1",
+      "profile_digest": "f6fe52ede8e6d67e7538b2641c80639955cb8760a77176b063e4edbc4419cfb4",
+      "profile_id": "ce351733226e2f09201c4a1a29b82f2df20397c6b2109449834e250807f00696",
+      "repository": "fraware/ovk-consumer-express-actions",
+      "source_sha": "d684bc703fdc75328fb9e39d32ab2c0e5090e1f0",
+      "transition_id": "a94a4d63235d565930a236c6e8304e5b33516d2f36db7b815e9adad73770a74e",
+      "universe": "source_universe_v2"
+    },
+    {
+      "anchor_id": "de92b959aeb27eb70c15f55facc396418a5d372a8c59e78216986e054d66cff2",
+      "claim_id": "ovk-consumer-pin-guard:v1.2.1",
+      "element_paths": [
+        "scripts/assert_ovk_pin.py"
+      ],
+      "evidence_class": "REPLAY_VERIFIED",
+      "footprint_digest": "3eafe09dc299db3c45ee7d62cc06279cc8e9a5d0bcfd2e3804f6fa352e0c146d",
+      "footprint_id": "2b31b6b77acca6a97063357bc7a078bfcc237f4b23807df01ec10c2b19663d67",
+      "profile_class": "OVK_CONSUMER_SCENARIO_V1",
+      "profile_digest": "f6fe52ede8e6d67e7538b2641c80639955cb8760a77176b063e4edbc4419cfb4",
+      "profile_id": "2695c224f36d495413ff2fe36f0c283f69540475c908fec37e51b5a06b5d2601",
+      "repository": "fraware/ovk-consumer-fastapi-terraform",
+      "source_sha": "73223b1b2f4c6332d2e3bd7b9554e8b0d0dd1472",
+      "transition_id": "0671bfaf6b19d7ee167192dace4e13715444c3821ee112eb63c5682b110427f0",
+      "universe": "source_universe_v2"
+    },
+    {
+      "anchor_id": "cc11e1e04abb825f71d2abd5c1f7bd62afd5b0112e47728363fc37d60307bd97",
+      "claim_id": "ovk-consumer-pin-guard:v1.2.1",
+      "element_paths": [
+        "scripts/assert_ovk_pin.py"
+      ],
+      "evidence_class": "REPLAY_VERIFIED",
+      "footprint_digest": "3eafe09dc299db3c45ee7d62cc06279cc8e9a5d0bcfd2e3804f6fa352e0c146d",
+      "footprint_id": "9cacac0ffe158be148a150774b5d243704021e5c4b4ad94c9beb9206ec530144",
+      "profile_class": "OVK_CONSUMER_SCENARIO_V1",
+      "profile_digest": "f6fe52ede8e6d67e7538b2641c80639955cb8760a77176b063e4edbc4419cfb4",
+      "profile_id": "82a6aa4cd1aeb2b634df669a891d19720a8948f11a801c9fffb75dd049d82b06",
+      "repository": "fraware/ovk-consumer-fastapi-terraform",
+      "source_sha": "eeabfc4e1c88a5d75cbdf3cca2755b7f239bdcce",
+      "transition_id": "266238ecda6bd41fa70fb06283bb6c9c621670c4f4b06897e2769811dba9a8a5",
+      "universe": "source_universe_v2"
+    },
+    {
+      "anchor_id": "9340bbe2a0b6cc358cba34adb5416ced34ad6e3e1084e44a49d6672bcc6d97a0",
+      "claim_id": "ovk-consumer-pin-guard:v1.2.1",
+      "element_paths": [
+        "scripts/assert_ovk_pin.py"
+      ],
+      "evidence_class": "REPLAY_VERIFIED",
+      "footprint_digest": "3eafe09dc299db3c45ee7d62cc06279cc8e9a5d0bcfd2e3804f6fa352e0c146d",
+      "footprint_id": "e8d565ffe56be1159b34e870253751ad5a32b1bee6e7d30d74166b76860dab8d",
+      "profile_class": "OVK_CONSUMER_SCENARIO_V1",
+      "profile_digest": "f6fe52ede8e6d67e7538b2641c80639955cb8760a77176b063e4edbc4419cfb4",
+      "profile_id": "25aa216133419e4f6676d85e015561290c10fac3125d4a2f32b290e62698fa85",
+      "repository": "fraware/ovk-consumer-fastapi-terraform",
+      "source_sha": "294f9a7c29c052425cd5d82d0ee44aeb5a00b77f",
+      "transition_id": "b0f23624f079feb956e8bb0e1d3dcfe25ae950ece26618cd7c506ea84a4b9733",
+      "universe": "source_universe_v2"
+    }
+  ],
+  "mapping_digest": "65bcfa3c5d1584f9769385218e92ce6f7090f9c9ed8ca8d57fbc42d1f3227c02",
+  "notes": [
+    "Overlay mappings for v2 Tier-A anchors only; does not rewrite CONTEXT_FOOTPRINT_MAPPING.v0.",
+    "Derived from expansion_v2 SOURCE_EVIDENCE_TIERED overlays and census overlays.",
+    "No RTK predictions or baselines consulted."
+  ],
+  "schema_version": "rtk.pilot_n10_mapping_overlay.v0"
+}

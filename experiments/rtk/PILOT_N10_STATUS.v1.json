@@ -1,0 +1,16 @@
+{
+  "schema_version": "rtk.pilot_status.v1",
+  "pilot_id": "tier_a_pilot_n10",
+  "status": "SUPERSEDED_INTERPRETATION",
+  "current_interpretation": "STRUCTURAL_CONSISTENCY_ONLY",
+  "historical_scoring_preserved": true,
+  "historical_scoring_status": "POST_PREDICTION_COMMITMENT_SCORED",
+  "superseding_audit": "experiments/rtk/METHODOLOGICAL_AUDIT_PILOT_N10.v0.json",
+  "baselines": "POST_HOC_ONLY_IF_RUN",
+  "confirmatory_use": false,
+  "reference_implementation_frozen_for_future_use": {
+    "implementation_id": "rtk.reference_implementation.v0",
+    "commit_sha": "2c97b59b8b546ac9392a279970a8c25573c30296",
+    "semantic_modification_permitted_before_reuse_as_same_sut": false
+  }
+}

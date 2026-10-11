@@ -1,0 +1,28 @@
+{
+  "schema_version": "rtk.prediction_commitment.v0",
+  "status": "PREDICTIONS_COMMITTED_BLIND",
+  "implementation_id": "rtk.reference_implementation.v0",
+  "implementation_kind": "REFERENCE_NOT_HISTORICAL_GO",
+  "evaluated_implementation_path": "experiments/rtk/reference_implementation/",
+  "evaluated_implementation_commit_sha": "2c97b59b8b546ac9392a279970a8c25573c30296",
+  "input_cdi_path": "experiments/rtk/sealed/pilot_n10/CanonicalDecisionInput.tier_a.jsonl",
+  "input_cdi_sha256": "aab9e084dcf39ba1a7b27e1fad73e681e68ef9d67530f9a04a05ade05079aa5c",
+  "predictions_path": "experiments/rtk/sealed/pilot_n10/RTK_PREDICTIONS.jsonl",
+  "predictions_sha256": "104a506f41994d14753710dadc3301a3ee4fe7cd2822c8c44a6ea65a7f33429f",
+  "case_count": 16,
+  "execution_status_counts": {
+    "OK": 16
+  },
+  "predicted_verdict_counts_ok_only": {
+    "REVALIDATION_REQUIRED": 5,
+    "VALID": 11
+  },
+  "failure_category_counts": {},
+  "oracle_compared": true,
+  "unblinding": "SCORING_ONLY_AFTER_COMMITMENT",
+  "baselines_status": "BASELINES_PENDING",
+  "baselines_note": "Freeze baselines registry empty; no baseline identifiers frozen for execution.",
+  "independence_note": "Predictions produced from CDI only after oracle commitment; no semantic patching from holdout.",
+  "commit_sha": "62e140e97000ac7a199216240341333267112281",
+  "scoring_report": "experiments/rtk/sealed/pilot_n10/SCORING_REPORT.json"
+}

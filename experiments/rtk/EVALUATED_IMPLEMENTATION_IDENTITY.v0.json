@@ -1,0 +1,41 @@
+{
+  "schema_version": "evaluated_implementation_identity.v0",
+  "go_checker_status": "UNVERIFIED",
+  "go_checker_sha": null,
+  "python_rtk_predictor_status": "BOUND_REFERENCE_IMPLEMENTATION",
+  "python_rtk_predictor_sha": "2c97b59b8b546ac9392a279970a8c25573c30296",
+  "evaluated_implementation_status": "BOUND_REFERENCE_IMPLEMENTATION",
+  "evaluated_implementation_path": "experiments/rtk/reference_implementation/",
+  "evaluated_implementation_id": "rtk.reference_implementation.v0",
+  "notes": [
+    "Preferred Go production checker was not recovered under bounded provenance search; go_checker_status remains UNVERIFIED.",
+    "No pre-existing OVK module matching CanonicalDecisionInput.v1 → sealed verdict space was found; a NEW reference implementation was authored from frozen schema + canonicalization + PROTOCOL/ANALYSIS_PLAN verdict semantics.",
+    "Bound package: experiments/rtk/reference_implementation/ (canonicalize + predictor + synthetic conformance tests).",
+    "This identity binds an explicit reference predictor only. It is NOT the unrecovered historical Go production checker and makes no Go parity claim.",
+    "Conformance tests use synthetic fixtures only; sealed Tier-A holdout targets were not used as development oracles.",
+    "No oracle labeling, RTK predictions on holdout, baselines, or unblinding were performed in this binding pass."
+  ],
+  "frozen_interface": {
+    "canonical_decision_input": "schemas/CanonicalDecisionInput.v1.schema.json",
+    "canonicalization_spec": "specs/CanonicalDecisionInput.v1.canonicalization.md",
+    "case_schema": "schemas/case.schema.json",
+    "oracle_schema": "schemas/oracle.schema.json",
+    "prediction_schema": "reference_implementation/schemas/prediction.v0.schema.json",
+    "semantics_doc": "reference_implementation/SEMANTICS.md",
+    "verdict_space": [
+      "VALID",
+      "INVALID",
+      "REVALIDATION_REQUIRED",
+      "UNRESOLVED"
+    ]
+  },
+  "toolchain": {
+    "language": "Python",
+    "python_version": "3.12.3",
+    "python_implementation": "CPython",
+    "jsonschema_version": "4.26.0",
+    "pytest_version": "8.4.2",
+    "requires_python": ">=3.10"
+  },
+  "not_the_unrecovered_historical_go_checker": true
+}

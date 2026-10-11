@@ -1,0 +1,71 @@
+{
+  "binding_rule": "The listed files are the exact repository bytes at workflow head 0758dac59230cb8110c07c1cd6e5fc2e4bc11317, the commit actually checked out by run 37420715584. The workflow is intentionally the authentic pre-fix workflow and therefore still lacks the jsonschema dependency that caused the validation-step failure. Any environment-only repair must be a new commit layered on top and must not be represented as byte-identical to this handoff.",
+  "files": [
+    {
+      "bytes": 33271,
+      "git_blob_sha1": "f37323dfee0ebc40417eeee548c95de2debbd44f",
+      "path": "experiments/p05_formalpr_bench/rtk_eval/extract_historical_anchors.py",
+      "sha256": "1342d4ff8255ae4e4ae5c58fdf8c56b05621f10f119cdeb6e68736a79d253d65"
+    },
+    {
+      "bytes": 33882,
+      "git_blob_sha1": "f97e2826308342a9ac772d39aee794a781417113",
+      "path": "experiments/p05_formalpr_bench/rtk_eval/materialize_source_evidence.py",
+      "sha256": "b78f6efc19d0e159cd9041f6f615ac3b81ee22df6b862d6cfdc55622904ffedd"
+    },
+    {
+      "bytes": 5929,
+      "git_blob_sha1": "8e1870eea20dd18b6bd090cc7ee3b8ded7f70987",
+      "path": "experiments/p05_formalpr_bench/rtk_eval/project_source_evidence_semantics.py",
+      "sha256": "db44d1932a679f40a3fcc42be6adcefdab221c838d9e0e6a26696b658e281b2f"
+    },
+    {
+      "bytes": 23041,
+      "git_blob_sha1": "6010c44bb6ee2d89a30927726b37c1b346be4e0f",
+      "path": "experiments/p05_formalpr_bench/rtk_eval/tier_source_evidence_v1.py",
+      "sha256": "a86e4b723838dbb4e80e7cc9826a0be863e7a5017ac18edb304336d622f6a094"
+    },
+    {
+      "bytes": 13413,
+      "git_blob_sha1": "cc374b68685911d384e97e2e54acc9bbc9306560",
+      "path": ".github/workflows/rtk-source-evidence.yml",
+      "sha256": "9fd043e3a8c3e268f9e78dff9ff752d4e5a2ca6ab9ac7004f780fbb9cdf9d445"
+    }
+  ],
+  "frozen_inputs": {
+    "certifyedge_cutoff_sha": "6ef02d54c4697886b20577f10eec683861475db2",
+    "certifyedge_rust": "1.88.0",
+    "historical_anchors_sha256": "44cb1f2701705375e9354b4a51a07064d2dba2d33f757e0955fc03db00d4d5cc",
+    "pcs_core_cutoff_sha": "9c971f5f9da8a424924dd8f48d6a3b71a1009e1b",
+    "python": "3.11.16",
+    "source_evidence_semantic_projection_sha256": "7ea32cb2c579077f281a3356683a3e926872492b6e756b44c0c39d077358f1fe",
+    "transition_census_sha256": "b1816276176297adf345981fe5d9c8271cf00f5b71653d59a21d8261d64a6b11"
+  },
+  "materializer_provenance_note": "For v1 reproduction, materialize_source_evidence.py is bound to run-head blob f97e2826308342a9ac772d39aee794a781417113. An earlier freeze record referenced an older materializer blob; that older blob is not substituted here because it was not the materializer executed by run 37420715584.",
+  "purpose": "Exact byte handoff for the modules checked out by the first v1 source-evidence workflow run; no current-head substitution.",
+  "repository": "fraware/labtrust-portfolio",
+  "schema_version": "rtk.v1_authentic_module_handoff.v0",
+  "workflow": {
+    "conclusion": "failure",
+    "failure_reason": "ModuleNotFoundError: No module named 'jsonschema'",
+    "failure_step": "Validate v1 tier separation and schema",
+    "head_sha": "0758dac59230cb8110c07c1cd6e5fc2e4bc11317",
+    "job_id": 112129224231,
+    "name": "RTK source-native evidence materialization",
+    "pre_failure_steps_confirmed_success": [
+      "Checkout exact methodology revision",
+      "Set up exact Python",
+      "Set up CertifyEdge Rust toolchain",
+      "Verify methodology checkout and compile generators",
+      "Clone exact public source histories",
+      "Regenerate frozen transition census",
+      "Regenerate historical anchors",
+      "Verify frozen structural inputs",
+      "Materialize committed source evidence with source-native validators",
+      "Validate source-evidence materialization boundary",
+      "Project and verify stable v0 replay semantics",
+      "Classify replay-verified and committed-attestation source evidence v1"
+    ],
+    "run_id": 37420715584
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "artifact_recovery": {
+    "handoff_zip": "rtk-sealed-census-handoff_e8aa.zip",
+    "note": "Exact bytes recovered from GitHub Actions artifact; committed without reserialization."
+  },
+  "authentic_generator": {
+    "commit": "f0e432d3546170bc17e77d9ea1141b51b3bfa5eb",
+    "git_blob_sha": "dcd3bcb521e3267f4e7a07556373b12d7d885705",
+    "note": "Blob not present on OVK or other accessible public mirrors; sealed census bytes remain canonical.",
+    "path": "experiments/p05_formalpr_bench/rtk_eval/generate_transition_census.py",
+    "role": "INDEPENDENT_REPRODUCIBILITY_CHECK_ONLY_NOT_BINDING_OBJECT",
+    "status": "GENERATOR_BLOB_UNAVAILABLE"
+  },
+  "authoritative_provenance": {
+    "artifact_name": "rtk-structural-corpus",
+    "github_actions_artifact_id": 11387510679,
+    "job": 112081026751,
+    "original_artifact_sha256": "667866fdc56a79f2d2225519cdbf2b1fc0dd20740b5037147bcc55ed1d844096",
+    "repository": "fraware/labtrust-portfolio",
+    "repository_note": "PROVENANCE_LABEL_ONLY_NO_LIVE_FETCH",
+    "workflow": "RTK structural corpus build",
+    "workflow_commit": "194e9edd1ac80f04c41b0602b8f21e96cf0b6ce7",
+    "workflow_run": 37405175934
+  },
+  "binding_object": "experiments/rtk/sealed/TRANSITION_CENSUS.jsonl",
+  "census": {
+    "path": "experiments/rtk/sealed/TRANSITION_CENSUS.jsonl",
+    "record_count": 248,
+    "records_by_repository": {
+      "SentinelOps-CI/pcs-core": 198,
+      "fraware/CertifyEdge": 50
+    },
+    "sha256": "b1816276176297adf345981fe5d9c8271cf00f5b71653d59a21d8261d64a6b11",
+    "size_bytes": 412559
+  },
+  "expected_downstream_digests_immutable": {
+    "anchors_cardinality": 541,
+    "anchors_sha256": "44cb1f2701705375e9354b4a51a07064d2dba2d33f757e0955fc03db00d4d5cc",
+    "semantic_projection_sha256": "7ea32cb2c579077f281a3356683a3e926872492b6e756b44c0c39d077358f1fe"
+  },
+  "manifest": {
+    "path": "experiments/rtk/sealed/TRANSITION_CENSUS_MANIFEST.json",
+    "sha256": "c4b1e90eba63a489da016b29e8b6ff1c93be969a98a098f3f9b2d957319c4ab3"
+  },
+  "prohibitions": [
+    "DO_NOT_RESERIALIZE_OR_REGENERATE_BINDING_CENSUS",
+    "DO_NOT_REPLACE_WITH_GENERATOR_OUTPUT",
+    "NO_ORACLE",
+    "NO_RTK_PREDICTION",
+    "NO_BASELINE",
+    "NO_UNBLINDING"
+  ],
+  "schema_version": "rtk.sealed_census_provenance.v1",
+  "source_cutoffs": [
+    {
+      "cutoff_sha": "6ef02d54c4697886b20577f10eec683861475db2",
+      "repository": "fraware/CertifyEdge"
+    },
+    {
+      "cutoff_sha": "9c971f5f9da8a424924dd8f48d6a3b71a1009e1b",
+      "repository": "SentinelOps-CI/pcs-core"
+    }
+  ],
+  "status": "SEALED_BYTES_COMMITTED"
+}

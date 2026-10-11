@@ -1,0 +1,204 @@
+{
+  "anchor_projection_status": {
+    "anchors_materialized": false,
+    "projection_materialized": false,
+    "reason": "Authentic extract/materialize/project modules unavailable after sealed census commit; not inventing substitutes."
+  },
+  "binding_decision": "SOURCE_EVIDENCE_V1_BINDING.json UNCREATED (pipeline modules unavailable)",
+  "byte_level_diff_status": {
+    "possible": false,
+    "reason": "Sealed census artifact bytes are not present on OVK and are not recoverable from public CertifyEdge/pcs-core trees or public GitHub search for the digest. Without the sealed byte string, a byte-level diff cannot be computed; only candidate digests can be compared to the published SHA-256."
+  },
+  "cardinality_result": {
+    "local_first_parent_transition_count": 248,
+    "matches_sealed_cardinality": true,
+    "per_repository": [
+      {
+        "cutoff_committer_timestamp": "2026-05-22T10:56:51-07:00",
+        "cutoff_sha": "6ef02d54c4697886b20577f10eec683861475db2",
+        "first_parent_commit_count": 51,
+        "first_parent_transition_count": 50,
+        "head_at_cutoff": true,
+        "is_shallow": "false",
+        "repository": "CertifyEdge",
+        "url": "https://github.com/fraware/CertifyEdge"
+      },
+      {
+        "cutoff_committer_timestamp": "2026-07-24T20:21:55+02:00",
+        "cutoff_sha": "9c971f5f9da8a424924dd8f48d6a3b71a1009e1b",
+        "first_parent_commit_count": 199,
+        "first_parent_transition_count": 198,
+        "head_at_cutoff": true,
+        "is_shallow": "false",
+        "repository": "pcs-core",
+        "url": "https://github.com/SentinelOps-CI/pcs-core"
+      }
+    ]
+  },
+  "clone_provenance": {
+    "CertifyEdge": {
+      "clone_url": "https://github.com/fraware/CertifyEdge",
+      "first_parent_commits": 51,
+      "is_shallow": "false"
+    },
+    "note": "Both clones are full (non-shallow) at investigation time.",
+    "pcs-core": {
+      "clone_url": "https://github.com/SentinelOps-CI/pcs-core",
+      "first_parent_commits": 199,
+      "is_shallow": "false"
+    }
+  },
+  "digest_result": {
+    "any_local_serialization_matched_sealed_census_sha256": false,
+    "attempt_count": 13,
+    "attempts": [
+      {
+        "attempt_id": "array_compact_sorted_keys",
+        "byte_length": 384364,
+        "matches_sealed_census_sha256": false,
+        "notes": "",
+        "sha256": "3d17b503d4784fd5132a0c3b1e80b75cd825f83444026d9e27875ff50728559c"
+      },
+      {
+        "attempt_id": "array_pretty2_sorted_nl",
+        "byte_length": 436134,
+        "matches_sealed_census_sha256": false,
+        "notes": "",
+        "sha256": "ea8f712c8282f7b9f7503e00dd4526d03f25dacde6161a4fbbea73f1c4f81816"
+      },
+      {
+        "attempt_id": "ndjson_sorted_keys",
+        "byte_length": 384363,
+        "matches_sealed_census_sha256": false,
+        "notes": "",
+        "sha256": "a789ab542ba686a9242ee19a6fe55dbe7273a7662c8f6ec463d9fb38608d5abb"
+      },
+      {
+        "attempt_id": "obj_source_universe_census.v0_pretty_sorted_nl",
+        "byte_length": 452805,
+        "matches_sealed_census_sha256": false,
+        "notes": "",
+        "sha256": "92033cdc87ed3c517072f4d17f66eb7fa45623b58669fe8a66aef52ee825768d"
+      },
+      {
+        "attempt_id": "obj_source_universe_census.v0_compact_sorted",
+        "byte_length": 384737,
+        "matches_sealed_census_sha256": false,
+        "notes": "",
+        "sha256": "15cb3d331cfb1ed825b396fb81577b0f6e484f0875c7f39dfa01b2a26b0e895c"
+      },
+      {
+        "attempt_id": "array_no_null_compact_sorted",
+        "byte_length": 378412,
+        "matches_sealed_census_sha256": false,
+        "notes": "",
+        "sha256": "39221e61915381ef8ab8c4871ed20eb100d77d0b9bdf789a6c4c1bc1b8a38986"
+      },
+      {
+        "attempt_id": "array_schema_required_only_compact_sorted",
+        "byte_length": 370972,
+        "matches_sealed_census_sha256": false,
+        "notes": "",
+        "sha256": "79c7c48e063556ccfa626d8fb35f7ce73d791593a7566539b41fb7b504d49dd6"
+      },
+      {
+        "attempt_id": "array_git_path_order_compact_sorted_keys",
+        "byte_length": 384364,
+        "matches_sealed_census_sha256": false,
+        "notes": "changed_paths preserve git diff order; object keys sorted",
+        "sha256": "3d17b503d4784fd5132a0c3b1e80b75cd825f83444026d9e27875ff50728559c"
+      },
+      {
+        "attempt_id": "array_three_dot_diff_compact_sorted",
+        "byte_length": 384364,
+        "matches_sealed_census_sha256": false,
+        "notes": "",
+        "sha256": "3d17b503d4784fd5132a0c3b1e80b75cd825f83444026d9e27875ff50728559c"
+      },
+      {
+        "attempt_id": "array_author_iso_compact_sorted",
+        "byte_length": 384364,
+        "matches_sealed_census_sha256": false,
+        "notes": "",
+        "sha256": "d32e7f83a4076ab59c1d6ddd044480a886f6121e73e5a89d974821338ce916a8"
+      },
+      {
+        "attempt_id": "array_fullsha_tid_compact_sorted",
+        "byte_length": 398252,
+        "matches_sealed_census_sha256": false,
+        "notes": "",
+        "sha256": "279394a955c41fe14ae2020f9b0f25d36db16353a36ed8781a0ef85909afe6fc"
+      },
+      {
+        "attempt_id": "pairs_nl",
+        "byte_length": 20336,
+        "matches_sealed_census_sha256": false,
+        "notes": "",
+        "sha256": "27e4e97f23a1612258b8fe6d477fc6ad187e0079069d4721a97fa8022d35bf6c"
+      },
+      {
+        "attempt_id": "csv_repo_src_tgt",
+        "byte_length": 22718,
+        "matches_sealed_census_sha256": false,
+        "notes": "",
+        "sha256": "7600a4df17ec8d2640c7d07d655565079fc1c47a5d9d79076dbafc6c5b0a337d"
+      }
+    ],
+    "candidate_artifact": "experiments/rtk/forensics/CENSUS_CANDIDATE.source_universe_census.v0.json",
+    "candidate_matches_sealed": false,
+    "candidate_sha256": "92033cdc87ed3c517072f4d17f66eb7fa45623b58669fe8a66aef52ee825768d"
+  },
+  "environment": {
+    "label": "LOCAL_REPRODUCIBLE",
+    "platform": "Linux-6.12.94+-x86_64-with-glibc2.39",
+    "python": "3.12.3 (main, Mar 23 2026, 19:04:32) [GCC 13.3.0]"
+  },
+  "generated_at_utc": "2026-10-06T17:47:24.730655+00:00",
+  "hypotheses_not_falsifiable_without_sealed_bytes_or_scripts": [
+    "Exact field set / naming from private generate_transition_census.py",
+    "Canonicalization rules (key order without sort_keys, float/int timestamp encoding, path filtering)",
+    "Eligibility exclusions that still yield 248 (none observed under FIRST_PARENT N-1)",
+    "Additional metadata fields (semantic categories, URLs, tool versions) that change the digest without changing cardinality"
+  ],
+  "hypotheses_tested": [
+    "JSON array vs wrapped object vs NDJSON",
+    "sort_keys compact vs pretty vs trailing newline",
+    "dropping null exclusion_reason",
+    "schema-required fields only",
+    "git path order vs sorted unique paths",
+    "two-dot vs three-dot changed_paths",
+    "committer vs author ISO timestamps",
+    "short-12 vs full SHA transition_id",
+    "CSV/pairs-only reductions",
+    "gzip/zip wrappers (earlier probe; miss)",
+    "repo order CertifyEdge-then-pcs-core (freeze order)"
+  ],
+  "investigation_scope": {
+    "cutoffs_immutable": true,
+    "history_rule": "FIRST_PARENT",
+    "sealed_targets": {
+      "anchor_cardinality": 541,
+      "anchor_sha256": "44cb1f2701705375e9354b4a51a07064d2dba2d33f757e0955fc03db00d4d5cc",
+      "census_cardinality": 248,
+      "census_sha256": "b1816276176297adf345981fe5d9c8271cf00f5b71653d59a21d8261d64a6b11",
+      "semantic_projection_sha256": "7ea32cb2c579077f281a3356683a3e926872492b6e756b44c0c39d077358f1fe"
+    }
+  },
+  "ovk_branch": "research/rtk-sealed-evaluation-507f",
+  "prohibitions_honored": [
+    "NO_ORACLE",
+    "NO_RTK_PREDICTION",
+    "NO_BASELINE_EXECUTION",
+    "NO_UNBLINDING",
+    "NO_DIGEST_SEMANTICS_WEAKENING",
+    "NO_FABRICATED_BINDING"
+  ],
+  "schema_version": "census_digest_forensics.v0",
+  "status": "SUPERSEDED_BY_SEALED_BYTE_COMMIT",
+  "supersession": {
+    "note": "Prior HARD_STOP_DIGEST_MISMATCH applied when sealed bytes were absent. Bytes are now committed; remaining blocker is authentic pipeline module recovery.",
+    "pipeline_recovery": "experiments/rtk/forensics/PIPELINE_MODULE_RECOVERY.v0.json",
+    "sealed_census_path": "experiments/rtk/sealed/TRANSITION_CENSUS.jsonl",
+    "sealed_census_sha256": "b1816276176297adf345981fe5d9c8271cf00f5b71653d59a21d8261d64a6b11"
+  }
+}

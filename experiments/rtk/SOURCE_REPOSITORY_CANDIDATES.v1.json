@@ -1,0 +1,97 @@
+{
+  "schema_version": "source_repository_candidates.v1",
+  "status": "CUTOFFS_PINNED_BEFORE_ADDED_REPO_MATERIALIZATION",
+  "notes": [
+    "Ordered list. source-universe-v0 identities are recorded first and are immutable.",
+    "Expansion candidates below are OVK-side proposed public repositories for pre-oracle feasibility only.",
+    "They are not claimed to be copies of any private evaluation candidate roster.",
+    "Cutoff SHAs were pinned from each repository default-branch tip before expansion materialization attempts.",
+    "Do not reorder/insert/delete after materialization inspection begins without a new candidates file version.",
+    "If this list is exhausted below the 20-transition feasibility gate: STOP EXPANSION."
+  ],
+  "source_universe_v0": [
+    {
+      "order": 0,
+      "repository": "CertifyEdge",
+      "url": "https://github.com/fraware/CertifyEdge",
+      "cutoff_sha": "6ef02d54c4697886b20577f10eec683861475db2",
+      "history_rule": "FIRST_PARENT",
+      "role": "SOURCE_UNIVERSE_V0",
+      "inspection_status": "IDENTITY_RECORDED",
+      "ovk_materialization_status": "SOURCE_EVIDENCE_V1_BOUND"
+    },
+    {
+      "order": 1,
+      "repository": "pcs-core",
+      "url": "https://github.com/SentinelOps-CI/pcs-core",
+      "cutoff_sha": "9c971f5f9da8a424924dd8f48d6a3b71a1009e1b",
+      "history_rule": "FIRST_PARENT",
+      "role": "SOURCE_UNIVERSE_V0",
+      "inspection_status": "IDENTITY_RECORDED",
+      "ovk_materialization_status": "SOURCE_EVIDENCE_V1_BOUND"
+    }
+  ],
+  "expansion_candidates_ordered": [
+    {
+      "order": 2,
+      "repository": "pcs-bench",
+      "url": "https://github.com/fraware/pcs-bench",
+      "cutoff_sha": "6092cccefee7841dfde1393e6881d433838a2252",
+      "cutoff_timestamp": "2026-05-27T09:31:28-07:00",
+      "cutoff_policy": "PINNED_DEFAULT_BRANCH_TIP_BEFORE_MATERIALIZATION",
+      "history_rule": "FIRST_PARENT",
+      "role": "EXPANSION_CANDIDATE",
+      "eligibility_basis": "source_side_public_history_only",
+      "inspection_status": "CUTOFF_PINNED_NOT_MATERIALIZED"
+    },
+    {
+      "order": 3,
+      "repository": "ovk-consumer-fastapi-terraform",
+      "url": "https://github.com/fraware/ovk-consumer-fastapi-terraform",
+      "cutoff_sha": "784576bc5fd01ac80092662887a896301d4fe186",
+      "cutoff_timestamp": "2026-08-26T14:19:38-07:00",
+      "cutoff_policy": "PINNED_DEFAULT_BRANCH_TIP_BEFORE_MATERIALIZATION",
+      "history_rule": "FIRST_PARENT",
+      "role": "EXPANSION_CANDIDATE",
+      "eligibility_basis": "source_side_public_history_only",
+      "inspection_status": "CUTOFF_PINNED_NOT_MATERIALIZED"
+    },
+    {
+      "order": 4,
+      "repository": "ovk-consumer-express-actions",
+      "url": "https://github.com/fraware/ovk-consumer-express-actions",
+      "cutoff_sha": "31aed31a04c7bca67d3bd6151caf1e42f4b7d1f8",
+      "cutoff_timestamp": "2026-08-26T14:19:47-07:00",
+      "cutoff_policy": "PINNED_DEFAULT_BRANCH_TIP_BEFORE_MATERIALIZATION",
+      "history_rule": "FIRST_PARENT",
+      "role": "EXPANSION_CANDIDATE",
+      "eligibility_basis": "source_side_public_history_only",
+      "inspection_status": "CUTOFF_PINNED_NOT_MATERIALIZED"
+    },
+    {
+      "order": 5,
+      "repository": "environment-assurance-compiler",
+      "url": "https://github.com/fraware/environment-assurance-compiler",
+      "cutoff_sha": "812b4b13f8acdfcafb50de9d794c7fa0b20b31ad",
+      "cutoff_timestamp": "2026-09-20T17:30:12-07:00",
+      "cutoff_policy": "PINNED_DEFAULT_BRANCH_TIP_BEFORE_MATERIALIZATION",
+      "history_rule": "FIRST_PARENT",
+      "role": "EXPANSION_CANDIDATE",
+      "eligibility_basis": "source_side_public_history_only",
+      "inspection_status": "CUTOFF_PINNED_NOT_MATERIALIZED"
+    },
+    {
+      "order": 6,
+      "repository": "lean-project-evidence",
+      "url": "https://github.com/fraware/lean-project-evidence",
+      "cutoff_sha": "4660d97db933b0fbcf5c9af466191055c887bea3",
+      "cutoff_timestamp": "2026-07-22T03:47:25-07:00",
+      "cutoff_policy": "PINNED_DEFAULT_BRANCH_TIP_BEFORE_MATERIALIZATION",
+      "history_rule": "FIRST_PARENT",
+      "role": "EXPANSION_CANDIDATE",
+      "eligibility_basis": "source_side_public_history_only",
+      "inspection_status": "CUTOFF_PINNED_NOT_MATERIALIZED"
+    }
+  ],
+  "stop_rule": "STOP_EXPANSION_WHEN_CANDIDATE_LIST_EXHAUSTED_BELOW_FEASIBILITY_GATE"
+}

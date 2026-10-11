@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/rtk/oracle.schema.json",
+  "title": "RTK independent oracle record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "case_id",
+    "transition_id",
+    "verdict",
+    "oracle_basis",
+    "supporting_artifacts",
+    "adjudication_status"
+  ],
+  "properties": {
+    "case_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "transition_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "verdict": {
+      "enum": [
+        "VALID",
+        "INVALID",
+        "REVALIDATION_REQUIRED",
+        "UNRESOLVED"
+      ]
+    },
+    "oracle_basis": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_native_validator": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "supporting_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "confidence": {
+      "enum": [
+        "HIGH",
+        "MEDIUM",
+        "LOW"
+      ]
+    },
+    "repair_equivalence_class": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "unresolved_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "annotator_1": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "annotator_2": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "adjudication_status": {
+      "enum": [
+        "SINGLE_REVIEW",
+        "AGREED",
+        "ADJUDICATED",
+        "UNRESOLVED"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "verdict": {
+            "const": "UNRESOLVED"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "unresolved_reason"
+        ],
+        "properties": {
+          "unresolved_reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  ]
+}

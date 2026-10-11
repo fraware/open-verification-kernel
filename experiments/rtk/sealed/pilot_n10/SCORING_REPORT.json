@@ -1,0 +1,79 @@
+{
+  "analysis_plan": "experiments/rtk/ANALYSIS_PLAN.md",
+  "baselines": {
+    "note": "No baselines registered in freeze; pairwise baseline comparison not executed.",
+    "status": "BASELINES_PENDING"
+  },
+  "cases_per_transition": {
+    "0671bfaf6b19d7ee167192dace4e13715444c3821ee112eb63c5682b110427f0": 1,
+    "0ae93de9f05390aab8a5eeb497010de00f1f1526877e3f62a299ef7b11b72773": 1,
+    "0dee0b9d86c1285f2c17c132759765a3a969e573759f9dabc2ea380f7a73431f": 1,
+    "169c82378398a539dc138c5384688380ebff5ec94e4062d84c77fe368f2eb6ca": 3,
+    "266238ecda6bd41fa70fb06283bb6c9c621670c4f4b06897e2769811dba9a8a5": 1,
+    "50e37face67d76404c7961494212f366df42b86ce94bece82fd1fca8d8c463b5": 3,
+    "612f67ed08fa0ef97b1f5b088e0e0899200200191d6f7a901c440c717626b0e3": 3,
+    "a8606440a805b7eedbbdb0309c459b8425cf9302abe5581f202ec47870f5fd7a": 1,
+    "a94a4d63235d565930a236c6e8304e5b33516d2f36db7b815e9adad73770a74e": 1,
+    "b0f23624f079feb956e8bb0e1d3dcfe25ae950ece26618cd7c506ea84a4b9733": 1
+  },
+  "confusion_oracle_by_rtk": {
+    "REVALIDATION_REQUIRED|REVALIDATION_REQUIRED": 5,
+    "VALID|VALID": 11
+  },
+  "holdout_driven_semantic_patch": false,
+  "n_cases": 16,
+  "n_transitions": 10,
+  "oracle_commitment_sha": "ef90e4674aabfc5438e2eac49a4e80dc03cc0275",
+  "oracle_verdict_counts": {
+    "REVALIDATION_REQUIRED": 5,
+    "VALID": 11
+  },
+  "prediction_commitment_sha": "62e140e97000ac7a199216240341333267112281",
+  "primary_efficiency_unnecessary_revalidation": {
+    "case_level_denominator": 11,
+    "case_level_numerator": 0,
+    "case_level_point": 0.0,
+    "estimand": "UR = P(Dhat=REVALIDATION_REQUIRED | D*=VALID)"
+  },
+  "primary_safety_false_reuse": {
+    "case_level_denominator": 5,
+    "case_level_numerator": 0,
+    "case_level_point": 0.0,
+    "estimand": "FR = P(Dhat=VALID | D* in {INVALID, REVALIDATION_REQUIRED})",
+    "exact_one_sided_upper_95_case_level_if_zero": 0.4507197283469412,
+    "exact_one_sided_upper_95_transition_level_if_zero": 0.6315968501359612,
+    "power_note": "N=10 transitions / small safety denominator yields weak upper bounds versus 20/59 planning targets; limited-power pilot, not a strong reliability claim.",
+    "transition_level_denominator": 3,
+    "transition_level_events": 0,
+    "transition_level_rate": 0.0
+  },
+  "reference_implementation_modified_after_errors": false,
+  "repair_analysis": {
+    "note": "Repair sufficiency/cost regret require repair execution machinery not frozen for this pilot.",
+    "status": "NOT_EXECUTED"
+  },
+  "repository_stratified_case_counts": {
+    "SentinelOps-CI/pcs-core": 9,
+    "fraware/ovk-consumer-express-actions": 4,
+    "fraware/ovk-consumer-fastapi-terraform": 3
+  },
+  "rtk_verdict_counts": {
+    "REVALIDATION_REQUIRED": 5,
+    "VALID": 11
+  },
+  "schema_version": "rtk.scoring_report.pilot_n10.v0",
+  "scope": "PRIMARY_TIER_A_REPLAY_VERIFIED_PILOT_N10",
+  "secondary": {
+    "operational_failure_rate": 0.0,
+    "revalidation_required_precision": 1.0,
+    "revalidation_required_recall": 1.0,
+    "three_way_accuracy_resolved": 1.0,
+    "transition_level_exact_match_rate": 1.0,
+    "unresolved_rate": 0.0,
+    "valid_precision": 1.0,
+    "valid_recall": 1.0
+  },
+  "status": "POST_PREDICTION_COMMITMENT_SCORED",
+  "tier_b_folded_into_primary": false,
+  "unblinding_for_scoring_only": true
+}

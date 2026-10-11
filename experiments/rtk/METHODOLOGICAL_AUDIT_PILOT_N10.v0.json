@@ -1,0 +1,36 @@
+{
+  "schema_version": "rtk.methodological_audit.pilot_n10.v0",
+  "status": "PILOT_N10_STRUCTURAL_CONSISTENCY_ONLY_POST_AUDIT",
+  "audited_head_sha": "78595e6a17cf591f3202e9e234637ab784f9438a",
+  "historical_bindings": {
+    "oracle_commit_sha": "ef90e4674aabfc5438e2eac49a4e80dc03cc0275",
+    "prediction_commit_sha": "62e140e97000ac7a199216240341333267112281",
+    "scoring_commit_sha": "8346d4c96adc48282fd79032b4f64859d408a4b5",
+    "evaluated_implementation_commit_sha": "2c97b59b8b546ac9392a279970a8c25573c30296",
+    "cdi_sha256": "aab9e084dcf39ba1a7b27e1fad73e681e68ef9d67530f9a04a05ade05079aa5c",
+    "oracle_sha256": "59694f29701e6ed93cdb51cbfb94d5966a69f53758d7305c3871768564ccc0bf",
+    "predictions_sha256": "104a506f41994d14753710dadc3301a3ee4fe7cd2822c8c44a6ea65a7f33429f",
+    "scoring_report_sha256": "f810180cc6547391d8287a18ff743ac1ffe944ff529b8bf79c797c904dbcd049"
+  },
+  "corpus": {
+    "case_count": 16,
+    "transition_count": 10
+  },
+  "deterministic_findings": {
+    "complete_evidence_snapshots": 16,
+    "evidence_artifact_paths_equal_context_footprint_elements": 16,
+    "footprint_fully_covered_by_artifact_paths": 16,
+    "oracle_and_predictor_reduced_to_same_path_intersection_predicate": 16,
+    "oracle_prediction_agreement": 16,
+    "exceptions": 0
+  },
+  "interpretation": {
+    "independent_empirical_validation": false,
+    "structural_consistency_evidence": true,
+    "false_reuse_point_estimate_independent_reliability_evidence": false,
+    "unnecessary_revalidation_point_estimate_independent_reliability_evidence": false
+  },
+  "preserved_history": true,
+  "original_artifacts_modified": false,
+  "next_confirmatory_requirement": "Oracle must use target-side evidence or an independently justified semantic-continuity rule capable of disagreement with the RTK decision statistic."
+}

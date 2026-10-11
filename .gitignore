@@ -50,3 +50,10 @@ Thumbs.db
 
 # Internal engineering handoff (not public product docs)
 docs/internal/*.docx
+
+# RTK sealed-eval local work trees (never commit)
+_rtk_sources/
+_rtk_source_evidence/
+_rtk_materialize_work/
+/VALIDATION_ENVIRONMENT.txt
+!experiments/rtk/sealed/frozen_outputs/VALIDATION_ENVIRONMENT.txt

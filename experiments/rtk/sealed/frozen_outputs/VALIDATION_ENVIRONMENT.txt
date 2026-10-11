@@ -1,0 +1,7 @@
+python=Python 3.11.16
+jsonschema=4.26.0
+jsonschema_pin=4.26.0
+workflow_repair=jsonschema_environment_only
+authentic_pre_fix_workflow_blob=cc374b68685911d384e97e2e54acc9bbc9306560
+repaired_workflow_not_byte_identical_to_handoff=true
+method_sha=831a589ed5c01fe2f980d32a95c73b4c5d338b58
