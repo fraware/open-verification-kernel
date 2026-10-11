@@ -496,14 +496,6 @@ def test_effect_local_complete_coverage_establishes_guarantee_under_global_parti
     assert state.reason_codes == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "RTK refinement gap: current guarantee snapshots do not accept predecessor "
-        "guarantee definitions and hence cannot independently reject transport "
-        "across a changed GuaranteeSpec definition"
-    ),
-)
 def test_reused_protected_effect_evidence_does_not_establish_modified_guarantee(
     tmp_path,
 ) -> None:
@@ -579,5 +571,15 @@ def test_reused_protected_effect_evidence_does_not_establish_modified_guarantee(
     )
     assert snapshot.state_for("G-REFUND").evidence_origin == "reused"
 
-    # Desired guarantee-level transport invariant, not yet enforced by OVK.
-    assert snapshot.state_for("G-REFUND").status != "established"
+    # Guard the setup: we must actually reproduce the refinement gap before
+    # classifying the example as an expected failure. Unexpected setup failures
+    # still fail this test normally.
+    observed_status = snapshot.state_for("G-REFUND").status
+    if observed_status == "established":
+        pytest.xfail(
+            "The Protected Effect evidence has been reused for a changed "
+            "durable guarantee definition; guarantee-level refinement is pending."
+        )
+
+    # This assertion becomes an ordinary PASS once the boundary is enforced.
+    assert observed_status != "established"
