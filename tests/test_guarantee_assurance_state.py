@@ -560,11 +560,16 @@ def _make_signed_transport_case(tmp_path):
     return source_snapshot, target_snapshot, source_evidence, target_evidence, head
 
 
-def _transport_admission(source, target, source_evidence, target_evidence, *, key=TEST_KEY):
+def _transport_admission(
+    source, target, source_evidence, target_evidence, *,
+    key=TEST_KEY, source_spec=None, target_spec=None,
+):
     return evaluate_guarantee_transport_admission(
         source,
         target,
         guarantee_id="G-REFUND",
+        source_spec=source_spec if source_spec is not None else _specs()[0],
+        target_spec=target_spec if target_spec is not None else _specs()[0],
         source_evidence=source_evidence,
         target_evidence=target_evidence,
         signature_key=key,
@@ -594,7 +599,9 @@ def test_guarantee_transport_rejects_changed_declaration_even_with_pe_pass(tmp_p
     )
     # This current-state PASS is *only* about the identical typed PE claim.
     assert target.state_for("G-REFUND").status == "established"
-    decision = _transport_admission(source, target, original, reused)
+    decision = _transport_admission(
+        source, target, original, reused, target_spec=modified
+    )
     assert decision.eligible is False
     assert "guarantee_definition_changed" in decision.reason_codes
 
@@ -611,7 +618,9 @@ def test_guarantee_transport_rejects_changed_assumptions(tmp_path) -> None:
         policy_digest="policy-a",
         signature_key=TEST_KEY,
     )
-    result = _transport_admission(source, target, original, reused)
+    result = _transport_admission(
+        source, target, original, reused, target_spec=modified
+    )
     assert result.eligible is False
     assert "guarantee_definition_changed" in result.reason_codes
 
@@ -689,3 +698,45 @@ def test_guarantee_transport_rejects_unsigned_or_partial_coverage(tmp_path) -> N
     result = _transport_admission(source, target, original, partial)
     assert result.eligible is False
     assert "target_coverage_not_complete" in result.reason_codes
+
+
+def test_guarantee_transport_rejects_snapshot_declaration_forgery(tmp_path) -> None:
+    """Matching snapshot digests never override separately supplied declarations."""
+    source, target, original, reused, _ = _make_signed_transport_case(tmp_path)
+    modified = _specs()[0].model_copy(
+        update={"statement": "Different, independently supplied declaration."}
+    )
+    result = _transport_admission(
+        source, target, original, reused, target_spec=modified
+    )
+    assert result.eligible is False
+    assert "target_declaration_digest_mismatch" in result.reason_codes
+
+
+def test_guarantee_transport_rejects_snapshot_statement_forgery(tmp_path) -> None:
+    source, target, original, reused, _ = _make_signed_transport_case(tmp_path)
+    state = target.state_for("G-REFUND")
+    modified_state = state.model_copy(
+        update={"display_statement": "Misleading text, same digest"}
+    )
+    corrupted = target.model_copy(update={"states": [modified_state]})
+    result = _transport_admission(source, corrupted, original, reused)
+    assert result.eligible is False
+    assert "target_snapshot_statement_mismatch" in result.reason_codes
+
+
+def test_guarantee_transport_rejects_snapshot_selector_forgery(tmp_path) -> None:
+    source, target, original, reused, _ = _make_signed_transport_case(tmp_path)
+    state = target.state_for("G-REFUND")
+    modified_state = state.model_copy(
+        update={
+            "machine_claim": {
+                "guarantee_type": "protected_effect_integrity_v1",
+                "selector": {"effect_name": "unknown.action"},
+            }
+        }
+    )
+    corrupted = target.model_copy(update={"states": [modified_state]})
+    result = _transport_admission(source, corrupted, original, reused)
+    assert result.eligible is False
+    assert "target_snapshot_machine_claim_mismatch" in result.reason_codes
