@@ -659,3 +659,33 @@ def test_guarantee_transport_does_not_equate_fresh_evidence_with_reuse(tmp_path)
     result = _transport_admission(source, target, original, fresh_target)
     assert result.eligible is False
     assert "target_origin_not_reused" in result.reason_codes
+
+
+def test_guarantee_transport_rejects_inconsistent_machine_claim_metadata(tmp_path) -> None:
+    """Even matching definition digests cannot excuse a divergent typed claim."""
+    source, target, original, reused, _ = _make_signed_transport_case(tmp_path)
+    state = target.state_for("G-REFUND")
+    inconsistent = state.model_copy(
+        update={"machine_claim": {
+            "guarantee_type": "protected_effect_integrity_v1",
+            "selector": {"effect_name": "different.unrelated.effect"},
+        }}
+    )
+    modified = target.model_copy(update={"states": [inconsistent]})
+    result = _transport_admission(source, modified, original, reused)
+    assert result.eligible is False
+    assert "typed_machine_claim_changed" in result.reason_codes
+
+
+def test_guarantee_transport_rejects_unsigned_or_partial_coverage(tmp_path) -> None:
+    """A forged snapshot status cannot substitute for signed checked evidence."""
+    source, target, original, reused, _ = _make_signed_transport_case(tmp_path)
+    unsigned = reused.model_copy(update={"signature": None})
+    result = _transport_admission(source, target, original, unsigned)
+    assert result.eligible is False
+    assert "target_signature_missing" in result.reason_codes
+
+    partial = reused.model_copy(update={"coverage": {"status": "partial"}})
+    result = _transport_admission(source, target, original, partial)
+    assert result.eligible is False
+    assert "target_coverage_not_complete" in result.reason_codes
