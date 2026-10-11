@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-verification-kernel.dev/schemas/RTKCostObservation.v0.schema.json",
+  "title": "RTKCostObservation.v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "case_id",
+    "transition_id",
+    "path",
+    "run_id",
+    "status",
+    "measurements"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "RTKCostObservation.v0"
+    },
+    "case_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "transition_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "path": {
+      "enum": [
+        "full_revalidation",
+        "rtk_transport",
+        "rtk_repair"
+      ]
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "operational_failure",
+        "skipped"
+      ]
+    },
+    "runner_identity": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "cache_state": {
+      "enum": [
+        "cold",
+        "warm",
+        "mixed",
+        "unknown"
+      ]
+    },
+    "measurements": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "wall_time_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "cpu_time_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "peak_rss_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "accelerator_time_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "ci_billed_seconds": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "external_cost_usd": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "bytes_downloaded": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "bytes_evidence_read": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "human_active_seconds": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "retry_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}

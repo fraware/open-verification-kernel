@@ -61,6 +61,9 @@ Use this index as the canonical entry point. Each guide covers one topic; cross-
 | [THREAT_MODEL.md](THREAT_MODEL.md) | Threat model |
 | [ADAPTER_CONTRACT.md](ADAPTER_CONTRACT.md) | Backend adapter contract |
 | [ROADMAP.md](ROADMAP.md) | Release history and planned work |
+| [RTK_CONCRETE_REFINEMENT.md](RTK_CONCRETE_REFINEMENT.md) | Research bridge from abstract evidence transport to OVK guarantee/evidence reuse |
+| [RTK_CONFIRMATORY_EVALUATION.md](RTK_CONFIRMATORY_EVALUATION.md) | Independent-oracle protocol for a real evidence-transport test |
+| [RTK_ECONOMIC_MEASUREMENT.md](RTK_ECONOMIC_MEASUREMENT.md) | Paired cost measurement for reuse, revalidation, and repair |
 
 ## Reference
 
