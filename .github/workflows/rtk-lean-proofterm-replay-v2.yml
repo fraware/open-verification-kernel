@@ -51,7 +51,11 @@ jobs:
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
           "$HOME/.elan/bin/lean" --version | tee "$RUNNER_TEMP/lean-version.txt"
           grep -F 'Lean (version 4.14.0,' "$RUNNER_TEMP/lean-version.txt"
-          sha256sum "$("$HOME/.elan/bin/elan" which lean)"
+          grep -F 'commit 410fab728470' "$RUNNER_TEMP/lean-version.txt"
+          LEAN_BINARY="$("$HOME/.elan/bin/elan" which lean)"
+          sha256sum "$LEAN_BINARY"
+          test "$(sha256sum "$LEAN_BINARY" | cut -d ' ' -f 1)" = \
+            "eacf754d25ae86ea076882a34b9444f2485659d9df4266b821443b28ca95a215"
 
       - name: Execute independent native Lean replay development controls
         shell: bash
