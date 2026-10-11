@@ -13,10 +13,15 @@ does not assess OVK's external validity, and is **not a confirmatory sample**.
   `df0b2b3a439961ffcbb3985214365ffe40f49bc871df04dff268c7d8e21ca8b2`.
   This bootstrap digest was independently published by Lean maintainers in
   their `lean-eval-submissions` historical replay build instructions.
-- Lean toolchain: fixed release `leanprover/lean4:v4.14.0`. The first
-  workflow version verifies reported Lean version and records a binary
-  checksum, yet does not compare its archive against an independently fixed
-  expected hash. Binary provenance is a documented remaining limitation.
+- Lean toolchain: fixed release `leanprover/lean4:v4.14.0`.
+  The first native workflow run reported Lean checker commit
+  `410fab728470` and executable SHA-256
+  `eacf754d25ae86ea076882a34b9444f2485659d9df4266b821443b28ca95a215`.
+  A subsequent development amendment pins that measured checker identity and
+  executable digest for byte-identical reruns. The value was learned from a
+  development run, **not** an independent upstream signed archive digest or a
+  preregistered confirmatory checksum. Distribution provenance remains an
+  explicit external trust dependency.
 - Exact historical evidence: the bytes of
   `lean_replay_fixtures_v2/historical_proof.term.txt`,
   containing the Lean proof term `Eq.refl n`.
@@ -103,3 +108,31 @@ This is a **development** control for issue #177, not an external corpus or
 preregistered v2 evaluation. No outcomes have been used to update v1
 qualification rules. The next research step is to adapt the same procedure
 to historical source/target claims selected independently of OVK's prediction.
+
+
+## Development execution record (October 11, 2026)
+
+GitHub Actions run `38185763842` completed successfully with native Lean,
+not a simulated checker:
+https://github.com/fraware/open-verification-kernel/actions/runs/38185763842
+
+The workflow logs explicitly record:
+
+- Lean 4.14.0, kernel build commit `410fab728470`.
+- Source acceptance for the original `Eq.refl n` term in both controls.
+- Unchanged target historical term replay `ADMISSIBLE`.
+- Changed target historical term replay `INADMISSIBLE`.
+- Changed target **fresh** term acceptance `ESTABLISHED`.
+- Marker `NATIVE_LEAN_DEVELOPMENT_CONTROLS_PASS`.
+- Uploaded `rtk-lean-replay-v2-development` artifact (run artifact ID
+  `11719985007`). Verify its downloaded bytes independently if using this
+  result for a separate evidentiary claim.
+
+The subsequent checksum-locking workflow revision has its own CI outcome;
+the successful run above belongs to the earlier exact revision
+`86e6d46d320b1836c3bac7f98ae8238db6cb286a`.
+
+**Scientific interpretation:** this is a native proof-term replay *development
+control*, not a historical target-claim corpus. The workflow uses deliberately
+constructed source and target declarations; its successful native checker
+execution does not imply performance of OVK's RTK predictor on external data.
