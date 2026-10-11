@@ -14,6 +14,11 @@ between two representations of the same decision rule.
 
 ## Independence requirement
 
+The oracle must separately evaluate **target claim truth** and **historical
+applicability of the exact source evidence**. A fresh native PASS alone does not
+establish that a prior certificate remains applicable. See the mandatory
+[oracle identifiability contract](RTK_ORACLE_IDENTIFIABILITY.md).
+
 A sealed prediction sequence is insufficient if the oracle and SUT are functions
 of the same decision statistic.
 
@@ -89,30 +94,40 @@ Target verdict is absent from this object.
 
 ## Oracle verdicts
 
+Transport adjudication records two distinct axes: target claim truth
+(ESTABLISHED, REFUTED, UNKNOWN) and historical evidence applicability
+(ADMISSIBLE, INADMISSIBLE, UNDETERMINED). The oracle must use target-side
+information that is not functionally determined by the SUT's decision statistic.
+
 ### VALID
 
-The exact historical source evidence remains sufficient under the target context
-according to the independent target-native adjudication path.
+The *exact historical* source evidence remains admissible for the typed target
+claim under the target context and relying policy. Confirm by independent
+certificate replay or independently justified semantic continuity. Fresh target
+verification alone does not establish VALID reuse.
 
 ### INVALID
 
-The target adjudication establishes an affirmative same-subject contradiction,
-counterexample, or violation of the target claim.
-
-A source evidence replay failure alone is not enough for INVALID.
+An authoritative same-subject target counterexample or refutation establishes
+violation of the exact target claim. A certificate replay failure alone does not
+establish INVALID.
 
 ### REVALIDATION_REQUIRED
 
-The historical evidence does not establish the target claim under the target
-context, while the oracle has not established a contradiction of that claim.
+Independent target adjudication establishes loss of a historical evidence
+applicability condition, without an affirmative target-claim contradiction.
+Fresh target evidence may still independently establish the claim.
 
 ### UNRESOLVED
 
-Historical material, environment reconstruction, subject identity, or target
-adjudication is insufficient for a defensible verdict.
+Historical admissibility cannot be determined, including a fresh native PASS
+without evidence of historical applicability, operational failure, or conflict
+between purported authorities. Keep UNRESOLVED cases in attrition and safety
+sensitivity analyses. The SUT may revalidate conservatively, but the oracle
+must preserve uncertainty.
 
-UNRESOLVED is retained and reported. It is never forced into another class to grow
-the denominator.
+See [RTK_ORACLE_IDENTIFIABILITY.md](RTK_ORACLE_IDENTIFIABILITY.md) for the
+derivation table, conflict handling and mandatory adversarial controls.
 
 ## Frozen sequence
 
@@ -131,13 +146,30 @@ The confirmatory sequence is:
 11. freeze oracle rules;
 12. freeze baseline registry and implementations;
 13. freeze cost-measurement schema;
-14. execute target oracle;
-15. commit oracle bytes / digest;
-16. execute SUT blind to oracle;
-17. commit raw predictions / digest;
-18. execute frozen baselines blind to oracle;
-19. commit baseline outputs / digests;
+14. run the frozen SUT on committed pre-outcome inputs in a clean, isolated environment; 
+15. commit raw SUT predictions and cryptographic digests;
+16. run the frozen baselines blind to target outcomes in similarly isolated environments;
+17. commit all baseline outputs / digests;
+18. execute independent target-native adjudication in a separate, reproducible environment;
+19. commit oracle outcomes, evidence and digests without altering already-committed predictions;
 20. unblind once for scoring.
+
+The ordering above is the **prospective** default, not a retroactive description
+of the historical v1 source selection or the N=10 study. If operational constraints
+force the oracle to execute before the SUT, its outcome *bytes and interpretable
+labels must remain inaccessible* until SUT and baseline commitments are immutable.
+Publicly pushing an oracle JSON file before SUT execution is not sufficient
+blinding. A precommitted hash-only oracle record must use a privately retained
+high-entropy nonce to prevent enumeration of low-entropy labels; release the
+nonce and exact bytes only during unblinding. Check the nonce against the
+precommitted digest. Distinct clean worktrees, artifact stores, runner identities,
+and restricted tool permissions prevent target-oracle runs from influencing SUT
+cache state, prompts, or generated inputs.
+
+Once any confirmatory target outcome is accessed during predictor development,
+the associated sample moves to the development partition. Freeze and declare
+the revised ordering under a successor preregistration if it modifies the
+previously frozen study sequence.
 
 Any semantic modification after the relevant freeze creates a new experiment
 version.
@@ -156,23 +188,24 @@ that transition is falsely reused.
 
 ### False reuse
 
-`FR = P(predicted VALID | oracle != VALID)`
+`FR_nonvalid = #(SUT=VALID and oracle in {INVALID, REVALIDATION_REQUIRED}) / #(oracle in {INVALID, REVALIDATION_REQUIRED})`
 
-This is the primary safety metric.
+This is the primary safety metric on resolved, independently adjudicated
+non-VALID transitions. Also report errors among adjudicated VALID predictions:
+`#(SUT=VALID and oracle is non-VALID) / #(SUT=VALID with resolved oracle)`.
 
-Report:
+Predicted VALID on oracle UNRESOLVED is *unadjudicated reuse*. Report it
+separately and include a worst-case sensitivity analysis treating such reuse as
+unsafe. Do not count it as confirmed safe reuse.
 
-- numerator;
-- denominator;
-- transition-level point estimate;
-- exact one-sided 95% upper bound;
-- repository-stratified counts.
-
-Zero observed failures must never be reported without the upper confidence bound.
+Report raw numerators, denominators, repository stratification, and nominal
+one-sided 95% binomial bounds with the independent-Bernoulli assumption stated.
+Adjacent transitions in one repository may be correlated; nominal transition-
+level bounds are not dependence-robust confidence guarantees.
 
 ### Unnecessary revalidation
 
-`UR = P(predicted REVALIDATION_REQUIRED | oracle = VALID)`
+`UR = P(predicted REVALIDATION_REQUIRED | independently adjudicated oracle = VALID)`
 
 This is the primary efficiency metric.
 
@@ -200,9 +233,10 @@ With zero observed failures, an approximate one-sided 95% binomial upper bound i
 - 29: below about 10%;
 - 59: below about 5%.
 
-The relevant denominator for false reuse is resolved non-VALID independent
-transition opportunities, which may be materially smaller than the total number
-of Tier-A transitions. Candidate planning must account for that.
+The relevant false-reuse denominator consists of resolved non-VALID
+transition opportunities. It may be materially smaller than the total corpus.
+Transitions from a shared repository may be dependent; report repository-cluster
+summaries and distinguish nominal bounds from dependence-robust inference.
 
 ## Baselines
 
@@ -245,6 +279,14 @@ Walking the ordered candidate list stops only under the frozen rule, for example
 - the list is exhausted.
 
 Do not weaken source-evidence or oracle requirements to reach a sample-size target.
+
+## Pre-outcome admission gate
+
+Before confirmatory target adjudication, satisfy the five requirements in
+[RTK_ORACLE_IDENTIFIABILITY.md](RTK_ORACLE_IDENTIFIABILITY.md), including
+independent admissibility evidence and development-only adversarial controls.
+The mere existence of repository-native passing tests is insufficient to
+adjudicate historical proof or evidence reuse.
 
 ## Claim discipline
 

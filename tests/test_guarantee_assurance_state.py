@@ -16,7 +16,7 @@ from ovk.core.guarantee_assurance_state import (
     GuaranteeAssurancePolicy,
     build_guarantee_assurance_snapshot,
 )
-from ovk.core.guarantee_graph import GuaranteeSelector, GuaranteeSpec
+from ovk.core.guarantee_graph import GuaranteeSelector, GuaranteeSpec, compare_guarantee_graphs
 from ovk.core.models import VerificationSubject
 from ovk.core.protected_effect_evaluation import (
     evaluate_protected_effect_integrity,
@@ -492,3 +492,85 @@ def test_effect_local_complete_coverage_establishes_guarantee_under_global_parti
     state = snapshot.state_for("G-REFUND")
     assert state.status == "established"
     assert state.reason_codes == []
+
+
+def test_modified_description_does_not_change_typed_pe_result(
+    tmp_path,
+) -> None:
+    """Separate a changed declaration from the unchanged checked PE proposition.
+
+    The snapshot establishes the typed Protected Effect assertion. A changed
+    description changes the durable definition digest, so an independent
+    guarantee-level transport decision must not infer declaration continuity.
+    """
+    base = _ir(head_sha="head-a")
+    head = _ir(head_sha="head-b")
+    original_spec = _specs()[0]
+    modified_spec = original_spec.model_copy(
+        update={"statement": "A stronger, unverified normative claim about refunds."}
+    )
+    assert original_spec.definition_digest != modified_spec.definition_digest
+
+    transitions = compare_guarantee_graphs(
+        base_ir=base,
+        head_ir=head,
+        base_specs=[original_spec],
+        head_specs=[modified_spec],
+    )
+    assert len(transitions.transitions) == 1
+    assert transitions.transitions[0].kind == "definition_modified"
+
+    runtime = _runtime()
+    cache = ProtectedEffectEvidenceCache(HardenedResultCache(tmp_path))
+    evaluation = evaluate_protected_effect_integrity(
+        base, protected_effect_ids=["pe:refund"]
+    )[0]
+    fingerprint = build_execution_fingerprint(
+        evaluation,
+        environment_digest=runtime.environment_digest,
+        tool_digest=runtime.tool_digest,
+        worker_image_digest=runtime.worker_image_digest,
+        native_execution=runtime.native_execution,
+    )
+    source_evidence = protected_effect_evaluation_to_evidence(
+        base,
+        evaluation,
+        policy_digest="policy-a",
+        execution_fingerprint=fingerprint,
+        signing_key=TEST_KEY,
+    )
+    cache.put(
+        ir=base,
+        protected_effect_id="pe:refund",
+        policy_digest="policy-a",
+        execution_fingerprint=fingerprint,
+        evidence=source_evidence,
+        signature_key=TEST_KEY,
+    )
+    execution = execute_incremental_protected_effect_assurance(
+        base,
+        head,
+        policy_digest="policy-a",
+        runtime_fingerprint_provider=lambda _effect_id: runtime,
+        evidence_cache=cache,
+        signature_key=TEST_KEY,
+        signing_key=TEST_KEY,
+    )
+    assert "pe:refund" in execution.reused_effects
+
+    snapshot = build_guarantee_assurance_snapshot(
+        head,
+        [modified_spec],
+        execution.evidence,
+        policy_digest="policy-a",
+        signature_key=TEST_KEY,
+    )
+    assert snapshot.state_for("G-REFUND").evidence_origin == "reused"
+
+    # Establishment here is specifically for the unchanged typed Protected
+    # Effect assertion. It is not a guarantee-definition continuity verdict.
+    assert snapshot.state_for("G-REFUND").status == "established"
+    assert snapshot.state_for("G-REFUND").machine_claim == {
+        "guarantee_type": modified_spec.guarantee_type,
+        "selector": modified_spec.selector.model_dump(mode="json"),
+    }
