@@ -146,13 +146,30 @@ The confirmatory sequence is:
 11. freeze oracle rules;
 12. freeze baseline registry and implementations;
 13. freeze cost-measurement schema;
-14. execute target oracle;
-15. commit oracle bytes / digest;
-16. execute SUT blind to oracle;
-17. commit raw predictions / digest;
-18. execute frozen baselines blind to oracle;
-19. commit baseline outputs / digests;
+14. run the frozen SUT on committed pre-outcome inputs in a clean, isolated environment; 
+15. commit raw SUT predictions and cryptographic digests;
+16. run the frozen baselines blind to target outcomes in similarly isolated environments;
+17. commit all baseline outputs / digests;
+18. execute independent target-native adjudication in a separate, reproducible environment;
+19. commit oracle outcomes, evidence and digests without altering already-committed predictions;
 20. unblind once for scoring.
+
+The ordering above is the **prospective** default, not a retroactive description
+of the historical v1 source selection or the N=10 study. If operational constraints
+force the oracle to execute before the SUT, its outcome *bytes and interpretable
+labels must remain inaccessible* until SUT and baseline commitments are immutable.
+Publicly pushing an oracle JSON file before SUT execution is not sufficient
+blinding. A precommitted hash-only oracle record must use a privately retained
+high-entropy nonce to prevent enumeration of low-entropy labels; release the
+nonce and exact bytes only during unblinding. Check the nonce against the
+precommitted digest. Distinct clean worktrees, artifact stores, runner identities,
+and restricted tool permissions prevent target-oracle runs from influencing SUT
+cache state, prompts, or generated inputs.
+
+Once any confirmatory target outcome is accessed during predictor development,
+the associated sample moves to the development partition. Freeze and declare
+the revised ordering under a successor preregistration if it modifies the
+previously frozen study sequence.
 
 Any semantic modification after the relevant freeze creates a new experiment
 version.
