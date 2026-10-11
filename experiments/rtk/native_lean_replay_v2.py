@@ -21,9 +21,9 @@ from pathlib import Path
 from typing import Any
 
 EXPECTED_LEAN_VERSION = "4.14.0"
-_VERSION = re.compile(r"Lean \\(version 4\\.14\\.0(?:,|\\))")
+_VERSION = re.compile("Lean [(]version 4[.]14[.]0(?:,|[)])")
 # These are deliberately conservative, not a complete Lean security sandbox.
-_PROHIBITED = re.compile(r"\\b(sorry|admit|axiom|unsafe)\\b")
+_PROHIBITED = re.compile("(?<![A-Za-z0-9_])(sorry|admit|axiom|unsafe)(?![A-Za-z0-9_])")
 _TYPE_MISMATCH = re.compile(r"(?i)(type mismatch|application type mismatch)")
 
 
