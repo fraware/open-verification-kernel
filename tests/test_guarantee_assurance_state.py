@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from ovk.core.assurance_ir import (
     AssuranceCoverage,
     AssuranceExtractorIdentity,
