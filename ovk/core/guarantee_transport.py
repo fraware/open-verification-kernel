@@ -17,6 +17,8 @@ import hmac
 from pydantic import BaseModel, Field
 
 from ovk.core.evidence_integrity import (
+    integrity_envelope_complete,
+    is_supported_schema_version,
     recompute_input_digest,
     verify_evidence_digest,
     verify_evidence_signature,
@@ -68,6 +70,10 @@ def _signed_integrity_reasons(
     role: str,
 ) -> list[str]:
     reasons: list[str] = []
+    if not is_supported_schema_version(evidence.schema_version):
+        reasons.append(f"{role}_schema_unsupported")
+    if not integrity_envelope_complete(evidence):
+        reasons.append(f"{role}_integrity_envelope_incomplete")
     if not verify_evidence_digest(evidence):
         reasons.append(f"{role}_evidence_digest_invalid")
     if evidence.input_digest is None or not hmac.compare_digest(
@@ -223,6 +229,23 @@ def evaluate_guarantee_transport_admission(
             reasons.append(f"{role}_evidence_revision_mismatch")
         if evidence.policy_digest != snapshot.policy_digest:
             reasons.append(f"{role}_evidence_policy_mismatch")
+        semantic_records = [
+            item for item in evidence.generated_artifacts
+            if isinstance(item, dict)
+            and item.get("kind") == "protected_effect_semantic_slice"
+        ]
+        if len(semantic_records) != 1:
+            reasons.append(f"{role}_semantic_artifact_missing_or_ambiguous")
+        elif state_value := (
+            source_state if role == "source" else target_state
+        ):
+            if (
+                semantic_records[0].get("semantic_slice_digest")
+                != state_value.binding.semantic_slice_digest
+                or semantic_records[0].get("protected_effect_id")
+                != state_value.binding.protected_effect_id
+            ):
+                reasons.append(f"{role}_semantic_artifact_mismatch")
         coverage = evidence.coverage
         if not isinstance(coverage, dict) or coverage.get("status") != "complete":
             reasons.append(f"{role}_coverage_not_complete")
