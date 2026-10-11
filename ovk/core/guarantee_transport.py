@@ -144,6 +144,12 @@ def evaluate_guarantee_transport_admission(
         reasons.append("guarantee_state_missing_or_ambiguous")
 
     if source_state is not None and target_state is not None:
+        if source_state.machine_claim != target_state.machine_claim:
+            reasons.append("typed_machine_claim_changed")
+        if source_state.protected_effect_claim_status != "pass":
+            reasons.append("source_claim_status_not_pass")
+        if target_state.protected_effect_claim_status != "pass":
+            reasons.append("target_claim_status_not_pass")
         if source_state.status != "established":
             reasons.append("source_guarantee_not_established")
         if target_state.status != "established":
@@ -179,6 +185,13 @@ def evaluate_guarantee_transport_admission(
             reasons.append(f"{role}_evidence_revision_mismatch")
         if evidence.policy_digest != snapshot.policy_digest:
             reasons.append(f"{role}_evidence_policy_mismatch")
+        coverage = evidence.coverage
+        if not isinstance(coverage, dict) or coverage.get("status") != "complete":
+            reasons.append(f"{role}_coverage_not_complete")
+        if evidence.decision.get("decision_state") != "needs_review":
+            reasons.append(f"{role}_evidence_not_shadow")
+        if evidence.decision.get("controlling_finding_ids"):
+            reasons.append(f"{role}_controlling_findings_present")
         reasons.extend(_signed_integrity_reasons(evidence, key=signature_key, role=role))
 
     if target_evidence.change_origin.get("source") != "reused_sealed_evidence":
