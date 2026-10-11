@@ -236,14 +236,13 @@ def evaluate_guarantee_transport_admission(
         ]
         if len(semantic_records) != 1:
             reasons.append(f"{role}_semantic_artifact_missing_or_ambiguous")
-        elif state_value := (
-            source_state if role == "source" else target_state
-        ):
-            if (
+        else:
+            current_state = source_state if role == "source" else target_state
+            if current_state is not None and (
                 semantic_records[0].get("semantic_slice_digest")
-                != state_value.binding.semantic_slice_digest
+                != current_state.binding.semantic_slice_digest
                 or semantic_records[0].get("protected_effect_id")
-                != state_value.binding.protected_effect_id
+                != current_state.binding.protected_effect_id
             ):
                 reasons.append(f"{role}_semantic_artifact_mismatch")
         coverage = evidence.coverage
