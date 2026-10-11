@@ -10,6 +10,14 @@ on:
       - experiments/rtk/native_lean_replay_v2.py
       - experiments/rtk/lean_replay_fixtures_v2/**
       - tests/test_native_lean_replay_v2.py
+  pull_request:
+    branches:
+      - research/rtk-adjudication-v2-development
+    paths:
+      - .github/workflows/rtk-lean-proofterm-replay-v2.yml
+      - experiments/rtk/native_lean_replay_v2.py
+      - experiments/rtk/lean_replay_fixtures_v2/**
+      - tests/test_native_lean_replay_v2.py
   workflow_dispatch:
 
 permissions:
