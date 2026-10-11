@@ -1,0 +1,1 @@
+theorem historical_claim (n : Nat) : 0 + n = n :=

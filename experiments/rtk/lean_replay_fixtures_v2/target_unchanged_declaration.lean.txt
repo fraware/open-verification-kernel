@@ -1,0 +1,2 @@
+-- Unrelated source revision comment; checked claim unchanged.
+theorem historical_claim (n : Nat) : n + 0 = n :=
