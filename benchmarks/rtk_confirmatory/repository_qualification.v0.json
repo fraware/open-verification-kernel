@@ -1,0 +1,218 @@
+{
+  "schema_version": "rtk.confirmatory_repository_qualification.v0",
+  "discovery_snapshot": "benchmarks/rtk_confirmatory/repository_discovery.v0.json",
+  "discovery_snapshot_commit_sha": "5ea024726ee46c74e5626b0c3048ebc0f902076e",
+  "selection_protocol": "docs/RTK_CONFIRMATORY_SELECTION.v0.md",
+  "frozen_support_commit_sha": "79370539ca9b26a0a6b01f6ac6ab6923243f40f4",
+  "study_window": {
+    "target_after_or_equal": "2025-10-01T00:00:00Z",
+    "target_before_or_equal": "2026-09-30T23:59:59Z"
+  },
+  "qualification_mode": "SOURCE_SIDE_ONLY",
+  "target_oracle_executed": false,
+  "rtk_prediction_executed": false,
+  "repositories_reviewed": 20,
+  "qualified_repositories": [],
+  "qualified_repository_count": 0,
+  "selection_status": "EXHAUSTED_NO_QUALIFYING_REPOSITORIES",
+  "conclusion": "The frozen v0 discovery universe yielded no repository that simultaneously satisfies the application-surface, licensing, frozen-source-semantics, and independent-oracle-family gates. No criteria were weakened and the query was not broadened.",
+  "records": [
+    {
+      "order": 1,
+      "repository": "fastapi/fastapi",
+      "status": "EXCLUDED_NOT_APPLICATION_SURFACE",
+      "reasons": [
+        "framework_repository",
+        "security_material_is_framework_tests_and_documentation_not_application_protected_effects"
+      ]
+    },
+    {
+      "order": 2,
+      "repository": "tadata-org/fastapi_mcp",
+      "status": "EXCLUDED_NO_INDEPENDENT_AUTHORIZATION_ORACLE",
+      "reasons": [
+        "integration_library",
+        "auth_code_present_but_no_repository_native_authorization_test_family_identified"
+      ]
+    },
+    {
+      "order": 3,
+      "repository": "remsky/Kokoro-FastAPI",
+      "status": "EXCLUDED_NO_INDEPENDENT_AUTHORIZATION_ORACLE",
+      "reasons": [
+        "application_service",
+        "no_authentication_or_authorization_test_surface_identified"
+      ]
+    },
+    {
+      "order": 4,
+      "repository": "fastapi-users/fastapi-users",
+      "status": "EXCLUDED_NOT_APPLICATION_SURFACE",
+      "reasons": [
+        "authentication_library",
+        "tests_validate_library_authentication_semantics_not_application_protected_effect_claims"
+      ]
+    },
+    {
+      "order": 5,
+      "repository": "fastapi-admin/fastapi-admin",
+      "status": "EXCLUDED_NOT_APPLICATION_SURFACE",
+      "reasons": [
+        "admin_framework_library",
+        "example_application_not_independent_application_surface",
+        "no_authorization_oracle_family_identified"
+      ]
+    },
+    {
+      "order": 6,
+      "repository": "Sanjeev-Thiyagarajan/fastapi-course",
+      "status": "EXCLUDED_NO_OPEN_SOURCE_LICENSE_METADATA",
+      "reasons": [
+        "repository_license_missing",
+        "tutorial_repository"
+      ]
+    },
+    {
+      "order": 7,
+      "repository": "Buuntu/fastapi-react",
+      "status": "EXCLUDED_NO_TRANSITIONS_IN_STUDY_WINDOW",
+      "reasons": [
+        "cookiecutter_template",
+        "latest_commit_before_study_window"
+      ],
+      "cutoff_sha": "af17f2d422d0ebc5f173e83f2c6931045ab055b0",
+      "cutoff_date": "2022-02-18T04:40:27Z"
+    },
+    {
+      "order": 8,
+      "repository": "sml2h3/ddddocr-fastapi",
+      "status": "EXCLUDED_NO_OPEN_SOURCE_LICENSE_METADATA",
+      "reasons": [
+        "repository_license_missing",
+        "no_authorization_surface_identified"
+      ]
+    },
+    {
+      "order": 9,
+      "repository": "fastapi-practices/fastapi-best-architecture",
+      "status": "EXCLUDED_UNSUPPORTED_FROZEN_GUARD_EFFECTIVENESS",
+      "reasons": [
+        "application_like_surface",
+        "authorization_uses_dynamic_jwt_rbac_and_request_permission_objects",
+        "frozen_effectiveness_extractor_does_not_establish_these_guard_shapes"
+      ],
+      "cutoff_sha": "123a44aed02daf5ea60d2a7469625c933d3bb759",
+      "cutoff_date": "2026-09-20T03:01:09Z"
+    },
+    {
+      "order": 10,
+      "repository": "benavlabs/FastAPI-boilerplate",
+      "status": "EXCLUDED_UNSUPPORTED_FROZEN_GUARD_EFFECTIVENESS",
+      "reasons": [
+        "application_like_surface",
+        "strong_repository_native_authorization_tests_exist",
+        "require_permissions_returns_nested_closure_dependency",
+        "correctness_depends_on_crudauth_and_database_backed_permission_lookup",
+        "frozen_effectiveness_extractor_does_not_establish_nested_permission_dependency"
+      ],
+      "cutoff_sha": "4deb9c45f4298d4a84f005126f6ee8ccd823acf8",
+      "cutoff_date": "2026-09-28T17:38:25Z"
+    },
+    {
+      "order": 11,
+      "repository": "ChristopherGS/ultimate-fastapi-tutorial",
+      "status": "EXCLUDED_NO_OPEN_SOURCE_LICENSE_METADATA",
+      "reasons": [
+        "repository_license_missing",
+        "tutorial_repository"
+      ]
+    },
+    {
+      "order": 12,
+      "repository": "long2ice/fastapi-cache",
+      "status": "EXCLUDED_NOT_APPLICATION_SURFACE",
+      "reasons": [
+        "cache_library",
+        "no_authorization_surface_identified"
+      ]
+    },
+    {
+      "order": 13,
+      "repository": "fastapiutils/fastapi-utils",
+      "status": "EXCLUDED_NOT_APPLICATION_SURFACE",
+      "reasons": [
+        "utility_library",
+        "no_application_authorization_surface_identified"
+      ]
+    },
+    {
+      "order": 14,
+      "repository": "tiangolo/uvicorn-gunicorn-fastapi-docker",
+      "status": "EXCLUDED_NOT_APPLICATION_SURFACE",
+      "reasons": [
+        "container_tooling_repository",
+        "no_application_authorization_surface_identified"
+      ]
+    },
+    {
+      "order": 15,
+      "repository": "teamhide/fastapi-boilerplate",
+      "status": "EXCLUDED_NO_OPEN_SOURCE_LICENSE_METADATA",
+      "reasons": [
+        "repository_license_missing",
+        "auth_and_permission_tests_exist_but_license_gate_fails"
+      ]
+    },
+    {
+      "order": 16,
+      "repository": "s3rius/FastAPI-template",
+      "status": "EXCLUDED_NOT_APPLICATION_SURFACE",
+      "reasons": [
+        "project_template",
+        "no_repository_native_authorization_oracle_family_identified"
+      ]
+    },
+    {
+      "order": 17,
+      "repository": "insistence/RuoYi-FastAPI",
+      "status": "EXCLUDED_UNSUPPORTED_FROZEN_GUARD_EFFECTIVENESS",
+      "reasons": [
+        "application_like_surface",
+        "strong_repository_native_authorization_tests_exist",
+        "authorization_uses_class_and_factory_dependencies",
+        "frozen_effectiveness_extractor_only_establishes_narrow_top_level_function_guard_shapes",
+        "mapping_dependency_name_to_authorization_without_effectiveness_proof_would_be_unsound"
+      ],
+      "cutoff_sha": "726883f68ad21450ae47120d270895d9a5a9d69e",
+      "cutoff_date": "2026-09-12T09:01:05Z"
+    },
+    {
+      "order": 18,
+      "repository": "wassim249/fastapi-langgraph-agent-production-ready-template",
+      "status": "EXCLUDED_NO_INDEPENDENT_AUTHORIZATION_ORACLE",
+      "reasons": [
+        "template_repository",
+        "auth_code_present",
+        "no_repository_native_test_suite_identified"
+      ]
+    },
+    {
+      "order": 19,
+      "repository": "awtkns/fastapi-crudrouter",
+      "status": "EXCLUDED_NOT_APPLICATION_SURFACE",
+      "reasons": [
+        "crud_router_library",
+        "no_authorization_surface_identified"
+      ]
+    },
+    {
+      "order": 20,
+      "repository": "uriyyo/fastapi-pagination",
+      "status": "EXCLUDED_NOT_APPLICATION_SURFACE",
+      "reasons": [
+        "pagination_library",
+        "no_application_authorization_surface_identified"
+      ]
+    }
+  ]
+}

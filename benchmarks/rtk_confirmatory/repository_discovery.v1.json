@@ -1,0 +1,1421 @@
+{
+  "schema_version": "rtk.confirmatory_repository_discovery.v1",
+  "selection_protocol_commit_sha": "1bda7ef6463ac68db3fc9cabdbea94eb59f22e25",
+  "raw_hits_path": "benchmarks/rtk_confirmatory/code_search_hits.v1.json",
+  "repository_count": 141,
+  "deduplication": "first repository occurrence by query order then provider result order",
+  "target_oracle_executed": false,
+  "rtk_prediction_executed": false,
+  "repositories": [
+    {
+      "discovery_order": 1,
+      "repository": "kennethreitz/responder",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 1,
+      "first_path": "CHANGELOG.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 2,
+      "repository": "rbricheno/howto-authentication",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 2,
+      "first_path": "FASTAPI.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 3,
+      "repository": "zornade/visura-api",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 3,
+      "first_path": "main.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 4,
+      "repository": "Dilshan-H/srilanka-holidays",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 4,
+      "first_path": "app.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 5,
+      "repository": "doganarif/fastapi-radar",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 5,
+      "first_path": "README.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 6,
+      "repository": "burcev60/dev-notes",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 6,
+      "first_path": "fastapi/auth.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 7,
+      "repository": "ashfromsky/acquiremock",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 7,
+      "first_path": "README.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 8,
+      "repository": "cccmag/aiprogrammer",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 8,
+      "first_path": "2025/05/focus5.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 9,
+      "repository": "Physton/sd-webui-prompt-all-in-one-app",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 9,
+      "first_path": "app.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 10,
+      "repository": "frodobots-org/earth-rovers-sdk",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 10,
+      "first_path": "main.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 11,
+      "repository": "realcwj/123Pan-Unlimited-WebDAV",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 11,
+      "first_path": "auth.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 12,
+      "repository": "ajayyy/DeArrowThumbnailCache",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 12,
+      "first_path": "app.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 13,
+      "repository": "Astrenix/nexcore-x-ui",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 13,
+      "first_path": "docs/API.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 14,
+      "repository": "liuslevis/deepfind-cli",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 14,
+      "first_path": "PLAN_SAFE.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 15,
+      "repository": "huiyu9144/Huiyu-Pi",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 15,
+      "first_path": "docs/webhooks.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 16,
+      "repository": "klept0/TestFlight_Apprise_Notifier",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 16,
+      "first_path": "main.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 17,
+      "repository": "ai-dock/comfyui-api-wrapper",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 17,
+      "first_path": "README.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 18,
+      "repository": "ShauryaVaid/kgiit",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 18,
+      "first_path": "ARCHITECTURE.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 19,
+      "repository": "Skulldorom/rss-api",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 19,
+      "first_path": "main.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 20,
+      "repository": "wware/k8s-hack",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 20,
+      "first_path": "AUTH.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 21,
+      "repository": "j0shcap/PushNotificationServerFramework",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 21,
+      "first_path": "auth.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 22,
+      "repository": "patrick91/latest.cat",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 22,
+      "first_path": "main.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 23,
+      "repository": "PStryder/MemoryGate",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 23,
+      "first_path": "CODE_REVIEW_1.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 24,
+      "repository": "Prostecki/telegram-task-bot",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 24,
+      "first_path": "main.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 25,
+      "repository": "MarutiDubey/GitOwl",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 25,
+      "first_path": "README.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 26,
+      "repository": "Lerp12/lawl-backend-submission",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 26,
+      "first_path": "README.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 27,
+      "repository": "pavelanni/learn-oauth-python",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 27,
+      "first_path": "README.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 28,
+      "repository": "Rerowros/yookassa_telegram",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 28,
+      "first_path": "API.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 29,
+      "repository": "jaymody/seq2seq-sort",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 29,
+      "first_path": "api.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 30,
+      "repository": "rizqcon/openclawdev-taskboard",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 30,
+      "first_path": "app.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 31,
+      "repository": "ATHARVA262005/ai-audit-shelf",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 31,
+      "first_path": "api.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 32,
+      "repository": "israfeelmasum/neural-tts-api",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 32,
+      "first_path": "main.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 33,
+      "repository": "dubr1k/GigaAMGUI",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 33,
+      "first_path": "docs/PLAN.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 34,
+      "repository": "temporal-community/durable-research-fleet",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 34,
+      "first_path": "web.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 35,
+      "repository": "britrik/elevenlabs-twilio-memory-bridge",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 35,
+      "first_path": "app.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 36,
+      "repository": "Air000000/Enterprise-Support-AI-Copilot-API",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 36,
+      "first_path": "auth.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 37,
+      "repository": "abuzarai/drafting-assistant",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 37,
+      "first_path": "auth.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 38,
+      "repository": "BrunoTanabe/fastapi-clean-architecture-ddd-template",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 38,
+      "first_path": "README.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 39,
+      "repository": "awaithumans/awaithumans-human-in-the-loop-ai-agents",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 39,
+      "first_path": "BUILD_NOTES.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 40,
+      "repository": "alexandermoore/arxiv_hype",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 40,
+      "first_path": "main.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 41,
+      "repository": "nijaru/zenith",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 41,
+      "first_path": "CHANGELOG.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 42,
+      "repository": "AkaPranav/URL_Agent",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 42,
+      "first_path": "app.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 43,
+      "repository": "V2as/Sauceban",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 43,
+      "first_path": "USAGE-PUSH.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 44,
+      "repository": "bonnie-mcconnell/promptops",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 44,
+      "first_path": "auth.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 45,
+      "repository": "MaxiAdrien/support-navigator",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 45,
+      "first_path": "api.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 46,
+      "repository": "aloyb/blokd-app",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 46,
+      "first_path": "skills/m4.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 47,
+      "repository": "lza6/quillbot-2api",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 47,
+      "first_path": "README.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 48,
+      "repository": "nsssayom/OpenGaze",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 48,
+      "first_path": "main.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 49,
+      "repository": "ranoram24/movie-aggragator",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 49,
+      "first_path": "auth.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 50,
+      "repository": "edgarstool/linear-webhook-bridge",
+      "first_query_index": 1,
+      "first_query": "Header compare_digest HTTPException FastAPI",
+      "first_result_order": 50,
+      "first_path": "SKILL.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 51,
+      "repository": "justrach/turboAPI",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 1,
+      "first_path": "python/turboapi/security.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 52,
+      "repository": "iflytek/astron-agent",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 2,
+      "first_path": "core/workflow/extensions/fastapi/middleware/auth.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 53,
+      "repository": "semantica-agi/semantica",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 3,
+      "first_path": "semantica/explorer/dependencies.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 54,
+      "repository": "BerriAI/litellm",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 4,
+      "first_path": "litellm/proxy/auth/user_api_key_auth.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 55,
+      "repository": "Roy3838/Observer",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 5,
+      "first_path": "api/admin_auth.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 56,
+      "repository": "repowise-dev/repowise",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 6,
+      "first_path": "packages/server/src/repowise/server/deps.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 57,
+      "repository": "Deodat-Lawson/LaunchStack",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 7,
+      "first_path": "services/transcription/app/auth.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 58,
+      "repository": "OneUptime/blog",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 8,
+      "first_path": "posts/2026-01-22-hmac-signing-python-api/README.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 59,
+      "repository": "nfraxlab/svc-infra",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 9,
+      "first_path": "src/svc_infra/api/fastapi/auth/security.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 60,
+      "repository": "spatiamed/spatiamed-common",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 11,
+      "first_path": "sm_common/fastapi_guard.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 61,
+      "repository": "AleksNeStu/ai-real-estate-assistant",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 12,
+      "first_path": "docs/architecture/authentication.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 62,
+      "repository": "potpie-ai/potpie",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 13,
+      "first_path": "potpie/context-engine/src/potpie_context_engine/adapters/inbound/http/deps.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 63,
+      "repository": "ParisNeo/lollms_hub",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 16,
+      "first_path": "app/api/v1/dependencies.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 64,
+      "repository": "microsoft/deepRAG",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 17,
+      "first_path": "src/api/api.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 65,
+      "repository": "fengzhizi319/privacy-local-agent",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 18,
+      "first_path": "console/docs/tech-fastapi.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 66,
+      "repository": "SHAdd0WTAka/Zen-Ai-Pentest",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 19,
+      "first_path": "api/core/auth.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 67,
+      "repository": "RayLee1997/Shared-Workspace",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 20,
+      "first_path": "05_Technology/Tools/FastAPI/FastAPI 安全认证编程指南.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 68,
+      "repository": "MajorAbdullah/fastapi-pro-toolkit",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 21,
+      "first_path": "skills/fastapi-auth-security/SKILL.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 69,
+      "repository": "karanie/BI-Rumah-Sakit-Data-Backend",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 22,
+      "first_path": "app/fastapi/__init__.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 70,
+      "repository": "dahiya001rohit/Notes",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 23,
+      "first_path": "fastapi.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 71,
+      "repository": "tang-vu/ContribAI",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 24,
+      "first_path": "python/web/auth.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 72,
+      "repository": "ferosai/feros",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 25,
+      "first_path": "studio/api/app/lib/auth.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 73,
+      "repository": "carbonthecoder/secure-code",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 26,
+      "first_path": "recipes/python-fastapi/main.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 74,
+      "repository": "AviralGup7/Singularity-Zero",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 27,
+      "first_path": "src/dashboard/fastapi/dependencies.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 75,
+      "repository": "CodingCookiee/python-learning-platform",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 28,
+      "first_path": "content/tracks/python/15-fastapi/lessons/06-fastapi-auth.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 76,
+      "repository": "zubrist/ZTM_Python",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 29,
+      "first_path": "fastapi/01_fastapi_restful_api_design.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 77,
+      "repository": "harshaygadekar/Python-Interview-Prep",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 30,
+      "first_path": "curriculum/17-fastapi-deep-dive/04-authentication.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 78,
+      "repository": "cgallic/kai-cmo-harness",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 31,
+      "first_path": "gateway/auth.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 79,
+      "repository": "notadev-iamaura/OneRAG",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 32,
+      "first_path": "app/lib/auth.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 80,
+      "repository": "weihong-su/miniQMT",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 33,
+      "first_path": "xtquant_manager/security.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 81,
+      "repository": "caura-ai/caura",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 34,
+      "first_path": "core-api/src/core_api/auth.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 82,
+      "repository": "Kohulan/ChemAudit",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 35,
+      "first_path": "backend/app/core/security.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 83,
+      "repository": "jingyi0605/DeepStressModel",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 36,
+      "first_path": "docs/benchmark_security/server_api_prompt.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 84,
+      "repository": "AngelaRP19/El-Muro",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 37,
+      "first_path": "services/career-service/src/infrastructure/config/hmac_validator.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 85,
+      "repository": "nikhilbadyal/bitwarden-backup",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 38,
+      "first_path": "api/auth.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 86,
+      "repository": "ActiveInferenceInstitute/Active_InferAnts",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 39,
+      "first_path": "6_API/MetaInformAnt_API.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 87,
+      "repository": "SignalPilot-Labs/AutoFyn",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 40,
+      "first_path": "dashboard/backend/auth.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 88,
+      "repository": "atompilot/qmt-bridge",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 42,
+      "first_path": "src/qmt_bridge/server/security.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 89,
+      "repository": "ByteDance-Seed/DAComp",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 44,
+      "first_path": "methods/de-agent/openhands/server/dependencies.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 90,
+      "repository": "amir-jafari/Data-Visualization",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 45,
+      "first_path": "fastapi/basics/security/api_key.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 91,
+      "repository": "ELHart05/AirmonGUI",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 47,
+      "first_path": "backend/app/security.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 92,
+      "repository": "JawadAminMSFT/WorkbenchIQ",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 48,
+      "first_path": "app/auth.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 93,
+      "repository": "Modern-Prometheus-AI/Neuroca",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 49,
+      "first_path": "src/neuroca/api/middleware/authentication.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 94,
+      "repository": "micro-nova/support_tunnel",
+      "first_query_index": 2,
+      "first_query": "APIKeyHeader hmac compare_digest HTTPException FastAPI",
+      "first_result_order": 50,
+      "first_path": "api/admin.py",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 95,
+      "repository": "zhanymkanov/fastapi-best-practices",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 1,
+      "first_path": "AGENTS.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 96,
+      "repository": "yezz123/authx",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 2,
+      "first_path": "README.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 97,
+      "repository": "khulnasoft/cheatsheets",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 3,
+      "first_path": "fastapi.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 98,
+      "repository": "Creepyrishi/learning-notes",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 4,
+      "first_path": "FastAPI.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 99,
+      "repository": "RajeshTechForge/awesome-python-libraries",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 5,
+      "first_path": "FASTAPI.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 100,
+      "repository": "Bishwajit-2810/groq-lab",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 6,
+      "first_path": "fastapi.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 101,
+      "repository": "CheongLoic/cheatsheet",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 7,
+      "first_path": "FastAPI.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 102,
+      "repository": "huang-pan/modern-data-stack-2023",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 8,
+      "first_path": "FastAPI.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 103,
+      "repository": "anuragnayak01/anuragnayak01.github.io",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 9,
+      "first_path": "fastAPI.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 104,
+      "repository": "sasilver75/obsidian",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 11,
+      "first_path": "FastAPI.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 105,
+      "repository": "MedAziz11/Uptime-Kuma-Web-API",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 12,
+      "first_path": "diff.txt",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 106,
+      "repository": "moreskylab/InstaCode",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 13,
+      "first_path": "fastapi.qmd",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 107,
+      "repository": "arjun3649/Tresure",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 14,
+      "first_path": "FastApi.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 108,
+      "repository": "Rose-Alice18/Commands",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 15,
+      "first_path": "fastapi.txt",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 109,
+      "repository": "mankindjnr/markdown-blog",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 16,
+      "first_path": "fastapi.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 110,
+      "repository": "glimzzc/mynotes",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 17,
+      "first_path": "fastapi.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 111,
+      "repository": "fillsai/learning-docs",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 18,
+      "first_path": "006.fastapi.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 112,
+      "repository": "Aherontas/Pycon_Greece_2025_Presentation_Agents",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 19,
+      "first_path": "DEPLOYMENT.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 113,
+      "repository": "OSSMafia/fastapi-clerk-middleware",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 20,
+      "first_path": "README.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 114,
+      "repository": "LuisSucuc/devbrain",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 21,
+      "first_path": "fastapi.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 115,
+      "repository": "manerishikesh26/studies",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 22,
+      "first_path": "FastAPI.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 116,
+      "repository": "zilliztech/mfs",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 23,
+      "first_path": "docs/api.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 117,
+      "repository": "shashstormer/AuthTuna",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 24,
+      "first_path": "readme.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 118,
+      "repository": "materials-marketplace/shieldapi",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 25,
+      "first_path": "README.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 119,
+      "repository": "oramaai/orama-core",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 26,
+      "first_path": "CLAUDE.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 120,
+      "repository": "benavlabs/SQLModel-boilerplate",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 28,
+      "first_path": "README.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 121,
+      "repository": "hamedasgari20/Python-Django-FastAPI-advanced-topics",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 29,
+      "first_path": "README.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 122,
+      "repository": "bergran/fast-api-project-template",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 30,
+      "first_path": "README.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 123,
+      "repository": "zhongzhongBaby/FastapiMysqlDemo",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 31,
+      "first_path": "ReadMe.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 124,
+      "repository": "ChrisioGwaan/realtime-speech-to-text",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 32,
+      "first_path": "LEARN.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 125,
+      "repository": "s33Y377/interview-question-exercise",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 33,
+      "first_path": "fastapi1.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 126,
+      "repository": "Kalharapasan/Handwriting-Recognition-App-03",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 34,
+      "first_path": "README.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 127,
+      "repository": "edihasaj/tuspyserver",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 35,
+      "first_path": "README.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 128,
+      "repository": "myui/rtrec",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 36,
+      "first_path": "CLAUDE.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 129,
+      "repository": "rafael-fu2025/SeaSID",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 37,
+      "first_path": "SeaSID.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 130,
+      "repository": "alexcc4/fastapi-scaffold",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 38,
+      "first_path": "AGENTS.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 131,
+      "repository": "PrimeevolutionZ/blossom-ai",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 39,
+      "first_path": "SECURITY.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 132,
+      "repository": "hu55ain3laa/fastauth",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 40,
+      "first_path": "README.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 133,
+      "repository": "SoroushMehraban/Fast-API",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 41,
+      "first_path": "readme.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 134,
+      "repository": "phbernardes/fastapi-django",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 42,
+      "first_path": "README.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 135,
+      "repository": "weinaike/agentflow",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 43,
+      "first_path": "install.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 136,
+      "repository": "IamBlackShifu/iloc-dashboards",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 44,
+      "first_path": "FAQ.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 137,
+      "repository": "xdssio/token-vault",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 46,
+      "first_path": "README.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 138,
+      "repository": "cnndabbler/clerk_fastapi",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 47,
+      "first_path": "README.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 139,
+      "repository": "alexisvassquez/trackthatmoney",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 48,
+      "first_path": "CHANGELOG.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 140,
+      "repository": "gemini2026/documentation-search-mcp",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 49,
+      "first_path": "TUTORIAL.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    },
+    {
+      "discovery_order": 141,
+      "repository": "mikkovihonen/quadletman",
+      "first_query_index": 3,
+      "first_query": "Depends credentials HTTPException token FastAPI",
+      "first_result_order": 50,
+      "first_path": "CLAUDE.md",
+      "qualification_status": "UNQUALIFIED",
+      "exclusion_reason_codes": []
+    }
+  ]
+}

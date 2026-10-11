@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-verification-kernel.dev/schemas/RTKConfirmatoryCase.v0.schema.json",
+  "title": "RTKConfirmatoryCase.v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "case_id",
+    "transition_id",
+    "repository",
+    "source_sha",
+    "target_sha",
+    "claim_id",
+    "source_evidence_digest",
+    "source_adapter",
+    "oracle_adapter",
+    "partition",
+    "sut_input_digest",
+    "selection_record"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "RTKConfirmatoryCase.v0"
+    },
+    "case_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "transition_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repository": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "target_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "claim_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "claim_definition_digest": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_context_digest": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_evidence_digest": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_native_acceptance_digest": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "family",
+        "version"
+      ],
+      "properties": {
+        "family": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "oracle_adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "family",
+        "version",
+        "independence_basis"
+      ],
+      "properties": {
+        "family": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "independence_basis": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "partition": {
+      "enum": [
+        "development",
+        "confirmatory"
+      ]
+    },
+    "sut_input_digest": {
+      "type": "string",
+      "minLength": 1
+    },
+    "selection_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "selected_pre_oracle",
+        "candidate_order"
+      ],
+      "properties": {
+        "selected_pre_oracle": {
+          "const": true
+        },
+        "candidate_order": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "selection_rule_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}
