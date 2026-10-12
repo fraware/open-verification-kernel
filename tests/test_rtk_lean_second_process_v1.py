@@ -184,7 +184,7 @@ def test_native_witness_substitution_and_forged_target_pass_rejected():
 
 def test_separate_driver_only_allows_one_command_boundary():
     defs = "private def helper : Nat := 0\nrun_cmd do\n  pure ()\n"
-    driver = "run_cmd do\n  pure ()\n"
+    driver = "\nrun_cmd do\n  pure ()\n"
     result = separate_native_driver(encoder=defs, decoder=defs, driver=driver)
     assert result.count("run_cmd do") == 1
     assert result.startswith("import Lean\nimport RTKSemanticSupport")
