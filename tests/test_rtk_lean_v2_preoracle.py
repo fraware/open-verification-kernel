@@ -210,7 +210,14 @@ def test_reject_oracle_order_old_evidence_or_context_mismatch():
         score_provisional(cohort, preds, receipt, NONCE, swapped)
 
     obs = observation("C0", app="ADMISSIBLE", truth="UNKNOWN")
-    forged = obs.model_copy(update={"source_evidence_sha256": "9" * 64})
+    forged = obs.model_copy(
+        update={
+            "source_evidence_sha256": "9" * 64,
+            "applicability_witness": witness(
+                "EXACT_CERTIFICATE_REPLAY", source="9" * 64
+            ),
+        }
+    )
     bad = OracleBatch(
         schema_version="rtk.lean_v2.oracle_batch.v1",
         cohort_sha256=digest(build_cohort(1)),
