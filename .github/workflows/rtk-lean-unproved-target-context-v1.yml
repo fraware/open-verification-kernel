@@ -132,6 +132,17 @@ jobs:
           )
           assert old["op"]["type_repr"] == new["op"]["type_repr"]
           assert old["op"]["value_repr"] != new["op"]["value_repr"]
+          source_imports = set(
+              records["source"]["projection"]["imported_boundaries"]
+          )
+          target_imports = set(
+              records["target_goal"]["projection"]["imported_boundaries"]
+          )
+          # The proof term refers to Eq.refl, absent from the target goal
+          # declaration. This reference still needs independent checking
+          # in the target environment before any old-proof transport claim.
+          pending_reference_checks = sorted(source_imports - target_imports)
+          assert "Eq.refl" in pending_reference_checks
           output = {
               "schema_version": "rtk.lean_unproved_target_context.v1-development",
               "native_checker_binary_sha256":
@@ -144,6 +155,9 @@ jobs:
               "historical_evidence_target_replay_executed": False,
               "target_native_oracle_executed": False,
               "imported_support_complete": False,
+              "source_only_imported_references_needing_target_check":
+                pending_reference_checks,
+              "proof_reference_transport_verified": False,
               "sound_transport_conclusion_established": False,
               "records": records,
           }
