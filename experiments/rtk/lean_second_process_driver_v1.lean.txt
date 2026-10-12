@@ -1,0 +1,69 @@
+/-
+Second-process Lean 4.14 source-proof verification driver.
+This file is appended after the standalone Expr encoder/decoder definitions.
+The process imports only Lean and the source RTKSemanticSupport module.
+It never declares or imports the historical theorem or target goal.
+-/
+
+run_cmd do
+  let env ← getEnv
+  if (env.find? `historical_claim).isSome then
+    throwError "RTK_SECOND_PROCESS_HISTORICAL_THEOREM_PRELOADED"
+  if (env.find? `rtk_unproven_target_claim).isSome then
+    throwError "RTK_SECOND_PROCESS_TARGET_GOAL_PRELOADED"
+  let raw ← liftIO <| IO.FS.readFile ".rtk-imported-build/rtk_source_proof_payload.json"
+  let payload ← match Json.parse raw with
+    | .ok data => pure data
+    | .error _ => throwError "RTK_SECOND_PROCESS_INVALID_JSON"
+  let schema ← match payload.getObjVal? "schema_version" with
+    | .ok v => pure v
+    | .error _ => throwError "RTK_SECOND_PROCESS_SCHEMA_MISSING"
+  unless schema == Json.str "rtk.lean_separate_source_proof_payload.v1-development" do
+    throwError "RTK_SECOND_PROCESS_SCHEMA_MISMATCH"
+  let decl ← match payload.getObjVal? "declaration_name" with
+    | .ok v => pure v
+    | .error _ => throwError "RTK_SECOND_PROCESS_DECLARATION_MISSING"
+  unless decl == Json.str "historical_claim" do
+    throwError "RTK_SECOND_PROCESS_DECLARATION_MISMATCH"
+  let rawType ← match payload.getObjVal? "claim_ast" with
+    | .ok v => pure v
+    | .error _ => throwError "RTK_SECOND_PROCESS_CLAIM_AST_MISSING"
+  let rawProof ← match payload.getObjVal? "proof_ast" with
+    | .ok v => pure v
+    | .error _ => throwError "RTK_SECOND_PROCESS_PROOF_AST_MISSING"
+  let expectedType ← match rtkDecodeExpr rawType 1024 with
+    | .ok e => pure e
+    | .error reason => throwError m!"RTK_SECOND_PROCESS_CLAIM_DECODE:{reason}"
+  let proof ← match rtkDecodeExpr rawProof 1024 with
+    | .ok e => pure e
+    | .error reason => throwError m!"RTK_SECOND_PROCESS_PROOF_DECODE:{reason}"
+  let reClaim ← rtkStrictExprAst expectedType
+  let reProof ← rtkStrictExprAst proof
+  unless reClaim == rawType && reProof == rawProof do
+    throwError "RTK_SECOND_PROCESS_AST_REENCODE_MISMATCH"
+  let inferred ← match Lean.Kernel.check env {} proof with
+    | .ok t => pure t
+    | .error _ => throwError "RTK_SECOND_PROCESS_SOURCE_PROOF_KERNEL_REJECTED"
+  let matchesClaim ← match Lean.Kernel.isDefEq env {} inferred expectedType with
+    | .ok b => pure b
+    | .error _ => throwError "RTK_SECOND_PROCESS_CLAIM_DEF_EQ_CHECK_FAILED"
+  unless matchesClaim do
+    throwError "RTK_SECOND_PROCESS_CHECKED_CLAIM_TYPE_MISMATCH"
+  -- The decoder is applied to externally serialized JSON loaded by this
+  -- process; no original proof term or theorem declaration is in the input.
+  logInfo m!"RTK_SECOND_PROCESS_PROOF_JSON={Json.compress (Json.mkObj [
+    ("schema_version", Json.str "rtk.lean_second_process_kernel_check.v1-development"),
+    ("declaration_name", Json.str "historical_claim"),
+    ("claim_ast", reClaim),
+    ("proof_ast", reProof),
+    ("source_proof_kernel_checked", Json.bool true),
+    ("source_proof_type_defeq_serialized_claim", Json.bool true),
+    ("historical_theorem_not_imported_or_declared", Json.bool true),
+    ("serialized_expr_loaded_from_disk", Json.bool true),
+    ("independent_process_from_serializer", Json.bool true),
+    ("target_historical_proof_replayed", Json.bool false),
+    ("target_claim_established", Json.bool false),
+    ("independently_governed_provenance", Json.bool false),
+    ("transitive_support_completeness_proved", Json.bool false),
+    ("transport_applicability_established", Json.bool false)
+  ])}"
