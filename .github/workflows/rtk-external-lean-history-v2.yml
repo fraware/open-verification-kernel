@@ -1,0 +1,122 @@
+name: RTK external Lean history v2 development
+
+on:
+  pull_request:
+    branches:
+      - research/rtk-lean-proofterm-replay-v2
+    paths:
+      - .github/workflows/rtk-external-lean-history-v2.yml
+      - experiments/rtk/native_external_lean_history_v2.py
+      - tests/test_native_external_lean_history_v2.py
+  push:
+    branches:
+      - research/rtk-external-lean-history-v2
+    paths:
+      - .github/workflows/rtk-external-lean-history-v2.yml
+      - experiments/rtk/native_external_lean_history_v2.py
+      - tests/test_native_external_lean_history_v2.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  external_native_development:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout OVK development implementation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Checkout pinned source release of independent upstream
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: leanprover/lean4
+          ref: 410fab7284703f41660ca2454218dcca9b2ec896
+          path: upstream_source
+          persist-credentials: false
+          sparse-checkout: doc/examples/tc.lean
+          sparse-checkout-cone-mode: false
+
+      - name: Checkout pinned target release of independent upstream
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: leanprover/lean4
+          ref: 11651562caae0a0b3973811508db2ab8903d3854
+          path: upstream_target
+          persist-credentials: false
+          sparse-checkout: doc/examples/tc.lean
+          sparse-checkout-cone-mode: false
+
+      - name: Prove exact historical source and target Git identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C upstream_source rev-parse HEAD)" = "410fab7284703f41660ca2454218dcca9b2ec896"
+          test "$(git -C upstream_target rev-parse HEAD)" = "11651562caae0a0b3973811508db2ab8903d3854"
+          test "$(git -C upstream_source hash-object doc/examples/tc.lean)" = "c6c3cd21a7ef1e1ae0b5bff7625e941cb93379e9"
+          test "$(git -C upstream_target hash-object doc/examples/tc.lean)" = "2b8252f7442fcd860a860a8241752e107096ab01"
+          sha256sum upstream_source/doc/examples/tc.lean upstream_target/doc/examples/tc.lean
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+
+      - name: Install and authenticate exact Lean checker binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+            https://github.com/leanprover/elan/releases/download/v4.2.3/elan-x86_64-unknown-linux-gnu.tar.gz \
+            --output "$RUNNER_TEMP/elan.tar.gz"
+          echo 'df0b2b3a439961ffcbb3985214365ffe40f49bc871df04dff268c7d8e21ca8b2  '"$RUNNER_TEMP"'/elan.tar.gz' | sha256sum --check --strict
+          tar --extract --gzip --file "$RUNNER_TEMP/elan.tar.gz" --directory "$RUNNER_TEMP" elan-init
+          "$RUNNER_TEMP/elan-init" -y --no-modify-path --default-toolchain none
+          "$HOME/.elan/bin/elan" toolchain install leanprover/lean4:v4.14.0
+          "$HOME/.elan/bin/elan" default leanprover/lean4:v4.14.0
+          LEAN_BINARY="$("$HOME/.elan/bin/elan" which lean)"
+          "$LEAN_BINARY" --version
+          test "$(sha256sum "$LEAN_BINARY" | cut -d ' ' -f 1)" = \
+            "eacf754d25ae86ea076882a34b9444f2485659d9df4266b821443b28ca95a215"
+
+      - name: Check exact upstream historical theorem under native Lean
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile experiments/rtk/native_external_lean_history_v2.py
+          mkdir -p "$RUNNER_TEMP/rtk-external-history"
+          python -m experiments.rtk.native_external_lean_history_v2 \
+            --lean "$HOME/.elan/bin/lean" \
+            --source-checkout upstream_source \
+            --target-checkout upstream_target \
+            --output "$RUNNER_TEMP/rtk-external-history/native.json"
+          python - "$RUNNER_TEMP/rtk-external-history/native.json" <<'PY'
+          import json
+          import pathlib
+          import sys
+          result = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert result["historical_theorem_identical"], result
+          assert result["file_content_changed"], result
+          # A source or target failure is recorded, never silently converted
+          # to a proof of false/VALID transport. Assert exact source first.
+          assert result["source_native_acceptance"] == "ACCEPTED", result
+          if result["target_native_acceptance"] == "ACCEPTED":
+              assert result["historical_evidence_applicability"] == "ADMISSIBLE"
+              assert result["witness_basis"] == "UNCHANGED_UPSTREAM_THEOREM_NATIVE_RECHECK"
+              print("UPSTREAM_LEAN_NATIVE_REPLAY_ACCEPTED")
+          else:
+              assert result["historical_evidence_applicability"] == "UNDETERMINED"
+              print("UPSTREAM_LEAN_TARGET_INCONCLUSIVE")
+          PY
+
+      - name: Archive adjudication and native checker outputs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rtk-external-lean-history-v2-development
+          path: ${{ runner.temp }}/rtk-external-history/*.json
+          if-no-files-found: warn
+          retention-days: 30
