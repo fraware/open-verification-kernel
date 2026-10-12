@@ -1,0 +1,4 @@
+def op (n : Nat) : Nat := 0 + n
+-- This is an UNPROVED GOAL DECLARATION for context inspection only.
+-- The axiom placeholder must never count as a proof or authorization.
+axiom rtk_unproven_target_claim (n : Nat) : op n = n
