@@ -68,6 +68,9 @@ class LeanContextManifest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     schema_version: Literal["rtk.lean_v2.context_manifest.v1"]
+    repository: str = Field(min_length=3)
+    revision_sha: str = Field(pattern=_GIT)
+    theorem_source_path: str = Field(min_length=1)
     theorem_symbol: str = Field(pattern=_SYM)
     statement_sha256: str = Field(pattern=_SHA)
     checker_binary_sha256: str = Field(pattern=_SHA)
@@ -89,6 +92,8 @@ class LeanContextManifest(BaseModel):
             raise ValueError("duplicate root symbols")
         if any(not isinstance(x, str) or not x for x in self.root_symbols):
             raise ValueError("invalid root symbol")
+        if self.theorem_symbol not in self.root_symbols:
+            raise ValueError("theorem must be a declared support root")
         return self
 
 
@@ -186,7 +191,13 @@ def evaluate_lean_transport(raw: LeanTransportInput) -> LeanTransportDecision:
     )
     # Prevent comparison across unrelated precommitted source/target cases.
     if (
-        source.theorem_symbol != case.theorem_name
+        source.repository != case.repository
+        or target.repository != case.repository
+        or source.revision_sha != case.source_sha
+        or target.revision_sha != case.target_sha
+        or source.theorem_source_path != case.source_path
+        or target.theorem_source_path != case.target_path
+        or source.theorem_symbol != case.theorem_name
         or target.theorem_symbol != case.theorem_name
         or target.statement_sha256 != case.target_claim_sha256
         or digest(source) != case.source_context_sha256
