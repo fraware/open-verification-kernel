@@ -21,9 +21,9 @@ run_cmd do
     visited := visited.insert current
     let some ci := env.find? current
       | throwError m!"RTK_SOURCE_PROBE_MISSING_CONSTANT: {current}"
-    -- Expand only two known local declarations in this scoped native pilot.
+    -- Expand every declaration originating in the checked source module.
     -- Imported constant bodies are a TRUST BOUNDARY, not proved complete.
-    let isLocal := current == root || current == `op
+    let isLocal := !env.isImportedConst current
     let refs := if isLocal then ci.getUsedConstantsAsSet.toList.toArray else #[]
     let kind : String := match ci with
       | .thmInfo _ => "theorem"
