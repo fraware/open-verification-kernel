@@ -70,10 +70,13 @@ not the native canonical Lean 4.15.0 release environment. A broader study
 needs both canonical source/target toolchain checks and a declared
 cross-version policy or proof-certificate migration rule.
 
-The entire file is checked, so any unproved `axiom`, `sorry`, arbitrary
-import or broader unsafe compilation semantics in that file require separate
-review before the observed PASS would count as independent evidence for a
-formal claim. The operator/CLI verification itself is not an attestation
+The entire file is checked. The adapter now conservatively rejects
+lexical occurrences of `axiom`, `sorry`, `admit`, `unsafe`, and `import` in
+both exact upstream files. This prevents a known class of holes and untracked
+module imports from being silently treated as formal proof evidence in this
+restricted pilot. The lexical restriction may reject benign comments and is
+not a substitute for a complete Lean trust audit, import/axiom audit, or
+proof-term kernel replay. The operator/CLI verification itself is not an attestation
 from an external trusted third party. CI artifact authenticity and signing
 are separate provenance questions.
 
