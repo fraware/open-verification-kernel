@@ -72,7 +72,7 @@ class FrozenLeanCase(BaseModel):
         components = value.split("/")
         if (
             value.startswith("/")
-            or "\\\\" in value
+            or chr(92) in value
             or any(part in ("", ".", "..") for part in components)
             or not value.endswith(".lean")
         ):
@@ -95,6 +95,9 @@ class FrozenCohort(BaseModel):
     selection_rule_sha256: str = Field(pattern=_SHA)
     source_adapter_id: str = Field(min_length=1)
     oracle_adapter_id: str = Field(min_length=1)
+    oracle_commit: str = Field(pattern=_GIT_SHA)
+    sut_adapter_id: str = Field(min_length=1)
+    sut_commit: str = Field(pattern=_GIT_SHA)
     cases: list[FrozenLeanCase] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -147,6 +150,10 @@ class PredictionCommitment(BaseModel):
 
 
 def _validate_prediction_batch(cohort: FrozenCohort, batch: PredictionBundle) -> None:
+    if batch.sut_commit != cohort.sut_commit:
+        raise ValueError("SUT commit differs from frozen implementation identity")
+    if batch.sut_adapter_id != cohort.sut_adapter_id:
+        raise ValueError("SUT adapter differs from frozen implementation identity")
     if batch.cohort_sha256 != digest(cohort):
         raise ValueError("prediction batch refers to a different frozen cohort")
     if len(batch.predictions) != len(cohort.cases):
@@ -184,6 +191,10 @@ def make_commitment(
     prove that a later Git commit predates the native oracle run.
     """
 
+    # Pydantic model_copy(update=...) bypasses validation. Reject externally
+    # reconstructed instances at the public admission boundary.
+    cohort = FrozenCohort.model_validate(cohort.model_dump(mode="json"))
+    batch = PredictionBundle.model_validate(batch.model_dump(mode="json"))
     _validate_prediction_batch(cohort, batch)
     nonce = _nonce_bytes(private_nonce_hex)
     payload_digest = bytes.fromhex(digest(batch))
@@ -219,6 +230,8 @@ class OracleBatch(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     schema_version: Literal["rtk.lean_v2.oracle_batch.v1"]
     cohort_sha256: str = Field(pattern=_SHA)
+    oracle_adapter_id: str = Field(min_length=1)
+    oracle_commit: str = Field(pattern=_GIT_SHA)
     observations: list[TransportAdjudicationInput] = Field(min_length=1)
 
 
@@ -236,10 +249,10 @@ class ProvisionalScore(BaseModel):
     total_cases: int
     resolved_cases: int
     unresolved_cases: int
-    confirmed_nonvalid_cases: int
-    falsely_reused_nonvalid_cases: int
+    resolved_nonvalid_labels: int
+    valid_predictions_on_resolved_nonvalid_labels: int
     unadjudicated_valid_predictions: int
-    confirmed_valid_cases: int
+    resolved_valid_labels: int
     unnecessary_revalidations: int
     counts_by_predicted_verdict: dict[str, int]
 
@@ -258,8 +271,14 @@ def score_provisional(
     """
 
     _validate_commitment(cohort, batch, receipt, private_nonce_hex)
+    oracle = OracleBatch.model_validate(oracle.model_dump(mode="json"))
     if oracle.cohort_sha256 != digest(cohort):
         raise ValueError("oracle batch does not belong to frozen cohort")
+    if (
+        oracle.oracle_adapter_id != cohort.oracle_adapter_id
+        or oracle.oracle_commit != cohort.oracle_commit
+    ):
+        raise ValueError("oracle implementation differs from frozen registration")
     if len(oracle.observations) != len(cohort.cases):
         raise ValueError("oracle omitted or added cases")
     resolved = nonvalid = false_reuse = unresolved_valid = valid = unnecessary = 0
@@ -302,10 +321,10 @@ def score_provisional(
         total_cases=len(cohort.cases),
         resolved_cases=resolved,
         unresolved_cases=len(cohort.cases) - resolved,
-        confirmed_nonvalid_cases=nonvalid,
-        falsely_reused_nonvalid_cases=false_reuse,
+        resolved_nonvalid_labels=nonvalid,
+        valid_predictions_on_resolved_nonvalid_labels=false_reuse,
         unadjudicated_valid_predictions=unresolved_valid,
-        confirmed_valid_cases=valid,
+        resolved_valid_labels=valid,
         unnecessary_revalidations=unnecessary,
         counts_by_predicted_verdict=counts,
     )
