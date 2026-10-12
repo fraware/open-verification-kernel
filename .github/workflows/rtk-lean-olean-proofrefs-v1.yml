@@ -3,7 +3,7 @@ name: RTK Lean imported olean proofrefs development
 on:
   pull_request:
     branches:
-      - research/rtk-lean-context-transport-sut
+      - research/rtk-lean-native-support-probe
     paths:
       - .github/workflows/rtk-lean-olean-proofrefs-v1.yml
       - experiments/rtk/lean_native_support_footer.lean.txt
