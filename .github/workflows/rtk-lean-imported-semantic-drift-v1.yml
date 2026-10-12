@@ -1,0 +1,295 @@
+name: RTK Lean imported semantic drift development
+
+on:
+  pull_request:
+    branches:
+      - research/rtk-lean-dual-installed-env-v1
+    paths:
+      - .github/workflows/rtk-lean-imported-semantic-drift-v1.yml
+      - experiments/rtk/lean_native_support_footer.lean.txt
+      - experiments/rtk/lean_native_support_projection.py
+      - experiments/rtk/lean_imported_proofrefs_v1.py
+      - experiments/rtk/lean_dual_installed_env_v1.py
+      - experiments/rtk/lean_imported_drift_fixtures_v1/**
+      - tests/test_rtk_lean_dual_installed_env_v1.py
+      - docs/RTK_LEAN_OLEAN_PROOFREFS_V1_DEVELOPMENT.md
+      - tests/test_rtk_lean_imported_proofrefs_v1.py
+      - experiments/rtk/lean_context_drift_fixtures_v1/**
+  push:
+    branches:
+      - research/rtk-lean-imported-semantic-drift-v1
+    paths:
+      - .github/workflows/rtk-lean-imported-semantic-drift-v1.yml
+      - experiments/rtk/lean_native_support_footer.lean.txt
+      - experiments/rtk/lean_native_support_projection.py
+      - experiments/rtk/lean_imported_proofrefs_v1.py
+      - experiments/rtk/lean_dual_installed_env_v1.py
+      - experiments/rtk/lean_imported_drift_fixtures_v1/**
+      - tests/test_rtk_lean_dual_installed_env_v1.py
+      - docs/RTK_LEAN_OLEAN_PROOFREFS_V1_DEVELOPMENT.md
+      - tests/test_rtk_lean_imported_proofrefs_v1.py
+      - experiments/rtk/lean_context_drift_fixtures_v1/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  development_preoracle_context_only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact source revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Provision two distinct pinned Lean installations
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+            https://github.com/leanprover/elan/releases/download/v4.2.3/elan-x86_64-unknown-linux-gnu.tar.gz \
+            --output "$RUNNER_TEMP/elan.tar.gz"
+          echo 'df0b2b3a439961ffcbb3985214365ffe40f49bc871df04dff268c7d8e21ca8b2  '"$RUNNER_TEMP"'/elan.tar.gz' | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/elan.tar.gz" -C "$RUNNER_TEMP" elan-init
+          "$RUNNER_TEMP/elan-init" -y --no-modify-path --default-toolchain none
+          for SIDE in source target; do
+            export ELAN_HOME="$RUNNER_TEMP/rtk-lean-$SIDE-install"
+            "$HOME/.elan/bin/elan" toolchain install leanprover/lean4:v4.14.0
+            "$HOME/.elan/bin/elan" default leanprover/lean4:v4.14.0
+            LEAN_BINARY="$("$HOME/.elan/bin/elan" which lean)"
+            "$LEAN_BINARY" --version
+            test "$(sha256sum "$LEAN_BINARY" | cut -d ' ' -f 1)" = \
+              "eacf754d25ae86ea076882a34b9444f2485659d9df4266b821443b28ca95a215"
+            test -f "$(dirname "$(dirname "$LEAN_BINARY")")/lib/lean/Init/Prelude.olean"
+            if [ "$SIDE" = source ]; then
+              echo "RTK_SOURCE_LEAN=$LEAN_BINARY" >> "$GITHUB_ENV"
+              echo "RTK_SOURCE_ROOT=$(dirname "$(dirname "$LEAN_BINARY")")" >> "$GITHUB_ENV"
+              SOURCE_LEAN="$LEAN_BINARY"
+            else
+              echo "RTK_TARGET_LEAN=$LEAN_BINARY" >> "$GITHUB_ENV"
+              echo "RTK_TARGET_ROOT=$(dirname "$(dirname "$LEAN_BINARY")")" >> "$GITHUB_ENV"
+              test "$SOURCE_LEAN" != "$LEAN_BINARY"
+              test "$(stat -Lc '%d:%i' "$SOURCE_LEAN")" != \
+                "$(stat -Lc '%d:%i' "$LEAN_BINARY")"
+            fi
+          done
+          echo "TWO_DISTINCT_PINNED_LEAN_INSTALLATIONS_PROVISIONED"
+
+      - name: Compile and compare imported module equal-content baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/imported-semantic-drift"
+          FIX=experiments/rtk/lean_imported_drift_fixtures_v1
+          mkdir -p "$ROOT" "$GITHUB_WORKSPACE/.rtk-imported-build"
+          MODULE_SOURCE="$GITHUB_WORKSPACE/.rtk-imported-build/RTKSemanticSupport.lean"
+          cp "$FIX/source_support.lean.txt" "$MODULE_SOURCE"
+          cp "$MODULE_SOURCE" "$ROOT/equal_content_support.lean.txt"
+          "$RTK_SOURCE_LEAN" -o "$RTK_SOURCE_ROOT/lib/lean/RTKSemanticSupport.olean" \
+            "$MODULE_SOURCE"
+          "$RTK_TARGET_LEAN" -o "$RTK_TARGET_ROOT/lib/lean/RTKSemanticSupport.olean" \
+            "$MODULE_SOURCE"
+          SOURCE_OLEAN="$RTK_SOURCE_ROOT/lib/lean/RTKSemanticSupport.olean"
+          TARGET_OLEAN="$RTK_TARGET_ROOT/lib/lean/RTKSemanticSupport.olean"
+          SOURCE_HASH="$(sha256sum "$SOURCE_OLEAN" | cut -d ' ' -f 1)"
+          TARGET_CONTROL_HASH="$(sha256sum "$TARGET_OLEAN" | cut -d ' ' -f 1)"
+          test "$SOURCE_HASH" = "$TARGET_CONTROL_HASH"
+          cp "$FIX/target_support.lean.txt" "$MODULE_SOURCE"
+          cp "$MODULE_SOURCE" "$ROOT/changed_content_support.lean.txt"
+          "$RTK_TARGET_LEAN" -o "$TARGET_OLEAN" "$MODULE_SOURCE"
+          TARGET_DRIFT_HASH="$(sha256sum "$TARGET_OLEAN" | cut -d ' ' -f 1)"
+          test "$SOURCE_HASH" != "$TARGET_DRIFT_HASH"
+          python - "$ROOT" "$SOURCE_HASH" "$TARGET_CONTROL_HASH" "$TARGET_DRIFT_HASH" <<'PY'
+          import json
+          import pathlib
+          import sys
+          root = pathlib.Path(sys.argv[1])
+          record = {
+              "schema_version": "rtk.imported_module_control.v1-development",
+              "module": "RTKSemanticSupport",
+              "source_and_target_equal_content_control_sha256": sys.argv[2],
+              "target_equal_content_control_sha256": sys.argv[3],
+              "target_changed_semantics_sha256": sys.argv[4],
+              "equal_content_byte_reproducible": sys.argv[2] == sys.argv[3],
+              "changed_definition_olean_bytes_differ": sys.argv[2] != sys.argv[4],
+              "built_with_separate_installed_lean_roots": True,
+              "transport_soundness_proved": False,
+          }
+          (root / "imported_semantic_drift_build_control.json").write_text(
+              json.dumps(record, sort_keys=True, indent=2) + "\n"
+          )
+          print("IMPORTED_OLEAN_EQUAL_CONTENT_CONTROL_AND_DRIFT_CONFIRMED")
+          PY
+
+      - name: Inspect checked source proof and unproved imported target goal
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/imported-semantic-drift"
+          FIX=experiments/rtk/lean_imported_drift_fixtures_v1
+          NATIVE_FIX=experiments/rtk/lean_context_drift_fixtures_v1
+          FOOTER=experiments/rtk/lean_native_support_footer.lean.txt
+          {
+            printf 'import Lean\nimport RTKSemanticSupport\n'
+            cat "$FIX/theorem_declaration.lean.txt"
+            cat "$NATIVE_FIX/historical_proof.term.txt"
+            printf '\n'
+            cat "$FOOTER"
+          } > "$ROOT/source.lean"
+          python - "$FIX/target_unproved_claim.lean.txt" "$FOOTER" "$ROOT/target_goal.lean" <<'PY'
+          import pathlib
+          import sys
+          claim = pathlib.Path(sys.argv[1]).read_bytes()
+          footer = pathlib.Path(sys.argv[2]).read_text()
+          source_name = "let root : Name := `historical_claim"
+          target_name = "let root : Name := `rtk_unproven_target_claim"
+          assert footer.count(source_name) == 1
+          assert claim.count(b"axiom rtk_unproven_target_claim ") == 1
+          assert b"theorem" not in claim and b"Nat.zero_add" not in claim
+          content = (
+              b"import Lean\nimport RTKSemanticSupport\n" + claim + b"\n"
+              + footer.replace(source_name, target_name).encode()
+          )
+          pathlib.Path(sys.argv[3]).write_bytes(content)
+          PY
+          "$RTK_SOURCE_LEAN" "$ROOT/source.lean" | tee "$ROOT/source.native.log"
+          "$RTK_TARGET_LEAN" "$ROOT/target_goal.lean" | tee "$ROOT/target_goal.native.log"
+          cat > "$ROOT/inspect_imported_op.lean.txt" <<'LEAN'
+          open Lean Elab Command
+          run_cmd do
+            let env ← getEnv
+            let some (.defnInfo info) := env.find? `op
+              | throwError "RTK_IMPORTED_OP_DEFINITION_UNAVAILABLE"
+            logInfo m!"RTK_IMPORTED_OP_JSON={Json.compress (Json.mkObj [
+              ("type_repr", Json.str (toString (repr info.type))),
+              ("value_repr", Json.str (toString (repr info.value)))
+            ])}"
+          LEAN
+          cat "$ROOT/inspect_imported_op.lean.txt" >> "$ROOT/source.lean"
+          cat "$ROOT/inspect_imported_op.lean.txt" >> "$ROOT/target_goal.lean"
+          "$RTK_SOURCE_LEAN" "$ROOT/source.lean" | tee "$ROOT/source_with_op.native.log"
+          "$RTK_TARGET_LEAN" "$ROOT/target_goal.lean" | tee "$ROOT/target_with_op.native.log"
+
+      - name: Seal pre-oracle module-byte and proof-reference observations
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/imported-semantic-drift"
+          python -m experiments.rtk.lean_imported_proofrefs_v1 \
+            --make-footer-from-source-log "$ROOT/source.native.log" \
+            --footer-output "$ROOT/source_oldproof_references.lean.txt"
+          cp "$ROOT/source.lean" "$ROOT/source_refs.lean"
+          cp "$ROOT/target_goal.lean" "$ROOT/target_refs.lean"
+          cat "$ROOT/source_oldproof_references.lean.txt" >> "$ROOT/source_refs.lean"
+          cat "$ROOT/source_oldproof_references.lean.txt" >> "$ROOT/target_refs.lean"
+          "$RTK_SOURCE_LEAN" "$ROOT/source_refs.lean" | tee "$ROOT/source_refs.native.log"
+          "$RTK_TARGET_LEAN" "$ROOT/target_refs.lean" | tee "$ROOT/target_refs.native.log"
+          python -m experiments.rtk.lean_dual_installed_env_v1 \
+            --source-native-log "$ROOT/source.native.log" \
+            --source-refs-log "$ROOT/source_refs.native.log" \
+            --target-refs-log "$ROOT/target_refs.native.log" \
+            --target-unproved-goal-log "$ROOT/target_goal.native.log" \
+            --source-root "$RTK_SOURCE_ROOT" \
+            --target-root "$RTK_TARGET_ROOT" \
+            --source-lean "$RTK_SOURCE_LEAN" \
+            --target-lean "$RTK_TARGET_LEAN" \
+            --output "$ROOT/imported_semantic_drift_preoracle.json"
+          python - "$ROOT" <<'PY'
+          import json
+          import pathlib
+          import sys
+          root = pathlib.Path(sys.argv[1])
+          record = json.loads((root / "imported_semantic_drift_preoracle.json").read_text())
+          assert record["environment_byte_comparison"] == "DRIFT_DETECTED"
+          assert record["changed_module_bytes"] == ["RTKSemanticSupport"]
+          assert record["source_only_modules"] == []
+          assert record["target_only_modules"] == []
+          assert record["old_proof_reference_differences"] == []
+          assert record["old_proof_reference_count"] >= 4
+          assert record["transport_applicability"] == "UNDETERMINED"
+          assert record["historical_proof_replayed_on_target"] is False
+          assert record["target_claim_established"] is False
+          observations = {}
+          for side in ("source", "target"):
+              log = (root / f"{side}_with_op.native.log").read_text()
+              matches = [
+                  line.split("RTK_IMPORTED_OP_JSON=", 1)[1]
+                  for line in log.splitlines()
+                  if "RTK_IMPORTED_OP_JSON=" in line
+              ]
+              assert len(matches) == 1, (side, log[-1000:])
+              observations[side] = json.loads(matches[0])
+          assert observations["source"]["type_repr"] == observations["target"]["type_repr"]
+          assert observations["source"]["value_repr"] != observations["target"]["value_repr"]
+          (root / "imported_definition_native_drift.json").write_text(
+              json.dumps({
+                  "source": observations["source"],
+                  "target": observations["target"],
+                  "same_native_declaration_type": True,
+                  "different_native_definition_values": True,
+                  "target_oldproof_replay_executed_at_this_phase": False,
+                  "development_only": True,
+              }, sort_keys=True, indent=2) + "\n"
+          )
+          print("IMPORTED_SEMANTIC_DRIFT_PREORACLE_CONTROL_PASS")
+          PY
+
+      - name: Post-observation development-only historical proof replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/imported-semantic-drift"
+          FIX=experiments/rtk/lean_imported_drift_fixtures_v1
+          TERMS=experiments/rtk/lean_context_drift_fixtures_v1
+          test -s "$ROOT/imported_semantic_drift_preoracle.json"
+          test -s "$ROOT/imported_definition_native_drift.json"
+          {
+            printf 'import Lean\nimport RTKSemanticSupport\n'
+            cat "$FIX/theorem_declaration.lean.txt"
+            cat "$TERMS/historical_proof.term.txt"
+          } > "$ROOT/target_historical_proof.lean"
+          set +e
+          "$RTK_TARGET_LEAN" "$ROOT/target_historical_proof.lean" \
+            > "$ROOT/target_historical_proof.native.log" 2>&1
+          HISTORICAL_STATUS=$?
+          set -e
+          test "$HISTORICAL_STATUS" -ne 0
+          {
+            printf 'import Lean\nimport RTKSemanticSupport\n'
+            cat "$FIX/theorem_declaration.lean.txt"
+            cat "$TERMS/fresh_target_proof.term.txt"
+          } > "$ROOT/target_fresh_proof.lean"
+          "$RTK_TARGET_LEAN" "$ROOT/target_fresh_proof.lean" \
+            > "$ROOT/target_fresh_proof.native.log" 2>&1
+          python - "$ROOT" "$HISTORICAL_STATUS" <<'PY'
+          import json
+          import pathlib
+          import sys
+          root = pathlib.Path(sys.argv[1])
+          diagnostic = (root / "target_historical_proof.native.log").read_text()
+          assert "error:" in diagnostic, diagnostic[-1500:]
+          result = {
+              "schema_version": "rtk.imported_drift_native_oracle.v1-development",
+              "prior_support_context_observed_before_target_replay": True,
+              "historical_proof_native_rejected": True,
+              "historical_replay_exit_code": int(sys.argv[2]),
+              "fresh_target_proof_native_accepted": True,
+              "target_claim_established_under_fresh_proof": True,
+              "oracle_independent_of_development_fixture_selection": False,
+              "confirmatory_accuracy_measurement": False,
+          }
+          (root / "post_observation_native_replay.json").write_text(
+              json.dumps(result, sort_keys=True, indent=2) + "\n"
+          )
+          print("IMPORTED_SEMANTIC_DRIFT_NATIVE_REPLAY_DEVELOPMENT_PASS")
+          PY
+
+      - name: Archive checked context inputs and native logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rtk-lean-imported-semantic-drift-development
+          path: ${{ runner.temp }}/imported-semantic-drift/*
+          if-no-files-found: warn
+          retention-days: 30
