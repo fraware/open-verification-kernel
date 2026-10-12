@@ -235,6 +235,12 @@ def compare_imported_proof_references(
         "module_file_count": len(modules),
         "loaded_environment_olean_files": loaded_modules,
         "loaded_environment_module_count": len(loaded_modules),
+        "loaded_environment_total_size_bytes": sum(
+            item["file_size_bytes"] for item in loaded_modules.values()
+        ),
+        "loaded_environment_inventory_sha256": _hash(json.dumps(
+            loaded_modules, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")),
         "source_target_loaded_module_inventory_identical": True,
         "source_imported_proof_references": source,
         "target_imported_proof_references": target,
