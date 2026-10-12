@@ -9,6 +9,7 @@ on:
       - experiments/rtk/lean_native_support_footer.lean.txt
       - experiments/rtk/lean_native_support_projection.py
       - experiments/rtk/lean_imported_proofrefs_v1.py
+      - docs/RTK_LEAN_OLEAN_PROOFREFS_V1_DEVELOPMENT.md
       - tests/test_rtk_lean_imported_proofrefs_v1.py
       - experiments/rtk/lean_context_drift_fixtures_v1/**
   push:
@@ -19,6 +20,7 @@ on:
       - experiments/rtk/lean_native_support_footer.lean.txt
       - experiments/rtk/lean_native_support_projection.py
       - experiments/rtk/lean_imported_proofrefs_v1.py
+      - docs/RTK_LEAN_OLEAN_PROOFREFS_V1_DEVELOPMENT.md
       - tests/test_rtk_lean_imported_proofrefs_v1.py
       - experiments/rtk/lean_context_drift_fixtures_v1/**
   workflow_dispatch:
@@ -205,6 +207,14 @@ jobs:
           assert record["module_file_count"] > 0
           assert record["loaded_environment_module_count"] >= record["module_file_count"]
           assert record["source_target_loaded_module_inventory_identical"] is True
+          assert record["loaded_environment_total_size_bytes"] > 0
+          assert len(record["loaded_environment_inventory_sha256"]) == 64
+          print(
+              "LOADED_LEAN_OLEAN_MODULES",
+              record["loaded_environment_module_count"],
+              "TOTAL_BYTES", record["loaded_environment_total_size_bytes"],
+              "INVENTORY_SHA256", record["loaded_environment_inventory_sha256"],
+          )
           assert set(record["imported_olean_module_files"]).issubset(
               record["loaded_environment_olean_files"]
           )
