@@ -107,7 +107,7 @@ def test_forged_target_proof_or_changed_subject_rejected():
         )
     target["theorem_value_ast"] = None
     target["theorem_name"] = "historical_claim"
-    with pytest.raises(ValueError, match="native proof"):
+    with pytest.raises(ValueError, match="target axiom contains"):
         analyze_structural_pair(
             _log(), "RTK_STRUCTURAL_EXPR_JSON=" + json.dumps(target)
         )
