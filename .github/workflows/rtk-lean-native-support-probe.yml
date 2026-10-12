@@ -7,6 +7,8 @@ on:
     paths:
       - .github/workflows/rtk-lean-native-support-probe.yml
       - experiments/rtk/lean_native_support_footer.lean.txt
+      - experiments/rtk/lean_native_support_projection.py
+      - tests/test_rtk_lean_native_support_projection.py
       - experiments/rtk/lean_context_drift_fixtures_v1/**
   push:
     branches:
@@ -14,6 +16,8 @@ on:
     paths:
       - .github/workflows/rtk-lean-native-support-probe.yml
       - experiments/rtk/lean_native_support_footer.lean.txt
+      - experiments/rtk/lean_native_support_projection.py
+      - tests/test_rtk_lean_native_support_projection.py
       - experiments/rtk/lean_context_drift_fixtures_v1/**
   workflow_dispatch:
 
@@ -119,6 +123,33 @@ jobs:
           )
           print("LEAN_NATIVE_SUPPORT_DRIFT_DEVELOPMENT_PASS")
           PY
+      - name: Validate machine-readable support graph and incomplete trust boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/lean-native-support"
+          python -m experiments.rtk.lean_native_support_projection \
+            --native-development-result "$ROOT/native_support_development.json" \
+            --output "$ROOT/native_support_projection.json"
+          python - "$ROOT/native_support_projection.json" <<'PY'
+          import json
+          import pathlib
+          import sys
+          data = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          source, target = data["source"], data["target"]
+          assert source["support_claimed_complete"] is False
+          assert target["support_claimed_complete"] is False
+          assert source["semantic_serialization_soundness_established"] is False
+          assert target["semantic_serialization_soundness_established"] is False
+          assert source["imported_boundaries"] and target["imported_boundaries"]
+          get = lambda x: {node["symbol"]: node for node in x["support_nodes"]}
+          old, new = get(source), get(target)
+          assert old["op"]["semantic_sha256"] != new["op"]["semantic_sha256"]
+          assert data["native_authenticity_verified"] is False
+          assert data["semantic_completeness_proved"] is False
+          print("NATIVE_LOCAL_SUPPORT_PROJECTION_INCOMPLETE_PASS")
+          PY
+
       - name: Archive exact native support-development evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
