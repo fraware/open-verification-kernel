@@ -47,8 +47,8 @@ def project_native_probe(raw: object) -> dict[str, Any]:
     nodes: dict[str, dict[str, Any]] = {}
     for node in raw["items"]:
         if not isinstance(node, dict) or set(node) != {
-            "symbol", "kind", "expanded", "type_repr",
-            "value_repr", "references",
+            "symbol", "kind", "expanded", "imported_module",
+            "type_repr", "value_repr", "references",
         }:
             raise ValueError("unexpected native node fields")
         name = node["symbol"]
@@ -64,6 +64,12 @@ def project_native_probe(raw: object) -> dict[str, Any]:
         if (not isinstance(node["type_repr"], str) or
                 not isinstance(node["value_repr"], str)):
             raise ValueError("invalid native expression serialization")
+        origin = node["imported_module"]
+        if not isinstance(origin, str) or (
+            (node["expanded"] and origin != "")
+            or (not node["expanded"] and not _SYMBOL.fullmatch(origin))
+        ):
+            raise ValueError("invalid native imported module provenance")
         refs = node["references"]
         if not isinstance(refs, list) or any(
             not isinstance(x, str) or not _SYMBOL.fullmatch(x) for x in refs
@@ -99,6 +105,7 @@ def project_native_probe(raw: object) -> dict[str, Any]:
 
     output: list[dict[str, Any]] = []
     imported: list[str] = []
+    imported_modules: dict[str, str] = {}
     for name in sorted(nodes):
         node = nodes[name]
         semantic = {
@@ -107,9 +114,11 @@ def project_native_probe(raw: object) -> dict[str, Any]:
             "native_type_repr": node["type_repr"],
             "native_value_repr": node["value_repr"],
             "native_expanded": node["expanded"],
+            "imported_module": node["imported_module"],
         }
         if not node["expanded"]:
             imported.append(name)
+            imported_modules[name] = node["imported_module"]
         output.append({
             "symbol": name,
             "semantic_sha256": _digest(semantic),
@@ -122,6 +131,7 @@ def project_native_probe(raw: object) -> dict[str, Any]:
         "source_probe_sha256": _digest(raw),
         "support_nodes": output,
         "imported_boundaries": imported,
+        "imported_modules": imported_modules,
         "support_claimed_complete": False,
         "semantic_serialization_soundness_established": False,
         "source_authenticity_verified": False,
