@@ -19,6 +19,10 @@ using `Environment.getModuleIdxFor?` (the API actually present in pinned
 Lean **4.14.0**). This yields automatic recursive expansion of local
 definitions and theorem references. Imported constants are recorded as
 opaque name/type-classification boundaries with **no body expansion**.
+Their upstream module names are recovered from
+`Environment.getModuleIdxFor?` and `Environment.allImportedModuleNames`
+under pinned Lean 4.14.0. This metadata identifies an imported *module
+name*, not its exact `.olean` bytes or a verified semantic closure.
 
 This source is grounded in upstream `leanprover/lean4` release
 `v4.14.0` at commit
@@ -138,3 +142,20 @@ cohort must run this mechanism on externally qualified target revisions,
 keep the checker transcripts away from the prediction code, and
 independently validate the imported dependency closure before any
 conditional `VALID` transport decision is treated as reliable.
+
+
+## Module-origin sensitivity
+
+The partial projection explicitly records `imported_modules` for every
+opaque referenced constant and hashes that module name together with
+the node's declaration identity. A missing imported origin causes a
+fail-closed error. Changing an imported module identity changes its
+diagnostic fingerprint; changing the contents of an imported module
+*under the same module name* is **not detected** by this fingerprint.
+Consequently the imported-boundary completeness flag remains false
+even if every module name matches.
+
+The next source/target environment-transport obligation must bind exact
+imported `.olean` artifacts or signed compatible module manifests
+(including checker/build identity), with independent proof that those
+identities suffice for unchanged kernel interpretation.
