@@ -91,3 +91,29 @@ outcomes or SUT predictions:
 - an isolated prediction-before-oracle execution plan.
 
 The current development case is explicitly ineligible for that holdout.
+
+## Recorded native development execution
+
+At exact PR head `97cc3aba8e15610095788840416a54236613a8f1`,
+the external native workflow run
+[38186706358](https://github.com/fraware/open-verification-kernel/actions/runs/38186706358)
+completed **success**. The run retrieved and Git-verified both upstream
+revision/file objects and the pinned Lean 4.14.0 checker executable.
+The native log recorded:
+
+```json
+{"historical_evidence_applicability": "ADMISSIBLE",
+ "source_native_acceptance": "ACCEPTED",
+ "target_native_acceptance": "ACCEPTED"}
+```
+
+The workflow's explicit success marker was
+`UPSTREAM_LEAN_NATIVE_REPLAY_ACCEPTED`. Uploaded native result artifact:
+`rtk-external-lean-history-v2-development`, GitHub Actions artifact ID
+`11720495086`. The unit suite and native backend jobs have separate outcomes
+and must be read at this exact head before any all-green statement.
+
+The observation is a *pre-inspected, historical development positive
+control*. It is not an independently selected confirmatory sample, nor
+evidence of a frozen SUT's false-reuse rate. Nothing in this result was fed
+into a production authorization or merge gate.
