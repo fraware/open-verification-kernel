@@ -1,0 +1,2 @@
+def op (n : Nat) : Nat := 0 + n
+theorem historical_claim (n : Nat) : op n = n :=
