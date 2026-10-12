@@ -306,6 +306,8 @@ jobs:
             --source-structural-log "$ROOT/source_structural.native.log" \
             --target-structural-log "$ROOT/target_structural.native.log" \
             --historical-proof-source "$PROOF" \
+            --source-checked-input "$ROOT/source.lean" \
+            --target-unproved-checked-input "$ROOT/target_goal.lean" \
             --output "$ROOT/strict_preoracle_native_evidence_envelope.json"
           python - "$ROOT/strict_preoracle_native_evidence_envelope.json" <<'PY'
           import json
@@ -313,6 +315,11 @@ jobs:
           import sys
           evidence = json.loads(pathlib.Path(sys.argv[1]).read_text())
           assert evidence["changed_imported_module_bytes"] == ["RTKSemanticSupport"]
+          assert len(evidence["source_exact_checked_input_sha256"]) == 64
+          assert len(evidence["target_unproved_exact_checked_input_sha256"]) == 64
+          assert evidence["source_exact_checked_input_sha256"] != (
+              evidence["target_unproved_exact_checked_input_sha256"]
+          )
           assert evidence["imported_definition_structurally_changed"] is True
           assert evidence["conservative_action"] == "REVALIDATION_REQUIRED"
           assert evidence["historical_evidence_applicability"] == "UNDETERMINED"
