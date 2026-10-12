@@ -21,8 +21,8 @@ run_cmd do
       | throwError m!"RTK_SOURCE_PROBE_MISSING_CONSTANT: {current}"
     -- Expand only two known local declarations in this scoped native pilot.
     -- Imported constant bodies are a TRUST BOUNDARY, not proved complete.
-    let local := current == root || current == `op
-    let refs := if local then ci.getUsedConstantsAsSet.toList.toArray else #[]
+    let isLocal := current == root || current == `op
+    let refs := if isLocal then ci.getUsedConstantsAsSet.toList.toArray else #[]
     let kind : String := match ci with
       | .thmInfo _ => "theorem"
       | .defnInfo _ => "definition"
@@ -32,7 +32,7 @@ run_cmd do
       | .recInfo _ => "recursor"
       | .inductInfo _ => "inductive"
       | .quotInfo _ => "quotient"
-    let body : String := if !local then "" else match ci with
+    let body : String := if !isLocal then "" else match ci with
       | .thmInfo v => toString (repr v.value)
       | .defnInfo v => toString (repr v.value)
       | .opaqueInfo v => toString (repr v.value)
@@ -41,8 +41,8 @@ run_cmd do
     items := items.push <| Json.mkObj [
       ("symbol", Json.str current.toString),
       ("kind", Json.str kind),
-      ("expanded", Json.bool local),
-      ("type_repr", Json.str (if local then toString (repr ci.type) else "")),
+      ("expanded", Json.bool isLocal),
+      ("type_repr", Json.str (if isLocal then toString (repr ci.type) else "")),
       ("value_repr", Json.str body),
       ("references", Json.arr depNames)
     ]
