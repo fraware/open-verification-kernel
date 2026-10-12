@@ -330,7 +330,9 @@ def test_model_copy_bypass_is_revalidated_at_oracle_boundary():
     invalid_record = record.model_copy(
         update={"historical_evidence_applicability": "UNDETERMINED"}
     )
-    oracle = OracleBatch(
+    # model_construct bypasses the outer Pydantic validator too, allowing
+    # this test to exercise the scorer's explicit revalidation boundary.
+    oracle = OracleBatch.model_construct(
         schema_version="rtk.lean_v2.oracle_batch.v1",
         cohort_sha256=digest(cohort),
         oracle_adapter_id=cohort.oracle_adapter_id,
