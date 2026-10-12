@@ -12,6 +12,13 @@ No historical target proof is replayed.
 -/
 open Lean Elab Command
 
+private partial def rtkClosureNameAst : Name → Json
+  | .anonymous => Json.arr #[Json.str "anonymous"]
+  | .str prefix text =>
+    Json.arr #[Json.str "str", rtkClosureNameAst prefix, Json.str text]
+  | .num prefix index =>
+    Json.arr #[Json.str "num", rtkClosureNameAst prefix, toJson index]
+
 private def rtkStrictKind (ci : ConstantInfo) : String :=
   match ci with
   | .axiomInfo _ => "axiom"
@@ -67,15 +74,18 @@ private def rtkStrictClosure (env : Environment) (root : Name)
       | .error reason => return .error reason
     nodes := nodes.push <| Json.mkObj [
       ("name", Json.str current.toString),
+      ("name_ast", rtkClosureNameAst current),
       ("kind", Json.str (rtkStrictKind ci)),
       ("module", Json.str moduleName),
       ("unsafe", Json.bool ci.isUnsafe),
       ("partial", Json.bool ci.isPartial),
       ("level_parameter_count", toJson ci.levelParams.length),
-      ("direct_references", Json.arr <| refs.map fun n => Json.str n.toString)
+      ("direct_references", Json.arr <| refs.map fun n => Json.str n.toString),
+      ("direct_reference_asts", Json.arr <| refs.map rtkClosureNameAst)
     ]
   return .ok <| Json.mkObj [
     ("root_name", Json.str root.toString),
+    ("root_name_ast", rtkClosureNameAst root),
     ("node_count", toJson nodes.size),
     ("edge_count", toJson edgeCount),
     ("nodes", Json.arr nodes),
