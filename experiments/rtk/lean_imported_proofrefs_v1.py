@@ -161,14 +161,18 @@ def _module_paths(module: str, root: Path) -> Path:
 
 def imported_olean_snapshot(imported: dict[str, str], lean_root: Path) -> dict[str, dict[str, Any]]:
     modules = sorted(set(imported.values()))
-    if not modules or len(modules) > 256:
+    if not modules or len(modules) > 2048:
         raise ValueError("unsupported imported module inventory")
     result = {}
+    total_bytes = 0
     for name in modules:
         path = _module_paths(name, lean_root)
         stat = path.stat()
         if not 0 < stat.st_size < 128 * 1024 * 1024:
             raise ValueError("unsupported imported .olean file size")
+        total_bytes += stat.st_size
+        if total_bytes > 512 * 1024 * 1024:
+            raise ValueError("imported module inventory exceeds 512 MiB limit")
         file_bytes = path.read_bytes()
         if len(file_bytes) != stat.st_size:
             raise ValueError("changed imported module size during read")
