@@ -21,6 +21,9 @@ from typing import Any
 _SHA = re.compile(r"^[a-f0-9]{64}$")
 _SYMBOL = re.compile(r"^[A-Za-z_][A-Za-z0-9_.']*$")
 _SCHEMA = "rtk.lean_native_support_probe.v1-development"
+_PINNED_CHECKER_SHA256 = (
+    "eacf754d25ae86ea076882a34b9444f2485659d9df4266b821443b28ca95a215"
+)
 
 
 def _digest(value: object) -> str:
@@ -151,11 +154,11 @@ def main() -> int:
         "semantic_support_complete", "development_only",
     }:
         parser.error("unexpected native development evidence structure")
-    if data["checker_version"] != "4.14.0" or not (
-        isinstance(data["checker_binary_sha256"], str)
-        and _SHA.fullmatch(data["checker_binary_sha256"])
+    if (
+        data["checker_version"] != "4.14.0"
+        or data["checker_binary_sha256"] != _PINNED_CHECKER_SHA256
     ):
-        parser.error("unsupported checker version/identity")
+        parser.error("checker version or exact executable digest mismatch")
     if data["semantic_support_complete"] is not False or (
         data["adjudication_is_independent"] is not False
         or data["development_only"] is not True
