@@ -1,0 +1,201 @@
+/-
+Lean 4.14.0 research-only constructor decoder for the restricted JSON AST
+defined by lean_structural_expr_probe_v1.lean.txt. Both must be appended
+to the SAME Lean source; no target historical proof is supplied.
+
+The decoder rejects unknown constructors, shape mismatches, metadata and
+metavariables. The runtime witness shows local encode/decode expression
+identity and Lean.Kernel.check on the decoded SOURCE historical proof.
+No decoder correctness theorem or complete environment transport is claimed.
+-/
+
+private def rtkFields (j : Json) (tag : String) (arity : Nat) :
+    Except String (Array Json) := do
+  let a ← j.getArr?
+  unless a.size == arity do
+    throw s!"RTK_DECODE_WRONG_ARITY:{tag}"
+  let actual ← a[0]!.getStr?
+  unless actual == tag do
+    throw s!"RTK_DECODE_WRONG_TAG:{tag}"
+  return a
+
+private partial def rtkDecodeName (j : Json) (fuel : Nat) :
+    Except String Name := do
+  if fuel == 0 then throw "RTK_DECODE_NAME_DEPTH_EXCEEDED"
+  let a ← j.getArr?
+  if a.isEmpty then throw "RTK_DECODE_EMPTY_NAME"
+  match (← a[0]!.getStr?) with
+    | "anonymous" =>
+      unless a.size == 1 do throw "RTK_DECODE_BAD_ANON_NAME"
+      return .anonymous
+    | "str" =>
+      unless a.size == 3 do throw "RTK_DECODE_BAD_STRING_NAME"
+      return .str (← rtkDecodeName a[1]! (fuel - 1)) (← a[2]!.getStr?)
+    | "num" =>
+      unless a.size == 3 do throw "RTK_DECODE_BAD_NUM_NAME"
+      return .num (← rtkDecodeName a[1]! (fuel - 1)) (← a[2]!.getNat?)
+    | _ => throw "RTK_DECODE_UNSUPPORTED_NAME"
+
+private def rtkDecodeBinderInfo (j : Json) : Except String BinderInfo := do
+  match (← j.getStr?) with
+    | "default" => return .default
+    | "implicit" => return .implicit
+    | "strictImplicit" => return .strictImplicit
+    | "instImplicit" => return .instImplicit
+    | _ => throw "RTK_DECODE_UNSUPPORTED_BINDER"
+
+private partial def rtkDecodeLevel (j : Json) (fuel : Nat) :
+    Except String Level := do
+  if fuel == 0 then throw "RTK_DECODE_LEVEL_DEPTH_EXCEEDED"
+  let a ← j.getArr?
+  if a.isEmpty then throw "RTK_DECODE_EMPTY_LEVEL"
+  match (← a[0]!.getStr?) with
+    | "zero" =>
+      let _ ← rtkFields j "zero" 1
+      return .zero
+    | "succ" =>
+      let _ ← rtkFields j "succ" 2
+      return .succ (← rtkDecodeLevel a[1]! (fuel - 1))
+    | "max" =>
+      let _ ← rtkFields j "max" 3
+      return .max (← rtkDecodeLevel a[1]! (fuel - 1))
+                  (← rtkDecodeLevel a[2]! (fuel - 1))
+    | "imax" =>
+      let _ ← rtkFields j "imax" 3
+      return .imax (← rtkDecodeLevel a[1]! (fuel - 1))
+                   (← rtkDecodeLevel a[2]! (fuel - 1))
+    | "param" =>
+      let _ ← rtkFields j "param" 2
+      return .param (← rtkDecodeName a[1]! 128)
+    | _ => throw "RTK_DECODE_UNSUPPORTED_LEVEL"
+
+private partial def rtkDecodeExpr (j : Json) (fuel : Nat) :
+    Except String Expr := do
+  if fuel == 0 then throw "RTK_DECODE_EXPR_DEPTH_EXCEEDED"
+  let a ← j.getArr?
+  if a.isEmpty then throw "RTK_DECODE_EMPTY_EXPR"
+  let f := fuel - 1
+  match (← a[0]!.getStr?) with
+    | "bvar" =>
+      let _ ← rtkFields j "bvar" 2
+      return .bvar (← a[1]!.getNat?)
+    | "sort" =>
+      let _ ← rtkFields j "sort" 2
+      return .sort (← rtkDecodeLevel a[1]! f)
+    | "const" =>
+      let _ ← rtkFields j "const" 3
+      let n ← rtkDecodeName a[1]! 128
+      let levels ← a[2]!.getArr?
+      if levels.size > 1024 then throw "RTK_DECODE_TOO_MANY_LEVELS"
+      let mut result : List Level := []
+      for level in levels do
+        result := (← rtkDecodeLevel level f) :: result
+      return .const n result.reverse
+    | "app" =>
+      let _ ← rtkFields j "app" 3
+      return .app (← rtkDecodeExpr a[1]! f) (← rtkDecodeExpr a[2]! f)
+    | "lam" =>
+      let _ ← rtkFields j "lam" 5
+      return .lam (← rtkDecodeName a[1]! 128)
+                  (← rtkDecodeExpr a[2]! f)
+                  (← rtkDecodeExpr a[3]! f)
+                  (← rtkDecodeBinderInfo a[4]!)
+    | "forallE" =>
+      let _ ← rtkFields j "forallE" 5
+      return .forallE (← rtkDecodeName a[1]! 128)
+                      (← rtkDecodeExpr a[2]! f)
+                      (← rtkDecodeExpr a[3]! f)
+                      (← rtkDecodeBinderInfo a[4]!)
+    | "letE" =>
+      let _ ← rtkFields j "letE" 6
+      return .letE (← rtkDecodeName a[1]! 128)
+                   (← rtkDecodeExpr a[2]! f)
+                   (← rtkDecodeExpr a[3]! f)
+                   (← rtkDecodeExpr a[4]! f)
+                   (← a[5]!.getBool?)
+    | "natVal" =>
+      let _ ← rtkFields j "natVal" 2
+      return .lit (.natVal (← a[1]!.getNat?))
+    | "strVal" =>
+      let _ ← rtkFields j "strVal" 2
+      return .lit (.strVal (← a[1]!.getStr?))
+    | "proj" =>
+      let _ ← rtkFields j "proj" 4
+      return .proj (← rtkDecodeName a[1]! 128)
+                   (← a[2]!.getNat?)
+                   (← rtkDecodeExpr a[3]! f)
+    | _ => throw "RTK_DECODE_UNSUPPORTED_EXPR"
+
+private def rtkVerifiedRoundtrip (e : Expr) :
+    CommandElabM Json := do
+  let original ← rtkStrictExprAst e
+  let reconstructed ← match rtkDecodeExpr original 1024 with
+    | .ok expr => pure expr
+    | .error message => throwError m!"{message}"
+  unless reconstructed == e do
+    throwError "RTK_NATIVE_ROUNDTRIP_EXPR_INEQUALITY"
+  let encodedAgain ← rtkStrictExprAst reconstructed
+  unless encodedAgain == original do
+    throwError "RTK_NATIVE_ROUNDTRIP_AST_INEQUALITY"
+  return original
+
+run_cmd do
+  let env ← getEnv
+  let root : Name := `historical_claim
+  let some ci := env.find? root
+    | throwError "RTK_ROUNDTRIP_MISSING_CLAIM"
+  let some (.defnInfo opInfo) := env.find? `op
+    | throwError "RTK_ROUNDTRIP_MISSING_OP"
+  let claimKind : String := match ci with
+    | .thmInfo _ => "theorem"
+    | .axiomInfo _ => "axiom"
+    | _ => "wrong"
+  unless claimKind == "theorem" || claimKind == "axiom" do
+    throwError "RTK_ROUNDTRIP_CLAIM_KIND_FORBIDDEN"
+  let claimType ← rtkVerifiedRoundtrip ci.type
+  let opType ← rtkVerifiedRoundtrip opInfo.type
+  let opValue ← rtkVerifiedRoundtrip opInfo.value
+  let mut proof : Json := Json.null
+  let mut sourceKernelProofChecked := false
+  match ci with
+    | .thmInfo info =>
+      proof ← rtkVerifiedRoundtrip info.value
+      let decodedProof ← match rtkDecodeExpr proof 1024 with
+        | .ok e => pure e
+        | .error message => throwError m!"{message}"
+      match Lean.Kernel.check env {} decodedProof with
+        | .ok _ => sourceKernelProofChecked := true
+        | .error _ => throwError "RTK_ROUNDTRIP_SOURCE_PROOF_KERNEL_REJECTED"
+    | .axiomInfo _ => pure ()
+    | _ => throwError "RTK_ROUNDTRIP_CLAIM_KIND_INVALID"
+
+  -- Adversarial negative control. An altered expression must NOT be
+  -- indistinguishable from the native imported definition.
+  let forged : Json := Json.arr #[Json.str "natVal", toJson (0 : Nat)]
+  let recoveredForgery ← match rtkDecodeExpr forged 1024 with
+    | .ok e => pure e
+    | .error message => throwError m!"{message}"
+  if recoveredForgery == opInfo.value then
+    throwError "RTK_ROUNDTRIP_FORGED_OP_NOT_REJECTED"
+  match rtkDecodeExpr (Json.arr #[Json.str "mvar", toJson "untrusted"]) 1024 with
+    | .ok _ => throwError "RTK_ROUNDTRIP_FORBIDDEN_METAVAR_ACCEPTED"
+    | .error _ => pure ()
+
+  logInfo m!"RTK_NATIVE_ROUNDTRIP_JSON={Json.compress (Json.mkObj [
+    ("schema_version", Json.str "rtk.lean_native_expr_roundtrip.v1-development"),
+    ("root_name", Json.str root.toString),
+    ("root_kind", Json.str claimKind),
+    ("root_type_ast", claimType),
+    ("root_proof_ast", proof),
+    ("op_type_ast", opType),
+    ("op_value_ast", opValue),
+    ("source_proof_kernel_checked", Json.bool sourceKernelProofChecked),
+    ("target_old_proof_replayed", Json.bool false),
+    ("target_claim_established", Json.bool false),
+    ("decode_encode_ast_equal", Json.bool true),
+    ("decode_native_expr_equal", Json.bool true),
+    ("malformed_metavar_rejected", Json.bool true),
+    ("forged_imported_definition_rejected", Json.bool true),
+    ("semantic_support_complete", Json.bool false),
+    ("cross_environment_transport_established", Json.bool false)
+  ])}"
