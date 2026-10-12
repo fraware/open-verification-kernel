@@ -81,7 +81,7 @@ def test_injected_target_axiom_causes_conservative_revalidation():
          "exactly one"),
         (lambda x: x.update(changed_target_log=x["changed_target_log"].replace(
             "RTKSemanticSupport", "Other.Module")),
-         "wrong imported module"),
+         "axiom module absent from environment inventory"),
         (lambda x: x.update(changed_target_log=x["changed_target_log"].replace(
             "rtkExternal", "sorryAx")), "sorryAx"),
         (lambda x: x.update(target_log=x["target_log"].replace(
