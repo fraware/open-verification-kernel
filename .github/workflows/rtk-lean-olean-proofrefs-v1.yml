@@ -203,6 +203,12 @@ jobs:
           record = json.loads(pathlib.Path(sys.argv[1]).read_text())
           assert record["reference_count"] > 0
           assert record["module_file_count"] > 0
+          assert record["loaded_environment_module_count"] >= record["module_file_count"]
+          assert record["source_target_loaded_module_inventory_identical"] is True
+          assert set(record["imported_olean_module_files"]).issubset(
+              record["loaded_environment_olean_files"]
+          )
+          assert record["imported_module_semantic_closure_proved"] is False
           assert record["reference_identity_matches_in_this_environment"]
           assert record["reference_differences"] == []
           assert "Eq.refl" in record["source_imported_proof_references"]
