@@ -10,6 +10,7 @@ import pytest
 
 from experiments.rtk.lean_imported_proofrefs_v1 import (
     _extract_json,
+    _environment_modules,
     _reference_record,
     generate_reference_probe,
     imported_olean_snapshot,
@@ -47,6 +48,7 @@ def _native_source_log() -> str:
 def _references_log(*, module="Init.Core", typed="Eq proof type") -> str:
     raw = {
         "schema_version": "rtk.lean_imported_ref_lookup.v1-development",
+        "environment_modules": ["Init.Prelude", "Init.Core"],
         "items": [
             {
                 "symbol": "Eq.refl", "kind": "theorem",
@@ -80,6 +82,7 @@ def test_native_reference_identity_and_type_must_match():
         _reference_record(
             "RTK_NATIVE_REFERENCE_JSON=" + json.dumps({
                 "schema_version": "rtk.lean_imported_ref_lookup.v1-development",
+                "environment_modules": ["Init.Prelude", "Init.Core"],
                 "items": [],
             }),
             expected,
@@ -126,3 +129,28 @@ def test_reference_forgery_cannot_impersonate_native_root():
     assert source_imported_symbols(source) == {"Eq.refl": "Other.Module"}
     with pytest.raises(ValueError, match="wrong module"):
         _reference_record(_references_log(), {"Eq.refl": "Other.Module"})
+
+
+def test_loaded_native_module_inventory_is_deterministic_and_rejects_poisoned_names():
+    assert _environment_modules(_references_log()) == [
+        "Init.Core", "Init.Prelude"
+    ]
+    invalid = json.loads(_references_log().split("RTK_NATIVE_REFERENCE_JSON=", 1)[1])
+    invalid["environment_modules"] = ["Init.Core", "Init.Core"]
+    with pytest.raises(ValueError, match="duplicated"):
+        _environment_modules("RTK_NATIVE_REFERENCE_JSON=" + json.dumps(invalid))
+    invalid["environment_modules"] = ["../outside"]
+    with pytest.raises(ValueError, match="invalid"):
+        _environment_modules("RTK_NATIVE_REFERENCE_JSON=" + json.dumps(invalid))
+
+
+def test_loaded_olean_snapshot_spans_all_named_modules(tmp_path):
+    base = tmp_path / "lib" / "lean" / "Init"
+    base.mkdir(parents=True)
+    (base / "Core.olean").write_bytes(b"one")
+    (base / "Prelude.olean").write_bytes(b"two")
+    modules = imported_olean_snapshot({
+        "Init.Core": "Init.Core", "Init.Prelude": "Init.Prelude"
+    }, tmp_path)
+    assert len(modules) == 2
+    assert all(len(item["file_sha256"]) == 64 for item in modules.values())
