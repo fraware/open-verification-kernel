@@ -1,0 +1,133 @@
+/-
+Research-only structural encoding of a narrow set of native checked Lean
+Expr/Level constructors. Input declarations are accepted by the pinned Lean
+4.14.0 checker prior to this command. The output is JSON AST, NOT a proof of
+cross-environment applicability, transport, or independent provenance.
+
+Unsupported free variables, metavariables, universe metavariables, expression
+metadata, and excess expression nesting result in an explicit failure. The
+serializer never silently falls back to pretty-printed Expr representations.
+-/
+open Lean Elab Command
+
+private partial def rtkNameAst : Name → Json
+  | .anonymous => Json.arr #[Json.str "anonymous"]
+  | .str p s => Json.arr #[Json.str "str", rtkNameAst p, toJson s]
+  | .num p i => Json.arr #[Json.str "num", rtkNameAst p, toJson i]
+
+private def rtkBinderInfoAst : BinderInfo → Json
+  | .default => Json.str "default"
+  | .implicit => Json.str "implicit"
+  | .strictImplicit => Json.str "strictImplicit"
+  | .instImplicit => Json.str "instImplicit"
+
+private partial def rtkLevelAst (l : Level) (fuel : Nat) : Except String Json := do
+  if fuel == 0 then
+    throw "RTK_AST_LEVEL_DEPTH_EXCEEDED"
+  match l with
+    | .zero => return Json.arr #[Json.str "zero"]
+    | .succ v =>
+      return Json.arr #[Json.str "succ", (← rtkLevelAst v (fuel - 1))]
+    | .max a b =>
+      return Json.arr #[Json.str "max", (← rtkLevelAst a (fuel - 1)), (← rtkLevelAst b (fuel - 1))]
+    | .imax a b =>
+      return Json.arr #[Json.str "imax", (← rtkLevelAst a (fuel - 1)), (← rtkLevelAst b (fuel - 1))]
+    | .param n =>
+      return Json.arr #[Json.str "param", rtkNameAst n]
+    | .mvar _ =>
+      throw "RTK_AST_UNIVERSE_METAVARIABLE_FORBIDDEN"
+
+private partial def rtkExprAst (e : Expr) (fuel : Nat) : Except String Json := do
+  if fuel == 0 then
+    throw "RTK_AST_EXPR_DEPTH_EXCEEDED"
+  let fuel' := fuel - 1
+  match e with
+    | .bvar i => return Json.arr #[Json.str "bvar", toJson i]
+    | .fvar _ => throw "RTK_AST_FREE_VARIABLE_FORBIDDEN"
+    | .mvar _ => throw "RTK_AST_EXPR_METAVARIABLE_FORBIDDEN"
+    | .sort u =>
+      return Json.arr #[Json.str "sort", (← rtkLevelAst u fuel')]
+    | .const n levels =>
+      let mut encoded : Array Json := #[]
+      for level in levels do
+        encoded := encoded.push (← rtkLevelAst level fuel')
+      return Json.arr #[Json.str "const", rtkNameAst n, Json.arr encoded]
+    | .app f a =>
+      return Json.arr #[
+        Json.str "app",
+        (← rtkExprAst f fuel'),
+        (← rtkExprAst a fuel')
+      ]
+    | .lam n t body bi =>
+      return Json.arr #[
+        Json.str "lam", rtkNameAst n,
+        (← rtkExprAst t fuel'),
+        (← rtkExprAst body fuel'),
+        rtkBinderInfoAst bi
+      ]
+    | .forallE n t body bi =>
+      return Json.arr #[
+        Json.str "forallE", rtkNameAst n,
+        (← rtkExprAst t fuel'),
+        (← rtkExprAst body fuel'),
+        rtkBinderInfoAst bi
+      ]
+    | .letE n t v body nonDep =>
+      return Json.arr #[
+        Json.str "letE", rtkNameAst n,
+        (← rtkExprAst t fuel'),
+        (← rtkExprAst v fuel'),
+        (← rtkExprAst body fuel'),
+        toJson nonDep
+      ]
+    | .lit (.natVal n) =>
+      return Json.arr #[Json.str "natVal", toJson n]
+    | .lit (.strVal s) =>
+      return Json.arr #[Json.str "strVal", toJson s]
+    | .mdata _ _ =>
+      throw "RTK_AST_EXPR_METADATA_UNSUPPORTED"
+    | .proj name idx struct =>
+      return Json.arr #[
+        Json.str "proj", rtkNameAst name, toJson idx,
+        (← rtkExprAst struct fuel')
+      ]
+
+private def rtkStrictExprAst (expr : Expr) : CommandElabM Json := do
+  match rtkExprAst expr 1024 with
+    | .ok encoded => return encoded
+    | .error reason => throwError m!"{reason}"
+
+run_cmd do
+  let env ← getEnv
+  let root : Name := `historical_claim
+  let some sourceConstant := env.find? root
+    | throwError "RTK_AST_SOURCE_THEOREM_MISSING"
+  let some (.defnInfo opDecl) := env.find? `op
+    | throwError "RTK_AST_IMPORTED_OP_MISSING_OR_WRONG_KIND"
+  let rootKind : String := match sourceConstant with
+    | .thmInfo _ => "theorem"
+    | .axiomInfo _ => "axiom"
+    | _ => "unsupported"
+  unless rootKind == "theorem" || rootKind == "axiom" do
+    throwError "RTK_AST_ROOT_WRONG_KIND"
+  let rootType ← rtkStrictExprAst sourceConstant.type
+  let opType ← rtkStrictExprAst opDecl.type
+  let opValue ← rtkStrictExprAst opDecl.value
+  let mut rootValue : Json := Json.null
+  match sourceConstant with
+    | .thmInfo v =>
+      rootValue ← rtkStrictExprAst v.value
+    | .axiomInfo _ => pure ()
+    | _ => throwError "RTK_AST_ROOT_KIND_CHANGED"
+  logInfo m!"RTK_STRUCTURAL_EXPR_JSON={Json.compress (Json.mkObj [
+    ("schema_version", Json.str "rtk.lean_native_structural_expr.v1-development"),
+    ("theorem_name", Json.str root.toString),
+    ("theorem_kind", Json.str rootKind),
+    ("theorem_type_ast", rootType),
+    ("theorem_value_ast", rootValue),
+    ("op_name", Json.str "op"),
+    ("op_type_ast", opType),
+    ("op_value_ast", opValue),
+    ("unsupported_constructs_silently_omitted", Json.bool false),
+    ("imported_support_closure_proved", Json.bool false)
+  ])}"
