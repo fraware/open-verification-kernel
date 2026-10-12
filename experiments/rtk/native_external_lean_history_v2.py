@@ -16,10 +16,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from experiments.rtk.native_lean_replay_v2 import (
-    EXPECTED_LEAN_VERSION,
-    _invoke,
-)
+from experiments.rtk.native_lean_replay_v2 import _invoke
 
 UPSTREAM = "leanprover/lean4"
 SOURCE_COMMIT = "410fab7284703f41660ca2454218dcca9b2ec896"
