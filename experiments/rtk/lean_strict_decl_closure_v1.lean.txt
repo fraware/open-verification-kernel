@@ -1,0 +1,135 @@
+/-
+Development-only, bounded, fail-closed constant reference closure.
+Lean 4.14.0: ConstantInfo.getUsedConstantsAsSet explicitly captures
+native type/value constant references, with additional special cases for
+inductive families, constructors and recursors. Each referenced constant
+is checked against Environment.find? BEFORE being scheduled.
+
+The result is complete only for THIS declared reference relation, within
+the configured traversal budget and native execution. It is not a proof
+of complete kernel/elaborator/reducibility/axiom/policy/environment support.
+No historical target proof is replayed.
+-/
+open Lean Elab Command
+
+private def rtkStrictKind (ci : ConstantInfo) : String :=
+  match ci with
+  | .axiomInfo _ => "axiom"
+  | .defnInfo _ => "definition"
+  | .thmInfo _ => "theorem"
+  | .opaqueInfo _ => "opaque"
+  | .quotInfo _ => "quotient"
+  | .inductInfo _ => "inductive"
+  | .ctorInfo _ => "constructor"
+  | .recInfo _ => "recursor"
+
+private def rtkStrictModule (env : Environment) (n : Name) : Except String String := do
+  match env.getModuleIdxFor? n with
+  | none => return "LOCAL"
+  | some idx =>
+    match env.allImportedModuleNames[idx.toNat]? with
+    | none => throw s!"RTK_STRICT_CLOSURE_MODULE_INDEX_INVALID:{n}"
+    | some moduleName => return moduleName.toString
+
+private def rtkRequireNamesExist (env : Environment) (names : Array Name) :
+    Except String Unit := do
+  for name in names do
+    if (env.find? name).isNone then
+      throw s!"RTK_STRICT_CLOSURE_MISSING_DECLARATION:{name}"
+
+private def rtkStrictClosure (env : Environment) (root : Name)
+    (maxNodes : Nat) (maxEdges : Nat) : Except String Json := Id.run do
+  let mut pending : Array Name := #[root]
+  let mut visited : NameSet := {}
+  let mut nodes : Array Json := #[]
+  let mut edgeCount := 0
+  while !pending.isEmpty do
+    let current := pending.back!
+    pending := pending.pop
+    if visited.contains current then continue
+    if nodes.size >= maxNodes then
+      return .error "RTK_STRICT_CLOSURE_NODE_BUDGET_EXCEEDED"
+    let some ci := env.find? current
+      | return .error s!"RTK_STRICT_CLOSURE_MISSING_DECLARATION:{current}"
+    visited := visited.insert current
+    let refs := (ci.getUsedConstantsAsSet.toList.toArray).qsort Name.lt
+    edgeCount := edgeCount + refs.size
+    if edgeCount > maxEdges then
+      return .error "RTK_STRICT_CLOSURE_EDGE_BUDGET_EXCEEDED"
+    match rtkRequireNamesExist env refs with
+    | .error reason => return .error reason
+    | .ok _ => pure ()
+    for ref in refs do
+      if !visited.contains ref then
+        pending := pending.push ref
+    let moduleName ← match rtkStrictModule env current with
+      | .ok m => pure m
+      | .error reason => return .error reason
+    nodes := nodes.push <| Json.mkObj [
+      ("name", Json.str current.toString),
+      ("kind", Json.str (rtkStrictKind ci)),
+      ("module", Json.str moduleName),
+      ("unsafe", Json.bool ci.isUnsafe),
+      ("partial", Json.bool ci.isPartial),
+      ("level_parameter_count", toJson ci.levelParams.length),
+      ("direct_references", Json.arr <| refs.map fun n => Json.str n.toString)
+    ]
+  return .ok <| Json.mkObj [
+    ("root_name", Json.str root.toString),
+    ("node_count", toJson nodes.size),
+    ("edge_count", toJson edgeCount),
+    ("nodes", Json.arr nodes),
+    ("missing_references_rejected", Json.bool true),
+    ("budget_exhaustion_rejected", Json.bool true),
+    ("reported_reference_relation", Json.str "ConstantInfo.getUsedConstantsAsSet"),
+    ("complete_for_reported_reference_relation_under_budget", Json.bool true),
+    ("semantic_dependency_closure_proved", Json.bool false)
+  ]
+
+run_cmd do
+  let env ← getEnv
+  let root : Name := `historical_claim
+  let some rootCi := env.find? root
+    | throwError "RTK_STRICT_CLOSURE_ROOT_MISSING"
+  let kind : String :=
+    match rootCi with
+    | .thmInfo _ => "source_theorem"
+    | .axiomInfo _ => "target_goal_placeholder"
+    | _ => "unsupported"
+  unless kind != "unsupported" do
+    throwError "RTK_STRICT_CLOSURE_ROOT_KIND_UNSUPPORTED"
+
+  -- Tests invoke the SAME dependency-existence predicate used on all
+  -- intermediate edges. The missing reference must fail, not be skipped.
+  match rtkRequireNamesExist env #[`rtkDefinitelyNonexistentClosureDependency] with
+  | .ok _ => throwError "RTK_STRICT_CLOSURE_MISSING_REF_GUARD_BYPASSED"
+  | .error reason =>
+    unless reason.startsWith "RTK_STRICT_CLOSURE_MISSING_DECLARATION:" do
+      throwError m!"{reason}"
+  match rtkStrictClosure env root 0 10 with
+  | .ok _ => throwError "RTK_STRICT_CLOSURE_NODE_BUDGET_GUARD_BYPASSED"
+  | .error reason =>
+    unless reason == "RTK_STRICT_CLOSURE_NODE_BUDGET_EXCEEDED" do
+      throwError m!"{reason}"
+
+  let result ← match rtkStrictClosure env root 12000 180000 with
+    | .ok found => pure found
+    | .error reason => throwError m!"{reason}"
+  let imported ← match rtkStrictClosure env `op 12000 180000 with
+    | .ok found => pure found
+    | .error reason => throwError m!"{reason}"
+
+  logInfo m!"RTK_NATIVE_STRICT_CLOSURE_JSON={Json.compress (Json.mkObj [
+    ("schema_version", Json.str "rtk.lean_native_strict_decl_closure.v1-development"),
+    ("root_name", Json.str root.toString),
+    ("root_kind", Json.str kind),
+    ("root_declaration_closure", result),
+    ("imported_definition_closure", imported),
+    ("target_historical_proof_replayed", Json.bool false),
+    ("target_claim_established", Json.bool false),
+    ("axiom_policy_authenticated", Json.bool false),
+    ("source_target_environment_authenticity_verified", Json.bool false),
+    ("semantic_support_complete", Json.bool false),
+    ("transport_applicability", Json.str "UNDETERMINED"),
+    ("reliance_authorization", Json.bool false)
+  ])}"
