@@ -82,19 +82,22 @@ jobs:
           set -euo pipefail
           ROOT="$RUNNER_TEMP/imported-semantic-drift"
           FIX=experiments/rtk/lean_imported_drift_fixtures_v1
-          mkdir -p "$ROOT"
-          cp "$FIX/source_support.lean.txt" "$ROOT/RTKSemanticSupport.lean"
+          mkdir -p "$ROOT" "$GITHUB_WORKSPACE/.rtk-imported-build"
+          MODULE_SOURCE="$GITHUB_WORKSPACE/.rtk-imported-build/RTKSemanticSupport.lean"
+          cp "$FIX/source_support.lean.txt" "$MODULE_SOURCE"
+          cp "$MODULE_SOURCE" "$ROOT/equal_content_support.lean.txt"
           "$RTK_SOURCE_LEAN" -o "$RTK_SOURCE_ROOT/lib/lean/RTKSemanticSupport.olean" \
-            "$ROOT/RTKSemanticSupport.lean"
+            "$MODULE_SOURCE"
           "$RTK_TARGET_LEAN" -o "$RTK_TARGET_ROOT/lib/lean/RTKSemanticSupport.olean" \
-            "$ROOT/RTKSemanticSupport.lean"
+            "$MODULE_SOURCE"
           SOURCE_OLEAN="$RTK_SOURCE_ROOT/lib/lean/RTKSemanticSupport.olean"
           TARGET_OLEAN="$RTK_TARGET_ROOT/lib/lean/RTKSemanticSupport.olean"
           SOURCE_HASH="$(sha256sum "$SOURCE_OLEAN" | cut -d ' ' -f 1)"
           TARGET_CONTROL_HASH="$(sha256sum "$TARGET_OLEAN" | cut -d ' ' -f 1)"
           test "$SOURCE_HASH" = "$TARGET_CONTROL_HASH"
-          cp "$FIX/target_support.lean.txt" "$ROOT/RTKSemanticSupport.lean"
-          "$RTK_TARGET_LEAN" -o "$TARGET_OLEAN" "$ROOT/RTKSemanticSupport.lean"
+          cp "$FIX/target_support.lean.txt" "$MODULE_SOURCE"
+          cp "$MODULE_SOURCE" "$ROOT/changed_content_support.lean.txt"
+          "$RTK_TARGET_LEAN" -o "$TARGET_OLEAN" "$MODULE_SOURCE"
           TARGET_DRIFT_HASH="$(sha256sum "$TARGET_OLEAN" | cut -d ' ' -f 1)"
           test "$SOURCE_HASH" != "$TARGET_DRIFT_HASH"
           python - "$ROOT" "$SOURCE_HASH" "$TARGET_CONTROL_HASH" "$TARGET_DRIFT_HASH" <<'PY'
@@ -287,6 +290,6 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: rtk-lean-imported-semantic-drift-development
-          path: ${{ runner.temp }}/unproved-target-context/*
+          path: ${{ runner.temp }}/imported-semantic-drift/*
           if-no-files-found: warn
           retention-days: 30
