@@ -19,9 +19,11 @@ uses the pinned Lean 4.14.0 `Environment.find?` API to verify that
 It maintains a visited set and a queue to handle repeated references
 and declaration cycles, bounded at **12,000 nodes and 180,000 direct
 edges** per root. If either budget is exhausted, the probe fails and
-does not issue a graph-completed result. The same missing-reference
-predicate is also tested directly on a known absent name; a
-zero-node-budget negative control must fail explicitly.
+does not issue a graph-completed result. The same missing-reference predicate is tested directly on a
+known absent name, and the full walker is separately invoked on an
+absent root name. The native negative controls also invoke the walker
+with zero allowed nodes and zero allowed edges, both of which must fail
+with their distinct expected diagnostics.
 
 Each declaration node records its kind (definition, theorem, axiom,
 opaque, inductive, constructor, recursor, quotient), module origin,
