@@ -522,7 +522,7 @@ jobs:
           MODULE="$BASE/RTKSemanticSupport.lean"
           cat > "$MODULE" <<'LEAN'
           axiom rtkExternal (n : Nat) : Nat
-          def op (n : Nat) : Nat := rtkExternal n
+          noncomputable def op (n : Nat) : Nat := rtkExternal n
           LEAN
           cp "$MODULE" "$ROOT/target_axiom_injected_imported_module.lean.txt"
           "$RTK_TARGET_LEAN" -o "$RTK_TARGET_ROOT/lib/lean/RTKSemanticSupport.olean" \
