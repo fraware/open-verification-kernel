@@ -67,7 +67,7 @@ def _read_record(native_log: str, expected_root: str, expected_kind: str) -> dic
         if (not isinstance(items, list) or len(items) > 8192
             or any(not isinstance(n, str) or not _SYMBOL.fullmatch(n)
                    for n in items)
-            or items != sorted(set(items))):
+            or len(items) != len(set(items))):
             raise ValueError("invalid direct native dependency references")
     for field in ("op_transitive_axioms", "source_proof_transitive_axioms"):
         axioms = data[field]
@@ -87,8 +87,8 @@ def _read_record(native_log: str, expected_root: str, expected_kind: str) -> dic
             if name == "sorryAx" or name.endswith(".sorryAx"):
                 raise ValueError("Lean sorryAx dependency forbidden")
             names.append(name)
-        if names != sorted(set(names)):
-            raise ValueError("duplicate or unsorted axiom names")
+        if len(names) != len(set(names)):
+            raise ValueError("duplicate native axiom names")
     if expected_kind == "unproved_goal_placeholder" and data[
         "source_proof_transitive_axioms"
     ]:
