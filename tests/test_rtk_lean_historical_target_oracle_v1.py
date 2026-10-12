@@ -89,7 +89,7 @@ def test_exact_native_decision_normalization(decision):
 
 
 def test_unproved_target_claim_only():
-    with pytest.raises(ValueError, match="unproved target"):
+    with pytest.raises(ValueError, match="unexpected checked source theorem"):
         export_target_claim(
             source_payload_bytes=_source(),
             target_native_log=_target_native(kind="theorem", value=_EXPR),
