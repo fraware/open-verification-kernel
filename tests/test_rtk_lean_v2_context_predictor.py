@@ -160,7 +160,7 @@ def test_affecting_typed_claim_checker_and_policy_invalidates_reuse(change, reas
 @pytest.mark.parametrize(
     ("source", "target", "state", "accepted", "reason"),
     [
-        (None, manifest(complete=False), "active", "ACCEPTED",
+        (None, manifest(revision=TARGET, complete=False), "active", "ACCEPTED",
          "support_completeness_unestablished"),
         (None, None, "unknown", "ACCEPTED",
          "prior_evidence_admissibility_unknown"),
@@ -168,7 +168,7 @@ def test_affecting_typed_claim_checker_and_policy_invalidates_reuse(change, reas
          "source_native_acceptance_not_established"),
         (
             None,
-            manifest(nodes=[
+            manifest(revision=TARGET, nodes=[
                 LeanSupportNode(symbol="MyTheorem", semantic_sha256=A,
                                 dependencies=["AbsentDependency"])
             ]),
@@ -176,7 +176,7 @@ def test_affecting_typed_claim_checker_and_policy_invalidates_reuse(change, reas
         ),
         (
             None,
-            manifest(nodes=[
+            manifest(revision=TARGET, nodes=[
                 LeanSupportNode(
                     symbol="MyTheorem", semantic_sha256=A,
                     dependencies=["Other"]
@@ -265,3 +265,21 @@ def test_predictor_rejects_oracle_verdict_on_input_surface():
     data["target_native_oracle"] = "ACCEPTED"
     with pytest.raises(ValidationError):
         LeanTransportInput.model_validate(data)
+
+
+def test_manifest_declared_revision_path_and_repository_must_match_frozen_case():
+    record = inputs()
+    for update in (
+        {"revision_sha": SOURCE},
+        {"theorem_source_path": "OtherFile.lean"},
+        {"repository": "attacker/swapped-repository"},
+    ):
+        modified = record.target.model_copy(update=update)
+        tampered = record.model_copy(update={"target": modified})
+        with pytest.raises(ValueError, match="frozen case"):
+            evaluate_lean_transport(tampered)
+
+
+def test_support_root_must_include_declared_theorem():
+    with pytest.raises(ValidationError, match="support root"):
+        manifest(roots=["IndependentHelper"])
