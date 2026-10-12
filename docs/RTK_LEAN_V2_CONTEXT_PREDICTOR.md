@@ -141,3 +141,30 @@ Only once this abstraction has a justified soundness boundary is
 `VALID` an engineering candidate for broader deployment. Until then,
 all prediction outputs are research hypotheses, and production policy
 authority is unchanged.
+
+
+## 6. Native definitional-dependency drift development control
+
+The separate workflow
+`.github/workflows/rtk-lean-support-drift-v1.yml`
+executes Lean 4.14.0 with the pinned checker executable, using the same
+exact historical proof bytes in two synthetic contexts:
+
+- Source definition: `def op (n : Nat) : Nat := n`.
+- Target definition: `def op (n : Nat) : Nat := 0 + n`.
+- Theorem declaration, text-identical across both contexts:
+  `theorem historical_claim (n : Nat) : op n = n :=`.
+- Historical proof term: `Eq.refl n` in both contexts.
+- Separate fresh target proof: `Nat.zero_add n`.
+
+The native positive/negative development control is intended to demonstrate
+that keeping a formal theorem statement *text-identical* does not in itself
+preserve an old proof's applicability if the definition on which it depends
+changes. Its output must be classified strictly from the exact-head native
+workflow result and archived checker diagnostic bytes.
+
+This development example must **not** count as an independent holdout
+calibration of the new predictor. The predictor's matching-support rule
+is still evaluated only against caller-supplied typed graphs. In particular,
+no source/target `op` support digests are yet populated by an independently
+authenticated Lean-native dependency extractor.
