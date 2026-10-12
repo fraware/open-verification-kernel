@@ -3,6 +3,8 @@ Development-only introspection of native Lean ConstantInfo and expression
 references. This footer runs only after a native checked theorem definition.
 Not a proof of semantic completeness; checker and source version are pinned.
 -/
+open Lean Elab Command
+
 run_cmd do
   let env ← getEnv
   let root : Name := `historical_claim
