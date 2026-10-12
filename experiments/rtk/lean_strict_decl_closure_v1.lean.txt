@@ -116,6 +116,16 @@ run_cmd do
   | .error reason =>
     unless reason.startsWith "RTK_STRICT_CLOSURE_MISSING_DECLARATION:" do
       throwError m!"{reason}"
+  match rtkStrictClosure env `rtkDefinitelyNonexistentClosureDependency 10 10 with
+  | .ok _ => throwError "RTK_STRICT_CLOSURE_MISSING_ROOT_GUARD_BYPASSED"
+  | .error reason =>
+    unless reason.startsWith "RTK_STRICT_CLOSURE_MISSING_DECLARATION:" do
+      throwError m!"{reason}"
+  match rtkStrictClosure env `op 12000 0 with
+  | .ok _ => throwError "RTK_STRICT_CLOSURE_EDGE_BUDGET_GUARD_BYPASSED"
+  | .error reason =>
+    unless reason == "RTK_STRICT_CLOSURE_EDGE_BUDGET_EXCEEDED" do
+      throwError m!"{reason}"
   match rtkStrictClosure env root 0 10 with
   | .ok _ => throwError "RTK_STRICT_CLOSURE_NODE_BUDGET_GUARD_BYPASSED"
   | .error reason =>
