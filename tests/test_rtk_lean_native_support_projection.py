@@ -19,6 +19,7 @@ def native_fixture(*, op_body: str = "Expr.bvar 0"):
                 "symbol": "historical_claim",
                 "kind": "theorem",
                 "expanded": True,
+                "imported_module": "",
                 "type_repr": "Expr.app (Expr.const `op []) (Expr.bvar 0)",
                 "value_repr": "Expr.const `Eq.refl []",
                 "references": ["op", "Eq.refl", "Nat"],
@@ -27,6 +28,7 @@ def native_fixture(*, op_body: str = "Expr.bvar 0"):
                 "symbol": "op",
                 "kind": "definition",
                 "expanded": True,
+                "imported_module": "",
                 "type_repr": "Expr.forallE Nat Nat",
                 "value_repr": op_body,
                 "references": ["Nat"],
@@ -35,6 +37,7 @@ def native_fixture(*, op_body: str = "Expr.bvar 0"):
                 "symbol": "Eq.refl",
                 "kind": "theorem",
                 "expanded": False,
+                "imported_module": "Init.Core",
                 "type_repr": "",
                 "value_repr": "",
                 "references": [],
@@ -43,6 +46,7 @@ def native_fixture(*, op_body: str = "Expr.bvar 0"):
                 "symbol": "Nat",
                 "kind": "inductive",
                 "expanded": False,
+                "imported_module": "Init.Core",
                 "type_repr": "",
                 "value_repr": "",
                 "references": [],
@@ -55,6 +59,9 @@ def test_native_projection_preserves_local_and_imported_boundaries():
     projected = project_native_probe(native_fixture())
     assert projected["root_symbol"] == "historical_claim"
     assert projected["imported_boundaries"] == ["Eq.refl", "Nat"]
+    assert projected["imported_modules"] == {
+        "Eq.refl": "Init.Core", "Nat": "Init.Core"
+    }
     assert projected["support_claimed_complete"] is False
     assert projected["semantic_serialization_soundness_established"] is False
     assert projected["source_authenticity_verified"] is False
@@ -89,7 +96,8 @@ def test_native_semantic_body_drift_changes_local_node_identity():
         (lambda x: x.update({"root": "Nat"}), "root"),
         (lambda x: x["items"].append({
             "symbol": "Unreachable", "kind": "definition",
-            "expanded": True, "type_repr": "Nat", "value_repr": "Nat",
+            "expanded": True, "imported_module": "",
+            "type_repr": "Nat", "value_repr": "Nat",
             "references": [],
         }), "unreachable"),
     ],
@@ -118,3 +126,18 @@ def test_lexical_equivalence_is_not_a_completeness_proof():
     assert source == same
     assert source["support_claimed_complete"] is False
     assert source["applicability_proved"] is False
+
+
+def test_imported_module_origin_is_mandatory_and_bound_to_digest():
+    base = native_fixture()
+    alternate = deepcopy(base)
+    alternate["items"][2]["imported_module"] = "Other.Module"
+    old = project_native_probe(base)
+    new = project_native_probe(alternate)
+    src = {n["symbol"]: n for n in old["support_nodes"]}
+    dst = {n["symbol"]: n for n in new["support_nodes"]}
+    assert src["Eq.refl"]["semantic_sha256"] != dst["Eq.refl"]["semantic_sha256"]
+    invalid = native_fixture()
+    invalid["items"][2]["imported_module"] = ""
+    with pytest.raises(ValueError, match="imported module"):
+        project_native_probe(invalid)
