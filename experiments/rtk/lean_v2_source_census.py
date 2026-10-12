@@ -42,6 +42,22 @@ def _git(repo: Path, *args: str, timeout: int = 25) -> str:
     return run.stdout
 
 
+def _git_blob(repo: Path, source_sha: str, path: str) -> bytes:
+    """Fetch exact historical blob bytes without text-mode newline conversion."""
+    try:
+        run = subprocess.run(
+            ["git", "-C", str(repo), "show", f"{source_sha}:{path}"],
+            capture_output=True,
+            timeout=25,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise ValueError("source Git blob unavailable") from error
+    if run.returncode != 0 or len(run.stdout) > 65536:
+        raise ValueError("source Git blob missing or oversize")
+    return run.stdout
+
+
 def _sha256(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
@@ -102,12 +118,12 @@ def source_only_transition_census(
             exclusions.append({"path": path, "reason": "invalid_path"})
             continue
         try:
-            source = _git(repo_path, "show", f"{source_sha}:{path}")
-        except ValueError:
+            source_bytes = _git_blob(repo_path, source_sha, path)
+            source = source_bytes.decode("utf-8")
+        except (ValueError, UnicodeError):
             exclusions.append({"path": path, "reason": "source_file_unavailable"})
             continue
-        source_bytes = source.encode("utf-8")
-        if not source_bytes or len(source_bytes) > 65536:
+        if not source_bytes:
             exclusions.append({"path": path, "reason": "source_size_unsupported"})
             continue
         proofs = _source_theorems(source)
