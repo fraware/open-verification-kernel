@@ -16,7 +16,12 @@ an authenticated third-party evidence bundle, or a production authorization.
 - Source-side and target-side native structural `Lean.Expr` JSON logs.
 - A dual-toolchain native `.olean` comparison record, with per-module digests.
 - A structural source/target expression comparison record.
-- Exact historical proof *source bytes* (used only for identity).
+- Exact historical proof *source bytes*, plus the precise source and
+  target `.lean` input file bytes submitted to the native Lean checker.
+  The source file must contain the historical proof-byte sequence
+  **exactly once**. The target file must exclude that byte sequence
+  and contain the explicitly unproved axiom goal. Their exact
+  SHA-256 digests are separately preserved in the envelope.
 
 There is **no argument accepting an oracle result**. The function refuses
 extra environment record fields, truth/replay authority flags, altered
@@ -109,3 +114,16 @@ RTK transport SUT and independently sealed prospective evaluation.
 
 No experimental success should be described as a universal Lean
 transport soundness result or an authorization of security reliance.
+
+## Exact source-proof/target-goal input binding
+
+The post-audit revision adds direct checked-input-file identity checks.
+The source proof term digest alone did not prove that the exact source
+file submitted to Lean contained those bytes. The bridge now requires
+both native checker input files and refuses a missing or duplicated old
+proof term in the source file, that proof term appearing in the unproved
+target file, or incorrect source theorem/target axiom declarations.
+The exact source and target file SHA-256 values accompany the native
+log fingerprints. These checks establish **internal input identity**
+under this development workflow; they do not authenticate the runner or
+prove the log was produced by executing those specific file bytes.
