@@ -1,0 +1,135 @@
+{
+  "schema_version": "rtk.lean_v2.repository_discovery.preoracle.v1",
+  "status": "SOURCE_CANDIDATE_UNQUALIFIED",
+  "discovery_utc_date": "2026-10-11",
+  "discovery_query": "language:Lean stars:>50 created:<2025-01-01 archived:false",
+  "results_requested": 20,
+  "results_received": 20,
+  "sort_note": "GitHub provider default relevance order retained exactly; repeat search need not reproduce order",
+  "source_inspection_performed_for_this_ledger": false,
+  "target_native_checks_performed": false,
+  "sut_predictions_performed": false,
+  "historical_selections_v0_v1_unmodified": true,
+  "records": [
+    {
+      "rank": 0,
+      "repository": "leanprover/lean4",
+      "status": "EXCLUDED_DEVELOPMENT_REPOSITORY",
+      "reason": "used to develop external Lean native replay adapter in PR #182"
+    },
+    {
+      "rank": 1,
+      "repository": "leanprover-community/mathlib4",
+      "status": "UNQUALIFIED",
+      "reason": null
+    },
+    {
+      "rank": 2,
+      "repository": "ImperialCollegeLondon/FLT",
+      "status": "UNQUALIFIED",
+      "reason": null
+    },
+    {
+      "rank": 3,
+      "repository": "leanprover-community/physlib",
+      "status": "UNQUALIFIED",
+      "reason": null
+    },
+    {
+      "rank": 4,
+      "repository": "uwdb/Cosette",
+      "status": "UNQUALIFIED",
+      "reason": null
+    },
+    {
+      "rank": 5,
+      "repository": "AndrasKovacs/smalltt",
+      "status": "UNQUALIFIED",
+      "reason": null
+    },
+    {
+      "rank": 6,
+      "repository": "teorth/equational_theories",
+      "status": "UNQUALIFIED",
+      "reason": null
+    },
+    {
+      "rank": 7,
+      "repository": "lecopivo/SciLean",
+      "status": "UNQUALIFIED",
+      "reason": null
+    },
+    {
+      "rank": 8,
+      "repository": "leanprover-community/batteries",
+      "status": "UNQUALIFIED",
+      "reason": null
+    },
+    {
+      "rank": 9,
+      "repository": "digama0/mm0",
+      "status": "UNQUALIFIED",
+      "reason": null
+    },
+    {
+      "rank": 10,
+      "repository": "PatrickMassot/GlimpseOfLean",
+      "status": "UNQUALIFIED",
+      "reason": null
+    },
+    {
+      "rank": 11,
+      "repository": "leanprover-community/aesop",
+      "status": "UNQUALIFIED",
+      "reason": null
+    },
+    {
+      "rank": 12,
+      "repository": "dselsam/certigrad",
+      "status": "UNQUALIFIED",
+      "reason": null
+    },
+    {
+      "rank": 13,
+      "repository": "leanprover/verso",
+      "status": "UNQUALIFIED",
+      "reason": null
+    },
+    {
+      "rank": 14,
+      "repository": "leanprover-community/NNG4",
+      "status": "UNQUALIFIED",
+      "reason": null
+    },
+    {
+      "rank": 15,
+      "repository": "AlexKontorovich/PrimeNumberTheoremAnd",
+      "status": "UNQUALIFIED",
+      "reason": null
+    },
+    {
+      "rank": 16,
+      "repository": "Verified-zkEVM/ArkLib",
+      "status": "UNQUALIFIED",
+      "reason": null
+    },
+    {
+      "rank": 17,
+      "repository": "lambdaclass/concrete",
+      "status": "UNQUALIFIED",
+      "reason": null
+    },
+    {
+      "rank": 18,
+      "repository": "ImperialCollegeLondon/formalising-mathematics",
+      "status": "UNQUALIFIED",
+      "reason": null
+    },
+    {
+      "rank": 19,
+      "repository": "leanprover-community/lean4-metaprogramming-book",
+      "status": "UNQUALIFIED",
+      "reason": null
+    }
+  ]
+}
