@@ -19,7 +19,10 @@ run_cmd do
     visited := visited.insert current
     let some ci := env.find? current
       | throwError m!"RTK_SOURCE_PROBE_MISSING_CONSTANT: {current}"
-    let refs := ci.getUsedConstantsAsSet.toList.toArray
+    -- Expand only two known local declarations in this scoped native pilot.
+    -- Imported constant bodies are a TRUST BOUNDARY, not proved complete.
+    let local := current == root || current == `op
+    let refs := if local then ci.getUsedConstantsAsSet.toList.toArray else #[]
     let kind : String := match ci with
       | .thmInfo _ => "theorem"
       | .defnInfo _ => "definition"
@@ -29,7 +32,7 @@ run_cmd do
       | .recInfo _ => "recursor"
       | .inductInfo _ => "inductive"
       | .quotInfo _ => "quotient"
-    let body : String := match ci with
+    let body : String := if !local then "" else match ci with
       | .thmInfo v => toString (repr v.value)
       | .defnInfo v => toString (repr v.value)
       | .opaqueInfo v => toString (repr v.value)
@@ -38,7 +41,8 @@ run_cmd do
     items := items.push <| Json.mkObj [
       ("symbol", Json.str current.toString),
       ("kind", Json.str kind),
-      ("type_repr", Json.str (toString (repr ci.type))),
+      ("expanded", Json.bool local),
+      ("type_repr", Json.str (if local then toString (repr ci.type) else "")),
       ("value_repr", Json.str body),
       ("references", Json.arr depNames)
     ]
@@ -48,5 +52,6 @@ run_cmd do
   logInfo m!"RTK_NATIVE_SUPPORT_JSON={Json.compress (Json.mkObj [
     ("schema_version", Json.str "rtk.lean_native_support_probe.v1-development"),
     ("root", Json.str root.toString),
+    ("imported_boundary_expansion_complete", Json.bool false),
     ("items", Json.arr items)
   ])}"
