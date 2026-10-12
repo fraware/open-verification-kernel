@@ -23,7 +23,16 @@ run_cmd do
       | throwError m!"RTK_SOURCE_PROBE_MISSING_CONSTANT: {current}"
     -- Expand every declaration originating in the checked source module.
     -- Imported constant bodies are a TRUST BOUNDARY, not proved complete.
-    let isLocal := (env.getModuleIdxFor? current).isNone
+    let moduleIdx? := env.getModuleIdxFor? current
+    let isLocal := moduleIdx?.isNone
+    let importedModule : String := match moduleIdx? with
+      | none => ""
+      | some idx =>
+        match env.allImportedModuleNames[idx.toNat]? with
+        | some moduleName => moduleName.toString
+        | none => ""
+    if !isLocal && importedModule == "" then
+      throwError m!"RTK_NATIVE_SUPPORT_MISSING_IMPORTED_MODULE: {current}"
     let refs := if isLocal then ci.getUsedConstantsAsSet.toList.toArray else #[]
     let kind : String := match ci with
       | .thmInfo _ => "theorem"
@@ -44,6 +53,7 @@ run_cmd do
       ("symbol", Json.str current.toString),
       ("kind", Json.str kind),
       ("expanded", Json.bool isLocal),
+      ("imported_module", Json.str importedModule),
       ("type_repr", Json.str (if isLocal then toString (repr ci.type) else "")),
       ("value_repr", Json.str body),
       ("references", Json.arr depNames)
