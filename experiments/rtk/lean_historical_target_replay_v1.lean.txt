@@ -22,9 +22,15 @@ run_cmd do
   let target ← match Json.parse targetRaw with
     | .ok v => pure v
     | .error _ => throwError "RTK_TARGET_REPLAY_TARGET_JSON_INVALID"
-  unless (source.getObjVal? "schema_version") == .ok (Json.str "rtk.lean_separate_source_proof_payload.v1-development") do
+  let sourceSchema ← match source.getObjVal? "schema_version" with
+    | .ok v => pure v
+    | .error _ => throwError "RTK_TARGET_REPLAY_SOURCE_SCHEMA_MISSING"
+  unless sourceSchema == Json.str "rtk.lean_separate_source_proof_payload.v1-development" do
     throwError "RTK_TARGET_REPLAY_SOURCE_SCHEMA_INVALID"
-  unless (target.getObjVal? "schema_version") == .ok (Json.str "rtk.lean_target_claim_export.v1-development") do
+  let targetSchema ← match target.getObjVal? "schema_version" with
+    | .ok v => pure v
+    | .error _ => throwError "RTK_TARGET_REPLAY_TARGET_SCHEMA_MISSING"
+  unless targetSchema == Json.str "rtk.lean_target_claim_export.v1-development" do
     throwError "RTK_TARGET_REPLAY_TARGET_SCHEMA_INVALID"
   let sourceProofAst ← match source.getObjVal? "proof_ast" with
     | .ok v => pure v
@@ -45,8 +51,10 @@ run_cmd do
   let proof ← match rtkDecodeExpr sourceProofAst 1024 with
     | .ok e => pure e
     | .error reason => throwError m!"RTK_TARGET_REPLAY_PROOF_DECODE:{reason}"
-  unless rtkStrictExprAst proof == sourceProofAst &&
-      rtkStrictExprAst expectedType == targetClaimAst do
+  let reconstructedProofAst ← rtkStrictExprAst proof
+  let reconstructedTargetAst ← rtkStrictExprAst expectedType
+  unless reconstructedProofAst == sourceProofAst &&
+      reconstructedTargetAst == targetClaimAst do
     throwError "RTK_TARGET_REPLAY_AST_ROUNDTRIP_MISMATCH"
   -- Only the native checker result below provides the adjudication.
   -- No predictor, footprint classifier, or fresh proof is consulted.
