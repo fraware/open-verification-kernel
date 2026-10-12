@@ -1,0 +1,69 @@
+/-
+Development-only introspection of native Lean ConstantInfo and expression
+references. This footer runs only after a native checked theorem definition.
+Not a proof of semantic completeness; checker and source version are pinned.
+-/
+open Lean Elab Command
+
+run_cmd do
+  let env ← getEnv
+  let root : Name := `historical_claim
+  let mut pending : Array Name := #[root]
+  let mut visited : NameSet := {}
+  let mut items : Array Json := #[]
+  for _ in [:1024] do
+    if pending.isEmpty then
+      break
+    let current := pending.back!
+    pending := pending.pop
+    if visited.contains current then
+      continue
+    visited := visited.insert current
+    let some ci := env.find? current
+      | throwError m!"RTK_SOURCE_PROBE_MISSING_CONSTANT: {current}"
+    -- Expand every declaration originating in the checked source module.
+    -- Imported constant bodies are a TRUST BOUNDARY, not proved complete.
+    let moduleIdx? := env.getModuleIdxFor? current
+    let isLocal := moduleIdx?.isNone
+    let importedModule : String := match moduleIdx? with
+      | none => ""
+      | some idx =>
+        match env.allImportedModuleNames[idx.toNat]? with
+        | some moduleName => moduleName.toString
+        | none => ""
+    if !isLocal && importedModule == "" then
+      throwError m!"RTK_NATIVE_SUPPORT_MISSING_IMPORTED_MODULE: {current}"
+    let refs := if isLocal then ci.getUsedConstantsAsSet.toList.toArray else #[]
+    let kind : String := match ci with
+      | .thmInfo _ => "theorem"
+      | .defnInfo _ => "definition"
+      | .opaqueInfo _ => "opaque"
+      | .axiomInfo _ => "axiom"
+      | .ctorInfo _ => "constructor"
+      | .recInfo _ => "recursor"
+      | .inductInfo _ => "inductive"
+      | .quotInfo _ => "quotient"
+    let body : String := if !isLocal then "" else match ci with
+      | .thmInfo v => toString (repr v.value)
+      | .defnInfo v => toString (repr v.value)
+      | .opaqueInfo v => toString (repr v.value)
+      | _ => ""
+    let depNames : Array Json := refs.map fun n => Json.str n.toString
+    items := items.push <| Json.mkObj [
+      ("symbol", Json.str current.toString),
+      ("kind", Json.str kind),
+      ("expanded", Json.bool isLocal),
+      ("imported_module", Json.str importedModule),
+      ("type_repr", Json.str (if isLocal then toString (repr ci.type) else "")),
+      ("value_repr", Json.str body),
+      ("references", Json.arr depNames)
+    ]
+    pending := pending ++ refs
+  unless pending.isEmpty do
+    throwError "RTK_SOURCE_PROBE_EXCEEDED_NODE_LIMIT"
+  logInfo m!"RTK_NATIVE_SUPPORT_JSON={Json.compress (Json.mkObj [
+    ("schema_version", Json.str "rtk.lean_native_support_probe.v1-development"),
+    ("root", Json.str root.toString),
+    ("imported_boundary_expansion_complete", Json.bool false),
+    ("items", Json.arr items)
+  ])}"
