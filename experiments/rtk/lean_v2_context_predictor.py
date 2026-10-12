@@ -26,7 +26,6 @@ from experiments.rtk.lean_v2_preoracle import (
     FrozenLeanCase,
     Prediction,
     PredictionBundle,
-    canonical_bytes,
     digest,
 )
 
