@@ -3,41 +3,6 @@ name: RTK Lean bounded strict declaration closure development
 on:
   pull_request:
     branches:
-      - research/rtk-lean-strict-declaration-closure-v1
-    paths:
-      - .github/workflows/rtk-lean-strict-declaration-closure-v1.yml
-      - experiments/rtk/lean_native_support_footer.lean.txt
-      - experiments/rtk/lean_native_support_projection.py
-      - experiments/rtk/lean_imported_proofrefs_v1.py
-      - experiments/rtk/lean_dual_installed_env_v1.py
-      - experiments/rtk/lean_imported_drift_fixtures_v1/**
-      - experiments/rtk/lean_structural_expr_probe_v1.lean.txt
-      - experiments/rtk/lean_structural_expr_v1.py
-      - tests/test_rtk_lean_structural_expr_v1.py
-      - experiments/rtk/lean_native_preoracle_envelope_v1.py
-      - experiments/rtk/lean_expr_decoder_roundtrip_v1.lean.txt
-      - experiments/rtk/lean_expr_roundtrip_v1.py
-      - experiments/rtk/lean_second_process_source_v1.py
-      - experiments/rtk/lean_second_process_driver_v1.lean.txt
-      - experiments/rtk/lean_second_process_witness_v1.py
-      - experiments/rtk/lean_axiom_dependency_probe_v1.lean.txt
-      - experiments/rtk/lean_axiom_support_v1.py
-      - experiments/rtk/lean_strict_decl_closure_v1.lean.txt
-      - experiments/rtk/lean_strict_decl_closure_v1.py
-      - experiments/rtk/lean_historical_target_oracle_v1.py
-      - experiments/rtk/lean_historical_target_replay_v1.lean.txt
-      - tests/test_rtk_lean_historical_target_oracle_v1.py
-      - tests/test_rtk_lean_strict_decl_closure_v1.py
-      - tests/test_rtk_lean_axiom_support_v1.py
-      - tests/test_rtk_lean_second_process_v1.py
-      - tests/test_rtk_lean_expr_roundtrip_v1.py
-      - tests/test_rtk_lean_native_preoracle_envelope_v1.py
-      - tests/test_rtk_lean_dual_installed_env_v1.py
-      - docs/RTK_LEAN_OLEAN_PROOFREFS_V1_DEVELOPMENT.md
-      - tests/test_rtk_lean_imported_proofrefs_v1.py
-      - experiments/rtk/lean_context_drift_fixtures_v1/**
-  push:
-    branches:
       - research/rtk-lean-independent-target-certificate-oracle-v1
     paths:
       - .github/workflows/rtk-lean-strict-declaration-closure-v1.yml
@@ -60,6 +25,45 @@ on:
       - experiments/rtk/lean_strict_decl_closure_v1.lean.txt
       - experiments/rtk/lean_strict_decl_closure_v1.py
       - experiments/rtk/lean_historical_target_oracle_v1.py
+      - experiments/rtk/lean_preoracle_byte_identity_v1.py
+      - tests/test_rtk_lean_preoracle_byte_identity_v1.py
+      - experiments/rtk/lean_historical_target_replay_v1.lean.txt
+      - tests/test_rtk_lean_historical_target_oracle_v1.py
+      - tests/test_rtk_lean_strict_decl_closure_v1.py
+      - tests/test_rtk_lean_axiom_support_v1.py
+      - tests/test_rtk_lean_second_process_v1.py
+      - tests/test_rtk_lean_expr_roundtrip_v1.py
+      - tests/test_rtk_lean_native_preoracle_envelope_v1.py
+      - tests/test_rtk_lean_dual_installed_env_v1.py
+      - docs/RTK_LEAN_OLEAN_PROOFREFS_V1_DEVELOPMENT.md
+      - tests/test_rtk_lean_imported_proofrefs_v1.py
+      - experiments/rtk/lean_context_drift_fixtures_v1/**
+  push:
+    branches:
+      - research/rtk-lean-preoracle-byte-identity-v1
+    paths:
+      - .github/workflows/rtk-lean-strict-declaration-closure-v1.yml
+      - experiments/rtk/lean_native_support_footer.lean.txt
+      - experiments/rtk/lean_native_support_projection.py
+      - experiments/rtk/lean_imported_proofrefs_v1.py
+      - experiments/rtk/lean_dual_installed_env_v1.py
+      - experiments/rtk/lean_imported_drift_fixtures_v1/**
+      - experiments/rtk/lean_structural_expr_probe_v1.lean.txt
+      - experiments/rtk/lean_structural_expr_v1.py
+      - tests/test_rtk_lean_structural_expr_v1.py
+      - experiments/rtk/lean_native_preoracle_envelope_v1.py
+      - experiments/rtk/lean_expr_decoder_roundtrip_v1.lean.txt
+      - experiments/rtk/lean_expr_roundtrip_v1.py
+      - experiments/rtk/lean_second_process_source_v1.py
+      - experiments/rtk/lean_second_process_driver_v1.lean.txt
+      - experiments/rtk/lean_second_process_witness_v1.py
+      - experiments/rtk/lean_axiom_dependency_probe_v1.lean.txt
+      - experiments/rtk/lean_axiom_support_v1.py
+      - experiments/rtk/lean_strict_decl_closure_v1.lean.txt
+      - experiments/rtk/lean_strict_decl_closure_v1.py
+      - experiments/rtk/lean_historical_target_oracle_v1.py
+      - experiments/rtk/lean_preoracle_byte_identity_v1.py
+      - tests/test_rtk_lean_preoracle_byte_identity_v1.py
       - experiments/rtk/lean_historical_target_replay_v1.lean.txt
       - tests/test_rtk_lean_historical_target_oracle_v1.py
       - tests/test_rtk_lean_strict_decl_closure_v1.py
@@ -636,17 +640,19 @@ jobs:
           print("STRICT_LEAN_CLOSURE_NATIVE_DEVELOPMENT_PASS")
           PY
 
-      - name: Independently replay serialized historical proof in two target contexts (development oracle)
+      - name: Seal strict pre-oracle identity predictions before independent target certificate replay
         shell: bash
         run: |
           set -euo pipefail
           ROOT="$RUNNER_TEMP/imported-semantic-drift"
           BASE="$GITHUB_WORKSPACE/.rtk-imported-build"
           MODULE="$BASE/RTKSemanticSupport.lean"
-          TARGET_OLEAN="$RTK_TARGET_ROOT/lib/lean/RTKSemanticSupport.olean"
+          OLEAN="$RTK_TARGET_ROOT/lib/lean/RTKSemanticSupport.olean"
           FIX=experiments/rtk/lean_imported_drift_fixtures_v1
           test -s "$ROOT/second_process_checked_source_claim.json"
           test -s "$ROOT/target_structural.native.log"
+          test ! -e "$ROOT/target_replay_equal.native.log"
+          test ! -e "$ROOT/target_replay_changed.native.log"
           python -m experiments.rtk.lean_historical_target_oracle_v1 prepare \
             --source-payload "$BASE/rtk_source_proof_payload.json" \
             --target-native-log "$ROOT/target_structural.native.log" \
@@ -658,6 +664,72 @@ jobs:
           cp "$BASE/rtk_target_claim_payload.json" "$ROOT/rtk_target_claim_payload.json"
           cp "$BASE/RTKHistoricalTargetReplay.lean" "$ROOT/RTKHistoricalTargetReplay.lean"
           cp "$BASE/rtk_source_proof_payload.json" "$ROOT/original_historical_proof_payload.json"
+
+          # Prediction source: source-checked proof receipt + exact target
+          # unproved claim + current target natively loaded import inventory.
+          # The old certificate is never replayed during this step.
+          for CONTROL in equal changed; do
+            if [ "$CONTROL" = equal ]; then
+              cp "$FIX/source_support.lean.txt" "$MODULE"
+            else
+              cp "$FIX/target_support.lean.txt" "$MODULE"
+            fi
+            "$RTK_TARGET_LEAN" -o "$OLEAN" "$MODULE"
+            "$RTK_TARGET_LEAN" "$ROOT/target_refs.lean" \
+              | tee "$ROOT/preoracle_target_refs_$CONTROL.native.log"
+            python -m experiments.rtk.lean_preoracle_byte_identity_v1 \
+              --environment "$ROOT/imported_semantic_drift_preoracle.json" \
+              --source-payload "$BASE/rtk_source_proof_payload.json" \
+              --source-native-witness "$ROOT/second_process_checked_source_claim.json" \
+              --target-payload "$BASE/rtk_target_claim_payload.json" \
+              --target-structural-log "$ROOT/target_structural.native.log" \
+              --target-reference-log "$ROOT/preoracle_target_refs_$CONTROL.native.log" \
+              --source-root "$RTK_SOURCE_ROOT" \
+              --target-root "$RTK_TARGET_ROOT" \
+              --source-checker "$RTK_SOURCE_LEAN" \
+              --target-checker "$RTK_TARGET_LEAN" \
+              --output "$ROOT/preoracle_byte_identity_$CONTROL.json"
+          done
+          python - "$ROOT" <<'PY'
+          import json
+          import pathlib
+          import sys
+          root = pathlib.Path(sys.argv[1])
+          equal = json.loads((root / "preoracle_byte_identity_equal.json").read_text())
+          changed = json.loads((root / "preoracle_byte_identity_changed.json").read_text())
+          assert equal["decision"] == "CONDITIONAL_IDENTITY_CANDIDATE"
+          assert changed["decision"] == "REVALIDATION_REQUIRED"
+          assert changed["changed_imported_modules"] == ["RTKSemanticSupport"]
+          for record in (equal, changed):
+              assert record["production_reliance_authorization"] is False
+              assert record["target_historical_proof_replayed"] is False
+              assert record["oracle_consulted"] is False
+              assert record["module_semantic_support_complete_proved"] is False
+          assert equal["historical_certificate_sha256"] == changed["historical_certificate_sha256"]
+          assert equal["target_unproved_claim_payload_sha256"] == changed["target_unproved_claim_payload_sha256"]
+          print("TWO_PREORACLE_PREDICTIONS_COMPUTED_WITHOUT_TARGET_REPLAY")
+          PY
+          sha256sum "$ROOT/preoracle_byte_identity_equal.json" \
+            "$ROOT/preoracle_byte_identity_changed.json" \
+            > "$ROOT/sealed_preoracle_predictions.sha256"
+          sha256sum --check --strict "$ROOT/sealed_preoracle_predictions.sha256"
+          test ! -e "$ROOT/target_replay_equal.native.log"
+          test ! -e "$ROOT/target_replay_changed.native.log"
+          echo "PREORACLE_BYTE_IDENTITY_PREDICTIONS_SEALED_BEFORE_ADJUDICATION"
+
+      - name: Independently replay serialized historical proof in two target contexts (development oracle)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/imported-semantic-drift"
+          BASE="$GITHUB_WORKSPACE/.rtk-imported-build"
+          MODULE="$BASE/RTKSemanticSupport.lean"
+          TARGET_OLEAN="$RTK_TARGET_ROOT/lib/lean/RTKSemanticSupport.olean"
+          FIX=experiments/rtk/lean_imported_drift_fixtures_v1
+          test -s "$ROOT/second_process_checked_source_claim.json"
+          test -s "$ROOT/target_structural.native.log"
+          test -s "$ROOT/sealed_preoracle_predictions.sha256"
+          sha256sum --check --strict "$ROOT/sealed_preoracle_predictions.sha256"
 
           # Equal-definition target: exact exported source certificate is accepted.
           cp "$FIX/source_support.lean.txt" "$MODULE"
@@ -692,6 +764,7 @@ jobs:
             --expected-decision INADMISSIBLE \
             --output "$ROOT/historical_replay_changed_development.json"
           cmp "$ROOT/original_historical_proof_payload.json" "$BASE/rtk_source_proof_payload.json"
+          sha256sum --check --strict "$ROOT/sealed_preoracle_predictions.sha256"
 
           # Fresh target proof is a separate target-truth control and never
           # enters the replay driver's environment or predictor inputs.
@@ -716,6 +789,11 @@ jobs:
           assert positive["target_imported_olean_sha256"] != negative["target_imported_olean_sha256"]
           assert not positive["production_reliance_authorized"]
           assert not negative["production_reliance_authorized"]
+          assert json.loads((root / "preoracle_byte_identity_equal.json").read_text())["decision"] == "CONDITIONAL_IDENTITY_CANDIDATE"
+          assert json.loads((root / "preoracle_byte_identity_changed.json").read_text())["decision"] == "REVALIDATION_REQUIRED"
+          assert json.loads((root / "preoracle_byte_identity_equal.json").read_text())["current_target_loaded_inventory_sha256"] == (
+              json.loads((root / "preoracle_byte_identity_equal.json").read_text())["source_loaded_inventory_sha256"]
+          )
           print("EXACT_HISTORICAL_CERTIFICATE_INDEPENDENT_TARGET_REPLAY_CONTROL_PASS")
           PY
 

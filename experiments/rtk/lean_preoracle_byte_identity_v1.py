@@ -1,0 +1,215 @@
+"""Strict *pre-oracle* byte-identity candidate for a fixed Lean 4.14 fixture.
+
+This module deliberately has no target replay input, no oracle parser and no
+production VALID output. Identity of all natively reported imported olean
+bytes plus a pinned checker yields only a CONDITIONAL candidate because neither
+semantic support completeness nor external provenance/policy has been proved.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+from pathlib import Path
+from typing import Any
+
+from experiments.rtk.lean_dual_installed_env_v1 import _installed_root
+from experiments.rtk.lean_historical_target_oracle_v1 import (
+    _source, export_target_claim,
+)
+from experiments.rtk.lean_imported_proofrefs_v1 import (
+    _EXPECTED_LEAN_BINARY, _environment_modules, imported_olean_snapshot,
+)
+from experiments.rtk.lean_native_preoracle_envelope_v1 import _modules
+from experiments.rtk.lean_structural_expr_v1 import _canonical, _digest
+
+_SCHEMA = "rtk.lean_preoracle_byte_identity.v1-development"
+
+
+def _hash(raw: bytes) -> str:
+    return hashlib.sha256(raw).hexdigest()
+
+
+def evaluate_preoracle_identity(
+    *,
+    environment: dict[str, Any],
+    source_payload_bytes: bytes,
+    source_native_witness: dict[str, Any],
+    target_payload_bytes: bytes,
+    target_structural_log: str,
+    current_target_reference_log: str,
+    source_root: Path,
+    target_root: Path,
+    source_checker: Path,
+    target_checker: Path,
+) -> dict[str, Any]:
+    """Do not accept or access target-kernel replay records at this boundary."""
+    if not isinstance(environment, dict) or environment.get(
+        "schema_version"
+    ) != "rtk.lean_dual_installed_environment.v1-development":
+        raise ValueError("unknown pre-oracle environment schema")
+    if (
+        environment.get("checker_binary_sha256") != _EXPECTED_LEAN_BINARY
+        or environment.get("separate_executable_paths_and_inodes_verified") is not True
+        or environment.get("historical_proof_replayed_on_target") is not False
+        or environment.get("native_transport_oracle_executed") is not False
+        or environment.get("reliance_authorization") is not False
+        or environment.get("transport_applicability") != "UNDETERMINED"
+    ):
+        raise ValueError("pre-oracle environment is contaminated or unsupported")
+    if (
+        environment.get("independently_administered_builds_verified") is not False
+        or environment.get("module_dependency_semantic_closure_proved") is not False
+        or environment.get("target_claim_established") is not False
+    ):
+        raise ValueError("unsubstantiated source/target authority flags")
+
+    src = _installed_root(source_root, source_checker)
+    tgt = _installed_root(target_root, target_checker)
+    if src == tgt or source_checker.samefile(target_checker):
+        raise ValueError("distinct installed checker contexts required")
+    if (
+        src != Path(environment.get("source_toolchain_root", "")).resolve()
+        or tgt != Path(environment.get("target_toolchain_root", "")).resolve()
+    ):
+        raise ValueError("native imported context roots do not match source record")
+
+    source = _source(source_payload_bytes)
+    if not isinstance(source_native_witness, dict) or any(
+        source_native_witness.get(k) is not True for k in (
+            "separate_process_native_source_proof_type_checked",
+            "native_source_proof_type_matches_serialized_claim",
+            "historical_theorem_not_in_new_environment",
+        )
+    ) or (
+        source_native_witness.get("serialized_payload_sha256")
+        != _hash(source_payload_bytes)
+        or source_native_witness.get("source_checked_proof_ast_sha256")
+        != _digest(source["proof_ast"])
+        or source_native_witness.get("source_claim_ast_sha256")
+        != _digest(source["claim_ast"])
+        or source_native_witness.get("source_checker_input_sha256")
+        != source["source_checked_file_sha256"]
+    ):
+        raise ValueError("source certificate not bound to native kernel receipt")
+    if any(source_native_witness.get(k) is not False for k in (
+        "target_historical_proof_replayed", "target_claim_established",
+        "complete_semantic_support_proved", "reliance_authorization",
+    )):
+        raise ValueError("source kernel receipt contains target or relying authority")
+
+    target = json.loads(target_payload_bytes)
+    if target != export_target_claim(
+        source_payload_bytes=source_payload_bytes,
+        target_native_log=target_structural_log,
+    ):
+        raise ValueError("unproved native target claim is not bound to exported AST")
+
+    source_inventory = environment.get("source_modules")
+    target_initial_inventory = environment.get("target_modules")
+    src_record, source_total, source_digest = _modules(source_inventory)
+    dst_record, _, _ = _modules(target_initial_inventory)
+    if (
+        source_digest != environment.get("source_module_inventory_sha256")
+        or source_total != environment.get("source_loaded_bytes")
+        or len(src_record) != environment.get("source_loaded_module_count")
+    ):
+        raise ValueError("historical imported module inventory is internally inconsistent")
+    actual_source = imported_olean_snapshot(
+        {name: name for name in src_record}, src
+    )
+    if actual_source != src_record:
+        raise ValueError("source imported module bytes changed since native receipt")
+    target_native_modules = _environment_modules(current_target_reference_log)
+    if set(target_native_modules) != set(src_record) or (
+        set(target_native_modules) != set(dst_record)
+    ):
+        return _result(
+            source_payload_bytes, target_payload_bytes, src_record, {}, 
+            "UNRESOLVED", ["loaded_import_inventory_changed"],
+        )
+    try:
+        actual_target = imported_olean_snapshot(
+            {name: name for name in target_native_modules}, tgt
+        )
+    except (ValueError, OSError):
+        return _result(
+            source_payload_bytes, target_payload_bytes, src_record, {},
+            "UNRESOLVED", ["target_import_acquisition_incomplete"],
+        )
+    changed = sorted(
+        name for name in src_record
+        if src_record[name]["file_sha256"] != actual_target[name]["file_sha256"]
+        or src_record[name]["file_size_bytes"] != actual_target[name]["file_size_bytes"]
+    )
+    return _result(
+        source_payload_bytes, target_payload_bytes, src_record, actual_target,
+        "REVALIDATION_REQUIRED" if changed else "CONDITIONAL_IDENTITY_CANDIDATE",
+        ["imported_olean_bytes_changed"] if changed
+        else ["exact_reported_loaded_olean_byte_identity"],
+        changed,
+    )
+
+
+def _result(
+    source: bytes, target: bytes, source_modules: dict, target_modules: dict,
+    decision: str, reasons: list[str], changed: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "schema_version": _SCHEMA,
+        "historical_certificate_sha256": _hash(source),
+        "target_unproved_claim_payload_sha256": _hash(target),
+        "source_loaded_inventory_sha256": _hash(_canonical(source_modules)),
+        "current_target_loaded_inventory_sha256": (
+            _hash(_canonical(target_modules)) if target_modules else None
+        ),
+        "source_loaded_module_count": len(source_modules),
+        "current_target_loaded_module_count": len(target_modules),
+        "decision": decision,
+        "reason_codes": reasons,
+        "changed_imported_modules": changed or [],
+        "candidate_for_reuse_under_explicit_unproved_premises": (
+            decision == "CONDITIONAL_IDENTITY_CANDIDATE"
+        ),
+        "full_kernel_environment_equivalence_proved": False,
+        "module_semantic_support_complete_proved": False,
+        "external_policy_and_provenance_authenticated": False,
+        "target_historical_proof_replayed": False,
+        "oracle_consulted": False,
+        "target_claim_truth_established": False,
+        "production_reliance_authorization": False,
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    for arg in (
+        "environment", "source-payload", "source-native-witness",
+        "target-payload", "target-structural-log", "target-reference-log",
+        "source-root", "target-root", "source-checker", "target-checker",
+        "output",
+    ):
+        parser.add_argument("--" + arg, required=True, type=Path)
+    args = parser.parse_args()
+    result = evaluate_preoracle_identity(
+        environment=json.loads(args.environment.read_text()),
+        source_payload_bytes=args.source_payload.read_bytes(),
+        source_native_witness=json.loads(args.source_native_witness.read_text()),
+        target_payload_bytes=args.target_payload.read_bytes(),
+        target_structural_log=args.target_structural_log.read_text(),
+        current_target_reference_log=args.target_reference_log.read_text(),
+        source_root=args.source_root,
+        target_root=args.target_root,
+        source_checker=args.source_checker,
+        target_checker=args.target_checker,
+    )
+    with args.output.open("x", encoding="utf-8") as out:
+        out.write(json.dumps(result, sort_keys=True, indent=2) + "\n")
+    print("PREORACLE_BYTE_IDENTITY_" + result["decision"] +
+          "_NO_PRODUCTION_AUTHORIZATION")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
