@@ -13,7 +13,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from experiments.rtk.lean_structural_expr_v1 import _structural_ast, _canonical
+from experiments.rtk.lean_structural_expr_v1 import _structural_ast, _canonical, _digest
 
 _SCHEMA = "rtk.lean_separate_source_proof_payload.v1-development"
 
@@ -62,6 +62,12 @@ def export_checked_source_proof(
         or b"Eq.refl n" not in checked_source_file
     ):
         raise ValueError("missing source declaration or historical proof source")
+    if _digest(native["theorem_value_ast"]) != native_envelope.get(
+        "source_checked_proof_expr_ast_sha256"
+    ) or _digest(native["theorem_type_ast"]) != native_envelope.get(
+        "statement_expr_ast_sha256"
+    ):
+        raise ValueError("checked source claim/proof AST digest mismatch")
 
     return {
         "schema_version": _SCHEMA,
