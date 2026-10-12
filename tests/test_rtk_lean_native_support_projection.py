@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
+import sys
 
 import pytest
 
-from experiments.rtk.lean_native_support_projection import project_native_probe
+from experiments.rtk.lean_native_support_projection import (
+    main,
+    project_native_probe,
+)
 
 
 def native_fixture(*, op_body: str = "Expr.bvar 0"):
@@ -141,3 +146,25 @@ def test_imported_module_origin_is_mandatory_and_bound_to_digest():
     invalid["items"][2]["imported_module"] = ""
     with pytest.raises(ValueError, match="imported module"):
         project_native_probe(invalid)
+
+
+def test_cli_refuses_unpinned_lean_binary(tmp_path, monkeypatch):
+    payload = {
+        "schema_version": "rtk.lean_native_support_probe.v1-development",
+        "checker_version": "4.14.0",
+        "checker_binary_sha256": "f" * 64,
+        "source": {},
+        "target": {},
+        "adjudication_is_independent": False,
+        "semantic_support_complete": False,
+        "development_only": True,
+    }
+    path = tmp_path / "native.json"
+    path.write_text(json.dumps(payload))
+    monkeypatch.setattr(sys, "argv", [
+        "projection", "--native-development-result", str(path),
+        "--output", str(tmp_path / "out.json"),
+    ])
+    with pytest.raises(SystemExit):
+        main()
+    assert not (tmp_path / "out.json").exists()
