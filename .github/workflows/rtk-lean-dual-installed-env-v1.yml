@@ -3,7 +3,7 @@ name: RTK Lean dual installed environments development
 on:
   pull_request:
     branches:
-      - research/rtk-lean-dual-installed-env-v1
+      - research/rtk-lean-olean-proofrefs-v1
     paths:
       - .github/workflows/rtk-lean-dual-installed-env-v1.yml
       - experiments/rtk/lean_native_support_footer.lean.txt
