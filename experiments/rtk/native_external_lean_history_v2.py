@@ -29,6 +29,12 @@ THEOREM_NAME = "HasType.det"
 # the immediately following blank line, not at an arbitrary secondary match.
 _START = re.compile("(?m)^theorem HasType[.]det(?![A-Za-z0-9_])")
 _VERSION = re.compile("Lean [(]version 4[.]14[.]0(?:,|[)])")
+# This particular external pilot is self-contained. The check intentionally
+# over-approximates unsupported declarations, including matches in comments;
+# rejected inputs stay out of the experiment instead of being called PASS.
+_UNSUPPORTED = re.compile(
+    "(?<![A-Za-z0-9_])(sorry|admit|axiom|unsafe|import)(?![A-Za-z0-9_])"
+)
 
 
 def _sha256(value: bytes) -> str:
@@ -61,6 +67,8 @@ def _read_exact(repo: Path, expected_commit: str, expected_blob: str) -> bytes:
     raw = path.read_bytes()
     if not raw or len(raw) > 16384 or bytes([0]) in raw:
         raise ValueError("external historical Lean file invalid or too large")
+    if _UNSUPPORTED.search(raw.decode("utf-8")):
+        raise ValueError("unsupported axiom/hole/import/unsafe construct in pilot")
     return raw
 
 
