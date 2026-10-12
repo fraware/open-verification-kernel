@@ -1,0 +1,126 @@
+name: RTK Lean semantic dependency drift development
+
+# Development-only native checks. No RTK prediction, no confirmatory corpus.
+on:
+  push:
+    branches:
+      - research/rtk-lean-context-transport-sut
+    paths:
+      - .github/workflows/rtk-lean-support-drift-v1.yml
+      - experiments/rtk/native_lean_replay_v2.py
+      - experiments/rtk/lean_context_drift_fixtures_v1/**
+      - tests/test_rtk_lean_v2_context_predictor.py
+  pull_request:
+    branches:
+      - research/rtk-v2-sealed-preoracle
+    paths:
+      - .github/workflows/rtk-lean-support-drift-v1.yml
+      - experiments/rtk/native_lean_replay_v2.py
+      - experiments/rtk/lean_context_drift_fixtures_v1/**
+      - tests/test_rtk_lean_v2_context_predictor.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native_lean_development_controls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact source revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+      - name: Install content-pinned elan bootstrap and fixed Lean toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+            https://github.com/leanprover/elan/releases/download/v4.2.3/elan-x86_64-unknown-linux-gnu.tar.gz \
+            --output "$RUNNER_TEMP/elan.tar.gz"
+          echo 'df0b2b3a439961ffcbb3985214365ffe40f49bc871df04dff268c7d8e21ca8b2  '"$RUNNER_TEMP"'/elan.tar.gz' | sha256sum --check --strict
+          tar --extract --gzip --file "$RUNNER_TEMP/elan.tar.gz" --directory "$RUNNER_TEMP" elan-init
+          "$RUNNER_TEMP/elan-init" -y --no-modify-path --default-toolchain none
+          "$HOME/.elan/bin/elan" toolchain install leanprover/lean4:v4.14.0
+          "$HOME/.elan/bin/elan" default leanprover/lean4:v4.14.0
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          "$HOME/.elan/bin/lean" --version | tee "$RUNNER_TEMP/lean-version.txt"
+          grep -F 'Lean (version 4.14.0,' "$RUNNER_TEMP/lean-version.txt"
+          grep -F 'commit 410fab728470' "$RUNNER_TEMP/lean-version.txt"
+          LEAN_BINARY="$("$HOME/.elan/bin/elan" which lean)"
+          sha256sum "$LEAN_BINARY"
+          test "$(sha256sum "$LEAN_BINARY" | cut -d ' ' -f 1)" = \
+            "eacf754d25ae86ea076882a34b9444f2485659d9df4266b821443b28ca95a215"
+
+      - name: Execute independent native Lean replay development controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile experiments/rtk/native_lean_replay_v2.py
+          mkdir -p "$RUNNER_TEMP/rtk-native-evidence"
+          FIX=experiments/rtk/lean_context_drift_fixtures_v1
+          LEAN="$HOME/.elan/bin/lean"
+          python experiments/rtk/native_lean_replay_v2.py \
+            --lean "$LEAN" \
+            --source "$FIX/source_declaration.lean.txt" \
+            --target "$FIX/source_declaration.lean.txt" \
+            --evidence "$FIX/historical_proof.term.txt" \
+            --output "$RUNNER_TEMP/rtk-native-evidence/unchanged.json"
+          python experiments/rtk/native_lean_replay_v2.py \
+            --lean "$LEAN" \
+            --source "$FIX/source_declaration.lean.txt" \
+            --target "$FIX/target_declaration.lean.txt" \
+            --evidence "$FIX/historical_proof.term.txt" \
+            --fresh "$FIX/fresh_target_proof.term.txt" \
+            --output "$RUNNER_TEMP/rtk-native-evidence/changed.json"
+          python - "$RUNNER_TEMP/rtk-native-evidence" <<'PY'
+          import hashlib
+          import json
+          import pathlib
+          import sys
+
+          root = pathlib.Path(sys.argv[1])
+          same = json.loads((root / "unchanged.json").read_text())
+          changed = json.loads((root / "changed.json").read_text())
+          expected_digest = hashlib.sha256(pathlib.Path(
+              "experiments/rtk/lean_context_drift_fixtures_v1/historical_proof.term.txt"
+          ).read_bytes()).hexdigest()
+          assert same["source_native_acceptance"] == "ACCEPTED", same
+          assert same["target_historical_replay"] == "ACCEPTED", same
+          assert same["historical_evidence_applicability"] == "ADMISSIBLE", same
+          assert changed["source_native_acceptance"] == "ACCEPTED", changed
+          assert changed["historical_evidence_applicability"] == "INADMISSIBLE", changed
+          assert changed["target_historical_replay"] == "CHECKER_REJECTED", changed
+          assert changed["fresh_target_execution"] == "ACCEPTED", changed
+          assert changed["target_claim_status"] == "ESTABLISHED", changed
+          assert same["historical_proof_sha256"] == expected_digest
+          assert changed["historical_proof_sha256"] == expected_digest
+          directory = pathlib.Path("experiments/rtk/lean_context_drift_fixtures_v1")
+          source_text = (directory / "source_declaration.lean.txt").read_text()
+          target_text = (directory / "target_declaration.lean.txt").read_text()
+          source_claim = [
+              line for line in source_text.splitlines()
+              if line.startswith("theorem historical_claim ")
+          ]
+          target_claim = [
+              line for line in target_text.splitlines()
+              if line.startswith("theorem historical_claim ")
+          ]
+          assert len(source_claim) == len(target_claim) == 1
+          assert source_claim == target_claim, (source_claim, target_claim)
+          assert source_text != target_text
+          print("NATIVE_LEAN_DEPENDENCY_DRIFT_DEVELOPMENT_PASS")
+          PY
+      - name: Upload native pilot outputs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rtk-lean-support-drift-v1-development
+          path: ${{ runner.temp }}/rtk-native-evidence/*.json
+          if-no-files-found: warn
+          retention-days: 30
