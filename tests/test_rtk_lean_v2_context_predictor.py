@@ -31,7 +31,7 @@ SOURCE, TARGET = "1" * 40, "2" * 40
 
 def manifest(*, statement=A, checker=B, policy=C, axiom=D,
              nodes=None, roots=None, complete=True, environment=E,
-             extractor=F, config=A):
+             extractor=F, config=A, revision=SOURCE):
     if nodes is None:
         nodes = [
             LeanSupportNode(
@@ -48,6 +48,9 @@ def manifest(*, statement=A, checker=B, policy=C, axiom=D,
         ]
     return LeanContextManifest(
         schema_version="rtk.lean_v2.context_manifest.v1",
+        repository="public/lean-project",
+        revision_sha=revision,
+        theorem_source_path="Src.lean",
         theorem_symbol="MyTheorem",
         statement_sha256=statement,
         checker_binary_sha256=checker,
@@ -64,7 +67,7 @@ def manifest(*, statement=A, checker=B, policy=C, axiom=D,
 
 def inputs(source=None, target=None, *, state="active", accepted="ACCEPTED"):
     source = source or manifest()
-    target = target or manifest()
+    target = target or manifest(revision=TARGET)
     case = FrozenLeanCase(
         case_id="lean-case-1",
         transition_id="transition-1",
@@ -113,7 +116,7 @@ def test_irrelevant_node_change_does_not_invalidate_proof_closure():
             dependencies=["TrustedPremise"],
         ),
     ]
-    decision = evaluate_lean_transport(inputs(target=manifest(nodes=target_nodes)))
+    decision = evaluate_lean_transport(inputs(target=manifest(revision=TARGET, nodes=target_nodes)))
     assert decision.verdict == "VALID"
     assert decision.source_support_sha256 == decision.target_support_sha256
 
@@ -127,7 +130,7 @@ def test_change_in_transitive_support_demands_revalidation():
             dependencies=["TrustedPremise"],
         ),
     ]
-    decision = evaluate_lean_transport(inputs(target=manifest(nodes=target_nodes)))
+    decision = evaluate_lean_transport(inputs(target=manifest(revision=TARGET, nodes=target_nodes)))
     assert decision.verdict == "REVALIDATION_REQUIRED"
     assert "transitive_support_changed" in decision.reason_codes
     assert "TrustedPremise" in decision.affected_support_symbols
@@ -148,7 +151,7 @@ def test_change_in_transitive_support_demands_revalidation():
     ],
 )
 def test_affecting_typed_claim_checker_and_policy_invalidates_reuse(change, reason):
-    result = evaluate_lean_transport(inputs(target=manifest(**change)))
+    result = evaluate_lean_transport(inputs(target=manifest(revision=TARGET, **change)))
     assert result.verdict == "REVALIDATION_REQUIRED"
     assert reason in result.reason_codes
     assert result.evidence_reuse_conditionally_eligible is False
@@ -206,7 +209,7 @@ def test_expired_or_revoked_source_is_not_reused(state):
 
 def test_reordered_dependency_manifest_has_same_support_identity():
     orig = manifest()
-    flipped = manifest(nodes=list(reversed(orig.support_nodes)))
+    flipped = manifest(revision=TARGET, nodes=list(reversed(orig.support_nodes)))
     result = evaluate_lean_transport(inputs(source=orig, target=flipped))
     assert result.verdict == "VALID"
 
@@ -214,7 +217,7 @@ def test_reordered_dependency_manifest_has_same_support_identity():
 def test_context_mutation_without_case_rebinding_fails_closed():
     record = inputs()
     forged = record.model_copy(update={
-        "target": manifest(checker=F),
+        "target": manifest(revision=TARGET, checker=F),
     })
     with pytest.raises(ValueError, match="frozen case"):
         evaluate_lean_transport(forged)
