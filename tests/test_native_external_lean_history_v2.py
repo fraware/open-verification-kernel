@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from experiments.rtk.native_external_lean_history_v2 import (
+    _UNSUPPORTED,
     _read_exact,
     _theorem_bytes,
 )
@@ -70,3 +71,21 @@ def test_unrelated_local_checkout_fails_immutable_commit_identity(tmp_path: Path
             "410fab7284703f41660ca2454218dcca9b2ec896",
             "c6c3cd21a7ef1e1ae0b5bff7625e941cb93379e9",
         )
+
+
+@pytest.mark.parametrize(
+    "construct",
+    [
+        "sorry",
+        "admit",
+        "axiom claim : False",
+        "unsafe def dangerous : Nat := 0",
+        "import OtherModule",
+    ],
+)
+def test_external_native_case_rejects_unsound_or_untracked_dependencies(construct):
+    assert _UNSUPPORTED.search(construct) is not None
+
+
+def test_external_native_case_allows_named_self_contained_proof():
+    assert _UNSUPPORTED.search(NATIVE_SNIPPET.decode("utf-8")) is None
