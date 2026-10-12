@@ -14,10 +14,10 @@ open Lean Elab Command
 
 private partial def rtkClosureNameAst : Name → Json
   | .anonymous => Json.arr #[Json.str "anonymous"]
-  | .str prefix text =>
-    Json.arr #[Json.str "str", rtkClosureNameAst prefix, Json.str text]
-  | .num prefix index =>
-    Json.arr #[Json.str "num", rtkClosureNameAst prefix, toJson index]
+  | .str parent text =>
+    Json.arr #[Json.str "str", rtkClosureNameAst parent, Json.str text]
+  | .num parent index =>
+    Json.arr #[Json.str "num", rtkClosureNameAst parent, toJson index]
 
 private def rtkStrictKind (ci : ConstantInfo) : String :=
   match ci with
