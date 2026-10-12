@@ -1,0 +1,84 @@
+/-
+Research-only native axiom/dependency introspection under pinned Lean 4.14.
+Native collectAxioms transitively inspects declarations, but its traversal
+silently ignores unknown constant names; this probe DOES NOT attest closure
+completeness or a trusted-axiom authorization policy. The target root is an
+UNPROVED axiom placeholder; its axiom set is deliberately not reported as
+an evidence-bearing proof.
+-/
+open Lean Elab Command
+
+run_cmd do
+  let env ← getEnv
+  let root : Name := `historical_claim
+  let some rootCi := env.find? root
+    | throwError "RTK_AXIOM_PROBE_CLAIM_ABSENT"
+  let rootKind : String := match rootCi with
+    | .thmInfo _ => "theorem"
+    | .axiomInfo _ => "unproved_goal_placeholder"
+    | _ => "invalid"
+  unless rootKind == "theorem" || rootKind == "unproved_goal_placeholder" do
+    throwError "RTK_AXIOM_PROBE_CLAIM_KIND_UNSUPPORTED"
+  let some opCi := env.find? `op
+    | throwError "RTK_AXIOM_PROBE_IMPORTED_DEFINITION_ABSENT"
+  let .defnInfo _ := opCi
+    | throwError "RTK_AXIOM_PROBE_IMPORTED_OP_NOT_DEFINITION"
+  let opAxioms ← collectAxioms `op
+  let rootAxioms ← if rootKind == "theorem"
+    then collectAxioms root
+    else pure (#[] : Array Name)
+  let opAxioms := opAxioms.qsort Name.lt
+  let rootAxioms := rootAxioms.qsort Name.lt
+  let mut opAxiomRecords : Array Json := #[]
+  for n in opAxioms do
+    let some (.axiomInfo _) := env.find? n
+      | throwError m!"RTK_AXIOM_PROBE_INVALID_IMPORTED_AXIOM:{n}"
+    let moduleName : String := match env.getModuleIdxFor? n with
+      | none => "LOCAL"
+      | some idx =>
+        match env.allImportedModuleNames[idx.toNat]? with
+          | some moduleName => moduleName.toString
+          | none => "UNRESOLVED"
+    if moduleName == "UNRESOLVED" then
+      throwError m!"RTK_AXIOM_PROBE_UNRESOLVED_MODULE:{n}"
+    opAxiomRecords := opAxiomRecords.push <| Json.mkObj [
+      ("name", Json.str n.toString),
+      ("module", Json.str moduleName),
+      ("kind", Json.str "axiom")
+    ]
+  let mut claimAxiomRecords : Array Json := #[]
+  for n in rootAxioms do
+    let some (.axiomInfo _) := env.find? n
+      | throwError m!"RTK_AXIOM_PROBE_INVALID_CLAIM_AXIOM:{n}"
+    let moduleName : String := match env.getModuleIdxFor? n with
+      | none => "LOCAL"
+      | some idx =>
+        match env.allImportedModuleNames[idx.toNat]? with
+          | some moduleName => moduleName.toString
+          | none => "UNRESOLVED"
+    if moduleName == "UNRESOLVED" then
+      throwError m!"RTK_AXIOM_PROBE_UNRESOLVED_MODULE:{n}"
+    claimAxiomRecords := claimAxiomRecords.push <| Json.mkObj [
+      ("name", Json.str n.toString),
+      ("module", Json.str moduleName),
+      ("kind", Json.str "axiom")
+    ]
+  let rootRefs := (rootCi.getUsedConstantsAsSet.toList.toArray).qsort Name.lt
+  let opRefs := (opCi.getUsedConstantsAsSet.toList.toArray).qsort Name.lt
+  let directRoot : Array Json := rootRefs.map fun n => Json.str n.toString
+  let directOp : Array Json := opRefs.map fun n => Json.str n.toString
+  logInfo m!"RTK_NATIVE_AXIOM_SUPPORT_JSON={Json.compress (Json.mkObj [
+    ("schema_version", Json.str "rtk.lean_native_axiom_dependency.v1-development"),
+    ("root_name", Json.str root.toString),
+    ("root_kind", Json.str rootKind),
+    ("op_name", Json.str "op"),
+    ("direct_root_references", Json.arr directRoot),
+    ("direct_op_references", Json.arr directOp),
+    ("op_transitive_axioms", Json.arr opAxiomRecords),
+    ("source_proof_transitive_axioms", Json.arr claimAxiomRecords),
+    ("synthetic_target_axiom_not_counted_as_proof", Json.bool true),
+    ("transitive_dependency_closure_proved", Json.bool false),
+    ("trusted_axiom_policy_authenticated", Json.bool false),
+    ("historic_target_proof_replayed", Json.bool false),
+    ("historical_applicability_established", Json.bool false)
+  ])}"
