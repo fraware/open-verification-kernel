@@ -99,8 +99,10 @@ run_cmd do
       ("kind", Json.str kind),
       ("type_repr", Json.str (toString (repr ci.type)))
     ]
+  let fullModuleNames : Array Json := env.allImportedModuleNames.map fun name => Json.str name.toString
   logInfo m!"RTK_NATIVE_REFERENCE_JSON={Json.compress (Json.mkObj [
     ("schema_version", Json.str "rtk.lean_imported_ref_lookup.v1-development"),
+    ("environment_modules", Json.arr fullModuleNames),
     ("items", Json.arr items)
   ])}"
 """
@@ -108,7 +110,7 @@ run_cmd do
 
 def _reference_record(log: str, expected: dict[str, str]) -> dict[str, dict[str, str]]:
     raw = _extract_json(log, _REFERENCES_MARKER)
-    if set(raw) != {"schema_version", "items"} or (
+    if set(raw) != {"schema_version", "items", "environment_modules"} or (
         raw["schema_version"] != "rtk.lean_imported_ref_lookup.v1-development"
     ):
         raise ValueError("unsupported reference observation")
@@ -127,6 +129,21 @@ def _reference_record(log: str, expected: dict[str, str]) -> dict[str, dict[str,
     if set(records) != set(expected):
         raise ValueError("reference identity mismatch")
     return records
+
+
+def _environment_modules(log: str) -> list[str]:
+    """Capture all imported module names from the native checker environment.
+
+    This is a loaded-module inventory, NOT a semantic soundness proof.
+    """
+    raw = _extract_json(log, _REFERENCES_MARKER)
+    values = raw.get("environment_modules")
+    if not isinstance(values, list) or not 1 <= len(values) <= 2048:
+        raise ValueError("missing or excessively large native imported module set")
+    if any(not isinstance(x, str) or not _MODULE.fullmatch(x) or "'" in x
+           for x in values) or len(set(values)) != len(values):
+        raise ValueError("invalid or duplicated native imported modules")
+    return sorted(values)
 
 
 def _module_paths(module: str, root: Path) -> Path:
@@ -189,12 +206,26 @@ def compare_imported_proof_references(
     if root["kind"] != "axiom" or root["value_repr"] != "":
         raise ValueError("target was not an unproved claim placeholder")
     modules = imported_olean_snapshot(imported, lean_root)
+    source_loaded = _environment_modules(source_ref_log)
+    target_loaded = _environment_modules(target_ref_log)
+    if source_loaded != target_loaded:
+        raise ValueError("source and target imported module inventories diverge")
+    # This captures the actual complete *loaded module-name inventory*.
+    # It still does not prove that those modules are semantically complete.
+    loaded_modules = imported_olean_snapshot(
+        {name: name for name in source_loaded}, lean_root
+    )
+    if not set(modules).issubset(loaded_modules):
+        raise ValueError("source proof imports outside native loaded modules")
     changed = sorted(name for name in source if source[name] != target[name])
     return {
         "schema_version": "rtk.lean_imported_proofref_transport.v1-development",
         "checker_sha256": _EXPECTED_LEAN_BINARY,
         "imported_olean_module_files": modules,
         "module_file_count": len(modules),
+        "loaded_environment_olean_files": loaded_modules,
+        "loaded_environment_module_count": len(loaded_modules),
+        "source_target_loaded_module_inventory_identical": True,
         "source_imported_proof_references": source,
         "target_imported_proof_references": target,
         "reference_count": len(source),
@@ -206,6 +237,7 @@ def compare_imported_proof_references(
         "target_old_proof_replayed": False,
         "target_goal_established": False,
         "transitive_import_semantics_proved": False,
+        "imported_module_semantic_closure_proved": False,
         "lean_expression_serialization_canonical": False,
         "transport_applicability_established": False,
         "source_native_log_sha256": _hash(source_native_log.encode()),
