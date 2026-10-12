@@ -215,10 +215,13 @@ def test_reject_oracle_order_old_evidence_or_context_mismatch():
 def test_source_case_disallows_path_traversal_and_internal_repositories():
     with pytest.raises(ValidationError, match="path"):
         case(0, path="../secrets.lean")
-    with pytest.raises(ValidationError):
-        case(0).model_copy(update={"repository": "fraware/sut"}).model_dump()
-    # model_copy deliberately bypasses validation, so the trust boundary
-    # must revalidate prior to accepting a supplied cohort.
+    with pytest.raises(ValidationError, match="internal repositories"):
+        FrozenLeanCase.model_validate({
+            **case(0).model_dump(),
+            "repository": "fraware/sut",
+        })
+    # model_copy deliberately bypasses validation. Admission functions must
+    # revalidate a supplied model before trusting its case identity.
 
 
 def test_reject_duplicate_cases_and_changed_case_order():
