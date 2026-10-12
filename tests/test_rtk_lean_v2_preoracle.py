@@ -54,6 +54,9 @@ def build_cohort(n: int = 2) -> FrozenCohort:
         selection_rule_sha256="f" * 64,
         source_adapter_id="lean-source@v2",
         oracle_adapter_id="native-term-replay@v2",
+        oracle_commit=SHA4,
+        sut_adapter_id="independent-lean-sut@draft",
+        sut_commit=SHA1,
         cases=[case(i) for i in range(n)],
     )
 
@@ -62,8 +65,8 @@ def build_predictions(cohort: FrozenCohort) -> PredictionBundle:
     return PredictionBundle(
         schema_version="rtk.lean_v2.predictions.v1",
         cohort_sha256=digest(cohort),
-        sut_commit=SHA1,
-        sut_adapter_id="independent-lean-sut@draft",
+        sut_commit=cohort.sut_commit,
+        sut_adapter_id=cohort.sut_adapter_id,
         predictions=[
             Prediction(
                 case_id=case_item.case_id,
@@ -115,6 +118,8 @@ def test_exact_case_bound_commitment_and_provisional_counts():
     oracle = OracleBatch(
         schema_version="rtk.lean_v2.oracle_batch.v1",
         cohort_sha256=digest(cohort),
+        oracle_adapter_id=cohort.oracle_adapter_id,
+        oracle_commit=cohort.oracle_commit,
         observations=[
             observation("C0", app="ADMISSIBLE", truth="UNKNOWN"),
             observation("C1", app="INADMISSIBLE", truth="ESTABLISHED"),
@@ -123,9 +128,9 @@ def test_exact_case_bound_commitment_and_provisional_counts():
     score = score_provisional(cohort, preds, receipt, NONCE, oracle)
     assert score.total_cases == 2
     assert score.resolved_cases == 2
-    assert score.confirmed_nonvalid_cases == 1
-    assert score.falsely_reused_nonvalid_cases == 1
-    assert score.confirmed_valid_cases == 1
+    assert score.resolved_nonvalid_labels == 1
+    assert score.valid_predictions_on_resolved_nonvalid_labels == 1
+    assert score.resolved_valid_labels == 1
     assert score.unadjudicated_valid_predictions == 0
     assert score.evidence_status == "PROVISIONAL_UNAUDITED"
     assert score.independent_oracle_execution_verified is False
@@ -139,6 +144,8 @@ def test_fresh_target_pass_does_not_resolve_historical_reuse():
     oracle = OracleBatch(
         schema_version="rtk.lean_v2.oracle_batch.v1",
         cohort_sha256=digest(cohort),
+        oracle_adapter_id=cohort.oracle_adapter_id,
+        oracle_commit=cohort.oracle_commit,
         observations=[observation("C0", app="UNDETERMINED", truth="ESTABLISHED")],
     )
     score = score_provisional(cohort, preds, receipt, NONCE, oracle)
@@ -175,6 +182,8 @@ def test_reject_changed_predictions_and_mismatched_commitment():
     oracle = OracleBatch(
         schema_version="rtk.lean_v2.oracle_batch.v1",
         cohort_sha256=digest(cohort),
+        oracle_adapter_id=cohort.oracle_adapter_id,
+        oracle_commit=cohort.oracle_commit,
         observations=[observation("C0", app="ADMISSIBLE", truth="UNKNOWN")],
     )
     with pytest.raises(ValueError, match="commitment"):
@@ -190,6 +199,8 @@ def test_reject_oracle_order_old_evidence_or_context_mismatch():
     swapped = OracleBatch(
         schema_version="rtk.lean_v2.oracle_batch.v1",
         cohort_sha256=digest(cohort),
+        oracle_adapter_id=cohort.oracle_adapter_id,
+        oracle_commit=cohort.oracle_commit,
         observations=[
             observation("C1", app="ADMISSIBLE", truth="UNKNOWN"),
             observation("C0", app="ADMISSIBLE", truth="UNKNOWN"),
@@ -203,6 +214,8 @@ def test_reject_oracle_order_old_evidence_or_context_mismatch():
     bad = OracleBatch(
         schema_version="rtk.lean_v2.oracle_batch.v1",
         cohort_sha256=digest(build_cohort(1)),
+        oracle_adapter_id=build_cohort(1).oracle_adapter_id,
+        oracle_commit=build_cohort(1).oracle_commit,
         observations=[forged],
     )
     one = build_cohort(1)
@@ -245,6 +258,8 @@ def test_stored_models_cannot_add_sut_prediction_to_native_oracle():
     oracle_data = {
         "schema_version": "rtk.lean_v2.oracle_batch.v1",
         "cohort_sha256": digest(cohort),
+        "oracle_adapter_id": cohort.oracle_adapter_id,
+        "oracle_commit": cohort.oracle_commit,
         "observations": [
             {**observation("C0", app="ADMISSIBLE", truth="UNKNOWN").model_dump(),
              "sut_prediction": "VALID"}
