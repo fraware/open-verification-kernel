@@ -277,3 +277,71 @@ def test_private_commitment_receipt_is_canonical_json():
     assert reread == receipt
     assert len(receipt.commitment_sha256) == 64
     assert json.loads(receipt.model_dump_json())["prediction_count"] == 1
+
+
+def test_frozen_predictor_identity_cannot_be_substituted():
+    cohort = build_cohort(1)
+    preds = build_predictions(cohort)
+    wrong = PredictionBundle(
+        **{
+            **preds.model_dump(),
+            "sut_adapter_id": "different-unregistered-predictor",
+        }
+    )
+    with pytest.raises(ValueError, match="SUT adapter"):
+        make_commitment(cohort, wrong, private_nonce_hex=NONCE)
+
+
+def test_frozen_oracle_identity_cannot_be_substituted():
+    cohort = build_cohort(1)
+    preds = build_predictions(cohort)
+    receipt = make_commitment(cohort, preds, private_nonce_hex=NONCE)
+    oracle = OracleBatch(
+        schema_version="rtk.lean_v2.oracle_batch.v1",
+        cohort_sha256=digest(cohort),
+        oracle_adapter_id="unregistered-native-backend",
+        oracle_commit=cohort.oracle_commit,
+        observations=[observation("C0", app="ADMISSIBLE", truth="UNKNOWN")],
+    )
+    with pytest.raises(ValueError, match="oracle implementation"):
+        score_provisional(cohort, preds, receipt, NONCE, oracle)
+
+
+def test_model_copy_bypass_is_revalidated_at_commit_boundary():
+    cohort = build_cohort(1)
+    preds = build_predictions(cohort)
+    altered_case = case(0).model_copy(update={"repository": "fraware/ovk"})
+    altered_cohort = cohort.model_copy(update={"cases": [altered_case]})
+    with pytest.raises(ValidationError, match="internal repositories"):
+        make_commitment(altered_cohort, preds, private_nonce_hex=NONCE)
+
+
+def test_model_copy_bypass_is_revalidated_at_oracle_boundary():
+    cohort = build_cohort(1)
+    preds = build_predictions(cohort)
+    receipt = make_commitment(cohort, preds, private_nonce_hex=NONCE)
+    record = observation("C0", app="ADMISSIBLE", truth="UNKNOWN")
+    invalid_record = record.model_copy(
+        update={"historical_evidence_applicability": "UNDETERMINED"}
+    )
+    oracle = OracleBatch(
+        schema_version="rtk.lean_v2.oracle_batch.v1",
+        cohort_sha256=digest(cohort),
+        oracle_adapter_id=cohort.oracle_adapter_id,
+        oracle_commit=cohort.oracle_commit,
+        observations=[invalid_record],
+    )
+    with pytest.raises(ValidationError):
+        score_provisional(cohort, preds, receipt, NONCE, oracle)
+
+
+def test_prediction_context_digest_is_not_interchangeable():
+    cohort = build_cohort(1)
+    preds = build_predictions(cohort)
+    bad = preds.model_copy(
+        update={"predictions": [
+            Prediction(case_id="C0", input_sha256="f" * 64, verdict="VALID")
+        ]}
+    )
+    with pytest.raises(ValueError, match="prediction input"):
+        make_commitment(cohort, bad, private_nonce_hex=NONCE)
