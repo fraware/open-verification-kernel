@@ -181,6 +181,15 @@ def _input(*, drift=True):
         "source_structural_log": source_struct,
         "target_structural_log": target_struct,
         "historical_proof_source": HIST,
+        "source_checked_input": (
+            b"import Lean\\n"
+            + b"theorem historical_claim (n : Nat) : n = n :=\\n"
+            + HIST
+        ),
+        "target_unproved_checked_input": (
+            b"import Lean\\n"
+            + b"axiom rtk_unproven_target_claim (n : Nat) : n = n\\n"
+        ),
     }
 
 
@@ -258,4 +267,25 @@ def test_unknown_target_proof_cannot_be_misreported_as_unproved():
         case["target_unproved_goal_log"].encode()
     )
     with pytest.raises(ValueError):
+        bind_preoracle_native_evidence(**case)
+
+
+def test_exact_source_proof_must_be_part_of_checked_lean_file():
+    case = _input()
+    case["source_checked_input"] = b"theorem historical_claim : True := by trivial"
+    with pytest.raises(ValueError, match="source proof bytes not bound"):
+        bind_preoracle_native_evidence(**case)
+
+
+def test_target_must_not_contain_historical_proof_bytes():
+    case = _input()
+    case["target_unproved_checked_input"] += HIST
+    with pytest.raises(ValueError, match="leaked into unproved target"):
+        bind_preoracle_native_evidence(**case)
+
+
+def test_duplicate_historical_proof_source_not_accepted():
+    case = _input()
+    case["source_checked_input"] += HIST
+    with pytest.raises(ValueError, match="source proof bytes not bound"):
         bind_preoracle_native_evidence(**case)
