@@ -43,6 +43,25 @@ Every digest and installed module path is emitted to a versioned record.
 The source reference inventory, native source and target lookup logs,
 and exact `.olean` fingerprints are preserved in the workflow artifact.
 
+**Expanded loaded-environment inventory.** The Lean native reference probe
+also records `Environment.allImportedModuleNames` on both sides. The
+current pinned development environment reported **1,012 loaded modules**
+on each side. The adapter confirms identical module-name inventories,
+then resolves and hashes every loaded module's installed `.olean` bytes,
+not only the direct proof references. File reads use streaming SHA-256,
+with bounded inventories (up to 2,048 modules), file sizes (under 128 MiB),
+and aggregate size (at most 4 GiB). The emitted record contains all
+per-module digests, a canonical JSON inventory digest and the exact
+aggregate byte count. A changed `.olean` file will change its SHA-256.
+
+This is an **exhaustive inventory of modules reported as loaded in that
+particular native Lean process**. It is not a proof that every semantic
+dependency relevant to historical evidence is represented, that native
+expression serialization is canonical, or that all nonmodule environment
+inputs were captured. The source/target fixture deliberately uses the
+same installation; the inventory matching observation is therefore
+a reproducibility control and not a cross-installation result.
+
 ## Scope of each result
 
 A successful bounded observation establishes only that, in the
@@ -50,7 +69,8 @@ A successful bounded observation establishes only that, in the
 all source-imported proof references were present in the target
 environment with the same recorded declaration kinds, imported-module
 names and diagnostic type representations. Their exact installed module
-file bytes were hashed and their provenance paths recorded.
+file bytes were hashed and their provenance paths recorded, alongside an
+inventory of all loaded-module file identities under this process.
 
 It does **not** establish that every dependency of the reference's
 `.olean` or transitive constant type/value has been captured. Two
