@@ -109,6 +109,8 @@ def bind_preoracle_native_evidence(
     source_structural_log: str,
     target_structural_log: str,
     historical_proof_source: bytes,
+    source_checked_input: bytes,
+    target_unproved_checked_input: bytes,
 ) -> dict[str, Any]:
     """No oracle input is accepted by this function or its CLI."""
 
@@ -226,6 +228,22 @@ def bind_preoracle_native_evidence(
         raise ValueError("structural AST evidence differs from native logs")
     if not historical_proof_source or len(historical_proof_source) > 65536:
         raise ValueError("historical source term identity missing or oversized")
+    if (
+        not source_checked_input
+        or not target_unproved_checked_input
+        or len(source_checked_input) > 262144
+        or len(target_unproved_checked_input) > 262144
+    ):
+        raise ValueError("exact native checker input bytes missing or oversize")
+    if source_checked_input.count(historical_proof_source) != 1:
+        raise ValueError("historical source proof bytes not bound to checker input")
+    if historical_proof_source in target_unproved_checked_input:
+        raise ValueError("historical source proof leaked into unproved target input")
+    if (
+        b"theorem historical_claim " not in source_checked_input
+        or b"axiom rtk_unproven_target_claim " not in target_unproved_checked_input
+    ):
+        raise ValueError("native checker inputs have wrong theorem/goal identity")
 
     # This recommendation is conservative: module drift does not logically
     # entail old proof rejection. Unchanged observed context lacks a proven
@@ -240,6 +258,12 @@ def bind_preoracle_native_evidence(
         "checker_binary_sha256": _EXPECTED_LEAN_BINARY,
         "source_proof_term_bytes_sha256": hashlib.sha256(
             historical_proof_source
+        ).hexdigest(),
+        "source_exact_checked_input_sha256": hashlib.sha256(
+            source_checked_input
+        ).hexdigest(),
+        "target_unproved_exact_checked_input_sha256": hashlib.sha256(
+            target_unproved_checked_input
         ).hexdigest(),
         "source_checked_proof_expr_ast_sha256": structural[
             "source_historical_proof_ast_sha256"
@@ -289,7 +313,8 @@ def main() -> int:
         "environment", "structural", "source-native-log",
         "source-reference-log", "target-reference-log",
         "target-unproved-goal-log", "source-structural-log",
-        "target-structural-log", "historical-proof-source", "output",
+        "target-structural-log", "historical-proof-source",
+        "source-checked-input", "target-unproved-checked-input", "output",
     ):
         parser.add_argument("--" + name, type=Path, required=True)
     args = parser.parse_args()
@@ -303,6 +328,8 @@ def main() -> int:
         source_structural_log=args.source_structural_log.read_text(encoding="utf-8"),
         target_structural_log=args.target_structural_log.read_text(encoding="utf-8"),
         historical_proof_source=args.historical_proof_source.read_bytes(),
+        source_checked_input=args.source_checked_input.read_bytes(),
+        target_unproved_checked_input=args.target_unproved_checked_input.read_bytes(),
     )
     with args.output.open("x", encoding="utf-8") as output:
         output.write(json.dumps(record, sort_keys=True, indent=2) + "\n")
