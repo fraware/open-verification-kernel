@@ -358,19 +358,27 @@ def main() -> int:
     cohort = _load_json(args.cohort, FrozenCohort)
     batch = _load_json(args.predictions, PredictionBundle)
     if args.mode == "commit":
+        # Keep the nonce out of the current code tree so it cannot be
+        # accidentally committed to a public branch. It is private until
+        # the authorized single unblinding.
+        if not args.nonce_file.is_absolute():
+            parser.error("nonce-file must be an absolute private path")
+        if args.nonce_file.resolve().is_relative_to(Path.cwd().resolve()):
+            parser.error("nonce-file must be outside the current worktree")
+        if args.receipt.exists() or args.nonce_file.exists():
+            parser.error("frozen receipt or private nonce file already exists")
         nonce = secrets.token_bytes(32).hex()
         receipt = make_commitment(cohort, batch, private_nonce_hex=nonce)
-        # Nonce and receipt must be written to distinct directories/permissions.
         nonce_fd = os.open(
             args.nonce_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
         )
         try:
             with os.fdopen(nonce_fd, "w", encoding="ascii") as output:
                 output.write(nonce + "\n")
+            _write_json(args.receipt, receipt)
         except BaseException:
             args.nonce_file.unlink(missing_ok=True)
             raise
-        _write_json(args.receipt, receipt)
         print("PREDICTION_COMMITMENT_CREATED")
         return 0
 
