@@ -120,5 +120,5 @@ def test_axiom_record_duplicate_names_rejected():
             ("rtkExternal", "RTKSemanticSupport"),
         ],
     )
-    with pytest.raises(ValueError, match="duplicate or unsorted"):
+    with pytest.raises(ValueError, match="duplicate native axiom names"):
         compare_native_axiom_support(**case)
