@@ -171,15 +171,21 @@ def imported_olean_snapshot(imported: dict[str, str], lean_root: Path) -> dict[s
         if not 0 < stat.st_size < 128 * 1024 * 1024:
             raise ValueError("unsupported imported .olean file size")
         total_bytes += stat.st_size
-        if total_bytes > 512 * 1024 * 1024:
-            raise ValueError("imported module inventory exceeds 512 MiB limit")
-        file_bytes = path.read_bytes()
-        if len(file_bytes) != stat.st_size:
-            raise ValueError("changed imported module size during read")
+        if total_bytes > 4 * 1024 * 1024 * 1024:
+            raise ValueError("imported module inventory exceeds 4 GiB limit")
+        # Stream installed .olean bytes. Lean distributions may contain over
+        # one thousand modules and exceed a 512 MiB aggregate size.
+        with path.open("rb") as data:
+            fingerprint = hashlib.file_digest(data, "sha256").hexdigest()
+        after = path.stat()
+        if (after.st_size, after.st_mtime_ns) != (
+            stat.st_size, stat.st_mtime_ns
+        ):
+            raise ValueError("imported module changed during fingerprinting")
         result[name] = {
             "relative_path": str(path.relative_to(lean_root)),
-            "file_sha256": _hash(file_bytes),
-            "file_size_bytes": len(file_bytes),
+            "file_sha256": fingerprint,
+            "file_size_bytes": stat.st_size,
         }
     return result
 
