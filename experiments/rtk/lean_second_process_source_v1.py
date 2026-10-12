@@ -94,8 +94,8 @@ def separate_native_driver(
             raise ValueError("unexpected " + label + " native driver boundary")
     encoder_defs = encoder.partition(marker)[0]
     decoder_defs = decoder.partition(marker)[0]
-    if "run_cmd do" in driver or "import " in driver:
-        raise ValueError("standalone driver contains forbidden front matter")
+    if driver.count(marker) != 1 or "import Lean" in driver or "import RTKSemanticSupport" in driver:
+        raise ValueError("standalone driver has unsupported command boundary")
     return (
         "import Lean\nimport RTKSemanticSupport\n"
         + encoder_defs + "\n"
