@@ -1,0 +1,81 @@
+/-!
+Development-only native target-context replay of the exact exported historical
+Lean proof expression. This driver is appended to the *existing* strict Expr
+encoder/decoder definitions. It imports only Lean and RTKSemanticSupport;
+the original theorem and unproved target placeholder are absent.
+
+A checker mismatch establishes certificate failure in this designated,
+reconstructed target context. No result confers production relying authority.
+-/
+
+run_cmd do
+  let env ← getEnv
+  if (env.find? `historical_claim).isSome then
+    throwError "RTK_TARGET_REPLAY_HISTORICAL_THEOREM_PRELOADED"
+  if (env.find? `rtk_unproven_target_claim).isSome then
+    throwError "RTK_TARGET_REPLAY_TARGET_PLACEHOLDER_PRELOADED"
+  let sourceRaw ← liftIO <| IO.FS.readFile ".rtk-imported-build/rtk_source_proof_payload.json"
+  let targetRaw ← liftIO <| IO.FS.readFile ".rtk-imported-build/rtk_target_claim_payload.json"
+  let source ← match Json.parse sourceRaw with
+    | .ok v => pure v
+    | .error _ => throwError "RTK_TARGET_REPLAY_SOURCE_JSON_INVALID"
+  let target ← match Json.parse targetRaw with
+    | .ok v => pure v
+    | .error _ => throwError "RTK_TARGET_REPLAY_TARGET_JSON_INVALID"
+  let sourceSchema ← match source.getObjVal? "schema_version" with
+    | .ok v => pure v
+    | .error _ => throwError "RTK_TARGET_REPLAY_SOURCE_SCHEMA_MISSING"
+  unless sourceSchema == Json.str "rtk.lean_separate_source_proof_payload.v1-development" do
+    throwError "RTK_TARGET_REPLAY_SOURCE_SCHEMA_INVALID"
+  let targetSchema ← match target.getObjVal? "schema_version" with
+    | .ok v => pure v
+    | .error _ => throwError "RTK_TARGET_REPLAY_TARGET_SCHEMA_MISSING"
+  unless targetSchema == Json.str "rtk.lean_target_claim_export.v1-development" do
+    throwError "RTK_TARGET_REPLAY_TARGET_SCHEMA_INVALID"
+  let sourceProofAst ← match source.getObjVal? "proof_ast" with
+    | .ok v => pure v
+    | .error _ => throwError "RTK_TARGET_REPLAY_PROOF_MISSING"
+  let sourceClaimAst ← match source.getObjVal? "claim_ast" with
+    | .ok v => pure v
+    | .error _ => throwError "RTK_TARGET_REPLAY_SOURCE_CLAIM_MISSING"
+  let targetClaimAst ← match target.getObjVal? "claim_ast" with
+    | .ok v => pure v
+    | .error _ => throwError "RTK_TARGET_REPLAY_TARGET_CLAIM_MISSING"
+  -- The bounded fixture fixes the same *structural* statement across contexts.
+  -- This equality does not assert semantic preservation of imported 'op'.
+  unless sourceClaimAst == targetClaimAst do
+    throwError "RTK_TARGET_REPLAY_STATEMENT_AST_CHANGED"
+  let expectedType ← match rtkDecodeExpr targetClaimAst 1024 with
+    | .ok e => pure e
+    | .error reason => throwError m!"RTK_TARGET_REPLAY_CLAIM_DECODE:{reason}"
+  let proof ← match rtkDecodeExpr sourceProofAst 1024 with
+    | .ok e => pure e
+    | .error reason => throwError m!"RTK_TARGET_REPLAY_PROOF_DECODE:{reason}"
+  let reconstructedProofAst ← rtkStrictExprAst proof
+  let reconstructedTargetAst ← rtkStrictExprAst expectedType
+  unless reconstructedProofAst == sourceProofAst &&
+      reconstructedTargetAst == targetClaimAst do
+    throwError "RTK_TARGET_REPLAY_AST_ROUNDTRIP_MISMATCH"
+  -- Only the native checker result below provides the adjudication.
+  -- No predictor, footprint classifier, or fresh proof is consulted.
+  let (checked, defeq, decision) ←
+    match Lean.Kernel.check env {} proof with
+    | .error _ => pure (false, false, "UNDETERMINED")
+    | .ok inferred =>
+      match Lean.Kernel.isDefEq env {} inferred expectedType with
+      | .ok true => pure (true, true, "ADMISSIBLE")
+      | .ok false => pure (true, false, "INADMISSIBLE")
+      | .error _ => pure (true, false, "UNDETERMINED")
+  logInfo m!"RTK_HISTORICAL_TARGET_REPLAY_JSON={Json.compress (Json.mkObj [
+    ("schema_version", Json.str "rtk.lean_historical_target_replay.v1-development"),
+    ("source_proof_ast", sourceProofAst),
+    ("target_claim_ast", targetClaimAst),
+    ("kernel_check_accepted", Json.bool checked),
+    ("inferred_type_defeq_target_claim", Json.bool defeq),
+    ("adjudication", Json.str decision),
+    ("target_theorem_or_placeholder_preloaded", Json.bool false),
+    ("fresh_target_proof_supplied_to_oracle", Json.bool false),
+    ("rtk_predictor_consulted", Json.bool false),
+    ("relying_authority", Json.bool false),
+    ("semantic_support_soundness_proved", Json.bool false)
+  ])}"
