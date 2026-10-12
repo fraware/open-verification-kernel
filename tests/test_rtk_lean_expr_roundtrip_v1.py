@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import json
 
 import pytest
@@ -82,7 +81,7 @@ def test_roundtrip_record_matches_native_source_and_target_records():
         ({"target_old_proof_replayed": True}, "unsupported native transport"),
         ({"cross_environment_transport_established": True}, "unsupported native transport"),
         ({"native_decoding_unchecked": True}, "evidence shape"),
-        ({"root_kind": "axiom"}, "source proof"),
+        ({"root_kind": "axiom"}, "wrong theorem subject"),
     ],
 )
 def test_reject_bad_source_native_witness(change, reason):
