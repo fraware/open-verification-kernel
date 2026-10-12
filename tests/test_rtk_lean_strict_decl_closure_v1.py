@@ -126,10 +126,14 @@ def test_structural_graph_tampering_fail_closed(which, field, reason):
     item = json.loads(raw)
     graph = item["root_declaration_closure"]
     if field == "missing_edge":
-        graph["nodes"] = [
-            entry for entry in graph["nodes"] if entry["name"] != "rtkExternal"
-        ]
+        # Keep aggregate counts consistent so the dangling op reference,
+        # rather than malformed graph bookkeeping, causes the rejection.
+        removed = next(
+            entry for entry in graph["nodes"] if entry["name"] == "rtkExternal"
+        )
+        graph["nodes"].remove(removed)
         graph["node_count"] -= 1
+        graph["edge_count"] -= len(removed["direct_reference_asts"])
     elif field == "extra_node":
         graph["nodes"].append(_node("ghost", "axiom", "Init.Prelude"))
         graph["node_count"] += 1
@@ -150,6 +154,13 @@ def test_structural_graph_tampering_fail_closed(which, field, reason):
     case[which] = prefix + "RTK_NATIVE_STRICT_CLOSURE_JSON=" + json.dumps(item)
     with pytest.raises(ValueError, match=reason):
         compare_native_strict_closures(**case)
+
+
+def test_graph_rejects_inconsistent_edge_count():
+    graph = _graph_record("historical_claim")
+    graph["edge_count"] -= 1
+    with pytest.raises(ValueError, match="graph edge count mismatch"):
+        _graph(graph, "historical_claim")
 
 
 def test_numeric_and_string_names_are_distinct():
