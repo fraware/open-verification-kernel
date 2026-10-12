@@ -30,7 +30,7 @@ REPO_PATH = "doc/examples/tc.lean"
 THEOREM_NAME = "HasType.det"
 # Closed-world extraction for this named, known example. The theorem ends at
 # the immediately following blank line, not at an arbitrary secondary match.
-_START = re.compile(r"(?m)^theorem HasType[.]det\\b")
+_START = re.compile("(?m)^theorem HasType[.]det(?![A-Za-z0-9_])")
 _VERSION = re.compile("Lean [(]version 4[.]14[.]0(?:,|[)])")
 
 
@@ -62,7 +62,7 @@ def _read_exact(repo: Path, expected_commit: str, expected_blob: str) -> bytes:
     if _git(repo, "hash-object", REPO_PATH) != expected_blob:
         raise ValueError("historical file blob identity mismatch")
     raw = path.read_bytes()
-    if not raw or len(raw) > 16384 or b"\\x00" in raw:
+    if not raw or len(raw) > 16384 or bytes([0]) in raw:
         raise ValueError("external historical Lean file invalid or too large")
     return raw
 
