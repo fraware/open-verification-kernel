@@ -99,7 +99,11 @@ def source_only_transition_census(
         raise ValueError("source commit identity mismatch")
     if _git(repo_path, "rev-parse", "--verify", f"{target_sha}^{{commit}}").strip() != target_sha:
         raise ValueError("target commit identity mismatch")
-    if _git(repo_path, "rev-parse", f"{target_sha}^").strip() != source_sha:
+    try:
+        first_parent = _git(repo_path, "rev-parse", f"{target_sha}^").strip()
+    except ValueError:
+        first_parent = None
+    if first_parent != source_sha:
         raise ValueError("source is not immediate first parent of target")
 
     changed_paths = _git(
