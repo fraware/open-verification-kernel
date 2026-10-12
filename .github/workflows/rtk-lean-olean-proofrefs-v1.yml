@@ -1,0 +1,226 @@
+name: RTK Lean imported olean proofrefs development
+
+on:
+  pull_request:
+    branches:
+      - research/rtk-lean-context-transport-sut
+    paths:
+      - .github/workflows/rtk-lean-olean-proofrefs-v1.yml
+      - experiments/rtk/lean_native_support_footer.lean.txt
+      - experiments/rtk/lean_native_support_projection.py
+      - experiments/rtk/lean_imported_proofrefs_v1.py
+      - tests/test_rtk_lean_imported_proofrefs_v1.py
+      - experiments/rtk/lean_context_drift_fixtures_v1/**
+  push:
+    branches:
+      - research/rtk-lean-olean-proofrefs-v1
+    paths:
+      - .github/workflows/rtk-lean-olean-proofrefs-v1.yml
+      - experiments/rtk/lean_native_support_footer.lean.txt
+      - experiments/rtk/lean_native_support_projection.py
+      - experiments/rtk/lean_imported_proofrefs_v1.py
+      - tests/test_rtk_lean_imported_proofrefs_v1.py
+      - experiments/rtk/lean_context_drift_fixtures_v1/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  development_preoracle_context_only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact source revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Install content-pinned checker
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+            https://github.com/leanprover/elan/releases/download/v4.2.3/elan-x86_64-unknown-linux-gnu.tar.gz \
+            --output "$RUNNER_TEMP/elan.tar.gz"
+          echo 'df0b2b3a439961ffcbb3985214365ffe40f49bc871df04dff268c7d8e21ca8b2  '"$RUNNER_TEMP"'/elan.tar.gz' | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/elan.tar.gz" -C "$RUNNER_TEMP" elan-init
+          "$RUNNER_TEMP/elan-init" -y --no-modify-path --default-toolchain none
+          "$HOME/.elan/bin/elan" toolchain install leanprover/lean4:v4.14.0
+          "$HOME/.elan/bin/elan" default leanprover/lean4:v4.14.0
+          LEAN_BINARY="$("$HOME/.elan/bin/elan" which lean)"
+          "$LEAN_BINARY" --version
+          test "$(sha256sum "$LEAN_BINARY" | cut -d ' ' -f 1)" = \
+            "eacf754d25ae86ea076882a34b9444f2485659d9df4266b821443b28ca95a215"
+
+      - name: Execute source-native proof and unproved target context probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/unproved-target-context"
+          FIX=experiments/rtk/lean_context_drift_fixtures_v1
+          FOOTER=experiments/rtk/lean_native_support_footer.lean.txt
+          mkdir -p "$ROOT"
+          {
+            printf 'import Lean\n'
+            cat "$FIX/source_declaration.lean.txt"
+            cat "$FIX/historical_proof.term.txt"
+            printf '\n'
+            cat "$FOOTER"
+          } > "$ROOT/source.lean"
+          python - "$FIX/target_unproven_context.lean.txt" "$FOOTER" "$ROOT/target_goal.lean" <<'PY'
+          import pathlib
+          import sys
+
+          original = pathlib.Path(sys.argv[1]).read_bytes()
+          footer = pathlib.Path(sys.argv[2]).read_text()
+          old = "let root : Name := `historical_claim"
+          new = "let root : Name := `rtk_unproven_target_claim"
+          assert footer.count(old) == 1
+          assert original.count(b"axiom rtk_unproven_target_claim ") == 1
+          assert b"theorem historical_claim " not in original
+          assert b"Nat.zero_add" not in original
+          content = b"import Lean\n" + original + b"\n" + footer.replace(
+              old, new
+          ).encode("utf-8")
+          pathlib.Path(sys.argv[3]).write_bytes(content)
+          PY
+          "$HOME/.elan/bin/lean" "$ROOT/source.lean" | tee "$ROOT/source.native.log"
+          "$HOME/.elan/bin/lean" "$ROOT/target_goal.lean" | tee "$ROOT/target_goal.native.log"
+
+      - name: Verify native pre-outcome typed-context observations
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/unproved-target-context"
+          python - "$ROOT" <<'PY'
+          import hashlib
+          import json
+          import pathlib
+          import sys
+          from experiments.rtk.lean_native_support_projection import project_native_probe
+
+          directory = pathlib.Path(sys.argv[1])
+          records = {}
+          for side in ("source", "target_goal"):
+              native_log = (directory / f"{side}.native.log").read_text()
+              markers = [
+                  line.split("RTK_NATIVE_SUPPORT_JSON=", 1)[1]
+                  for line in native_log.splitlines()
+                  if "RTK_NATIVE_SUPPORT_JSON=" in line
+              ]
+              assert len(markers) == 1, (side, native_log[-800:])
+              raw = json.loads(markers[0])
+              projection = project_native_probe(raw)
+              nodes = {node["symbol"]: node for node in raw["items"]}
+              records[side] = {
+                  "raw": raw, "projection": projection,
+                  "native_log_sha256": hashlib.sha256(
+                      native_log.encode("utf-8")
+                  ).hexdigest(),
+                  "exact_checked_input_sha256": hashlib.sha256(
+                      (directory / f"{side}.lean").read_bytes()
+                  ).hexdigest(),
+              }
+              if side == "source":
+                  assert nodes["historical_claim"]["kind"] == "theorem"
+                  assert nodes["historical_claim"]["value_repr"]
+              else:
+                  assert nodes["rtk_unproven_target_claim"]["kind"] == "axiom"
+                  assert nodes["rtk_unproven_target_claim"]["value_repr"] == ""
+              assert projection["support_claimed_complete"] is False
+
+          old = {n["symbol"]: n for n in records["source"]["raw"]["items"]}
+          new = {n["symbol"]: n for n in records["target_goal"]["raw"]["items"]}
+          assert old["historical_claim"]["type_repr"] == (
+              new["rtk_unproven_target_claim"]["type_repr"]
+          )
+          assert old["op"]["type_repr"] == new["op"]["type_repr"]
+          assert old["op"]["value_repr"] != new["op"]["value_repr"]
+          source_imports = set(
+              records["source"]["projection"]["imported_boundaries"]
+          )
+          target_imports = set(
+              records["target_goal"]["projection"]["imported_boundaries"]
+          )
+          # The proof term refers to Eq.refl, absent from the target goal
+          # declaration. This reference still needs independent checking
+          # in the target environment before any old-proof transport claim.
+          pending_reference_checks = sorted(source_imports - target_imports)
+          assert "Eq.refl" in pending_reference_checks
+          output = {
+              "schema_version": "rtk.lean_unproved_target_context.v1-development",
+              "native_checker_binary_sha256":
+                "eacf754d25ae86ea076882a34b9444f2485659d9df4266b821443b28ca95a215",
+              "source_proof_native_accepted": True,
+              "target_context_native_parsed": True,
+              "target_claim_proof_supplied": False,
+              "target_claim_established": False,
+              "target_axiom_is_only_a_goal_placeholder": True,
+              "historical_evidence_target_replay_executed": False,
+              "target_native_oracle_executed": False,
+              "imported_support_complete": False,
+              "source_only_imported_references_needing_target_check":
+                pending_reference_checks,
+              "proof_reference_transport_verified": False,
+              "sound_transport_conclusion_established": False,
+              "records": records,
+          }
+          (directory / "preoracle_context_development.json").write_text(
+              json.dumps(output, sort_keys=True, indent=2) + "\n"
+          )
+          print("NATIVE_UNPROVED_TARGET_CONTEXT_DEVELOPMENT_PASS")
+          PY
+
+      - name: Source-derived imported proof reference lookup in target goal environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/unproved-target-context"
+          python -m experiments.rtk.lean_imported_proofrefs_v1 \
+            --make-footer-from-source-log "$ROOT/source.native.log" \
+            --footer-output "$ROOT/old_source_imported_refs.lean.txt"
+          cp "$ROOT/source.lean" "$ROOT/source_refs.lean"
+          cp "$ROOT/target_goal.lean" "$ROOT/target_refs.lean"
+          cat "$ROOT/old_source_imported_refs.lean.txt" >> "$ROOT/source_refs.lean"
+          cat "$ROOT/old_source_imported_refs.lean.txt" >> "$ROOT/target_refs.lean"
+          LEAN_BINARY="$("$HOME/.elan/bin/elan" which lean)"
+          "$LEAN_BINARY" "$ROOT/source_refs.lean" | tee "$ROOT/source_refs.native.log"
+          "$LEAN_BINARY" "$ROOT/target_refs.lean" | tee "$ROOT/target_refs.native.log"
+          LEAN_ROOT="$(dirname "$(dirname "$LEAN_BINARY")")"
+          python -m experiments.rtk.lean_imported_proofrefs_v1 \
+            --source-native-log "$ROOT/source.native.log" \
+            --source-reference-log "$ROOT/source_refs.native.log" \
+            --target-reference-log "$ROOT/target_refs.native.log" \
+            --target-goal-native-log "$ROOT/target_goal.native.log" \
+            --lean-root "$LEAN_ROOT" \
+            --checker-binary "$LEAN_BINARY" \
+            --output "$ROOT/imported_olean_proofrefs_development.json"
+          python - "$ROOT/imported_olean_proofrefs_development.json" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          record = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert record["reference_count"] > 0
+          assert record["module_file_count"] > 0
+          assert record["reference_identity_matches_in_this_environment"]
+          assert record["reference_differences"] == []
+          assert "Eq.refl" in record["source_imported_proof_references"]
+          assert record["module_bytes_reproducibly_hashed"] is True
+          assert record["different_source_target_module_installations_compared"] is False
+          assert record["target_proof_supplied"] is False
+          assert record["target_old_proof_replayed"] is False
+          assert record["target_goal_established"] is False
+          assert record["transitive_import_semantics_proved"] is False
+          assert record["transport_applicability_established"] is False
+          print("SOURCE_PROOF_ONLY_REFS_PRESENT_AND_OLEAN_BOUND_NO_ORACLE_PASS")
+          PY
+
+      - name: Archive checked context inputs and native logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rtk-lean-olean-proofrefs-development
+          path: ${{ runner.temp }}/unproved-target-context/*
+          if-no-files-found: warn
+          retention-days: 30
