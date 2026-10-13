@@ -3,43 +3,6 @@ name: RTK Lean bounded strict declaration closure development
 on:
   pull_request:
     branches:
-      - research/rtk-lean-independent-target-certificate-oracle-v1
-    paths:
-      - .github/workflows/rtk-lean-strict-declaration-closure-v1.yml
-      - experiments/rtk/lean_native_support_footer.lean.txt
-      - experiments/rtk/lean_native_support_projection.py
-      - experiments/rtk/lean_imported_proofrefs_v1.py
-      - experiments/rtk/lean_dual_installed_env_v1.py
-      - experiments/rtk/lean_imported_drift_fixtures_v1/**
-      - experiments/rtk/lean_structural_expr_probe_v1.lean.txt
-      - experiments/rtk/lean_structural_expr_v1.py
-      - tests/test_rtk_lean_structural_expr_v1.py
-      - experiments/rtk/lean_native_preoracle_envelope_v1.py
-      - experiments/rtk/lean_expr_decoder_roundtrip_v1.lean.txt
-      - experiments/rtk/lean_expr_roundtrip_v1.py
-      - experiments/rtk/lean_second_process_source_v1.py
-      - experiments/rtk/lean_second_process_driver_v1.lean.txt
-      - experiments/rtk/lean_second_process_witness_v1.py
-      - experiments/rtk/lean_axiom_dependency_probe_v1.lean.txt
-      - experiments/rtk/lean_axiom_support_v1.py
-      - experiments/rtk/lean_strict_decl_closure_v1.lean.txt
-      - experiments/rtk/lean_strict_decl_closure_v1.py
-      - experiments/rtk/lean_historical_target_oracle_v1.py
-      - experiments/rtk/lean_preoracle_byte_identity_v1.py
-      - tests/test_rtk_lean_preoracle_byte_identity_v1.py
-      - experiments/rtk/lean_historical_target_replay_v1.lean.txt
-      - tests/test_rtk_lean_historical_target_oracle_v1.py
-      - tests/test_rtk_lean_strict_decl_closure_v1.py
-      - tests/test_rtk_lean_axiom_support_v1.py
-      - tests/test_rtk_lean_second_process_v1.py
-      - tests/test_rtk_lean_expr_roundtrip_v1.py
-      - tests/test_rtk_lean_native_preoracle_envelope_v1.py
-      - tests/test_rtk_lean_dual_installed_env_v1.py
-      - docs/RTK_LEAN_OLEAN_PROOFREFS_V1_DEVELOPMENT.md
-      - tests/test_rtk_lean_imported_proofrefs_v1.py
-      - experiments/rtk/lean_context_drift_fixtures_v1/**
-  push:
-    branches:
       - research/rtk-lean-preoracle-byte-identity-v1
     paths:
       - .github/workflows/rtk-lean-strict-declaration-closure-v1.yml
@@ -64,6 +27,45 @@ on:
       - experiments/rtk/lean_historical_target_oracle_v1.py
       - experiments/rtk/lean_preoracle_byte_identity_v1.py
       - tests/test_rtk_lean_preoracle_byte_identity_v1.py
+      - docs/RTK_LEAN_LOCAL_DECLARATION_SCOPE_V1.md
+      - experiments/rtk/lean_historical_target_replay_v1.lean.txt
+      - tests/test_rtk_lean_historical_target_oracle_v1.py
+      - tests/test_rtk_lean_strict_decl_closure_v1.py
+      - tests/test_rtk_lean_axiom_support_v1.py
+      - tests/test_rtk_lean_second_process_v1.py
+      - tests/test_rtk_lean_expr_roundtrip_v1.py
+      - tests/test_rtk_lean_native_preoracle_envelope_v1.py
+      - tests/test_rtk_lean_dual_installed_env_v1.py
+      - docs/RTK_LEAN_OLEAN_PROOFREFS_V1_DEVELOPMENT.md
+      - tests/test_rtk_lean_imported_proofrefs_v1.py
+      - experiments/rtk/lean_context_drift_fixtures_v1/**
+  push:
+    branches:
+      - research/rtk-lean-local-declaration-closure-v1
+    paths:
+      - .github/workflows/rtk-lean-strict-declaration-closure-v1.yml
+      - experiments/rtk/lean_native_support_footer.lean.txt
+      - experiments/rtk/lean_native_support_projection.py
+      - experiments/rtk/lean_imported_proofrefs_v1.py
+      - experiments/rtk/lean_dual_installed_env_v1.py
+      - experiments/rtk/lean_imported_drift_fixtures_v1/**
+      - experiments/rtk/lean_structural_expr_probe_v1.lean.txt
+      - experiments/rtk/lean_structural_expr_v1.py
+      - tests/test_rtk_lean_structural_expr_v1.py
+      - experiments/rtk/lean_native_preoracle_envelope_v1.py
+      - experiments/rtk/lean_expr_decoder_roundtrip_v1.lean.txt
+      - experiments/rtk/lean_expr_roundtrip_v1.py
+      - experiments/rtk/lean_second_process_source_v1.py
+      - experiments/rtk/lean_second_process_driver_v1.lean.txt
+      - experiments/rtk/lean_second_process_witness_v1.py
+      - experiments/rtk/lean_axiom_dependency_probe_v1.lean.txt
+      - experiments/rtk/lean_axiom_support_v1.py
+      - experiments/rtk/lean_strict_decl_closure_v1.lean.txt
+      - experiments/rtk/lean_strict_decl_closure_v1.py
+      - experiments/rtk/lean_historical_target_oracle_v1.py
+      - experiments/rtk/lean_preoracle_byte_identity_v1.py
+      - tests/test_rtk_lean_preoracle_byte_identity_v1.py
+      - docs/RTK_LEAN_LOCAL_DECLARATION_SCOPE_V1.md
       - experiments/rtk/lean_historical_target_replay_v1.lean.txt
       - tests/test_rtk_lean_historical_target_oracle_v1.py
       - tests/test_rtk_lean_strict_decl_closure_v1.py
@@ -677,6 +679,8 @@ jobs:
             "$RTK_TARGET_LEAN" -o "$OLEAN" "$MODULE"
             "$RTK_TARGET_LEAN" "$ROOT/target_refs.lean" \
               | tee "$ROOT/preoracle_target_refs_$CONTROL.native.log"
+            "$RTK_TARGET_LEAN" "$ROOT/target_strict_closure.lean" \
+              | tee "$ROOT/preoracle_target_closure_$CONTROL.native.log"
             python -m experiments.rtk.lean_preoracle_byte_identity_v1 \
               --environment "$ROOT/imported_semantic_drift_preoracle.json" \
               --source-payload "$BASE/rtk_source_proof_payload.json" \
@@ -684,6 +688,8 @@ jobs:
               --target-payload "$BASE/rtk_target_claim_payload.json" \
               --target-structural-log "$ROOT/target_structural.native.log" \
               --target-reference-log "$ROOT/preoracle_target_refs_$CONTROL.native.log" \
+              --source-declaration-closure-log "$ROOT/source_strict_closure.native.log" \
+              --current-target-declaration-closure-log "$ROOT/preoracle_target_closure_$CONTROL.native.log" \
               --source-root "$RTK_SOURCE_ROOT" \
               --target-root "$RTK_TARGET_ROOT" \
               --source-checker "$RTK_SOURCE_LEAN" \
@@ -705,6 +711,8 @@ jobs:
               assert record["target_historical_proof_replayed"] is False
               assert record["oracle_consulted"] is False
               assert record["module_semantic_support_complete_proved"] is False
+              assert record["native_import_only_scope_checked"] is True
+              assert record["native_reference_relation_semantic_completeness_proved"] is False
           assert equal["historical_certificate_sha256"] == changed["historical_certificate_sha256"]
           assert equal["target_unproved_claim_payload_sha256"] == changed["target_unproved_claim_payload_sha256"]
           print("TWO_PREORACLE_PREDICTIONS_COMPUTED_WITHOUT_TARGET_REPLAY")
@@ -796,6 +804,128 @@ jobs:
           )
           print("EXACT_HISTORICAL_CERTIFICATE_INDEPENDENT_TARGET_REPLAY_CONTROL_PASS")
           PY
+
+      - name: Demonstrate local declaration drift outside identical imported bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/imported-semantic-drift"
+          BASE="$GITHUB_WORKSPACE/.rtk-imported-build"
+          MODULE="$BASE/RTKSemanticSupport.lean"
+          OLEAN="$RTK_TARGET_ROOT/lib/lean/RTKSemanticSupport.olean"
+          cp experiments/rtk/lean_imported_drift_fixtures_v1/source_support.lean.txt "$MODULE"
+          "$RTK_TARGET_LEAN" -o "$OLEAN" "$MODULE"
+          python - "$ROOT/imported_semantic_drift_preoracle.json" "$RTK_TARGET_ROOT" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          from experiments.rtk.lean_imported_proofrefs_v1 import imported_olean_snapshot
+          env = json.loads(Path(sys.argv[1]).read_text())
+          source = env["source_modules"]
+          target = imported_olean_snapshot(
+              {name: name for name in source}, Path(sys.argv[2])
+          )
+          assert source == target, "local-drift negative control requires identical imported bytes"
+          print("ALL_REPORTED_IMPORTED_OLEAN_BYTES_IDENTICAL_LOCAL_DRIFT_CONTROL")
+          PY
+          cat > "$ROOT/local_source.lean" <<'LEAN'
+          import Lean
+          import RTKSemanticSupport
+          def rtkLocal (n : Nat) : Nat := n
+          theorem historical_claim (n : Nat) : rtkLocal n = n :=
+            Eq.refl n
+          LEAN
+          cat > "$ROOT/local_target.lean" <<'LEAN'
+          import Lean
+          import RTKSemanticSupport
+          def rtkLocal (n : Nat) : Nat := 0 + n
+          axiom rtk_unproven_target_claim (n : Nat) : rtkLocal n = n
+          LEAN
+          "$RTK_SOURCE_LEAN" "$ROOT/local_source.lean" \
+            | tee "$ROOT/local_source_checked.native.log"
+          "$RTK_TARGET_LEAN" "$ROOT/local_target.lean" \
+            | tee "$ROOT/local_target_unproved.native.log"
+          cp "$ROOT/local_source.lean" "$ROOT/local_source_structural.lean"
+          cp "$ROOT/local_target.lean" "$ROOT/local_target_structural.lean"
+          cat experiments/rtk/lean_structural_expr_probe_v1.lean.txt \
+            >> "$ROOT/local_source_structural.lean"
+          python - "$ROOT/local_target_structural.lean" <<'PY'
+          from pathlib import Path
+          import sys
+          probe = Path("experiments/rtk/lean_structural_expr_probe_v1.lean.txt").read_text()
+          assert probe.count("let root : Name := `historical_claim") == 1
+          with Path(sys.argv[1]).open("a") as out:
+              out.write(probe.replace(
+                  "let root : Name := `historical_claim",
+                  "let root : Name := `rtk_unproven_target_claim",
+              ))
+          PY
+          "$RTK_SOURCE_LEAN" "$ROOT/local_source_structural.lean" \
+            | tee "$ROOT/local_source_structural.native.log"
+          "$RTK_TARGET_LEAN" "$ROOT/local_target_structural.lean" \
+            | tee "$ROOT/local_target_structural.native.log"
+          cp "$ROOT/local_source.lean" "$ROOT/local_source_closure.lean"
+          cp "$ROOT/local_target.lean" "$ROOT/local_target_closure.lean"
+          cat experiments/rtk/lean_strict_decl_closure_v1.lean.txt \
+            >> "$ROOT/local_source_closure.lean"
+          python - "$ROOT/local_target_closure.lean" <<'PY'
+          from pathlib import Path
+          import sys
+          probe = Path("experiments/rtk/lean_strict_decl_closure_v1.lean.txt").read_text()
+          assert probe.count("let root : Name := `historical_claim") == 1
+          with Path(sys.argv[1]).open("a") as out:
+              out.write(probe.replace(
+                  "let root : Name := `historical_claim",
+                  "let root : Name := `rtk_unproven_target_claim",
+              ))
+          PY
+          "$RTK_SOURCE_LEAN" "$ROOT/local_source_closure.lean" \
+            | tee "$ROOT/local_source_closure.native.log"
+          "$RTK_TARGET_LEAN" "$ROOT/local_target_closure.lean" \
+            | tee "$ROOT/local_target_closure.native.log"
+          python - "$ROOT" <<'PY'
+          from pathlib import Path
+          import sys
+          from experiments.rtk.lean_structural_expr_v1 import _structural_ast
+          from experiments.rtk.lean_strict_decl_closure_v1 import _parse
+          root = Path(sys.argv[1])
+          source_ast = _structural_ast((root / "local_source_structural.native.log").read_text())
+          target_ast = _structural_ast((root / "local_target_structural.native.log").read_text())
+          assert source_ast["theorem_type_ast"] == target_ast["theorem_type_ast"]
+          assert source_ast["theorem_value_ast"] is not None
+          assert target_ast["theorem_value_ast"] is None
+          assert source_ast["op_value_ast"] == target_ast["op_value_ast"]
+          for name, kind in (("source", "source_theorem"),
+                             ("target", "target_goal_placeholder")):
+              record = _parse(
+                  (root / f"local_{name}_closure.native.log").read_text(),
+                  "historical_claim" if name == "source"
+                  else "rtk_unproven_target_claim", kind,
+              )
+              local = {
+                  node["name"] for node in record["root"]["nodes"]
+                  if node["module"] == "LOCAL"
+              }
+              assert "rtkLocal" in local, local
+              print("LOCAL_DEPENDENCY_OUTSIDE_IMPORTED_MODULES_RECORDED", name)
+          print("IDENTICAL_IMPORT_BYTES_DO_NOT_EXCLUDE_LOCAL_SEMANTIC_DRIFT")
+          PY
+          cat > "$ROOT/local_old_proof_target_attempt.lean" <<'LEAN'
+          import Lean
+          import RTKSemanticSupport
+          def rtkLocal (n : Nat) : Nat := 0 + n
+          theorem historical_claim (n : Nat) : rtkLocal n = n :=
+            Eq.refl n
+          LEAN
+          set +e
+          "$RTK_TARGET_LEAN" "$ROOT/local_old_proof_target_attempt.lean" \
+            > "$ROOT/local_old_proof_target_attempt.native.log" 2>&1
+          STATUS=$?
+          set -e
+          test "$STATUS" -ne 0
+          grep -Eq 'type mismatch|unsolved goals|application type mismatch' \
+            "$ROOT/local_old_proof_target_attempt.native.log"
+          echo "LOCAL_SEMANTIC_CHANGE_BREAKS_HISTORICAL_PROOF_DESPITE_IDENTICAL_IMPORTS"
 
       - name: Archive checked context inputs and native logs
         if: always()
