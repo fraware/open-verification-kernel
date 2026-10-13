@@ -1,4 +1,5 @@
-/-!
+import Lean
+/-
 A kernel-checked theorem about a *different, explicitly bounded* checker
 model. This is NOT a theorem about Lean.Kernel.check or the completeness of
 ConstantInfo.getUsedConstantsAsSet. The interpretation and acquisition of
@@ -8,8 +9,6 @@ The model has closed natural-number expressions, named constant lookups and
 addition. Its admissibility predicate checks that both sides of a certificate
 evaluate to the same Nat; missing references never count as evidence.
 -/
-import Lean
-
 namespace RTKRestrictedSupportModel
 
 inductive Term where
