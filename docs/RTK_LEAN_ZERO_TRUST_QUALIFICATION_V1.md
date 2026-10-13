@@ -14,6 +14,7 @@ The new development lane uses the **same pinned source and target Lean 4.14.0 ex
 4. Create a strict zero-trust context receipt binding the exact historical source certificate digest, checked source witness, target unproved proposition AST, native source/target kernel-header receipts, all natively reported imported module names and their exact on-disk `.olean` bytes.
 5. Run the pre-oracle predicate on this **separately re-executed** zero-trust evidence. For the known development controls, source-equal target module bytes are expected to produce `CONDITIONAL_IDENTITY_CANDIDATE` and changed imported `op` bytes `REVALIDATION_REQUIRED`, *both subject to unresolved semantic-support and policy premises*.
 6. Hash-seal both results and both full zero-trust context receipts **before** the independent historical target-proof oracle begins. The pre-existing default-trust abstentions remain separately sealed.
+7. Run the independent **exact historical-certificate target replay a second time with `--trust=0`**, separately for equal and changed imported-definition contexts. Recompile and compare the exact `RTKSemanticSupport.olean` bytes with the corresponding saved *pre-oracle* target module bytes. The driver reports `Environment.header.trustLevel` and `quotInit` from the same Lean process that calls `Kernel.check` / `Kernel.isDefEq`. A separate validator binds the header to the cryptographic digest of the native oracle log and its already validated adjudication record. The expected development oracle decisions remain `ADMISSIBLE` (equal imported bytes) and `INADMISSIBLE` (changed imported bytes).
 
 Native `trustLevel=0` is evidence about the executing import/checking protocol under its documented semantics, not a guarantee against a compromised binary, malicious serialized objects, ABI mismatch or compromised hosted runner. Neither the native text logs nor their hashes provide independent supply-chain attestation.
 
@@ -21,7 +22,13 @@ Native `trustLevel=0` is evidence about the executing import/checking protocol u
 
 `lean_trust_zero_receipt_v1.py` rejects wrong source-payload digest, missing zero-trust checked-source witness, a nonzero native source/target trust header, target evidence containing a fresh proof, mismatched target claim AST, imported module-set differences, missing or redirected `.olean` files, and malformed witness records. It does not ingest the reference oracle or output a `VALID` decision.
 
-The record explicitly reports `semantic_support_complete_proved=false`, `import_integrity_independently_authenticated=false`, `relying_policy_authenticated=false`, `independent_runner_attestation=false`, `oracle_consulted=false` and `production_reliance_authorized=false`.
+The source/target qualification record explicitly reports `semantic_support_complete_proved=false`, `import_integrity_independently_authenticated=false`, `relying_policy_authenticated=false`, `independent_runner_attestation=false`, `oracle_consulted=false` and `production_reliance_authorized=false`.
+
+## Independent zero-trust target replay boundary
+
+The pre-oracle has **no access** to target historical replay. The exact old certificate is only replayed in the later oracle stage, once the source and target qualification receipts and prediction outputs have been sealed. The existing default-trust oracle is retained for comparison, and each equal/changed case also receives a separate target `--trust=0` kernel replay. The oracle context witness is read from the **same process** as the kernel call, and does not derive zero-trust status from a different native invocation.
+
+This is development *adjudication of the historical certificate*, not proof that the historical claim's intended semantics is adequate, that all support dependencies are extracted, or that independent provenance and policy have been authenticated.
 
 ## Explicit remaining obligations
 
