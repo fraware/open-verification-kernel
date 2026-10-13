@@ -109,6 +109,32 @@ def _state_log(*, target: bool = False, trust: int = 0,
     })
 
 
+def _axiom_log(*, target: bool = False, op_axioms=(),
+               proof_axioms=(), root_refs=("op",), op_refs=("Nat",)) -> str:
+    root = "rtk_unproven_target_claim" if target else "historical_claim"
+    return "native: RTK_NATIVE_AXIOM_SUPPORT_JSON=" + json.dumps({
+        "schema_version": "rtk.lean_native_axiom_dependency.v1-development",
+        "root_name": root,
+        "root_kind": "unproved_goal_placeholder" if target else "theorem",
+        "op_name": "op",
+        "direct_root_references": list(root_refs),
+        "direct_op_references": list(op_refs),
+        "op_transitive_axioms": [
+            {"name": name, "module": module, "kind": "axiom"}
+            for name, module in op_axioms
+        ],
+        "source_proof_transitive_axioms": [
+            {"name": name, "module": module, "kind": "axiom"}
+            for name, module in proof_axioms
+        ],
+        "synthetic_target_axiom_not_counted_as_proof": True,
+        "transitive_dependency_closure_proved": False,
+        "trusted_axiom_policy_authenticated": False,
+        "historic_target_proof_replayed": False,
+        "historical_applicability_established": False,
+    })
+
+
 def _native_target() -> str:
     return "native: RTK_STRUCTURAL_EXPR_JSON=" + json.dumps({
         "schema_version": "rtk.lean_native_structural_expr.v1-development",
@@ -211,6 +237,8 @@ def _fixture(tmp_path: Path, monkeypatch) -> dict:
         }),
         "source_kernel_header_log": _state_log(),
         "current_target_kernel_header_log": _state_log(target=True),
+        "source_axiom_log": _axiom_log(),
+        "current_target_axiom_log": _axiom_log(target=True),
         "source_declaration_closure_log": _closure_log(),
         "current_target_declaration_closure_log": _closure_log(target=True),
         "source_root": source_root, "target_root": target_root,
@@ -460,3 +488,78 @@ def test_supported_native_header_is_not_complete_kernel_context(tmp_path, monkey
     assert out["native_kernel_header_supported"] is True
     assert out["complete_kernel_environment_state_proved"] is False
     assert out["external_policy_and_provenance_authenticated"] is False
+
+
+def test_unchecked_imported_axiom_disqualifies_equal_byte_candidate(tmp_path, monkeypatch):
+    # Zero trust verifies the imported axiom *declaration*, not that the
+    # proposition it asserts is justified. An equal-olean context still
+    # cannot qualify as an axiom-free historical-evidence candidate.
+    case = _fixture(tmp_path, monkeypatch)
+    case["source_axiom_log"] = _axiom_log(
+        op_axioms=(("rtkProofOracle", "RTKSemanticSupport"),),
+    )
+    result = evaluate_preoracle_identity(**case)
+    assert result["decision"] == "UNRESOLVED"
+    assert result["reason_codes"] == [
+        "observed_axiom_dependency_outside_axiom_free_fragment"
+    ]
+    assert result["production_reliance_authorization"] is False
+    assert result["observed_axiom_free_fragment_checked"] is False
+
+
+def test_target_imported_axiom_disqualifies_even_revalidation_status(
+    tmp_path, monkeypatch,
+):
+    case = _fixture(tmp_path, monkeypatch)
+    _module(case["target_root"], "RTKSemanticSupport", b"uses introduced axiom")
+    case["current_target_axiom_log"] = _axiom_log(
+        target=True, op_axioms=(("rtkExternal", "RTKSemanticSupport"),),
+    )
+    result = evaluate_preoracle_identity(**case)
+    assert result["decision"] == "UNRESOLVED"
+    assert result["reason_codes"] == [
+        "observed_axiom_dependency_outside_axiom_free_fragment"
+    ]
+
+
+def test_source_theorem_proof_axiom_disqualifies(tmp_path, monkeypatch):
+    case = _fixture(tmp_path, monkeypatch)
+    case["source_axiom_log"] = _axiom_log(
+        proof_axioms=(("rtkHistoricalShortcut", "RTKSemanticSupport"),),
+    )
+    assert evaluate_preoracle_identity(**case)["decision"] == "UNRESOLVED"
+
+
+def test_axiom_report_cannot_mismatch_native_reference_graph(tmp_path, monkeypatch):
+    case = _fixture(tmp_path, monkeypatch)
+    case["current_target_axiom_log"] = _axiom_log(
+        target=True, root_refs=("op", "rtkUnaccounted"),
+    )
+    with pytest.raises(ValueError, match="native axiom and closure witnesses disagree"):
+        evaluate_preoracle_identity(**case)
+
+
+def test_axiom_report_missing_is_fail_closed(tmp_path, monkeypatch):
+    case = _fixture(tmp_path, monkeypatch)
+    case["source_axiom_log"] = ""
+    with pytest.raises(ValueError, match="exactly one bounded native axiom marker"):
+        evaluate_preoracle_identity(**case)
+
+
+def test_sorry_axiom_is_rejected_by_native_axiom_record_validation(
+    tmp_path, monkeypatch,
+):
+    case = _fixture(tmp_path, monkeypatch)
+    case["source_axiom_log"] = _axiom_log(
+        proof_axioms=(("sorryAx", "Init.Prelude"),),
+    )
+    with pytest.raises(ValueError, match="Lean sorryAx dependency forbidden"):
+        evaluate_preoracle_identity(**case)
+
+
+def test_axiom_free_result_is_only_conditional(tmp_path, monkeypatch):
+    result = evaluate_preoracle_identity(**_fixture(tmp_path, monkeypatch))
+    assert result["observed_axiom_free_fragment_checked"] is True
+    assert result["transitive_axiom_support_complete_proved"] is False
+    assert result["axiom_policy_authenticated"] is False
+    assert result["production_reliance_authorization"] is False

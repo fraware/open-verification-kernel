@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from experiments.rtk.lean_axiom_support_v1 import _read_record
 from experiments.rtk.lean_dual_installed_env_v1 import _installed_root
 from experiments.rtk.lean_historical_target_oracle_v1 import (
     _source, export_target_claim,
@@ -143,6 +144,61 @@ def _native_import_only_scope(
     return True
 
 
+def _native_axiom_free_scope(
+    *, source_axiom_log: str, target_axiom_log: str,
+    source_closure_log: str, target_closure_log: str,
+) -> bool:
+    """Exclude *observed* transitive axioms in the bounded Lean fragment.
+
+    The source's historical theorem and the imported definition are checked
+    as actual declarations. The target's unproved placeholder is excluded
+    from evidence-bearing source proof support. This validates two native
+    reports of the same limited dependency relation, not a completeness
+    theorem for Lean's full kernel environment or an authenticated axiom policy.
+    """
+    records = (
+        (_read_record(source_axiom_log, "historical_claim", "theorem"),
+         _parse(source_closure_log, "historical_claim", "source_theorem"),
+         "historical_claim"),
+        (_read_record(target_axiom_log, "rtk_unproven_target_claim",
+                      "unproved_goal_placeholder"),
+         _parse(target_closure_log, "rtk_unproven_target_claim",
+                "target_goal_placeholder"),
+         "rtk_unproven_target_claim"),
+    )
+    for axiom_report, closure, root_name in records:
+        root = closure["root"]["index"][
+            _key(closure["record"]["root_declaration_closure"]["root_name_ast"])
+        ]
+        op = closure["op"]["index"][
+            _key(closure["record"]["imported_definition_closure"]["root_name_ast"])
+        ]
+        if (
+            root["name"] != root_name
+            or op["name"] != "op"
+            or set(root["direct_references"])
+            != set(axiom_report["direct_root_references"])
+            or set(op["direct_references"])
+            != set(axiom_report["direct_op_references"])
+        ):
+            raise ValueError("native axiom and closure witnesses disagree")
+        if (
+            axiom_report["op_transitive_axioms"]
+            or axiom_report["source_proof_transitive_axioms"]
+        ):
+            return False
+        # Cross-check that closure did not observe an axiom omitted by
+        # collectAxioms. Ignore only the *unproved target placeholder* root.
+        for graph in (closure["root"], closure["op"]):
+            for declaration in graph["nodes"]:
+                if declaration["kind"] == "axiom" and (
+                    root_name != "rtk_unproven_target_claim"
+                    or declaration["name"] != root_name
+                ):
+                    return False
+    return True
+
+
 def evaluate_preoracle_identity(
     *,
     environment: dict[str, Any],
@@ -153,6 +209,8 @@ def evaluate_preoracle_identity(
     current_target_reference_log: str,
     source_declaration_closure_log: str,
     current_target_declaration_closure_log: str,
+    source_axiom_log: str,
+    current_target_axiom_log: str,
     source_kernel_header_log: str,
     current_target_kernel_header_log: str,
     source_root: Path,
@@ -279,6 +337,16 @@ def evaluate_preoracle_identity(
             source_payload_bytes, target_payload_bytes, src_record, {},
             "UNRESOLVED", ["unaccounted_local_declaration_dependency"],
         )
+    if not _native_axiom_free_scope(
+        source_axiom_log=source_axiom_log,
+        target_axiom_log=current_target_axiom_log,
+        source_closure_log=source_declaration_closure_log,
+        target_closure_log=current_target_declaration_closure_log,
+    ):
+        return _result(
+            source_payload_bytes, target_payload_bytes, src_record, {},
+            "UNRESOLVED", ["observed_axiom_dependency_outside_axiom_free_fragment"],
+        )
     if set(target_native_modules) != set(src_record) or (
         set(target_native_modules) != set(dst_record)
     ):
@@ -339,6 +407,11 @@ def _result(
             decision in {"REVALIDATION_REQUIRED", "CONDITIONAL_IDENTITY_CANDIDATE"}
         ),
         "complete_kernel_environment_state_proved": False,
+        "observed_axiom_free_fragment_checked": (
+            decision in {"REVALIDATION_REQUIRED", "CONDITIONAL_IDENTITY_CANDIDATE"}
+        ),
+        "transitive_axiom_support_complete_proved": False,
+        "axiom_policy_authenticated": False,
         "external_policy_and_provenance_authenticated": False,
         "target_historical_proof_replayed": False,
         "oracle_consulted": False,
@@ -355,6 +428,7 @@ def main() -> int:
         "source-root", "target-root", "source-checker", "target-checker",
         "source-declaration-closure-log", "current-target-declaration-closure-log",
         "source-kernel-header-log", "current-target-kernel-header-log",
+        "source-axiom-log", "current-target-axiom-log",
         "output",
     ):
         parser.add_argument("--" + arg, required=True, type=Path)
@@ -372,6 +446,8 @@ def main() -> int:
         ),
         source_kernel_header_log=args.source_kernel_header_log.read_text(),
         current_target_kernel_header_log=args.current_target_kernel_header_log.read_text(),
+        source_axiom_log=args.source_axiom_log.read_text(),
+        current_target_axiom_log=args.current_target_axiom_log.read_text(),
         source_root=args.source_root,
         target_root=args.target_root,
         source_checker=args.source_checker,
