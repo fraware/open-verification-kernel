@@ -93,6 +93,22 @@ def _sha(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def _state_log(*, target: bool = False, trust: int = 0,
+               quot: bool = True) -> str:
+    return "native: RTK_NATIVE_KERNEL_HEADER_JSON=" + json.dumps({
+        "schema_version": "rtk.lean_native_kernel_header.v1-development",
+        "root_name": (
+            "rtk_unproven_target_claim" if target else "historical_claim"
+        ),
+        "root_kind": "axiom" if target else "theorem",
+        "trust_level": trust,
+        "quotient_initialized": quot,
+        "target_historical_proof_replayed": False,
+        "native_header_complete_environment_proof": False,
+        "reliance_authorization": False,
+    })
+
+
 def _native_target() -> str:
     return "native: RTK_STRUCTURAL_EXPR_JSON=" + json.dumps({
         "schema_version": "rtk.lean_native_structural_expr.v1-development",
@@ -193,6 +209,8 @@ def _fixture(tmp_path: Path, monkeypatch) -> dict:
         "current_target_reference_log": "RTK_NATIVE_REFERENCE_JSON=" + json.dumps({
             "environment_modules": sorted(source_modules),
         }),
+        "source_kernel_header_log": _state_log(),
+        "current_target_kernel_header_log": _state_log(target=True),
         "source_declaration_closure_log": _closure_log(),
         "current_target_declaration_closure_log": _closure_log(target=True),
         "source_root": source_root, "target_root": target_root,
@@ -384,3 +402,61 @@ def test_safe_restricted_expression_still_collects_references():
         json.dumps(_name("Nat"), separators=(",", ":"), sort_keys=True),
         json.dumps(_name("op"), separators=(",", ":"), sort_keys=True),
     }
+
+
+def test_equal_imports_different_quotient_state_cannot_reuse(tmp_path, monkeypatch):
+    case = _fixture(tmp_path, monkeypatch)
+    case["current_target_kernel_header_log"] = _state_log(
+        target=True, quot=False
+    )
+    out = evaluate_preoracle_identity(**case)
+    assert out["decision"] == "UNRESOLVED"
+    assert out["reason_codes"] == ["unsupported_kernel_quotient_state"]
+    assert out["candidate_for_reuse_under_explicit_unproved_premises"] is False
+    assert out["production_reliance_authorization"] is False
+
+
+@pytest.mark.parametrize(("side", "trust"), [
+    ("source", 1), ("target", 1), ("target", 2147483648),
+])
+def test_nonzero_trust_level_fails_closed(tmp_path, monkeypatch, side, trust):
+    case = _fixture(tmp_path, monkeypatch)
+    key = "source_kernel_header_log" if side == "source" else (
+        "current_target_kernel_header_log"
+    )
+    case[key] = _state_log(target=side == "target", trust=trust)
+    out = evaluate_preoracle_identity(**case)
+    assert out["decision"] == "UNRESOLVED"
+    assert out["reason_codes"] == ["unsupported_nonzero_kernel_trust_level"]
+
+
+@pytest.mark.parametrize("case_id", ["duplicate", "wrong_root", "false_authority",
+                                     "nonboolean_quot", "schema_mismatch"])
+def test_native_header_adversarial_forgery_rejected(tmp_path, monkeypatch, case_id):
+    case = _fixture(tmp_path, monkeypatch)
+    key = "current_target_kernel_header_log"
+    line = case[key]
+    marker, raw = line.split("RTK_NATIVE_KERNEL_HEADER_JSON=", 1)
+    record = json.loads(raw)
+    if case_id == "duplicate":
+        case[key] = line + "\n" + line
+    else:
+        if case_id == "wrong_root":
+            record["root_name"] = "historical_claim"
+        elif case_id == "false_authority":
+            record["reliance_authorization"] = True
+        elif case_id == "nonboolean_quot":
+            record["quotient_initialized"] = "true"
+        else:
+            record["schema_version"] = "rtk.lean_native_kernel_header.bad"
+        case[key] = marker + "RTK_NATIVE_KERNEL_HEADER_JSON=" + json.dumps(record)
+    with pytest.raises(ValueError, match="native kernel-header|native header identity"):
+        evaluate_preoracle_identity(**case)
+
+
+def test_supported_native_header_is_not_complete_kernel_context(tmp_path, monkeypatch):
+    out = evaluate_preoracle_identity(**_fixture(tmp_path, monkeypatch))
+    assert out["decision"] == "CONDITIONAL_IDENTITY_CANDIDATE"
+    assert out["native_kernel_header_supported"] is True
+    assert out["complete_kernel_environment_state_proved"] is False
+    assert out["external_policy_and_provenance_authenticated"] is False

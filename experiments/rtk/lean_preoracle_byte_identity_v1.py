@@ -26,6 +26,43 @@ from experiments.rtk.lean_structural_expr_v1 import _canonical, _digest
 from experiments.rtk.lean_strict_decl_closure_v1 import _key, _parse
 
 _SCHEMA = "rtk.lean_preoracle_byte_identity.v1-development"
+_HEADER_MARKER = "RTK_NATIVE_KERNEL_HEADER_JSON="
+_HEADER_SCHEMA = "rtk.lean_native_kernel_header.v1-development"
+
+
+def _kernel_header(raw: str, root: str, kind: str) -> dict[str, Any]:
+    """Parse exact native, pre-replay kernel-header observation, fail closed."""
+    matches = [
+        line.partition(_HEADER_MARKER)[2].strip()
+        for line in raw.splitlines() if _HEADER_MARKER in line
+    ]
+    if len(matches) != 1 or len(matches[0]) > 8192:
+        raise ValueError("one native kernel-header observation required")
+    try:
+        entry = json.loads(matches[0])
+    except json.JSONDecodeError as error:
+        raise ValueError("invalid native kernel-header JSON") from error
+    if not isinstance(entry, dict) or set(entry) != {
+        "schema_version", "root_name", "root_kind", "trust_level",
+        "quotient_initialized", "target_historical_proof_replayed",
+        "native_header_complete_environment_proof", "reliance_authorization",
+    }:
+        raise ValueError("unsupported native kernel-header schema")
+    if (
+        entry["schema_version"] != _HEADER_SCHEMA
+        or entry["root_name"] != root
+        or entry["root_kind"] != kind
+        or type(entry["trust_level"]) is not int
+        or not 0 <= entry["trust_level"] < 2**32
+        or type(entry["quotient_initialized"]) is not bool
+        or any(entry[k] is not False for k in (
+            "target_historical_proof_replayed",
+            "native_header_complete_environment_proof",
+            "reliance_authorization",
+        ))
+    ):
+        raise ValueError("native header identity or authority mismatch")
+    return entry
 
 
 def _hash(raw: bytes) -> str:
@@ -116,6 +153,8 @@ def evaluate_preoracle_identity(
     current_target_reference_log: str,
     source_declaration_closure_log: str,
     current_target_declaration_closure_log: str,
+    source_kernel_header_log: str,
+    current_target_kernel_header_log: str,
     source_root: Path,
     target_root: Path,
     source_checker: Path,
@@ -198,6 +237,31 @@ def evaluate_preoracle_identity(
     )
     if actual_source != src_record:
         raise ValueError("source imported module bytes changed since native receipt")
+    # These runtime fields live outside the imported .olean inventory.
+    # A change to quotient initialization or a nonzero trust level does not
+    # satisfy the restricted conditional reuse contract.
+    source_header = _kernel_header(
+        source_kernel_header_log, "historical_claim", "theorem"
+    )
+    target_header = _kernel_header(
+        current_target_kernel_header_log, "rtk_unproven_target_claim", "axiom"
+    )
+    if (
+        source_header["trust_level"] != 0 or target_header["trust_level"] != 0
+    ):
+        return _result(
+            source_payload_bytes, target_payload_bytes, src_record, {},
+            "UNRESOLVED", ["unsupported_nonzero_kernel_trust_level"],
+        )
+    if not source_header["quotient_initialized"] or not target_header[
+        "quotient_initialized"
+    ] or source_header["quotient_initialized"] != target_header[
+        "quotient_initialized"
+    ]:
+        return _result(
+            source_payload_bytes, target_payload_bytes, src_record, {},
+            "UNRESOLVED", ["unsupported_kernel_quotient_state"],
+        )
     target_native_modules = _environment_modules(current_target_reference_log)
     # Native closure is pre-outcome, derived from the checked source theorem
     # and the target's UNPROVED claim. No historical target-proof replay.
@@ -271,6 +335,10 @@ def _result(
             decision in {"REVALIDATION_REQUIRED", "CONDITIONAL_IDENTITY_CANDIDATE"}
         ),
         "native_reference_relation_semantic_completeness_proved": False,
+        "native_kernel_header_supported": (
+            decision in {"REVALIDATION_REQUIRED", "CONDITIONAL_IDENTITY_CANDIDATE"}
+        ),
+        "complete_kernel_environment_state_proved": False,
         "external_policy_and_provenance_authenticated": False,
         "target_historical_proof_replayed": False,
         "oracle_consulted": False,
@@ -286,6 +354,7 @@ def main() -> int:
         "target-payload", "target-structural-log", "target-reference-log",
         "source-root", "target-root", "source-checker", "target-checker",
         "source-declaration-closure-log", "current-target-declaration-closure-log",
+        "source-kernel-header-log", "current-target-kernel-header-log",
         "output",
     ):
         parser.add_argument("--" + arg, required=True, type=Path)
@@ -301,6 +370,8 @@ def main() -> int:
         current_target_declaration_closure_log=(
             args.current_target_declaration_closure_log.read_text()
         ),
+        source_kernel_header_log=args.source_kernel_header_log.read_text(),
+        current_target_kernel_header_log=args.current_target_kernel_header_log.read_text(),
         source_root=args.source_root,
         target_root=args.target_root,
         source_checker=args.source_checker,
