@@ -1,0 +1,97 @@
+import Lean
+
+/-!
+# Actual Lean Kernel API, full-context preservation boundary
+
+This is a theorem about actual Lean 4.14.0 opaque Kernel.check and
+Kernel.isDefEq, not a model of the typechecker.
+
+It proves only the mathematically immediate fact that the SAME proof, claim,
+full Environment and LocalContext receive the SAME result. The full context
+equalities below are explicit PREMISES, not conclusions drawn from imported
+module bytes, declaration-reference reports or zero-trust execution.
+
+Do not infer actual source/target Environment equality from this file.
+No production applicability or historical reliance authorization is derived.
+-/
+
+namespace RTKActualKernelIdentity
+
+open Lean
+
+def historicalCertificateAccepted
+    (env : Environment) (lctx : LocalContext)
+    (historicalProof targetClaim : Expr) : Prop :=
+  ∃ inferredType : Expr,
+    Kernel.check env lctx historicalProof = .ok inferredType ∧
+    Kernel.isDefEq env lctx inferredType targetClaim = .ok true
+
+/--
+  Actual kernel check result is preserved under equality of entire
+  environments and local contexts. This is extensional congruence of an
+  opaque checker, not a completeness or dependency-support theorem.
+-/
+theorem check_preserved_under_full_context_identity
+    (srcEnv dstEnv : Environment)
+    (srcLocal dstLocal : LocalContext)
+    (historicalProof : Expr)
+    (hEnv : srcEnv = dstEnv)
+    (hLocal : srcLocal = dstLocal) :
+    Kernel.check srcEnv srcLocal historicalProof =
+      Kernel.check dstEnv dstLocal historicalProof := by
+  subst dstEnv
+  subst dstLocal
+  rfl
+
+/--
+  Even definitional equality checks have an explicit whole-context premise.
+  Matching proof ASTs and imported module hashes alone are not such a premise.
+-/
+theorem definitional_equality_preserved_under_full_context_identity
+    (srcEnv dstEnv : Environment)
+    (srcLocal dstLocal : LocalContext)
+    (inferredType targetClaim : Expr)
+    (hEnv : srcEnv = dstEnv)
+    (hLocal : srcLocal = dstLocal) :
+    Kernel.isDefEq srcEnv srcLocal inferredType targetClaim =
+      Kernel.isDefEq dstEnv dstLocal inferredType targetClaim := by
+  subst dstEnv
+  subst dstLocal
+  rfl
+
+/--
+  A historical proof already accepted by the actual source checker is also
+  accepted by the target checker under full context identity. This makes
+  the undischarged environment-identity premise explicit.
+-/
+theorem historical_certificate_preserved_under_full_context_identity
+    (srcEnv dstEnv : Environment)
+    (srcLocal dstLocal : LocalContext)
+    (historicalProof targetClaim : Expr)
+    (hEnv : srcEnv = dstEnv)
+    (hLocal : srcLocal = dstLocal)
+    (accepted : historicalCertificateAccepted
+      srcEnv srcLocal historicalProof targetClaim) :
+    historicalCertificateAccepted
+      dstEnv dstLocal historicalProof targetClaim := by
+  subst dstEnv
+  subst dstLocal
+  exact accepted
+
+/--
+  The actual kernel WHNF operation has the same full-context boundary,
+  including all unfolding and reduction state represented by Environment.
+-/
+theorem whnf_preserved_under_full_context_identity
+    (srcEnv dstEnv : Environment)
+    (srcLocal dstLocal : LocalContext)
+    (expression : Expr)
+    (hEnv : srcEnv = dstEnv)
+    (hLocal : srcLocal = dstLocal) :
+    Kernel.whnf srcEnv srcLocal expression =
+      Kernel.whnf dstEnv dstLocal expression := by
+  subst dstEnv
+  subst dstLocal
+  rfl
+
+end RTKActualKernelIdentity

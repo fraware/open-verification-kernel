@@ -436,6 +436,12 @@ def _result(
         "target_historical_proof_replayed": False,
         "oracle_consulted": False,
         "target_claim_truth_established": False,
+        # Lean 4.14.0 is a legacy research baseline affected by the
+        # upstream #14576 kernel soundness defect (fixed in 4.32.2).
+        # A successful native --trust=0 replay is NOT security qualification.
+        "legacy_pinned_kernel_version": "4.14.0",
+        "legacy_pinned_kernel_known_soundness_defect_unresolved": True,
+        "designated_kernel_security_qualified": False,
         "production_reliance_authorization": False,
     }
 
