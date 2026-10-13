@@ -356,3 +356,31 @@ def test_imported_fragment_excludes_opaque_local_override(tmp_path, monkeypatch)
         tag + "RTK_NATIVE_STRICT_CLOSURE_JSON=" + json.dumps(record)
     )
     assert evaluate_preoracle_identity(**case)["decision"] == "UNRESOLVED"
+
+
+@pytest.mark.parametrize("expr", [
+    ["proj", ["str", ["anonymous"], "rtkLocal"], 0, _EXPR],
+    ["app", ["proj", ["str", ["anonymous"], "rtkLocal"], 0, _EXPR], _EXPR],
+    ["lam", ["anonymous"], ["sort", ["zero"]],
+     ["proj", ["str", ["anonymous"], "rtkLocal"], 0, _EXPR], "default"],
+    ["letE", ["anonymous"], ["sort", ["zero"]], _EXPR,
+     ["proj", ["str", ["anonymous"], "rtkLocal"], 0, _EXPR], False],
+])
+def test_projection_with_implicit_structure_dependency_rejected(expr):
+    # The earlier walker silently ignored the projector's Name. In particular
+    # it reported only 'op' in these cases, even though Expr.proj may need
+    # inductive/constructor/recursor metadata outside that collection.
+    from experiments.rtk.lean_preoracle_byte_identity_v1 import _used_constant_ids
+
+    with pytest.raises(ValueError, match="projection outside verified"):
+        _used_constant_ids(expr)
+
+
+def test_safe_restricted_expression_still_collects_references():
+    from experiments.rtk.lean_preoracle_byte_identity_v1 import _used_constant_ids
+    expr = ["forallE", ["anonymous"], ["const", _name("Nat"), []],
+            ["app", ["const", _name("op"), []], ["bvar", 0]], "default"]
+    assert _used_constant_ids(expr) == {
+        json.dumps(_name("Nat"), separators=(",", ":"), sort_keys=True),
+        json.dumps(_name("op"), separators=(",", ":"), sort_keys=True),
+    }
