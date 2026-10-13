@@ -29,8 +29,8 @@ def _make(tmp_path):
         "target_historical_proof_replay_executed": False,
         "target_claim_established": False, "reliance_authorization": False,
     })
-    header = lambda root, kind, trust: (
-        "native: RTK_NATIVE_KERNEL_HEADER_JSON=" + json.dumps({
+    def header(root, kind, trust):
+        return "native: RTK_NATIVE_KERNEL_HEADER_JSON=" + json.dumps({
             "schema_version": "rtk.lean_native_kernel_header.v1-development",
             "root_name": root, "root_kind": kind, "trust_level": trust,
             "quotient_initialized": True,
@@ -38,7 +38,6 @@ def _make(tmp_path):
             "native_header_complete_environment_proof": False,
             "reliance_authorization": False,
         })
-    )
     return dict(
         source_payload_bytes=source,
         checked_source_witness={
