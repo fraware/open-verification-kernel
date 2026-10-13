@@ -21,6 +21,62 @@ from experiments.rtk.lean_imported_proofrefs_v1 import (
 from experiments.rtk.lean_native_preoracle_envelope_v1 import _modules
 
 _SCHEMA = "rtk.lean_trust_zero_context_receipt.v1-development"
+_ORACLE_MARKER = "RTK_HISTORICAL_TARGET_REPLAY_CONTEXT_JSON="
+
+
+def verify_zero_trust_oracle_context(
+    *, native_log: str, adjudicated_record: dict[str, Any],
+) -> dict[str, Any]:
+    """Check actual replay-process trust state after independent adjudication."""
+    markers = [
+        line.partition(_ORACLE_MARKER)[2].strip()
+        for line in native_log.splitlines() if _ORACLE_MARKER in line
+    ]
+    if len(markers) != 1 or len(markers[0]) > 4096:
+        raise ValueError("one native target-oracle trust header required")
+    try:
+        state = json.loads(markers[0])
+    except json.JSONDecodeError as exc:
+        raise ValueError("malformed native oracle kernel header") from exc
+    if not isinstance(state, dict) or set(state) != {
+        "schema_version", "trust_level", "quotient_initialized",
+        "old_certificate_checked_in_this_process",
+        "production_reliance_authorization",
+    } or (
+        state.get("schema_version") !=
+        "rtk.lean_historical_replay_context.v1-development"
+    ):
+        raise ValueError("unsupported historical replay trust-state schema")
+    if (
+        type(state["trust_level"]) is not int
+        or state["trust_level"] != 0
+        or state["quotient_initialized"] is not True
+        or state["old_certificate_checked_in_this_process"] is not True
+        or state["production_reliance_authorization"] is not False
+    ):
+        raise ValueError("historical replay not observed under zero trust")
+    if (
+        not isinstance(adjudicated_record, dict)
+        or adjudicated_record.get("historical_certificate_adjudication")
+        not in {"ADMISSIBLE", "INADMISSIBLE", "UNDETERMINED"}
+        or adjudicated_record.get("native_target_kernel_replay_observed") is not True
+        or adjudicated_record.get("production_reliance_authorized") is not False
+        or adjudicated_record.get("predictor_consulted") is not False
+        or adjudicated_record.get("complete_semantic_support_proved") is not False
+        or adjudicated_record.get("native_target_log_sha256") != _sha(native_log.encode())
+    ):
+        raise ValueError("native zero-trust oracle log not bound to adjudication")
+    return {
+        "schema_version": "rtk.lean_zero_trust_oracle_context_receipt.v1-development",
+        "native_oracle_log_sha256": _sha(native_log.encode()),
+        "historical_certificate_adjudication":
+            adjudicated_record["historical_certificate_adjudication"],
+        "replay_kernel_trust_level": 0,
+        "replay_kernel_quotient_initialized": True,
+        "native_kernel_replay_observed": True,
+        "complete_semantic_support_proved": False,
+        "production_reliance_authorized": False,
+    }
 
 
 def _sha(raw: bytes) -> str:
