@@ -648,3 +648,14 @@ def test_native_expr_ref_sets_do_not_prove_complete_kernel_support(
     assert result["native_expr_reference_sets_crosschecked"] is True
     assert result["expr_reference_set_complete_kernel_semantics_proved"] is False
     assert result["production_reliance_authorization"] is False
+
+
+def test_legacy_4_14_kernel_is_never_security_qualified_even_for_equal_imports(
+    tmp_path, monkeypatch,
+):
+    out = evaluate_preoracle_identity(**_fixture(tmp_path, monkeypatch))
+    assert out["decision"] == "CONDITIONAL_IDENTITY_CANDIDATE"
+    assert out["legacy_pinned_kernel_version"] == "4.14.0"
+    assert out["legacy_pinned_kernel_known_soundness_defect_unresolved"] is True
+    assert out["designated_kernel_security_qualified"] is False
+    assert out["production_reliance_authorization"] is False
