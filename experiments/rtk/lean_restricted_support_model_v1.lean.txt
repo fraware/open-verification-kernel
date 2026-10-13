@@ -1,0 +1,120 @@
+/-!
+A kernel-checked theorem about a *different, explicitly bounded* checker
+model. This is NOT a theorem about Lean.Kernel.check or the completeness of
+ConstantInfo.getUsedConstantsAsSet. The interpretation and acquisition of
+actual Lean environments remain unproved (#195).
+
+The model has closed natural-number expressions, named constant lookups and
+addition. Its admissibility predicate checks that both sides of a certificate
+evaluate to the same Nat; missing references never count as evidence.
+-/
+import Lean
+
+namespace RTKRestrictedSupportModel
+
+inductive Term where
+  | nat : Nat → Term
+  | const : String → Term
+  | plus : Term → Term → Term
+deriving Repr, DecidableEq
+
+def used : Term → List String
+  | .nat _ => []
+  | .const name => [name]
+  | .plus lhs rhs => used lhs ++ used rhs
+
+def eval (env : String → Option Nat) : Term → Option Nat
+  | .nat n => some n
+  | .const name => env name
+  | .plus lhs rhs =>
+      match eval env lhs, eval env rhs with
+      | some a, some b => some (a + b)
+      | _, _ => none
+
+structure Certificate where
+  lhs : Term
+  rhs : Term
+deriving Repr
+
+def support (cert : Certificate) : List String :=
+  used cert.lhs ++ used cert.rhs
+
+def accepts (env : String → Option Nat) (cert : Certificate) : Bool :=
+  match eval env cert.lhs, eval env cert.rhs with
+  | some a, some b => a == b
+  | _, _ => false
+
+/-! The proof uses induction on the expression tree, not an assumption that
+checker outputs agree. The equality premise covers every looked-up name. -/
+theorem eval_preserved (oldEnv newEnv : String → Option Nat)
+    (term : Term)
+    (h : ∀ name, name ∈ used term → oldEnv name = newEnv name) :
+    eval oldEnv term = eval newEnv term := by
+  induction term with
+  | nat n =>
+      rfl
+  | const name =>
+      exact h name (by simp [used])
+  | plus lhs rhs lhsIH rhsIH =>
+      have hl : ∀ name, name ∈ used lhs →
+          oldEnv name = newEnv name := by
+        intro name hn
+        exact h name (by simp [used, hn])
+      have hr : ∀ name, name ∈ used rhs →
+          oldEnv name = newEnv name := by
+        intro name hn
+        exact h name (by simp [used, hn])
+      have leq := lhsIH hl
+      have req := rhsIH hr
+      simp [eval, leq, req]
+
+theorem certificate_acceptance_preserved
+    (oldEnv newEnv : String → Option Nat) (cert : Certificate)
+    (h : ∀ name, name ∈ support cert →
+        oldEnv name = newEnv name) :
+    accepts oldEnv cert = accepts newEnv cert := by
+  have hl := eval_preserved oldEnv newEnv cert.lhs (by
+    intro name hn
+    exact h name (by simp [support, hn]))
+  have hr := eval_preserved oldEnv newEnv cert.rhs (by
+    intro name hn
+    exact h name (by simp [support, hn]))
+  unfold accepts
+  rw [hl, hr]
+
+theorem historical_certificate_remains_accepted
+    (oldEnv newEnv : String → Option Nat) (cert : Certificate)
+    (sourceAccepted : accepts oldEnv cert = true)
+    (relevantLookupsEqual : ∀ name, name ∈ support cert →
+        oldEnv name = newEnv name) :
+    accepts newEnv cert = true := by
+  rw [← certificate_acceptance_preserved oldEnv newEnv cert
+    relevantLookupsEqual]
+  exact sourceAccepted
+
+/-! A non-vacuous counterexample: imported identity holds, but a local
+constant absent from that identity has a different value. The old certificate
+is accepted in source and rejected in target under the *same* syntax. -/
+def source : String → Option Nat
+  | "imported" => some 3
+  | "local" => some 1
+  | _ => none
+
+def target : String → Option Nat
+  | "imported" => some 3
+  | "local" => some 2
+  | _ => none
+
+def localCert : Certificate :=
+  ⟨Term.const "local", Term.nat 1⟩
+
+example : source "imported" = target "imported" := by decide
+example : accepts source localCert = true := by decide
+example : accepts target localCert = false := by decide
+example : "local" ∈ support localCert := by decide
+
+/-! Missing references do not accidentally make two failures "equal". -/
+def emptyEnv (_ : String) : Option Nat := none
+example : accepts emptyEnv localCert = false := by decide
+
+end RTKRestrictedSupportModel
