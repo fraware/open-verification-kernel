@@ -3,44 +3,6 @@ name: RTK Lean bounded strict declaration closure development
 on:
   pull_request:
     branches:
-      - research/rtk-lean-preoracle-byte-identity-v1
-    paths:
-      - .github/workflows/rtk-lean-strict-declaration-closure-v1.yml
-      - experiments/rtk/lean_native_support_footer.lean.txt
-      - experiments/rtk/lean_native_support_projection.py
-      - experiments/rtk/lean_imported_proofrefs_v1.py
-      - experiments/rtk/lean_dual_installed_env_v1.py
-      - experiments/rtk/lean_imported_drift_fixtures_v1/**
-      - experiments/rtk/lean_structural_expr_probe_v1.lean.txt
-      - experiments/rtk/lean_structural_expr_v1.py
-      - tests/test_rtk_lean_structural_expr_v1.py
-      - experiments/rtk/lean_native_preoracle_envelope_v1.py
-      - experiments/rtk/lean_expr_decoder_roundtrip_v1.lean.txt
-      - experiments/rtk/lean_expr_roundtrip_v1.py
-      - experiments/rtk/lean_second_process_source_v1.py
-      - experiments/rtk/lean_second_process_driver_v1.lean.txt
-      - experiments/rtk/lean_second_process_witness_v1.py
-      - experiments/rtk/lean_axiom_dependency_probe_v1.lean.txt
-      - experiments/rtk/lean_axiom_support_v1.py
-      - experiments/rtk/lean_strict_decl_closure_v1.lean.txt
-      - experiments/rtk/lean_strict_decl_closure_v1.py
-      - experiments/rtk/lean_historical_target_oracle_v1.py
-      - experiments/rtk/lean_preoracle_byte_identity_v1.py
-      - tests/test_rtk_lean_preoracle_byte_identity_v1.py
-      - docs/RTK_LEAN_LOCAL_DECLARATION_SCOPE_V1.md
-      - experiments/rtk/lean_historical_target_replay_v1.lean.txt
-      - tests/test_rtk_lean_historical_target_oracle_v1.py
-      - tests/test_rtk_lean_strict_decl_closure_v1.py
-      - tests/test_rtk_lean_axiom_support_v1.py
-      - tests/test_rtk_lean_second_process_v1.py
-      - tests/test_rtk_lean_expr_roundtrip_v1.py
-      - tests/test_rtk_lean_native_preoracle_envelope_v1.py
-      - tests/test_rtk_lean_dual_installed_env_v1.py
-      - docs/RTK_LEAN_OLEAN_PROOFREFS_V1_DEVELOPMENT.md
-      - tests/test_rtk_lean_imported_proofrefs_v1.py
-      - experiments/rtk/lean_context_drift_fixtures_v1/**
-  push:
-    branches:
       - research/rtk-lean-local-declaration-closure-v1
     paths:
       - .github/workflows/rtk-lean-strict-declaration-closure-v1.yml
@@ -66,6 +28,48 @@ on:
       - experiments/rtk/lean_preoracle_byte_identity_v1.py
       - tests/test_rtk_lean_preoracle_byte_identity_v1.py
       - docs/RTK_LEAN_LOCAL_DECLARATION_SCOPE_V1.md
+      - docs/RTK_RESTRICTED_SUPPORT_MODEL_V1.md
+      - experiments/rtk/lean_restricted_support_model_v1.lean.txt
+      - experiments/rtk/lean_historical_target_replay_v1.lean.txt
+      - tests/test_rtk_lean_historical_target_oracle_v1.py
+      - tests/test_rtk_lean_strict_decl_closure_v1.py
+      - tests/test_rtk_lean_axiom_support_v1.py
+      - tests/test_rtk_lean_second_process_v1.py
+      - tests/test_rtk_lean_expr_roundtrip_v1.py
+      - tests/test_rtk_lean_native_preoracle_envelope_v1.py
+      - tests/test_rtk_lean_dual_installed_env_v1.py
+      - docs/RTK_LEAN_OLEAN_PROOFREFS_V1_DEVELOPMENT.md
+      - tests/test_rtk_lean_imported_proofrefs_v1.py
+      - experiments/rtk/lean_context_drift_fixtures_v1/**
+  push:
+    branches:
+      - research/rtk-lean-restricted-support-preservation-v1
+    paths:
+      - .github/workflows/rtk-lean-strict-declaration-closure-v1.yml
+      - experiments/rtk/lean_native_support_footer.lean.txt
+      - experiments/rtk/lean_native_support_projection.py
+      - experiments/rtk/lean_imported_proofrefs_v1.py
+      - experiments/rtk/lean_dual_installed_env_v1.py
+      - experiments/rtk/lean_imported_drift_fixtures_v1/**
+      - experiments/rtk/lean_structural_expr_probe_v1.lean.txt
+      - experiments/rtk/lean_structural_expr_v1.py
+      - tests/test_rtk_lean_structural_expr_v1.py
+      - experiments/rtk/lean_native_preoracle_envelope_v1.py
+      - experiments/rtk/lean_expr_decoder_roundtrip_v1.lean.txt
+      - experiments/rtk/lean_expr_roundtrip_v1.py
+      - experiments/rtk/lean_second_process_source_v1.py
+      - experiments/rtk/lean_second_process_driver_v1.lean.txt
+      - experiments/rtk/lean_second_process_witness_v1.py
+      - experiments/rtk/lean_axiom_dependency_probe_v1.lean.txt
+      - experiments/rtk/lean_axiom_support_v1.py
+      - experiments/rtk/lean_strict_decl_closure_v1.lean.txt
+      - experiments/rtk/lean_strict_decl_closure_v1.py
+      - experiments/rtk/lean_historical_target_oracle_v1.py
+      - experiments/rtk/lean_preoracle_byte_identity_v1.py
+      - tests/test_rtk_lean_preoracle_byte_identity_v1.py
+      - docs/RTK_LEAN_LOCAL_DECLARATION_SCOPE_V1.md
+      - docs/RTK_RESTRICTED_SUPPORT_MODEL_V1.md
+      - experiments/rtk/lean_restricted_support_model_v1.lean.txt
       - experiments/rtk/lean_historical_target_replay_v1.lean.txt
       - tests/test_rtk_lean_historical_target_oracle_v1.py
       - tests/test_rtk_lean_strict_decl_closure_v1.py
@@ -123,6 +127,17 @@ jobs:
             fi
           done
           echo "TWO_DISTINCT_PINNED_LEAN_INSTALLATIONS_PROVISIONED"
+
+      - name: Kernel-check bounded support-preservation model (not Lean kernel transport)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp experiments/rtk/lean_restricted_support_model_v1.lean.txt \
+            "$RUNNER_TEMP/rtk_restricted_support_model_v1.lean"
+          "$RTK_SOURCE_LEAN" "$RUNNER_TEMP/rtk_restricted_support_model_v1.lean" \
+            | tee "$RUNNER_TEMP/rtk_restricted_support_model_v1.native.log"
+          test ! -s "$RUNNER_TEMP/rtk_restricted_support_model_v1.native.log"
+          echo "RESTRICTED_MODEL_PRESERVATION_THEOREM_KERNEL_CHECKED_NOT_LEAN_TRANSPORT"
 
       - name: Compile and compare imported module equal-content baseline
         shell: bash
