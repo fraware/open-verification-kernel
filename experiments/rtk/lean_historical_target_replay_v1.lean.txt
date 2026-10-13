@@ -66,6 +66,15 @@ run_cmd do
       | .ok true => pure (true, true, "ADMISSIBLE")
       | .ok false => pure (true, false, "INADMISSIBLE")
       | .error _ => pure (true, false, "UNDETERMINED")
+  -- This header is observed in the same native process that executed
+  -- Kernel.check and Kernel.isDefEq on the original certificate.
+  logInfo m!"RTK_HISTORICAL_TARGET_REPLAY_CONTEXT_JSON={Json.compress (Json.mkObj [
+    ("schema_version", Json.str "rtk.lean_historical_replay_context.v1-development"),
+    ("trust_level", toJson env.header.trustLevel.toNat),
+    ("quotient_initialized", Json.bool env.header.quotInit),
+    ("old_certificate_checked_in_this_process", Json.bool true),
+    ("production_reliance_authorization", Json.bool false)
+  ])}"
   logInfo m!"RTK_HISTORICAL_TARGET_REPLAY_JSON={Json.compress (Json.mkObj [
     ("schema_version", Json.str "rtk.lean_historical_target_replay.v1-development"),
     ("source_proof_ast", sourceProofAst),
