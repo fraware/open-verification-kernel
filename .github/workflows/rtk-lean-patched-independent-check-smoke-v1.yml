@@ -20,7 +20,9 @@ permissions:
 
 jobs:
   patched_kernel_smoke_only:
-    runs-on: ubuntu-24.04
+    # Ubuntu 24.04 GitHub runner blocks bwrap user namespace mapping.
+    # Ubuntu 22.04 is tested without weakening sandbox isolation.
+    runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
       - name: Checkout exact research revision
