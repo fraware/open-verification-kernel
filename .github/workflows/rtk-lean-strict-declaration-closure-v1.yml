@@ -741,60 +741,47 @@ jobs:
               --output "$ROOT/preoracle_byte_identity_$CONTROL.json"
           done
 
-          # Mutate only the target kernel environment header; all imported
-          # .olean bytes and the unproved target claim stay unchanged.
-          cp "$FIX/source_support.lean.txt" "$MODULE"
-          "$RTK_TARGET_LEAN" -o "$OLEAN" "$MODULE"
-          cp "$ROOT/target_goal.lean" "$ROOT/target_kernel_quot_changed.lean"
-          cat >> "$ROOT/target_kernel_quot_changed.lean" <<'LEAN'
-          open Lean Elab Command
-          run_cmd do
-            let env ← getEnv
-            setEnv { env with header := { env.header with quotInit := false } }
-          LEAN
-          cat "$ROOT/target_kernel_header_footer.lean.txt" \
-            >> "$ROOT/target_kernel_quot_changed.lean"
-          "$RTK_TARGET_LEAN" "$ROOT/target_kernel_quot_changed.lean" \
-            | tee "$ROOT/target_kernel_quot_changed.native.log"
-          python -m experiments.rtk.lean_preoracle_byte_identity_v1 \
-            --environment "$ROOT/imported_semantic_drift_preoracle.json" \
-            --source-payload "$BASE/rtk_source_proof_payload.json" \
-            --source-native-witness "$ROOT/second_process_checked_source_claim.json" \
-            --target-payload "$BASE/rtk_target_claim_payload.json" \
-            --target-structural-log "$ROOT/target_structural.native.log" \
-            --target-reference-log "$ROOT/preoracle_target_refs_equal.native.log" \
-            --source-declaration-closure-log "$ROOT/source_strict_closure.native.log" \
-            --current-target-declaration-closure-log "$ROOT/preoracle_target_closure_equal.native.log" \
-            --source-kernel-header-log "$ROOT/source_kernel_header.native.log" \
-            --current-target-kernel-header-log "$ROOT/target_kernel_quot_changed.native.log" \
-            --source-root "$RTK_SOURCE_ROOT" \
-            --target-root "$RTK_TARGET_ROOT" \
-            --source-checker "$RTK_SOURCE_LEAN" \
-            --target-checker "$RTK_TARGET_LEAN" \
-            --output "$ROOT/preoracle_kernel_quot_changed.json"
+          # The pinned Lean CLI uses a nonzero default kernel trust level.
+          # Imported modules are assumed checked, rather than reverified.
+          # Do not produce a reuse candidate from this runtime context.
           python - "$ROOT" <<'PY'
           import json
           import pathlib
           import sys
           root = pathlib.Path(sys.argv[1])
-          changed_header = json.loads((root / "preoracle_kernel_quot_changed.json").read_text())
-          assert changed_header["decision"] == "UNRESOLVED"
-          assert changed_header["reason_codes"] == ["unsupported_kernel_quotient_state"]
-          assert changed_header["production_reliance_authorization"] is False
-          print("NATIVE_KERNEL_QUOTIENT_STATE_DRIFT_WITH_UNCHANGED_IMPORTS_REJECTED")
+          marker = "RTK_NATIVE_KERNEL_HEADER_JSON="
+          def header(path):
+              lines = [
+                  line.split(marker, 1)[1] for line in path.read_text().splitlines()
+                  if marker in line
+              ]
+              assert len(lines) == 1
+              return json.loads(lines[0])
+          source = header(root / "source_kernel_header.native.log")
+          equal_header = header(root / "target_kernel_header_equal.native.log")
+          changed_header = header(root / "target_kernel_header_changed.native.log")
+          assert source["trust_level"] == 1025
+          assert equal_header["trust_level"] == source["trust_level"]
+          assert changed_header["trust_level"] == source["trust_level"]
+          assert all(x["quotient_initialized"] is True for x in (
+              source, equal_header, changed_header
+          ))
+          print("PINNED_LEAN_NONZERO_TRUST_LEVEL_OBSERVED_REUSE_DISABLED")
           equal = json.loads((root / "preoracle_byte_identity_equal.json").read_text())
+
           changed = json.loads((root / "preoracle_byte_identity_changed.json").read_text())
-          assert equal["decision"] == "CONDITIONAL_IDENTITY_CANDIDATE"
-          assert changed["decision"] == "REVALIDATION_REQUIRED"
-          assert changed["changed_imported_modules"] == ["RTKSemanticSupport"]
+          assert equal["decision"] == "UNRESOLVED"
+          assert changed["decision"] == "UNRESOLVED"
+          assert equal["reason_codes"] == ["unsupported_nonzero_kernel_trust_level"]
+          assert changed["reason_codes"] == ["unsupported_nonzero_kernel_trust_level"]
           for record in (equal, changed):
               assert record["production_reliance_authorization"] is False
               assert record["target_historical_proof_replayed"] is False
               assert record["oracle_consulted"] is False
               assert record["module_semantic_support_complete_proved"] is False
-              assert record["native_import_only_scope_checked"] is True
+              assert record["native_import_only_scope_checked"] is False
               assert record["native_reference_relation_semantic_completeness_proved"] is False
-              assert record["native_kernel_header_supported"] is True
+              assert record["native_kernel_header_supported"] is False
               assert record["complete_kernel_environment_state_proved"] is False
           assert equal["historical_certificate_sha256"] == changed["historical_certificate_sha256"]
           assert equal["target_unproved_claim_payload_sha256"] == changed["target_unproved_claim_payload_sha256"]
@@ -802,7 +789,6 @@ jobs:
           PY
           sha256sum "$ROOT/preoracle_byte_identity_equal.json" \
             "$ROOT/preoracle_byte_identity_changed.json" \
-            "$ROOT/preoracle_kernel_quot_changed.json" \
             > "$ROOT/sealed_preoracle_predictions.sha256"
           sha256sum --check --strict "$ROOT/sealed_preoracle_predictions.sha256"
           test ! -e "$ROOT/target_replay_equal.native.log"
@@ -881,8 +867,8 @@ jobs:
           assert positive["target_imported_olean_sha256"] != negative["target_imported_olean_sha256"]
           assert not positive["production_reliance_authorized"]
           assert not negative["production_reliance_authorized"]
-          assert json.loads((root / "preoracle_byte_identity_equal.json").read_text())["decision"] == "CONDITIONAL_IDENTITY_CANDIDATE"
-          assert json.loads((root / "preoracle_byte_identity_changed.json").read_text())["decision"] == "REVALIDATION_REQUIRED"
+          assert json.loads((root / "preoracle_byte_identity_equal.json").read_text())["decision"] == "UNRESOLVED"
+          assert json.loads((root / "preoracle_byte_identity_changed.json").read_text())["decision"] == "UNRESOLVED"
           assert json.loads((root / "preoracle_byte_identity_equal.json").read_text())["current_target_loaded_inventory_sha256"] == (
               json.loads((root / "preoracle_byte_identity_equal.json").read_text())["source_loaded_inventory_sha256"]
           )
