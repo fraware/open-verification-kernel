@@ -47,7 +47,11 @@ def _used_constant_ids(expr: object) -> set[str]:
     elif kind == "letE":
         children = expr[2:5]
     elif kind == "proj":
-        children = [expr[3]]
+        # Expr.proj carries the structure Name independently of its operand.
+        # The current source/target support adapter has no certified rule for
+        # constructor/recursor/projection metadata. Do not silently discard
+        # this dependency and infer byte-identity eligibility.
+        raise ValueError("projection outside verified pre-oracle fragment")
     else:
         children = []
     found: set[str] = set()
