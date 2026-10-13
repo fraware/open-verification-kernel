@@ -841,6 +841,7 @@ jobs:
             # The module and all declarations loaded by subsequent probes
             # use the supported zero-trust CLI path on the pinned toolchain.
             "$RTK_TARGET_LEAN" --trust=0 -o "$OLEAN" "$MODULE"
+            cp "$OLEAN" "$ROOT/zero_preoracle_target_$CONTROL.olean"
             "$RTK_TARGET_LEAN" --trust=0 "$ROOT/target_kernel_header_$CONTROL.lean" \
               | tee "$ROOT/zero_target_header_$CONTROL.native.log"
             "$RTK_TARGET_LEAN" --trust=0 "$ROOT/target_structural.lean" \
@@ -949,6 +950,44 @@ jobs:
           test -s "$ROOT/sealed_zero_trust_preoracle_receipts.sha256"
           sha256sum --check --strict "$ROOT/sealed_zero_trust_preoracle_receipts.sha256"
 
+          # The target oracle must check the exact old certificate under
+          # --trust=0 itself, using exactly the sealed target imported module
+          # bytes. The earlier default-trust oracle remains an independent
+          # control, not a substitute for this replay.
+          zero_trust_oracle () {
+            local control="$1" verdict="$2"
+            "$RTK_TARGET_LEAN" --trust=0 -o "$TARGET_OLEAN" "$MODULE"
+            cmp "$TARGET_OLEAN" "$ROOT/zero_preoracle_target_$control.olean"
+            "$RTK_TARGET_LEAN" --trust=0 "$BASE/RTKHistoricalTargetReplay.lean" \
+              | tee "$ROOT/target_replay_trust_zero_$control.native.log"
+            python -m experiments.rtk.lean_historical_target_oracle_v1 verify \
+              --source-payload "$BASE/rtk_source_proof_payload.json" \
+              --target-payload "$BASE/rtk_target_claim_payload.json" \
+              --lean-driver "$BASE/RTKHistoricalTargetReplay.lean" \
+              --target-olean "$ROOT/zero_preoracle_target_$control.olean" \
+              --native-log "$ROOT/target_replay_trust_zero_$control.native.log" \
+              --expected-decision "$verdict" \
+              --output "$ROOT/target_replay_trust_zero_$control.json"
+            python - "$ROOT" "$control" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          from experiments.rtk.lean_trust_zero_receipt_v1 import (
+              verify_zero_trust_oracle_context,
+          )
+          root, control = Path(sys.argv[1]), sys.argv[2]
+          result = verify_zero_trust_oracle_context(
+              native_log=(root / f"target_replay_trust_zero_{control}.native.log").read_text(),
+              adjudicated_record=json.loads(
+                  (root / f"target_replay_trust_zero_{control}.json").read_text()
+              ),
+          )
+          with (root / f"target_oracle_context_trust_zero_{control}.json").open("x") as file:
+              file.write(json.dumps(result, sort_keys=True, indent=2) + "\n")
+          print("HISTORICAL_TARGET_CERTIFICATE_REPLAY_AT_NATIVE_TRUST_ZERO", control)
+          PY
+          }
+
           # Equal-definition target: exact exported source certificate is accepted.
           cp "$FIX/source_support.lean.txt" "$MODULE"
           "$RTK_TARGET_LEAN" -o "$TARGET_OLEAN" "$MODULE"
@@ -966,6 +1005,7 @@ jobs:
             --native-log "$ROOT/target_replay_equal.native.log" \
             --expected-decision ADMISSIBLE \
             --output "$ROOT/historical_replay_equal_development.json"
+          zero_trust_oracle equal ADMISSIBLE
 
           # Same statement AST; changed imported op definition invalidates the
           # *old* certificate, even though an independently fresh proof exists.
@@ -984,8 +1024,10 @@ jobs:
             --native-log "$ROOT/target_replay_changed.native.log" \
             --expected-decision INADMISSIBLE \
             --output "$ROOT/historical_replay_changed_development.json"
+          zero_trust_oracle changed INADMISSIBLE
           cmp "$ROOT/original_historical_proof_payload.json" "$BASE/rtk_source_proof_payload.json"
           sha256sum --check --strict "$ROOT/sealed_preoracle_predictions.sha256"
+          sha256sum --check --strict "$ROOT/sealed_zero_trust_preoracle_receipts.sha256"
 
           # Fresh target proof is a separate target-truth control and never
           # enters the replay driver's environment or predictor inputs.
@@ -1010,6 +1052,14 @@ jobs:
           assert positive["target_imported_olean_sha256"] != negative["target_imported_olean_sha256"]
           assert not positive["production_reliance_authorized"]
           assert not negative["production_reliance_authorized"]
+          zero_positive = json.loads((root / "target_oracle_context_trust_zero_equal.json").read_text())
+          zero_negative = json.loads((root / "target_oracle_context_trust_zero_changed.json").read_text())
+          assert zero_positive["historical_certificate_adjudication"] == "ADMISSIBLE"
+          assert zero_negative["historical_certificate_adjudication"] == "INADMISSIBLE"
+          assert zero_positive["replay_kernel_trust_level"] == 0
+          assert zero_negative["replay_kernel_trust_level"] == 0
+          assert not zero_positive["production_reliance_authorized"]
+          assert not zero_negative["production_reliance_authorized"]
           assert json.loads((root / "preoracle_byte_identity_equal.json").read_text())["decision"] == "UNRESOLVED"
           assert json.loads((root / "preoracle_byte_identity_changed.json").read_text())["decision"] == "UNRESOLVED"
           assert json.loads((root / "preoracle_byte_identity_equal.json").read_text())["current_target_loaded_inventory_sha256"] is None
