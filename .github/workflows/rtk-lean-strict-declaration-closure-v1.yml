@@ -3,52 +3,6 @@ name: RTK Lean bounded strict declaration closure development
 on:
   pull_request:
     branches:
-      - research/rtk-lean-zero-trust-qualification-v1
-    paths:
-      - .github/workflows/rtk-lean-strict-declaration-closure-v1.yml
-      - experiments/rtk/lean_native_support_footer.lean.txt
-      - experiments/rtk/lean_native_support_projection.py
-      - experiments/rtk/lean_imported_proofrefs_v1.py
-      - experiments/rtk/lean_dual_installed_env_v1.py
-      - experiments/rtk/lean_imported_drift_fixtures_v1/**
-      - experiments/rtk/lean_structural_expr_probe_v1.lean.txt
-      - experiments/rtk/lean_structural_expr_v1.py
-      - tests/test_rtk_lean_structural_expr_v1.py
-      - experiments/rtk/lean_native_preoracle_envelope_v1.py
-      - experiments/rtk/lean_expr_decoder_roundtrip_v1.lean.txt
-      - experiments/rtk/lean_expr_roundtrip_v1.py
-      - experiments/rtk/lean_second_process_source_v1.py
-      - experiments/rtk/lean_second_process_driver_v1.lean.txt
-      - experiments/rtk/lean_second_process_witness_v1.py
-      - experiments/rtk/lean_axiom_dependency_probe_v1.lean.txt
-      - experiments/rtk/lean_axiom_support_v1.py
-      - experiments/rtk/lean_strict_decl_closure_v1.lean.txt
-      - experiments/rtk/lean_strict_decl_closure_v1.py
-      - experiments/rtk/lean_historical_target_oracle_v1.py
-      - experiments/rtk/lean_preoracle_byte_identity_v1.py
-      - tests/test_rtk_lean_preoracle_byte_identity_v1.py
-      - docs/RTK_LEAN_LOCAL_DECLARATION_SCOPE_V1.md
-      - docs/RTK_RESTRICTED_SUPPORT_MODEL_V1.md
-      - experiments/rtk/lean_restricted_support_model_v1.lean.txt
-      - experiments/rtk/lean_native_kernel_header_v1.lean.txt
-      - docs/RTK_NATIVE_KERNEL_HEADER_V1.md
-      - docs/RTK_LEAN_ZERO_TRUST_QUALIFICATION_V1.md
-      - docs/RTK_LEAN_AXIOM_FREE_PREORACLE_V1.md
-      - experiments/rtk/lean_trust_zero_receipt_v1.py
-      - tests/test_rtk_lean_trust_zero_receipt_v1.py
-      - experiments/rtk/lean_historical_target_replay_v1.lean.txt
-      - tests/test_rtk_lean_historical_target_oracle_v1.py
-      - tests/test_rtk_lean_strict_decl_closure_v1.py
-      - tests/test_rtk_lean_axiom_support_v1.py
-      - tests/test_rtk_lean_second_process_v1.py
-      - tests/test_rtk_lean_expr_roundtrip_v1.py
-      - tests/test_rtk_lean_native_preoracle_envelope_v1.py
-      - tests/test_rtk_lean_dual_installed_env_v1.py
-      - docs/RTK_LEAN_OLEAN_PROOFREFS_V1_DEVELOPMENT.md
-      - tests/test_rtk_lean_imported_proofrefs_v1.py
-      - experiments/rtk/lean_context_drift_fixtures_v1/**
-  push:
-    branches:
       - research/rtk-lean-axiom-free-applicability-v1
     paths:
       - .github/workflows/rtk-lean-strict-declaration-closure-v1.yml
@@ -80,6 +34,58 @@ on:
       - docs/RTK_NATIVE_KERNEL_HEADER_V1.md
       - docs/RTK_LEAN_ZERO_TRUST_QUALIFICATION_V1.md
       - docs/RTK_LEAN_AXIOM_FREE_PREORACLE_V1.md
+      - docs/RTK_LEAN_EXPR_NATIVE_PARITY_V1.md
+      - experiments/rtk/lean_native_expr_reference_probe_v1.lean.txt
+      - experiments/rtk/lean_native_expr_reference_v1.py
+      - experiments/rtk/lean_trust_zero_receipt_v1.py
+      - tests/test_rtk_lean_trust_zero_receipt_v1.py
+      - experiments/rtk/lean_historical_target_replay_v1.lean.txt
+      - tests/test_rtk_lean_historical_target_oracle_v1.py
+      - tests/test_rtk_lean_strict_decl_closure_v1.py
+      - tests/test_rtk_lean_axiom_support_v1.py
+      - tests/test_rtk_lean_second_process_v1.py
+      - tests/test_rtk_lean_expr_roundtrip_v1.py
+      - tests/test_rtk_lean_native_preoracle_envelope_v1.py
+      - tests/test_rtk_lean_dual_installed_env_v1.py
+      - docs/RTK_LEAN_OLEAN_PROOFREFS_V1_DEVELOPMENT.md
+      - tests/test_rtk_lean_imported_proofrefs_v1.py
+      - experiments/rtk/lean_context_drift_fixtures_v1/**
+  push:
+    branches:
+      - research/rtk-lean-expression-support-crosscheck-v1
+    paths:
+      - .github/workflows/rtk-lean-strict-declaration-closure-v1.yml
+      - experiments/rtk/lean_native_support_footer.lean.txt
+      - experiments/rtk/lean_native_support_projection.py
+      - experiments/rtk/lean_imported_proofrefs_v1.py
+      - experiments/rtk/lean_dual_installed_env_v1.py
+      - experiments/rtk/lean_imported_drift_fixtures_v1/**
+      - experiments/rtk/lean_structural_expr_probe_v1.lean.txt
+      - experiments/rtk/lean_structural_expr_v1.py
+      - tests/test_rtk_lean_structural_expr_v1.py
+      - experiments/rtk/lean_native_preoracle_envelope_v1.py
+      - experiments/rtk/lean_expr_decoder_roundtrip_v1.lean.txt
+      - experiments/rtk/lean_expr_roundtrip_v1.py
+      - experiments/rtk/lean_second_process_source_v1.py
+      - experiments/rtk/lean_second_process_driver_v1.lean.txt
+      - experiments/rtk/lean_second_process_witness_v1.py
+      - experiments/rtk/lean_axiom_dependency_probe_v1.lean.txt
+      - experiments/rtk/lean_axiom_support_v1.py
+      - experiments/rtk/lean_strict_decl_closure_v1.lean.txt
+      - experiments/rtk/lean_strict_decl_closure_v1.py
+      - experiments/rtk/lean_historical_target_oracle_v1.py
+      - experiments/rtk/lean_preoracle_byte_identity_v1.py
+      - tests/test_rtk_lean_preoracle_byte_identity_v1.py
+      - docs/RTK_LEAN_LOCAL_DECLARATION_SCOPE_V1.md
+      - docs/RTK_RESTRICTED_SUPPORT_MODEL_V1.md
+      - experiments/rtk/lean_restricted_support_model_v1.lean.txt
+      - experiments/rtk/lean_native_kernel_header_v1.lean.txt
+      - docs/RTK_NATIVE_KERNEL_HEADER_V1.md
+      - docs/RTK_LEAN_ZERO_TRUST_QUALIFICATION_V1.md
+      - docs/RTK_LEAN_AXIOM_FREE_PREORACLE_V1.md
+      - docs/RTK_LEAN_EXPR_NATIVE_PARITY_V1.md
+      - experiments/rtk/lean_native_expr_reference_probe_v1.lean.txt
+      - experiments/rtk/lean_native_expr_reference_v1.py
       - experiments/rtk/lean_trust_zero_receipt_v1.py
       - tests/test_rtk_lean_trust_zero_receipt_v1.py
       - experiments/rtk/lean_historical_target_replay_v1.lean.txt
@@ -711,6 +717,27 @@ jobs:
           target = source.replace(old, "let root : Name := `rtk_unproven_target_claim")
           (root / "target_kernel_header_footer.lean.txt").write_text(target)
           PY
+          # This is a direct native Expr.getUsedConstantsAsSet observation,
+          # separate from the structural Expr encoder and graph collector.
+          cp "$ROOT/source.lean" "$ROOT/source_expr_refs.lean"
+          cp "$ROOT/target_goal.lean" "$ROOT/target_expr_refs.lean"
+          cat experiments/rtk/lean_native_expr_reference_probe_v1.lean.txt \
+            >> "$ROOT/source_expr_refs.lean"
+          python - "$ROOT/target_expr_refs.lean" <<'PY'
+          from pathlib import Path
+          import sys
+          footer = Path(
+              "experiments/rtk/lean_native_expr_reference_probe_v1.lean.txt"
+          ).read_text()
+          old = "let root : Name := `historical_claim"
+          assert footer.count(old) == 1
+          with Path(sys.argv[1]).open("a") as output:
+              output.write(footer.replace(
+                  old, "let root : Name := `rtk_unproven_target_claim"
+              ))
+          PY
+          "$RTK_SOURCE_LEAN" "$ROOT/source_expr_refs.lean" \
+            | tee "$ROOT/source_expr_refs.native.log"
 
           # Prediction source: source-checked proof receipt + exact target
           # unproved claim + current target natively loaded import inventory.
@@ -728,6 +755,8 @@ jobs:
               | tee "$ROOT/preoracle_target_closure_$CONTROL.native.log"
             "$RTK_TARGET_LEAN" "$ROOT/target_axioms.lean" \
               | tee "$ROOT/preoracle_target_axioms_$CONTROL.native.log"
+            "$RTK_TARGET_LEAN" "$ROOT/target_expr_refs.lean" \
+              | tee "$ROOT/preoracle_target_expr_refs_$CONTROL.native.log"
             cp "$ROOT/target_goal.lean" "$ROOT/target_kernel_header_$CONTROL.lean"
             cat "$ROOT/target_kernel_header_footer.lean.txt" \
               >> "$ROOT/target_kernel_header_$CONTROL.lean"
@@ -744,6 +773,9 @@ jobs:
               --current-target-declaration-closure-log "$ROOT/preoracle_target_closure_$CONTROL.native.log" \
               --source-axiom-log "$ROOT/source_axioms.native.log" \
               --current-target-axiom-log "$ROOT/preoracle_target_axioms_$CONTROL.native.log" \
+              --source-structural-log "$ROOT/source_structural.native.log" \
+              --source-native-expr-references-log "$ROOT/source_expr_refs.native.log" \
+              --current-target-native-expr-references-log "$ROOT/preoracle_target_expr_refs_$CONTROL.native.log" \
               --source-kernel-header-log "$ROOT/source_kernel_header.native.log" \
               --current-target-kernel-header-log "$ROOT/target_kernel_header_$CONTROL.native.log" \
               --source-root "$RTK_SOURCE_ROOT" \
@@ -839,6 +871,8 @@ jobs:
             | tee "$ROOT/zero_source_closure.native.log"
           "$RTK_SOURCE_LEAN" --trust=0 "$ROOT/source_axioms.lean" \
             | tee "$ROOT/zero_source_axioms.native.log"
+          "$RTK_SOURCE_LEAN" --trust=0 "$ROOT/source_expr_refs.lean" \
+            | tee "$ROOT/zero_source_expr_refs.native.log"
 
           for CONTROL in equal changed; do
             if [ "$CONTROL" = equal ]; then
@@ -860,6 +894,8 @@ jobs:
               | tee "$ROOT/zero_target_closure_$CONTROL.native.log"
             "$RTK_TARGET_LEAN" --trust=0 "$ROOT/target_axioms.lean" \
               | tee "$ROOT/zero_target_axioms_$CONTROL.native.log"
+            "$RTK_TARGET_LEAN" --trust=0 "$ROOT/target_expr_refs.lean" \
+              | tee "$ROOT/zero_target_expr_refs_$CONTROL.native.log"
 
             # A zero-trust target observation has its OWN native-log digest.
             # Do not reuse the claim envelope bound to a default-trust log.
@@ -900,6 +936,9 @@ jobs:
               --current-target-declaration-closure-log "$ROOT/zero_target_closure_$CONTROL.native.log" \
               --source-axiom-log "$ROOT/zero_source_axioms.native.log" \
               --current-target-axiom-log "$ROOT/zero_target_axioms_$CONTROL.native.log" \
+              --source-structural-log "$ROOT/source_structural.native.log" \
+              --source-native-expr-references-log "$ROOT/zero_source_expr_refs.native.log" \
+              --current-target-native-expr-references-log "$ROOT/zero_target_expr_refs_$CONTROL.native.log" \
               --source-kernel-header-log "$ROOT/zero_source_kernel_header.native.log" \
               --current-target-kernel-header-log "$ROOT/zero_target_header_$CONTROL.native.log" \
               --source-root "$RTK_SOURCE_ROOT" \
@@ -922,6 +961,8 @@ jobs:
             | tee "$ROOT/zero_target_axiom_injected_closure.native.log"
           "$RTK_TARGET_LEAN" --trust=0 "$ROOT/target_axioms.lean" \
             | tee "$ROOT/zero_target_axiom_injected_axioms.native.log"
+          "$RTK_TARGET_LEAN" --trust=0 "$ROOT/target_expr_refs.lean" \
+            | tee "$ROOT/zero_target_axiom_injected_expr_refs.native.log"
           "$RTK_TARGET_LEAN" --trust=0 "$ROOT/target_structural.lean" \
             | tee "$ROOT/zero_target_axiom_injected_structural.native.log"
           "$RTK_TARGET_LEAN" --trust=0 "$ROOT/target_kernel_header_equal.lean" \
@@ -951,6 +992,9 @@ jobs:
             --current-target-declaration-closure-log "$ROOT/zero_target_axiom_injected_closure.native.log" \
             --source-axiom-log "$ROOT/zero_source_axioms.native.log" \
             --current-target-axiom-log "$ROOT/zero_target_axiom_injected_axioms.native.log" \
+            --source-structural-log "$ROOT/source_structural.native.log" \
+            --source-native-expr-references-log "$ROOT/zero_source_expr_refs.native.log" \
+            --current-target-native-expr-references-log "$ROOT/zero_target_axiom_injected_expr_refs.native.log" \
             --source-kernel-header-log "$ROOT/zero_source_kernel_header.native.log" \
             --current-target-kernel-header-log "$ROOT/zero_target_axiom_injected_header.native.log" \
             --source-root "$RTK_SOURCE_ROOT" \
@@ -995,6 +1039,8 @@ jobs:
               assert pred["oracle_consulted"] is False
               assert pred["native_kernel_header_supported"] is True
               assert pred["observed_axiom_free_fragment_checked"] is True
+              assert pred["native_expr_reference_sets_crosschecked"] is True
+              assert pred["expr_reference_set_complete_kernel_semantics_proved"] is False
               assert pred["transitive_axiom_support_complete_proved"] is False
               assert pred["axiom_policy_authenticated"] is False
               assert pred["module_semantic_support_complete_proved"] is False

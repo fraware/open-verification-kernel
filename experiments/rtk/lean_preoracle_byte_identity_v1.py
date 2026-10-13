@@ -16,6 +16,7 @@ from typing import Any
 
 from experiments.rtk.lean_axiom_support_v1 import _read_record
 from experiments.rtk.lean_dual_installed_env_v1 import _installed_root
+from experiments.rtk.lean_native_expr_reference_v1 import validate_expr_reference_pair
 from experiments.rtk.lean_historical_target_oracle_v1 import (
     _source, export_target_claim,
 )
@@ -90,8 +91,10 @@ def _used_constant_ids(expr: object) -> set[str]:
         # constructor/recursor/projection metadata. Do not silently discard
         # this dependency and infer byte-identity eligibility.
         raise ValueError("projection outside verified pre-oracle fragment")
-    else:
+    elif kind in {"bvar", "sort", "natVal", "strVal"}:
         children = []
+    else:
+        raise ValueError("unmodeled constructor in pre-oracle support traversal")
     found: set[str] = set()
     for child in children:
         found.update(_used_constant_ids(child))
@@ -211,6 +214,9 @@ def evaluate_preoracle_identity(
     current_target_declaration_closure_log: str,
     source_axiom_log: str,
     current_target_axiom_log: str,
+    source_structural_log: str,
+    source_native_expr_references_log: str,
+    current_target_native_expr_references_log: str,
     source_kernel_header_log: str,
     current_target_kernel_header_log: str,
     source_root: Path,
@@ -323,6 +329,16 @@ def evaluate_preoracle_identity(
     target_native_modules = _environment_modules(current_target_reference_log)
     # Native closure is pre-outcome, derived from the checked source theorem
     # and the target's UNPROVED claim. No historical target-proof replay.
+    validate_expr_reference_pair(
+        source_native_log=source_native_expr_references_log,
+        target_native_log=current_target_native_expr_references_log,
+        source_structural_log=source_structural_log,
+        target_structural_log=target_structural_log,
+        source_claim_ast=source["claim_ast"],
+        source_proof_ast=source["proof_ast"],
+        target_claim_ast=target["claim_ast"],
+        extract_constants=_used_constant_ids,
+    )
     native_import_only = _native_import_only_scope(
         source_closure_log=source_declaration_closure_log,
         target_closure_log=current_target_declaration_closure_log,
@@ -412,6 +428,10 @@ def _result(
         ),
         "transitive_axiom_support_complete_proved": False,
         "axiom_policy_authenticated": False,
+        "native_expr_reference_sets_crosschecked": (
+            decision in {"REVALIDATION_REQUIRED", "CONDITIONAL_IDENTITY_CANDIDATE"}
+        ),
+        "expr_reference_set_complete_kernel_semantics_proved": False,
         "external_policy_and_provenance_authenticated": False,
         "target_historical_proof_replayed": False,
         "oracle_consulted": False,
@@ -429,6 +449,9 @@ def main() -> int:
         "source-declaration-closure-log", "current-target-declaration-closure-log",
         "source-kernel-header-log", "current-target-kernel-header-log",
         "source-axiom-log", "current-target-axiom-log",
+        "source-structural-log",
+        "source-native-expr-references-log",
+        "current-target-native-expr-references-log",
         "output",
     ):
         parser.add_argument("--" + arg, required=True, type=Path)
@@ -448,6 +471,13 @@ def main() -> int:
         current_target_kernel_header_log=args.current_target_kernel_header_log.read_text(),
         source_axiom_log=args.source_axiom_log.read_text(),
         current_target_axiom_log=args.current_target_axiom_log.read_text(),
+        source_structural_log=args.source_structural_log.read_text(),
+        source_native_expr_references_log=(
+            args.source_native_expr_references_log.read_text()
+        ),
+        current_target_native_expr_references_log=(
+            args.current_target_native_expr_references_log.read_text()
+        ),
         source_root=args.source_root,
         target_root=args.target_root,
         source_checker=args.source_checker,

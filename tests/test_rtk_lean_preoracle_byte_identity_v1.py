@@ -135,6 +135,23 @@ def _axiom_log(*, target: bool = False, op_axioms=(),
     })
 
 
+def _expr_refs(*, target: bool = False, root_constants=None) -> str:
+    root = "rtk_unproven_target_claim" if target else "historical_claim"
+    constants = [_name("op")] if root_constants is None else root_constants
+    return "native: RTK_NATIVE_EXPR_REFERENCES_JSON=" + json.dumps({
+        "schema_version": "rtk.lean_native_expr_reference_set.v1-development",
+        "root_name": root,
+        "root_kind": "unproved_goal_placeholder" if target else "theorem",
+        "root_type_const_asts": constants,
+        "root_proof_const_asts": None if target else [_name("op")],
+        "op_type_const_asts": [_name("op")],
+        "op_value_const_asts": [_name("op")],
+        "expression_support_complete_for_kernel_proved": False,
+        "target_historical_proof_replayed": False,
+        "reliance_authorization": False,
+    })
+
+
 def _native_target() -> str:
     return "native: RTK_STRUCTURAL_EXPR_JSON=" + json.dumps({
         "schema_version": "rtk.lean_native_structural_expr.v1-development",
@@ -232,6 +249,14 @@ def _fixture(tmp_path: Path, monkeypatch) -> dict:
         "environment": env, "source_payload_bytes": source,
         "source_native_witness": witness, "target_payload_bytes": target,
         "target_structural_log": target_native,
+        "source_structural_log": target_native.replace(
+            '"theorem_name": "rtk_unproven_target_claim"',
+            '"theorem_name": "historical_claim"',
+        ).replace('"theorem_kind": "axiom"', '"theorem_kind": "theorem"').replace(
+            '"theorem_value_ast": null', '"theorem_value_ast": ' + json.dumps(_EXPR),
+        ),
+        "source_native_expr_references_log": _expr_refs(),
+        "current_target_native_expr_references_log": _expr_refs(target=True),
         "current_target_reference_log": "RTK_NATIVE_REFERENCE_JSON=" + json.dumps({
             "environment_modules": sorted(source_modules),
         }),
@@ -562,4 +587,64 @@ def test_axiom_free_result_is_only_conditional(tmp_path, monkeypatch):
     assert result["observed_axiom_free_fragment_checked"] is True
     assert result["transitive_axiom_support_complete_proved"] is False
     assert result["axiom_policy_authenticated"] is False
+    assert result["production_reliance_authorization"] is False
+
+
+@pytest.mark.parametrize("expr", [
+    ["unknownNode", _EXPR],
+    ["mdata", {"hidden": ["const", _name("danger"), []]}, _EXPR],
+    ["mvar", _EXPR],
+])
+def test_unknown_expression_forms_never_silently_ignore_constants(expr):
+    from experiments.rtk.lean_preoracle_byte_identity_v1 import _used_constant_ids
+    with pytest.raises(ValueError, match="unmodeled constructor"):
+        _used_constant_ids(expr)
+
+
+def test_native_reference_mismatch_rejected_even_with_identical_imports(
+    tmp_path, monkeypatch,
+):
+    case = _fixture(tmp_path, monkeypatch)
+    case["current_target_native_expr_references_log"] = _expr_refs(
+        target=True, root_constants=[_name("op"), _name("hiddenDependency")],
+    )
+    with pytest.raises(ValueError, match="native Expr reference set disagrees"):
+        evaluate_preoracle_identity(**case)
+
+
+def test_missing_native_expr_reference_observation_rejected(tmp_path, monkeypatch):
+    case = _fixture(tmp_path, monkeypatch)
+    case["source_native_expr_references_log"] = ""
+    with pytest.raises(ValueError, match="one bounded native expression reference"):
+        evaluate_preoracle_identity(**case)
+
+
+def test_unproved_target_cannot_have_proof_expr_reference_set(tmp_path, monkeypatch):
+    case = _fixture(tmp_path, monkeypatch)
+    key = "current_target_native_expr_references_log"
+    marker, raw = case[key].split("RTK_NATIVE_EXPR_REFERENCES_JSON=", 1)
+    payload = json.loads(raw)
+    payload["root_proof_const_asts"] = [_name("op")]
+    case[key] = marker + "RTK_NATIVE_EXPR_REFERENCES_JSON=" + json.dumps(payload)
+    with pytest.raises(ValueError, match="unproved target supplied proof"):
+        evaluate_preoracle_identity(**case)
+
+
+def test_native_expr_ref_source_proof_tamper_rejected(tmp_path, monkeypatch):
+    case = _fixture(tmp_path, monkeypatch)
+    key = "source_native_expr_references_log"
+    marker, raw = case[key].split("RTK_NATIVE_EXPR_REFERENCES_JSON=", 1)
+    payload = json.loads(raw)
+    payload["root_proof_const_asts"] = [_name("badSourceProof")]
+    case[key] = marker + "RTK_NATIVE_EXPR_REFERENCES_JSON=" + json.dumps(payload)
+    with pytest.raises(ValueError, match="native Expr reference set disagrees"):
+        evaluate_preoracle_identity(**case)
+
+
+def test_native_expr_ref_sets_do_not_prove_complete_kernel_support(
+    tmp_path, monkeypatch,
+):
+    result = evaluate_preoracle_identity(**_fixture(tmp_path, monkeypatch))
+    assert result["native_expr_reference_sets_crosschecked"] is True
+    assert result["expr_reference_set_complete_kernel_semantics_proved"] is False
     assert result["production_reliance_authorization"] is False
