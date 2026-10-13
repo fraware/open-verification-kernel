@@ -850,6 +850,22 @@ jobs:
             "$RTK_TARGET_LEAN" --trust=0 "$ROOT/target_strict_closure.lean" \
               | tee "$ROOT/zero_target_closure_$CONTROL.native.log"
 
+            # A zero-trust target observation has its OWN native-log digest.
+            # Do not reuse the claim envelope bound to a default-trust log.
+            python - "$BASE/rtk_source_proof_payload.json" \
+              "$ROOT/zero_target_structural_$CONTROL.native.log" \
+              "$ROOT/zero_target_claim_$CONTROL.json" <<'PY'
+          from pathlib import Path
+          import sys
+          from experiments.rtk.lean_historical_target_oracle_v1 import export_target_claim
+          from experiments.rtk.lean_structural_expr_v1 import _canonical
+          src, log, output = map(Path, sys.argv[1:])
+          target = export_target_claim(
+              source_payload_bytes=src.read_bytes(), target_native_log=log.read_text(),
+          )
+          with output.open("xb") as out:
+              out.write(_canonical(target) + b"\n")
+          PY
             python -m experiments.rtk.lean_trust_zero_receipt_v1 \
               --source-payload "$BASE/rtk_source_proof_payload.json" \
               --source-witness "$ROOT/zero_source_certificate_witness.json" \
@@ -866,7 +882,7 @@ jobs:
               --environment "$ROOT/imported_semantic_drift_preoracle.json" \
               --source-payload "$BASE/rtk_source_proof_payload.json" \
               --source-native-witness "$ROOT/zero_source_certificate_witness.json" \
-              --target-payload "$BASE/rtk_target_claim_payload.json" \
+              --target-payload "$ROOT/zero_target_claim_$CONTROL.json" \
               --target-structural-log "$ROOT/zero_target_structural_$CONTROL.native.log" \
               --target-reference-log "$ROOT/zero_target_refs_$CONTROL.native.log" \
               --source-declaration-closure-log "$ROOT/zero_source_closure.native.log" \
