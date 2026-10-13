@@ -85,6 +85,17 @@ jobs:
             | tee "$EVIDENCE/rtk_patched_olean.sha256"
           echo "RTK_PATCHED_SMOKE_MODULE_REBUILT_NO_LEGACY_OLEAN_REUSE"
 
+      - name: Provision required bubblewrap sandbox without weakening isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bubblewrap
+          command -v bwrap
+          bwrap --version
+          # A missing or unsupported sandbox must fail the actual checker;
+          # do not force an unsafe fallback or run imported macros on the host.
+
       - name: Independently check patched fixture with bundled checkers
         shell: bash
         run: |
@@ -104,3 +115,4 @@ jobs:
           name: rtk-patched-kernel-smoke-research
           path: .rtk-patched-smoke-evidence/
           if-no-files-found: warn
+          include-hidden-files: true
