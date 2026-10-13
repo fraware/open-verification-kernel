@@ -1,0 +1,28 @@
+/-
+Development-only native observation of kernel-relevant Environment.header fields
+in the source theorem / unproved target goal context. This probe performs no
+target certificate replay and does not certify complete environment provenance.
+-/
+open Lean Elab Command
+
+run_cmd do
+  let env ← getEnv
+  let root : Name := `historical_claim
+  let some info := env.find? root
+    | throwError "RTK_KERNEL_HEADER_ROOT_MISSING"
+  let kind : String := match info with
+    | .thmInfo _ => "theorem"
+    | .axiomInfo _ => "axiom"
+    | _ => "unsupported"
+  unless kind != "unsupported" do
+    throwError "RTK_KERNEL_HEADER_ROOT_KIND_UNSUPPORTED"
+  logInfo m!"RTK_NATIVE_KERNEL_HEADER_JSON={Json.compress (Json.mkObj [
+    ("schema_version", Json.str "rtk.lean_native_kernel_header.v1-development"),
+    ("root_name", Json.str root.toString),
+    ("root_kind", Json.str kind),
+    ("trust_level", toJson env.header.trustLevel.toNat),
+    ("quotient_initialized", Json.bool env.header.quotInit),
+    ("target_historical_proof_replayed", Json.bool false),
+    ("native_header_complete_environment_proof", Json.bool false),
+    ("reliance_authorization", Json.bool false)
+  ])}"
