@@ -1,0 +1,46 @@
+/-
+Native Lean 4.14.0 reference-set witness for a strictly limited Expr fragment.
+The root is either a checked historical theorem or an UNPROVED target axiom.
+No historical target certificate replay takes place in this command.
+
+This reports Expr.getUsedConstantsAsSet as *a second native reference
+observation*. It does NOT prove those references cover every kernel semantic
+dependency (projections, axioms, universe state, special kernel rules, etc).
+-/
+open Lean Elab Command
+
+private partial def rtkSupportNameAst : Name → Json
+  | .anonymous => Json.arr #[Json.str "anonymous"]
+  | .str p s => Json.arr #[Json.str "str", rtkSupportNameAst p, toJson s]
+  | .num p i => Json.arr #[Json.str "num", rtkSupportNameAst p, toJson i]
+
+private def rtkSupportRefs (expr : Expr) : Json :=
+  let names := (expr.getUsedConstantsAsSet.toList.toArray).qsort Name.lt
+  Json.arr (names.map rtkSupportNameAst)
+
+run_cmd do
+  let env ← getEnv
+  let root : Name := `historical_claim
+  let some rootInfo := env.find? root
+    | throwError "RTK_SUPPORT_ROOT_NOT_FOUND"
+  let some (.defnInfo opInfo) := env.find? `op
+    | throwError "RTK_SUPPORT_IMPORTED_OP_NOT_DEFINITION"
+  let mut proofRefs : Json := Json.null
+  let rootKind : String ← match rootInfo with
+    | .thmInfo theoremInfo => do
+      proofRefs := rtkSupportRefs theoremInfo.value
+      pure "theorem"
+    | .axiomInfo _ => pure "unproved_goal_placeholder"
+    | _ => throwError "RTK_SUPPORT_ROOT_KIND_UNSUPPORTED"
+  logInfo m!"RTK_NATIVE_EXPR_REFERENCES_JSON={Json.compress (Json.mkObj [
+    ("schema_version", Json.str "rtk.lean_native_expr_reference_set.v1-development"),
+    ("root_name", Json.str root.toString),
+    ("root_kind", Json.str rootKind),
+    ("root_type_const_asts", rtkSupportRefs rootInfo.type),
+    ("root_proof_const_asts", proofRefs),
+    ("op_type_const_asts", rtkSupportRefs opInfo.type),
+    ("op_value_const_asts", rtkSupportRefs opInfo.value),
+    ("expression_support_complete_for_kernel_proved", Json.bool false),
+    ("target_historical_proof_replayed", Json.bool false),
+    ("reliance_authorization", Json.bool false)
+  ])}"
