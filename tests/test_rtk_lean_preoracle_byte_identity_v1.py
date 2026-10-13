@@ -19,7 +19,74 @@ from experiments.rtk.lean_preoracle_byte_identity_v1 import (
 )
 from experiments.rtk.lean_structural_expr_v1 import _canonical, _digest
 
-_EXPR = ["sort", ["zero"]]
+_EXPR = ["const", ["str", ["anonymous"], "op"], []]
+
+
+def _name(name: str) -> list:
+    return ["str", ["anonymous"], name]
+
+
+def _node(name: str, kind: str, module: str, refs: tuple[str, ...]) -> dict:
+    return {
+        "name": name, "name_ast": _name(name),
+        "kind": kind, "module": module,
+        "unsafe": False, "partial": False, "level_parameter_count": 0,
+        "direct_references": list(refs),
+        "direct_reference_asts": [_name(r) for r in refs],
+    }
+
+
+def _closure_graph(
+    root: str, *, target: bool = False, local_dependency: bool = False,
+    op_only: bool = False,
+) -> dict:
+    nodes = [
+        _node("Nat", "inductive", "Init.Prelude", ()),
+        _node("op", "definition", "RTKSemanticSupport", ("Nat",)),
+    ]
+    if local_dependency:
+        nodes.append(_node("rtkLocal", "definition", "LOCAL", ("Nat",)))
+    if not op_only:
+        refs = ("op", "rtkLocal") if local_dependency else ("op",)
+        nodes.append(_node(
+            root, "axiom" if target else "theorem", "LOCAL", refs,
+        ))
+    if op_only:
+        nodes = nodes[:2]
+    return {
+        "root_name": "op" if op_only else root,
+        "root_name_ast": _name("op" if op_only else root),
+        "node_count": len(nodes),
+        "edge_count": sum(len(n["direct_references"]) for n in nodes),
+        "nodes": nodes,
+        "missing_references_rejected": True,
+        "budget_exhaustion_rejected": True,
+        "reported_reference_relation": "ConstantInfo.getUsedConstantsAsSet",
+        "complete_for_reported_reference_relation_under_budget": True,
+        "semantic_dependency_closure_proved": False,
+    }
+
+
+def _closure_log(*, target: bool = False, local_dependency: bool = False) -> str:
+    root = "rtk_unproven_target_claim" if target else "historical_claim"
+    record = {
+        "schema_version": "rtk.lean_native_strict_decl_closure.v1-development",
+        "root_name": root,
+        "root_kind": "target_goal_placeholder" if target else "source_theorem",
+        "root_declaration_closure": _closure_graph(
+            root, target=target, local_dependency=local_dependency,
+        ),
+        "imported_definition_closure": _closure_graph(root, op_only=True),
+        "target_historical_proof_replayed": False,
+        "target_claim_established": False,
+        "axiom_policy_authenticated": False,
+        "source_target_environment_authenticity_verified": False,
+        "semantic_support_complete": False,
+        "transport_applicability": "UNDETERMINED",
+        "reliance_authorization": False,
+    }
+    return "native: RTK_NATIVE_STRICT_CLOSURE_JSON=" + json.dumps(record)
+
 
 
 def _sha(value: bytes) -> str:
@@ -126,6 +193,8 @@ def _fixture(tmp_path: Path, monkeypatch) -> dict:
         "current_target_reference_log": "RTK_NATIVE_REFERENCE_JSON=" + json.dumps({
             "environment_modules": sorted(source_modules),
         }),
+        "source_declaration_closure_log": _closure_log(),
+        "current_target_declaration_closure_log": _closure_log(target=True),
         "source_root": source_root, "target_root": target_root,
         "source_checker": source_root / "lean",
         "target_checker": target_root / "lean",
@@ -217,3 +286,73 @@ def test_authenticity_is_not_inferred_from_equal_hashes(tmp_path, monkeypatch):
     assert out["external_policy_and_provenance_authenticated"] is False
     assert out["module_semantic_support_complete_proved"] is False
     assert out["production_reliance_authorization"] is False
+
+
+def test_unchanged_olean_does_not_cover_source_local_definition(tmp_path, monkeypatch):
+    case = _fixture(tmp_path, monkeypatch)
+    case["source_declaration_closure_log"] = _closure_log(local_dependency=True)
+    result = evaluate_preoracle_identity(**case)
+    assert result["decision"] == "UNRESOLVED"
+    assert result["reason_codes"] == ["unaccounted_local_declaration_dependency"]
+    assert result["candidate_for_reuse_under_explicit_unproved_premises"] is False
+
+
+def test_unchanged_olean_does_not_cover_target_local_definition(tmp_path, monkeypatch):
+    case = _fixture(tmp_path, monkeypatch)
+    case["current_target_declaration_closure_log"] = _closure_log(
+        target=True, local_dependency=True,
+    )
+    result = evaluate_preoracle_identity(**case)
+    assert result["decision"] == "UNRESOLVED"
+    assert result["production_reliance_authorization"] is False
+
+
+def test_missing_native_scope_is_rejected_even_with_equal_olean(tmp_path, monkeypatch):
+    case = _fixture(tmp_path, monkeypatch)
+    case["source_declaration_closure_log"] = ""
+    with pytest.raises(ValueError, match="one bounded native closure"):
+        evaluate_preoracle_identity(**case)
+
+
+def test_unsupported_root_dependency_graph_rejected(tmp_path, monkeypatch):
+    case = _fixture(tmp_path, monkeypatch)
+    tag, text = case["source_declaration_closure_log"].split(
+        "RTK_NATIVE_STRICT_CLOSURE_JSON=", 1
+    )
+    data = json.loads(text)
+    root = data["root_declaration_closure"]
+    root["nodes"] = [n for n in root["nodes"] if n["name"] != "op"]
+    root["node_count"] -= 1
+    root["edge_count"] -= 1
+    case["source_declaration_closure_log"] = tag + (
+        "RTK_NATIVE_STRICT_CLOSURE_JSON=" + json.dumps(data)
+    )
+    with pytest.raises(ValueError, match="UNRESOLVED_REFERENCED_DECLARATION"):
+        evaluate_preoracle_identity(**case)
+
+
+def test_changed_module_still_requires_import_only_native_scope(tmp_path, monkeypatch):
+    case = _fixture(tmp_path, monkeypatch)
+    _module(case["target_root"], "RTKSemanticSupport", b"op := 0 + n")
+    case["current_target_declaration_closure_log"] = _closure_log(
+        target=True, local_dependency=True,
+    )
+    out = evaluate_preoracle_identity(**case)
+    assert out["decision"] == "UNRESOLVED"
+    assert "unaccounted_local_declaration_dependency" in out["reason_codes"]
+
+
+def test_imported_fragment_excludes_opaque_local_override(tmp_path, monkeypatch):
+    case = _fixture(tmp_path, monkeypatch)
+    tag, raw = case["current_target_declaration_closure_log"].split(
+        "RTK_NATIVE_STRICT_CLOSURE_JSON=", 1
+    )
+    record = json.loads(raw)
+    for g in ("root_declaration_closure", "imported_definition_closure"):
+        for entry in record[g]["nodes"]:
+            if entry["name"] == "op":
+                entry["module"] = "LOCAL"
+    case["current_target_declaration_closure_log"] = (
+        tag + "RTK_NATIVE_STRICT_CLOSURE_JSON=" + json.dumps(record)
+    )
+    assert evaluate_preoracle_identity(**case)["decision"] == "UNRESOLVED"

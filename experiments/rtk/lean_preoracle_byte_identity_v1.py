@@ -23,12 +23,83 @@ from experiments.rtk.lean_imported_proofrefs_v1 import (
 )
 from experiments.rtk.lean_native_preoracle_envelope_v1 import _modules
 from experiments.rtk.lean_structural_expr_v1 import _canonical, _digest
+from experiments.rtk.lean_strict_decl_closure_v1 import _key, _parse
 
 _SCHEMA = "rtk.lean_preoracle_byte_identity.v1-development"
 
 
 def _hash(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
+
+
+def _used_constant_ids(expr: object) -> set[str]:
+    """Collect every syntactically referenced const identity in restricted Expr AST."""
+    if not isinstance(expr, list) or not expr:
+        raise ValueError("non-structural proof/claim AST")
+    kind = expr[0]
+    if kind == "const":
+        return {_key(expr[1])}
+    children: list[object]
+    if kind == "app":
+        children = expr[1:3]
+    elif kind in {"lam", "forallE"}:
+        children = expr[2:4]
+    elif kind == "letE":
+        children = expr[2:5]
+    elif kind == "proj":
+        children = [expr[3]]
+    else:
+        children = []
+    found: set[str] = set()
+    for child in children:
+        found.update(_used_constant_ids(child))
+    return found
+
+
+def _native_import_only_scope(
+    *, source_closure_log: str, target_closure_log: str,
+    source_proof_ast: object, source_claim_ast: object, target_claim_ast: object,
+    source_modules: dict, target_modules: dict,
+) -> bool:
+    """Prohibit unchecked local declarations reachable from proof and statement.
+
+    Only the source theorem / unproved target placeholder is allowed to be
+    LOCAL. This bounded native reference relation is NOT kernel completeness.
+    """
+    cases = (
+        (_parse(source_closure_log, "historical_claim", "source_theorem"),
+         "historical_claim", source_modules,
+         (source_proof_ast, source_claim_ast)),
+        (_parse(target_closure_log, "rtk_unproven_target_claim",
+                "target_goal_placeholder"),
+         "rtk_unproven_target_claim", target_modules, (target_claim_ast,)),
+    )
+    for native, permitted_root, inventory, expressions in cases:
+        root = native["root"]
+        op = native["op"]
+        # The kernel's local declarations are not represented by imported
+        # module fingerprints. A single extra LOCAL dependency invalidates
+        # this sufficiency candidate even if all .olean bytes are identical.
+        for graph in (root, op):
+            for entry in graph["nodes"]:
+                if entry["module"] == "LOCAL":
+                    if graph is op or entry["name"] != permitted_root:
+                        return False
+                elif entry["module"] not in inventory:
+                    raise ValueError("native referenced module outside loaded inventory")
+        op_root = op["index"][_key(
+            native["record"]["imported_definition_closure"]["root_name_ast"]
+        )]
+        if op_root["name"] != "op" or op_root["module"] != "RTKSemanticSupport":
+            return False
+        referenced: set[str] = set()
+        for expr in expressions:
+            referenced.update(_used_constant_ids(expr))
+        if not referenced.issubset(root["index"]):
+            raise ValueError("native graph omitted a referenced proof/claim constant")
+        if _key(["str", ["anonymous"], "op"]) not in referenced:
+            raise ValueError("unsupported proof/claim outside imported op fragment")
+    return True
 
 
 def evaluate_preoracle_identity(
@@ -39,6 +110,8 @@ def evaluate_preoracle_identity(
     target_payload_bytes: bytes,
     target_structural_log: str,
     current_target_reference_log: str,
+    source_declaration_closure_log: str,
+    current_target_declaration_closure_log: str,
     source_root: Path,
     target_root: Path,
     source_checker: Path,
@@ -122,6 +195,22 @@ def evaluate_preoracle_identity(
     if actual_source != src_record:
         raise ValueError("source imported module bytes changed since native receipt")
     target_native_modules = _environment_modules(current_target_reference_log)
+    # Native closure is pre-outcome, derived from the checked source theorem
+    # and the target's UNPROVED claim. No historical target-proof replay.
+    native_import_only = _native_import_only_scope(
+        source_closure_log=source_declaration_closure_log,
+        target_closure_log=current_target_declaration_closure_log,
+        source_proof_ast=source["proof_ast"],
+        source_claim_ast=source["claim_ast"],
+        target_claim_ast=target["claim_ast"],
+        source_modules=src_record,
+        target_modules=dst_record,
+    )
+    if not native_import_only:
+        return _result(
+            source_payload_bytes, target_payload_bytes, src_record, {},
+            "UNRESOLVED", ["unaccounted_local_declaration_dependency"],
+        )
     if set(target_native_modules) != set(src_record) or (
         set(target_native_modules) != set(dst_record)
     ):
@@ -174,6 +263,10 @@ def _result(
         ),
         "full_kernel_environment_equivalence_proved": False,
         "module_semantic_support_complete_proved": False,
+        "native_import_only_scope_checked": (
+            decision in {"REVALIDATION_REQUIRED", "CONDITIONAL_IDENTITY_CANDIDATE"}
+        ),
+        "native_reference_relation_semantic_completeness_proved": False,
         "external_policy_and_provenance_authenticated": False,
         "target_historical_proof_replayed": False,
         "oracle_consulted": False,
@@ -188,6 +281,7 @@ def main() -> int:
         "environment", "source-payload", "source-native-witness",
         "target-payload", "target-structural-log", "target-reference-log",
         "source-root", "target-root", "source-checker", "target-checker",
+        "source-declaration-closure-log", "current-target-declaration-closure-log",
         "output",
     ):
         parser.add_argument("--" + arg, required=True, type=Path)
@@ -199,6 +293,10 @@ def main() -> int:
         target_payload_bytes=args.target_payload.read_bytes(),
         target_structural_log=args.target_structural_log.read_text(),
         current_target_reference_log=args.target_reference_log.read_text(),
+        source_declaration_closure_log=args.source_declaration_closure_log.read_text(),
+        current_target_declaration_closure_log=(
+            args.current_target_declaration_closure_log.read_text()
+        ),
         source_root=args.source_root,
         target_root=args.target_root,
         source_checker=args.source_checker,
