@@ -813,6 +813,9 @@ jobs:
           cp "$FIX/source_support.lean.txt" "$MODULE"
           "$RTK_TARGET_LEAN" -o "$TARGET_OLEAN" "$MODULE"
           cp "$TARGET_OLEAN" "$ROOT/equal_source_semantics_target.olean"
+          test "$(sha256sum "$RTK_SOURCE_ROOT/lib/lean/RTKSemanticSupport.olean" | cut -d ' ' -f 1)" = \
+            "$(sha256sum "$ROOT/equal_source_semantics_target.olean" | cut -d ' ' -f 1)"
+          echo "EQUAL_IMPORTED_MODULE_BYTES_CONFIRMED_IN_SEPARATE_CONTROL"
           "$RTK_TARGET_LEAN" "$BASE/RTKHistoricalTargetReplay.lean" \
             | tee "$ROOT/target_replay_equal.native.log"
           python -m experiments.rtk.lean_historical_target_oracle_v1 verify \
@@ -869,9 +872,11 @@ jobs:
           assert not negative["production_reliance_authorized"]
           assert json.loads((root / "preoracle_byte_identity_equal.json").read_text())["decision"] == "UNRESOLVED"
           assert json.loads((root / "preoracle_byte_identity_changed.json").read_text())["decision"] == "UNRESOLVED"
-          assert json.loads((root / "preoracle_byte_identity_equal.json").read_text())["current_target_loaded_inventory_sha256"] == (
-              json.loads((root / "preoracle_byte_identity_equal.json").read_text())["source_loaded_inventory_sha256"]
-          )
+          assert json.loads((root / "preoracle_byte_identity_equal.json").read_text())["current_target_loaded_inventory_sha256"] is None
+          # A nonzero-trust abstention deliberately occurs *before* the
+          # predictor can certify any target inventory equivalence. The
+          # independently native module-byte equality control is asserted
+          # separately in this job, never inferred from an absent digest.
           print("EXACT_HISTORICAL_CERTIFICATE_INDEPENDENT_TARGET_REPLAY_CONTROL_PASS")
           PY
 
