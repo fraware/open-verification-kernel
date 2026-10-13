@@ -141,3 +141,80 @@ def test_incomplete_import_inventory_denied(tmp_path):
     )
     with pytest.raises(ValueError, match="inventory differs"):
         observe_trust_zero(**case)
+
+
+def _oracle_fixture(trust=0, decision="ADMISSIBLE"):
+    marker = "RTK_HISTORICAL_TARGET_REPLAY_CONTEXT_JSON="
+    line = "native: " + marker + json.dumps({
+        "schema_version": "rtk.lean_historical_replay_context.v1-development",
+        "trust_level": trust,
+        "quotient_initialized": True,
+        "old_certificate_checked_in_this_process": True,
+        "production_reliance_authorization": False,
+    })
+    record = {
+        "historical_certificate_adjudication": decision,
+        "native_target_log_sha256": hashlib.sha256(line.encode()).hexdigest(),
+        "native_target_kernel_replay_observed": True,
+        "production_reliance_authorized": False,
+        "predictor_consulted": False,
+        "complete_semantic_support_proved": False,
+    }
+    return line, record
+
+
+@pytest.mark.parametrize("decision", ["ADMISSIBLE", "INADMISSIBLE"])
+def test_native_zero_trust_target_oracle_context_verified(decision):
+    from experiments.rtk.lean_trust_zero_receipt_v1 import (
+        verify_zero_trust_oracle_context,
+    )
+    log, record = _oracle_fixture(decision=decision)
+    result = verify_zero_trust_oracle_context(
+        native_log=log, adjudicated_record=record,
+    )
+    assert result["historical_certificate_adjudication"] == decision
+    assert result["replay_kernel_trust_level"] == 0
+    assert result["production_reliance_authorized"] is False
+
+
+def test_target_oracle_default_trust_is_rejected():
+    from experiments.rtk.lean_trust_zero_receipt_v1 import (
+        verify_zero_trust_oracle_context,
+    )
+    log, record = _oracle_fixture(trust=1025)
+    with pytest.raises(ValueError, match="not observed under zero trust"):
+        verify_zero_trust_oracle_context(native_log=log, adjudicated_record=record)
+
+
+def test_target_oracle_different_log_digest_rejected():
+    from experiments.rtk.lean_trust_zero_receipt_v1 import (
+        verify_zero_trust_oracle_context,
+    )
+    log, record = _oracle_fixture()
+    record["native_target_log_sha256"] = "c" * 64
+    with pytest.raises(ValueError, match="not bound to adjudication"):
+        verify_zero_trust_oracle_context(native_log=log, adjudicated_record=record)
+
+
+def test_target_oracle_duplicate_trust_marker_rejected():
+    from experiments.rtk.lean_trust_zero_receipt_v1 import (
+        verify_zero_trust_oracle_context,
+    )
+    log, record = _oracle_fixture()
+    with pytest.raises(ValueError, match="one native target-oracle"):
+        verify_zero_trust_oracle_context(
+            native_log=log + "\n" + log, adjudicated_record=record,
+        )
+
+
+def test_target_oracle_authority_claim_rejected():
+    from experiments.rtk.lean_trust_zero_receipt_v1 import (
+        verify_zero_trust_oracle_context,
+    )
+    log, record = _oracle_fixture()
+    log = log.replace('"production_reliance_authorization": false',
+                      '"production_reliance_authorization": true')
+    with pytest.raises(ValueError, match="not observed under zero trust"):
+        verify_zero_trust_oracle_context(
+            native_log=log, adjudicated_record=record,
+        )
