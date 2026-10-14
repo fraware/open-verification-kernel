@@ -293,10 +293,17 @@ jobs:
           from experiments.rtk.lean_second_process_source_v1 import separate_native_driver
           context = Path(sys.argv[1])
           base = Path(__import__("os").environ["GITHUB_WORKSPACE"]) / "experiments/rtk"
+          legacy_driver = (base / "lean_historical_target_replay_v1.lean.txt").read_text()
+          # Kernel-relevant quotient state moved from EnvironmentHeader to
+          # Environment in Lean 4.35. This adapts only the patched invocation;
+          # the exact historical 4.14 source is kept for reproducibility.
+          field = "env.header.quotInit"
+          assert legacy_driver.count(field) == 1
+          patched_driver = legacy_driver.replace(field, "env.quotInit")
           driver = separate_native_driver(
               encoder=(base / "lean_structural_expr_probe_v1.lean.txt").read_text(),
               decoder=(base / "lean_expr_decoder_roundtrip_v1.lean.txt").read_text(),
-              driver=(base / "lean_historical_target_replay_v1.lean.txt").read_text(),
+              driver=patched_driver,
           )
           with (context / "RTKHistoricalTargetReplay.lean").open("x") as output:
               output.write(driver)
