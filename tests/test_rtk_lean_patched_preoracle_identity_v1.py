@@ -155,3 +155,19 @@ def test_nonpinned_checker_cannot_admit_any_candidate(monkeypatch):
     case["checker_binary_bytes"] = b"other compiler"
     with pytest.raises(ValueError, match="unsupported or altered patched Lean"):
         m.evaluate_patched_preoracle(**case)
+
+
+def test_independent_equal_source_with_different_compiled_bytes_revalidates(
+    monkeypatch,
+):
+    # Real pinned Lean 4.35 hosted run observed byte difference for the
+    # independently compiled same-text RTKPatchedSupport module.
+    case = _case(monkeypatch)
+    case["target_support_olean"] = b"same source text but distinct build bytes"
+    result = m.evaluate_patched_preoracle(**case)
+    assert result["decision"] == "REVALIDATION_REQUIRED"
+    assert result["reason_code"] == (
+        "whole_import_module_drift_with_unchanged_observed_op"
+    )
+    assert result["observed_imported_definition_ast_identical"] is True
+    assert result["source_target_environment_equivalence_proved"] is False
