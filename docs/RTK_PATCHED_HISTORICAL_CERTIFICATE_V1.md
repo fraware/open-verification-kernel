@@ -18,6 +18,12 @@ Two target variants are rebuilt in their own separate Lake project from text. Th
 
 Only the later reference-oracle step reads the sealed historical Expr. It runs `Lean.Kernel.check` and `Lean.Kernel.isDefEq` with **`--trust=0`**, asserts the source historical theorem was not imported, rejects substituted target claims, and records actual target-module bytes and same-process trust state. The development-control expectations are `ADMISSIBLE` for identical imported semantics and `INADMISSIBLE` for changed semantics. If actual results differ, CI must fail and the discrepancy must be investigated.
 
+## Patched kernel context API version
+
+The first end-to-end native run encountered an actual Lean 4.35 API change: `EnvironmentHeader.quotInit` is no longer a supported field. The source theorem nevertheless passed sandboxed paranoid checking, a fresh source-process exact serialized-proof check, and sealed two unproved target records. The *target historical replay* could not compile its legacy header observer.
+
+The patched driver now emits a **distinct `rtk.lean_historical_replay_context.v2-development`** record containing the actual `trustLevel=0` observed in the same checker process, plus `quotient_initialization_observed=false`. It does **not** invent an equivalent quotient flag. The strict verifier rejects old schemas, unexpected fields, any nonzero trust, or a purported quotient observation. This protocol distinction is not evidence that Lean 4.14 and 4.35 kernel environments are semantically equivalent. The absent quotient-init observation is an explicit remaining premise in any future transport-equivalence argument.
+
 ## Provenance, checker and logical distinctions
 
 - The source theorem is independently checked with the patched `lake check --paranoid` multi-checker route. This is **source module checking**, not an independent guarantee that transport to an altered target is correct.
