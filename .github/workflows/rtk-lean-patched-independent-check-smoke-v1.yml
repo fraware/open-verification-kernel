@@ -163,7 +163,7 @@ jobs:
           # A failing compiler is not automatically evidence of a failed proof.
           # Require an explicit elaboration/type-check error at the theorem.
           grep -F 'historical.lean:' "$EVIDENCE/patched_historical_changed_expected_error.log"
-          grep -E 'type mismatch|application type mismatch' \
+          grep -E 'Type mismatch|type mismatch|application type mismatch' \
             "$EVIDENCE/patched_historical_changed_expected_error.log"
           echo "PATCHED_LEAN_OLD_PROOF_TEXT_REJECTED_UNDER_DEFINITION_DRIFT"
 
