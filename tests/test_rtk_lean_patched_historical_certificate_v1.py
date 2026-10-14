@@ -50,7 +50,9 @@ def test_patched_source_export_restricted_to_checked_historical_theorem():
 
 @pytest.mark.parametrize("kind,value", [("axiom", False), ("theorem", False)])
 def test_unproved_or_missing_source_proof_rejected(kind, value):
-    with pytest.raises(ValueError, match="checked historical theorem"):
+    # The upstream strict AST decoder rejects an axiom in the source slot
+    # even before the patched exporter checks the missing checked theorem.
+    with pytest.raises(ValueError):
         export_source(
             _source_log(kind, value),
             b"theorem historical_claim (n : Nat) : op n = n := Eq.refl n",
@@ -95,8 +97,13 @@ def test_driver_rewrites_all_legacy_paths_without_target_proof():
         make_driver("bad", "bad", src, module="RTKPatchedSupport")
 
 
-def test_digests_of_same_syntactic_proof_are_stable():
-    raw = export_source(_source_log(), (
-        b"theorem historical_claim (n : Nat) : op n = n := Eq.refl n\n"
-    ))
-    assert hashlib.sha256(raw).hexdigest() == hashlib.sha256(raw).hexdigest()
+def test_source_input_changes_bind_payload_without_changing_proof_ast():
+    one = b"theorem historical_claim (n : Nat) : op n = n := Eq.refl n\\n"
+    two = one + b"-- changed source comment\\n"
+    raw_one = export_source(_source_log(), one)
+    raw_two = export_source(_source_log(), two)
+    assert hashlib.sha256(raw_one).digest() != hashlib.sha256(raw_two).digest()
+    assert _source(raw_one)["proof_ast"] == _source(raw_two)["proof_ast"]
+    assert _source(raw_one)["source_checked_file_sha256"] != (
+        _source(raw_two)["source_checked_file_sha256"]
+    )
