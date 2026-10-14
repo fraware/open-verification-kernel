@@ -3,16 +3,18 @@ name: RTK patched Lean 4.35 independent-checker smoke (research)
 on:
   push:
     branches:
+      - research/rtk-lean-patched-semantic-drift-development-v1
+    paths:
+      - .github/workflows/rtk-lean-patched-independent-check-smoke-v1.yml
+      - docs/RTK_LEAN_PATCHED_CHECKER_SMOKE_V1.md
+      - docs/RTK_PATCHED_SEMANTIC_DRIFT_DEVELOPMENT_V1.md
+  pull_request:
+    branches:
       - research/rtk-lean-patched-independent-check-smoke-v1
     paths:
       - .github/workflows/rtk-lean-patched-independent-check-smoke-v1.yml
       - docs/RTK_LEAN_PATCHED_CHECKER_SMOKE_V1.md
-  pull_request:
-    branches:
-      - research/rtk-lean-actual-kernel-identity-bridge-v1
-    paths:
-      - .github/workflows/rtk-lean-patched-independent-check-smoke-v1.yml
-      - docs/RTK_LEAN_PATCHED_CHECKER_SMOKE_V1.md
+      - docs/RTK_PATCHED_SEMANTIC_DRIFT_DEVELOPMENT_V1.md
   workflow_dispatch:
 
 permissions:
@@ -100,6 +102,94 @@ jobs:
           bwrap --version
           # A missing or unsupported sandbox must fail the actual checker;
           # do not force an unsafe fallback or run imported macros on the host.
+
+      - name: Check patched source-text replay and independent target proof controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/rtk-patched-semantic-drift"
+          EVIDENCE="$GITHUB_WORKSPACE/.rtk-patched-smoke-evidence"
+          mkdir -p "$ROOT/source" "$ROOT/equal" "$ROOT/changed"
+          for CASE in source equal changed; do
+            if [ "$CASE" = changed ]; then
+              cat > "$ROOT/$CASE/RTKPatchedSupport.lean" <<'LEAN'
+          import Init.Prelude
+          def op (n : Nat) : Nat := 0 + n
+          LEAN
+            else
+              cat > "$ROOT/$CASE/RTKPatchedSupport.lean" <<'LEAN'
+          import Init.Prelude
+          def op (n : Nat) : Nat := n
+          LEAN
+            fi
+            (
+              cd "$ROOT/$CASE"
+              lean --trust=0 -o RTKPatchedSupport.olean RTKPatchedSupport.lean \
+                > "$EVIDENCE/patched_support_$CASE.log" 2>&1
+              sha256sum RTKPatchedSupport.lean RTKPatchedSupport.olean \
+                > "$EVIDENCE/patched_support_$CASE.sha256"
+            )
+          done
+
+          # Identical source proof *text*, not exported original Expr bytes.
+          cat > "$ROOT/source/historical.lean" <<'LEAN'
+          import RTKPatchedSupport
+          theorem historical_claim (n : Nat) : op n = n := Eq.refl n
+          LEAN
+          cp "$ROOT/source/historical.lean" "$ROOT/equal/historical.lean"
+          cp "$ROOT/source/historical.lean" "$ROOT/changed/historical.lean"
+          sha256sum "$ROOT/source/historical.lean" "$ROOT/equal/historical.lean" \
+            "$ROOT/changed/historical.lean" > "$EVIDENCE/patched_historical_source_text.sha256"
+          for CASE in source equal; do
+            (
+              cd "$ROOT/$CASE"
+              LEAN_PATH="$ROOT/$CASE" lean --trust=0 historical.lean \
+                > "$EVIDENCE/patched_historical_$CASE.log" 2>&1
+            )
+          done
+          echo "PATCHED_LEAN_SAME_SOURCE_PROOF_TEXT_ACCEPTED_IN_EQUAL_TARGET"
+
+          # The changed definition is extensionally equivalent via a theorem,
+          # though the source's syntactic reflexivity witness is insufficient.
+          (
+            cd "$ROOT/changed"
+            if LEAN_PATH="$ROOT/changed" lean --trust=0 historical.lean \
+                > "$EVIDENCE/patched_historical_changed_expected_error.log" 2>&1; then
+              echo "ERROR: historical proof text unexpectedly accepted in drift" >&2
+              exit 1
+            fi
+          )
+          test -s "$EVIDENCE/patched_historical_changed_expected_error.log"
+          echo "PATCHED_LEAN_OLD_PROOF_TEXT_REJECTED_UNDER_DEFINITION_DRIFT"
+
+          cat > "$ROOT/changed/fresh_target.lean" <<'LEAN'
+          import RTKPatchedSupport
+          theorem fresh_target_claim (n : Nat) : op n = n := by
+            exact Nat.zero_add n
+          LEAN
+          (
+            cd "$ROOT/changed"
+            LEAN_PATH="$ROOT/changed" lean --trust=0 fresh_target.lean \
+              > "$EVIDENCE/patched_fresh_target.log" 2>&1
+          )
+          echo "PATCHED_LEAN_FRESH_TARGET_PROOF_ACCEPTED_SEPARATE_FROM_OLD_CERTIFICATE"
+
+          # These source-text results do not establish serialized Expr
+          # transport; all decisions remain development-only.
+          cat > "$EVIDENCE/patched_semantic_drift_status.json" <<'JSON'
+          {
+            "schema_version": "rtk.patched_lean_semantic_drift.v1-development",
+            "checker_version": "4.35.0",
+            "source_theorem_proof_text_identical": true,
+            "equal_definition_source_text_accepted": true,
+            "changed_definition_source_text_rejected": true,
+            "fresh_changed_target_proof_accepted_separately": true,
+            "exact_historical_serialized_expr_replayed": false,
+            "kernel_semantic_support_soundness_proved": false,
+            "source_provenance_independently_authenticated": false,
+            "production_reliance_authorized": false
+          }
+          JSON
 
       - name: Independently check patched fixture with bundled checkers
         shell: bash
