@@ -299,7 +299,7 @@ jobs:
           # the exact historical 4.14 source is kept for reproducibility.
           field = "env.header.quotInit"
           assert legacy_driver.count(field) == 1
-          patched_driver = legacy_driver.replace(field, "env.quotInit")
+          patched_driver = legacy_driver.replace(field, "env.toKernelEnv.quotInit")
           driver = separate_native_driver(
               encoder=(base / "lean_structural_expr_probe_v1.lean.txt").read_text(),
               decoder=(base / "lean_expr_decoder_roundtrip_v1.lean.txt").read_text(),
