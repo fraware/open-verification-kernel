@@ -10,9 +10,13 @@ The [Lean 4.35.0 release notes of October 12, 2026](https://lean-lang.org/doc/re
 
 ## Strict boundary of the new workflow
 
-`.github/workflows/rtk-lean-patched-independent-check-smoke-v1.yml` installs **Lean 4.35.0** by exact version. It creates a **new** minimal Lake project under a temporary directory using source text, defines `op n := n`, checks a source theorem `op n = n` and builds the corresponding new `.olean` from scratch. It then runs `lake check --paranoid` and must fail if that tool fails. Native version/build logs, recompiled module SHA and checker command transcript are retained as research artifacts. It never copies the v4.14.0 `.olean` file into the patched environment.
+`.github/workflows/rtk-lean-patched-independent-check-smoke-v1.yml` installs **Lean 4.35.0** by exact version. It creates a **new** minimal Lake project under a temporary directory using source text, defines `op n := n`, checks a source theorem `op n = n` and builds the corresponding new `.olean` from scratch. The smoke fixture imports only `Init.Prelude` instead of all `Lean` to minimize transitive imported declarations while preserving the exact same identity-theorem specification. It then runs `lake check --paranoid` and must fail if that tool fails. Native version/build logs, recompiled module SHA and checker command transcript are retained as research artifacts. It never copies the v4.14.0 `.olean` file into the patched environment.
 
 This is deliberately a **patched-checker infrastructure smoke**, not a migration of the historical serialized Lean 4.14 proof expression, not transport across an altered definition, and not a measurement of a held-out false-reuse rate. Any failure during installation, sandbox startup, export, checker availability, axiom policy or memory/time budgets must be reported as a failure. Do not skip an unavailable checker and claim the full set passed.
+
+## Hosted diagnostic history
+
+The initial Ubuntu 24.04 smoke run failed because `bwrap` was not installed; the next failed because the runner prohibited the sandbox's UID mapping. The isolated job moved to Ubuntu 22.04 with explicit `bubblewrap` installation and no sandbox bypass. On that runner, the paranoid Lean kernel and Lean4Lean **both accepted** the old `import Lean` smoke after a 164,015-declaration export, but the runner was stopped while checking with nanoda. This is **partial checker evidence**, not `lake check --paranoid` success. The subsequent minimal-`Init.Prelude` run is a performance correction that retains all required independent checkers. Each head must be qualified by its own complete exact-commit logs.
 
 ## Future actual qualification gates
 
