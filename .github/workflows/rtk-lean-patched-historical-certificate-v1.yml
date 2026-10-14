@@ -1,0 +1,288 @@
+name: RTK patched historical certificate replay (research)
+
+on:
+  push:
+    branches: [research/rtk-lean-patched-historical-certificate-v1]
+    paths:
+      - .github/workflows/rtk-lean-patched-historical-certificate-v1.yml
+      - experiments/rtk/lean_patched_historical_certificate_v1.py
+      - docs/RTK_PATCHED_HISTORICAL_CERTIFICATE_V1.md
+  pull_request:
+    branches: [research/rtk-lean-patched-independent-check-smoke-v1]
+    paths:
+      - .github/workflows/rtk-lean-patched-historical-certificate-v1.yml
+      - experiments/rtk/lean_patched_historical_certificate_v1.py
+      - docs/RTK_PATCHED_HISTORICAL_CERTIFICATE_V1.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native_patched_historical_replay:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 55
+    steps:
+      - name: Check out exact research revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Install hash-pinned Lean 4.35 and bubblewrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bubblewrap
+          command -v bwrap
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+            https://github.com/leanprover/elan/releases/download/v4.2.3/elan-x86_64-unknown-linux-gnu.tar.gz \
+            --output "$RUNNER_TEMP/elan.tar.gz"
+          echo 'df0b2b3a439961ffcbb3985214365ffe40f49bc871df04dff268c7d8e21ca8b2  '"$RUNNER_TEMP"'/elan.tar.gz' | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/elan.tar.gz" -C "$RUNNER_TEMP" elan-init
+          "$RUNNER_TEMP/elan-init" -y --no-modify-path --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          "$HOME/.elan/bin/elan" toolchain install leanprover/lean4:v4.35.0
+          "$HOME/.elan/bin/elan" default leanprover/lean4:v4.35.0
+          LEAN_BIN="$("$HOME/.elan/bin/elan" which lean)"
+          echo 'bf8d54e4714cc4b03d3f6bb34c83b7202b87e49c8bfcbff6895c085bb90ceb38  '"$LEAN_BIN" | sha256sum --check --strict
+          "$HOME/.elan/bin/lean" --version
+          echo "PATCHED_EXACT_LEAN_4_35_BINARY_SHA_VERIFIED"
+
+      - name: Rebuild historical source theorem from source and check independently
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/rtk-patched-history"
+          SRC="$ROOT/source"
+          mkdir -p "$SRC"
+          printf 'leanprover/lean4:v4.35.0\n' > "$SRC/lean-toolchain"
+          cat > "$SRC/lakefile.toml" <<'TOML'
+          name = "rtk_patched_historical_source"
+          version = "0.1.0"
+          defaultTargets = ["RTKPatchedSource"]
+
+          [[lean_lib]]
+          name = "RTKPatchedSupport"
+
+          [[lean_lib]]
+          name = "RTKPatchedSource"
+          TOML
+          cat > "$SRC/RTKPatchedSupport.lean" <<'LEAN'
+          import Init.Prelude
+          def op (n : Nat) : Nat := n
+          LEAN
+          cat > "$SRC/RTKPatchedSource.lean" <<'LEAN'
+          import RTKPatchedSupport
+          theorem historical_claim (n : Nat) : op n = n := Eq.refl n
+          LEAN
+          (cd "$SRC" && lake build)
+          (cd "$SRC" && lake check --paranoid) \
+            | tee "$ROOT/source_paranoid.native.log"
+          test -s "$ROOT/source_paranoid.native.log"
+          sha256sum "$SRC/.lake/build/lib/lean/RTKPatchedSupport.olean" \
+            "$SRC/.lake/build/lib/lean/RTKPatchedSource.olean" \
+            > "$ROOT/source_patched_module_hashes.sha256"
+          echo "PATCHED_SOURCE_HISTORICAL_THEOREM_PARANOID_INDEPENDENT_CHECKER_PASS"
+
+      - name: Export source proof expression and recheck unchanged serialized expression
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/rtk-patched-history"
+          SRC="$ROOT/source"
+          mkdir -p "$GITHUB_WORKSPACE/.rtk-patched-qualification"
+          ENC=experiments/rtk/lean_structural_expr_probe_v1.lean.txt
+          DEC=experiments/rtk/lean_expr_decoder_roundtrip_v1.lean.txt
+          SOURCE_INPUT="$SRC/RTKPatchedSource.lean"
+          cat > "$SRC/SourceProbe.lean" <<'LEAN'
+          import Lean
+          import RTKPatchedSource
+          LEAN
+          cat "$ENC" >> "$SRC/SourceProbe.lean"
+          LEAN_PATH="$SRC/.lake/build/lib/lean" lean --trust=0 "$SRC/SourceProbe.lean" \
+            | tee "$ROOT/source_structural.native.log"
+          python -m experiments.rtk.lean_patched_historical_certificate_v1 export \
+            --source-log "$ROOT/source_structural.native.log" \
+            --source-file "$SOURCE_INPUT" \
+            --output "$GITHUB_WORKSPACE/.rtk-patched-qualification/source_payload.json"
+          python -m experiments.rtk.lean_patched_historical_certificate_v1 driver \
+            --encoder "$ENC" --decoder "$DEC" \
+            --template experiments/rtk/lean_second_process_driver_v1.lean.txt \
+            --module RTKPatchedSupport \
+            --output "$ROOT/SourceRecheck.lean"
+          if grep -q 'import RTKPatchedSource' "$ROOT/SourceRecheck.lean"; then
+            echo "historical source theorem imported into rechecker" >&2
+            exit 1
+          fi
+          LEAN_PATH="$SRC/.lake/build/lib/lean" lean --trust=0 "$ROOT/SourceRecheck.lean" \
+            | tee "$ROOT/source_serialized_recheck.native.log"
+          python - "$ROOT" <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          import sys
+          from experiments.rtk.lean_structural_expr_v1 import _digest
+          from experiments.rtk.lean_historical_target_oracle_v1 import _source
+          root = Path(sys.argv[1])
+          data = _source(Path(".rtk-patched-qualification/source_payload.json").read_bytes())
+          marker = "RTK_SECOND_PROCESS_PROOF_JSON="
+          lines = [s.partition(marker)[2] for s in
+                   (root/"source_serialized_recheck.native.log").read_text().splitlines()
+                   if marker in s]
+          assert len(lines) == 1
+          witness = json.loads(lines[0])
+          assert witness["source_proof_kernel_checked"] is True
+          assert witness["source_proof_type_defeq_serialized_claim"] is True
+          assert witness["historical_theorem_not_imported_or_declared"] is True
+          assert witness["proof_ast"] == data["proof_ast"]
+          assert witness["claim_ast"] == data["claim_ast"]
+          assert witness["target_historical_proof_replayed"] is False
+          print("PATCHED_SOURCE_SERIALIZED_EXACT_PROOF_RECHECKED_SEPARATE_PROCESS")
+          PY
+
+      - name: Rebuild unproved target contexts and seal before any historical replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/rtk-patched-history"
+          TARGET="$ROOT/target"
+          mkdir -p "$TARGET"
+          printf 'leanprover/lean4:v4.35.0\n' > "$TARGET/lean-toolchain"
+          cat > "$TARGET/lakefile.toml" <<'TOML'
+          name = "rtk_patched_historical_target"
+          version = "0.1.0"
+          defaultTargets = ["RTKPatchedSupport"]
+
+          [[lean_lib]]
+          name = "RTKPatchedSupport"
+          TOML
+          python - "$TARGET/TargetProbe.lean" <<'PY'
+          from pathlib import Path
+          import sys
+          out = Path(sys.argv[1])
+          probe = Path("experiments/rtk/lean_structural_expr_probe_v1.lean.txt").read_text()
+          old = "let root : Name := `historical_claim"
+          assert probe.count(old) == 1
+          out.write_text(
+              "import Lean\nimport RTKPatchedSupport\n"
+              "axiom rtk_unproven_target_claim (n : Nat) : op n = n\n"
+              + probe.replace(old, "let root : Name := `rtk_unproven_target_claim")
+          )
+          PY
+          for CONTROL in equal changed; do
+            if [ "$CONTROL" = equal ]; then
+              cat > "$TARGET/RTKPatchedSupport.lean" <<'LEAN'
+          import Init.Prelude
+          def op (n : Nat) : Nat := n
+          LEAN
+            else
+              cat > "$TARGET/RTKPatchedSupport.lean" <<'LEAN'
+          import Init.Prelude
+          def op (n : Nat) : Nat := 0 + n
+          LEAN
+            fi
+            (cd "$TARGET" && lake build)
+            cp "$TARGET/.lake/build/lib/lean/RTKPatchedSupport.olean" \
+              "$ROOT/target_support_$CONTROL.olean"
+            LEAN_PATH="$TARGET/.lake/build/lib/lean" lean --trust=0 \
+              "$TARGET/TargetProbe.lean" \
+              | tee "$ROOT/target_unproved_$CONTROL.native.log"
+            python -m experiments.rtk.lean_patched_historical_certificate_v1 target \
+              --source-payload "$GITHUB_WORKSPACE/.rtk-patched-qualification/source_payload.json" \
+              --target-log "$ROOT/target_unproved_$CONTROL.native.log" \
+              --output "$GITHUB_WORKSPACE/.rtk-patched-qualification/target_$CONTROL.json"
+          done
+          python - "$ROOT" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          from experiments.rtk.lean_historical_target_oracle_v1 import _source
+          root = Path(sys.argv[1])
+          source = _source(Path(".rtk-patched-qualification/source_payload.json").read_bytes())
+          a = json.loads(Path(".rtk-patched-qualification/target_equal.json").read_text())
+          b = json.loads(Path(".rtk-patched-qualification/target_changed.json").read_text())
+          assert a["claim_ast"] == b["claim_ast"] == source["claim_ast"]
+          assert a["target_claim_established"] is False
+          assert b["target_claim_established"] is False
+          assert (root/"target_support_equal.olean").read_bytes() != (
+              root/"target_support_changed.olean").read_bytes()
+          print("PATCHED_IDENTICAL_STATEMENTS_CHANGED_MODULE_BYTES_NO_TARGET_PROOF")
+          PY
+          sha256sum "$GITHUB_WORKSPACE/.rtk-patched-qualification/"*.json \
+            "$ROOT/target_support_equal.olean" \
+            "$ROOT/target_support_changed.olean" \
+            > "$ROOT/sealed_preoracle_artifacts.sha256"
+          sha256sum --check --strict "$ROOT/sealed_preoracle_artifacts.sha256"
+          test ! -e "$ROOT/target_oracle_equal.native.log"
+          test ! -e "$ROOT/target_oracle_changed.native.log"
+          echo "PATCHED_PREORACLE_CONTEXTS_SEALED_BEFORE_HISTORICAL_REPLAY"
+
+      - name: Adjudicate exact historical proof in separately rebuilt patched targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/rtk-patched-history"
+          TARGET="$ROOT/target"
+          ENC=experiments/rtk/lean_structural_expr_probe_v1.lean.txt
+          DEC=experiments/rtk/lean_expr_decoder_roundtrip_v1.lean.txt
+          for CONTROL in equal changed; do
+            if [ "$CONTROL" = equal ]; then EXPECT=ADMISSIBLE; else EXPECT=INADMISSIBLE; fi
+            cp "$ROOT/target_support_$CONTROL.olean" \
+              "$TARGET/.lake/build/lib/lean/RTKPatchedSupport.olean"
+            cmp "$ROOT/target_support_$CONTROL.olean" \
+              "$TARGET/.lake/build/lib/lean/RTKPatchedSupport.olean"
+            python -m experiments.rtk.lean_patched_historical_certificate_v1 driver \
+              --encoder "$ENC" --decoder "$DEC" \
+              --template experiments/rtk/lean_historical_target_replay_v1.lean.txt \
+              --module RTKPatchedSupport \
+              --target-file ".rtk-patched-qualification/target_$CONTROL.json" \
+              --output "$ROOT/TargetOracle_$CONTROL.lean"
+            if grep -q 'import RTKPatchedSource' "$ROOT/TargetOracle_$CONTROL.lean"; then
+              echo "historical theorem preloaded into target oracle" >&2
+              exit 1
+            fi
+            LEAN_PATH="$TARGET/.lake/build/lib/lean" lean --trust=0 \
+              "$ROOT/TargetOracle_$CONTROL.lean" \
+              | tee "$ROOT/target_oracle_$CONTROL.native.log"
+            python -m experiments.rtk.lean_patched_historical_certificate_v1 verify \
+              --source-payload "$GITHUB_WORKSPACE/.rtk-patched-qualification/source_payload.json" \
+              --target-payload "$GITHUB_WORKSPACE/.rtk-patched-qualification/target_$CONTROL.json" \
+              --driver "$ROOT/TargetOracle_$CONTROL.lean" \
+              --module-olean "$ROOT/target_support_$CONTROL.olean" \
+              --oracle-log "$ROOT/target_oracle_$CONTROL.native.log" \
+              --expected "$EXPECT" \
+              --output "$ROOT/target_oracle_$CONTROL.json"
+          done
+          sha256sum --check --strict "$ROOT/sealed_preoracle_artifacts.sha256"
+          python - "$ROOT" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          root = Path(sys.argv[1])
+          a = json.loads((root/"target_oracle_equal.json").read_text())
+          b = json.loads((root/"target_oracle_changed.json").read_text())
+          assert a["historical_source_payload_sha256"] == b["historical_source_payload_sha256"]
+          assert a["historical_certificate_adjudication"] == "ADMISSIBLE"
+          assert b["historical_certificate_adjudication"] == "INADMISSIBLE"
+          for row in (a, b):
+              assert row["patched_lean_version"] == "4.35.0"
+              assert row["legacy_lean_4_14_artifact_reused"] is False
+              assert row["source_proof_rebuilt_under_patched_version"] is True
+              assert row["same_process_target_trust_zero_observed"] is True
+              assert row["semantic_transport_soundness_proved"] is False
+              assert row["patched_kernel_security_qualified_for_relying_policy"] is False
+              assert row["production_reliance_authorized"] is False
+          print("PATCHED_HISTORICAL_CERTIFICATE_DEV_TARGET_CONTRAST_PASS_NO_RELIANCE")
+          PY
+
+      - name: Publish bounded patched research observations
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rtk-patched-historical-certificate-research
+          path: |
+            ${{ runner.temp }}/rtk-patched-history/*.log
+            ${{ runner.temp }}/rtk-patched-history/*.json
+            ${{ runner.temp }}/rtk-patched-history/*.sha256
+          if-no-files-found: warn
