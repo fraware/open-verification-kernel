@@ -1,0 +1,123 @@
+name: RTK patched Lean 4.35 independent-checker smoke (research)
+
+on:
+  push:
+    branches:
+      - research/rtk-lean-patched-independent-check-smoke-v1
+    paths:
+      - .github/workflows/rtk-lean-patched-independent-check-smoke-v1.yml
+      - docs/RTK_LEAN_PATCHED_CHECKER_SMOKE_V1.md
+  pull_request:
+    branches:
+      - research/rtk-lean-actual-kernel-identity-bridge-v1
+    paths:
+      - .github/workflows/rtk-lean-patched-independent-check-smoke-v1.yml
+      - docs/RTK_LEAN_PATCHED_CHECKER_SMOKE_V1.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  patched_kernel_smoke_only:
+    # Ubuntu 24.04 GitHub runner blocks bwrap user namespace mapping.
+    # Ubuntu 22.04 is tested without weakening sandbox isolation.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact research revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Install separately versioned patched Lean 4.35.0 toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/.rtk-patched-smoke-evidence"
+          EVIDENCE="$GITHUB_WORKSPACE/.rtk-patched-smoke-evidence"
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+            https://github.com/leanprover/elan/releases/download/v4.2.3/elan-x86_64-unknown-linux-gnu.tar.gz \
+            --output "$RUNNER_TEMP/elan.tar.gz"
+          echo 'df0b2b3a439961ffcbb3985214365ffe40f49bc871df04dff268c7d8e21ca8b2  '"$RUNNER_TEMP"'/elan.tar.gz' | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/elan.tar.gz" -C "$RUNNER_TEMP" elan-init
+          "$RUNNER_TEMP/elan-init" -y --no-modify-path --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          "$HOME/.elan/bin/elan" toolchain install leanprover/lean4:v4.35.0
+          "$HOME/.elan/bin/elan" default leanprover/lean4:v4.35.0
+          "$HOME/.elan/bin/lean" --version | tee "$EVIDENCE/patched_lean_version.txt"
+          grep -F "4.35.0" "$EVIDENCE/patched_lean_version.txt"
+          LEAN_EXE="$("$HOME/.elan/bin/elan" which lean)"
+          sha256sum "$LEAN_EXE" | tee "$EVIDENCE/patched_lean_binary.sha256"
+          "$HOME/.elan/bin/elan" which lean | tee "$EVIDENCE/patched_lean_binary_path.txt"
+          "$HOME/.elan/bin/lake" --version | tee "$EVIDENCE/patched_lake_version.txt"
+          test -s "$EVIDENCE/patched_lake_version.txt"
+          echo "RTK_PATCHED_SMOKE_TOOLCHAIN_VERSION_PINNED_4_35_0"
+
+      - name: Create isolated patched-version proof fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/rtk-patched-kernel-smoke"
+          EVIDENCE="$GITHUB_WORKSPACE/.rtk-patched-smoke-evidence"
+          mkdir -p "$ROOT"
+          printf 'leanprover/lean4:v4.35.0\n' > "$ROOT/lean-toolchain"
+          cat > "$ROOT/lakefile.toml" <<'TOML'
+          name = "rtk_patched_kernel_smoke"
+          version = "0.1.0"
+          defaultTargets = ["RTKPatchedKernelSmoke"]
+
+          [[lean_lib]]
+          name = "RTKPatchedKernelSmoke"
+          TOML
+          cat > "$ROOT/RTKPatchedKernelSmoke.lean" <<'LEAN'
+          import Init.Prelude
+
+          namespace RTKPatchedKernelSmoke
+
+          def op (n : Nat) : Nat := n
+
+          theorem historical_claim (n : Nat) : op n = n :=
+            Eq.refl n
+
+          end RTKPatchedKernelSmoke
+          LEAN
+          cd "$ROOT"
+          lean --version
+          lake build 2>&1 | tee "$EVIDENCE/rtk_patched_build.log"
+          test -f "$ROOT/.lake/build/lib/lean/RTKPatchedKernelSmoke.olean"
+          sha256sum "$ROOT/.lake/build/lib/lean/RTKPatchedKernelSmoke.olean" \
+            | tee "$EVIDENCE/rtk_patched_olean.sha256"
+          echo "RTK_PATCHED_SMOKE_MODULE_REBUILT_NO_LEGACY_OLEAN_REUSE_MINIMAL_INIT_PRELUDE"
+
+      - name: Provision required bubblewrap sandbox without weakening isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bubblewrap
+          command -v bwrap
+          bwrap --version
+          # A missing or unsupported sandbox must fail the actual checker;
+          # do not force an unsafe fallback or run imported macros on the host.
+
+      - name: Independently check patched fixture with bundled checkers
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/rtk-patched-kernel-smoke"
+          # Official Lean 4.35 lake check --paranoid performs a sandboxed
+          # build/export and verification by bundled alternative checkers.
+          # Never substitute an ordinary lake build on failure.
+          lake check --paranoid 2>&1 | tee "$GITHUB_WORKSPACE/.rtk-patched-smoke-evidence/rtk_patched_paranoid.log"
+          test -s "$GITHUB_WORKSPACE/.rtk-patched-smoke-evidence/rtk_patched_paranoid.log"
+          echo "RTK_PATCHED_4_35_PARANOID_SMOKE_CHECK_COMPLETED_NO_TRANSPORT_AUTHORITY"
+
+      - name: Publish exact smoke evidence (research only)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rtk-patched-kernel-smoke-research
+          path: .rtk-patched-smoke-evidence/
+          if-no-files-found: warn
+          include-hidden-files: true
