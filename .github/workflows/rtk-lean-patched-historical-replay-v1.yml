@@ -84,6 +84,9 @@ jobs:
 
           [[lean_lib]]
           name = "RTKPatchedHistoricalSource"
+
+          [[lean_lib]]
+          name = "RTKSemanticSupport"
           TOML
           {
             printf 'import Init.Prelude\n'
