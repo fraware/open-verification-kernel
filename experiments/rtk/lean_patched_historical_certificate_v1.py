@@ -73,6 +73,18 @@ def make_driver(encoder: str, decoder: str, driver: str,
             ".rtk-imported-build/rtk_target_claim_payload.json",
             target_filename,
         )
+    if target_filename is not None:
+        # Lean 4.35 no longer exposes EnvironmentHeader.quotInit. Do NOT
+        # substitute a guessed value or retain the 4.14 receipt schema.
+        old = '("quotient_initialized", Json.bool env.header.quotInit)'
+        if text.count(old) != 1:
+            raise ValueError("patched replay driver quotient probe changed")
+        text = text.replace(
+            old, '("quotient_initialization_observed", Json.bool false)'
+        ).replace(
+            "rtk.lean_historical_replay_context.v1-development",
+            "rtk.lean_historical_replay_context.v2-development",
+        )
     if ".rtk-imported-build/" in text:
         raise ValueError("unsubstituted legacy path in patched driver")
     return text.encode()
@@ -86,10 +98,17 @@ def check_observation(raw: str, expected: str) -> None:
     state = json.loads(lines[0])
     if (
         not isinstance(state, dict)
+        or set(state) != {
+            "schema_version", "trust_level",
+            "quotient_initialization_observed",
+            "old_certificate_checked_in_this_process",
+            "production_reliance_authorization",
+        }
         or state.get("schema_version")
-        != "rtk.lean_historical_replay_context.v1-development"
-        or state.get("trust_level") != 0
-        or state.get("quotient_initialized") is not True
+        != "rtk.lean_historical_replay_context.v2-development"
+        or type(state.get("trust_level")) is not int
+        or state["trust_level"] != 0
+        or state.get("quotient_initialization_observed") is not False
         or state.get("old_certificate_checked_in_this_process") is not True
         or state.get("production_reliance_authorization") is not False
     ):
@@ -154,6 +173,7 @@ def main() -> int:
             "semantic_transport_soundness_proved": False,
             "source_proof_rebuilt_under_patched_version": True,
             "same_process_target_trust_zero_observed": True,
+            "patched_quotient_initialization_observed": False,
         })
         _write(a.output, json.dumps(result, sort_keys=True, indent=2).encode()+b"\n")
         print("PATCHED_4_35_EXACT_HISTORICAL_CERTIFICATE_" + a.expected)
