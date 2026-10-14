@@ -66,9 +66,9 @@ def test_source_code_identity_not_silently_substituted():
 
 def _header(trust=0, claimed=False):
     return "RTK_HISTORICAL_TARGET_REPLAY_CONTEXT_JSON=" + json.dumps({
-        "schema_version": "rtk.lean_historical_replay_context.v1-development",
+        "schema_version": "rtk.lean_historical_replay_context.v2-development",
         "trust_level": trust,
-        "quotient_initialized": True,
+        "quotient_initialization_observed": False,
         "old_certificate_checked_in_this_process": True,
         "production_reliance_authorization": claimed,
     })
@@ -107,3 +107,21 @@ def test_source_input_changes_bind_payload_without_changing_proof_ast():
     assert _source(raw_one)["source_checked_file_sha256"] != (
         _source(raw_two)["source_checked_file_sha256"]
     )
+
+
+
+def test_patched_driver_drops_removed_quotient_field_without_fake_observation():
+    from pathlib import Path
+    encoder = Path("experiments/rtk/lean_structural_expr_probe_v1.lean.txt").read_text()
+    decoder = Path("experiments/rtk/lean_expr_decoder_roundtrip_v1.lean.txt").read_text()
+    template = Path("experiments/rtk/lean_historical_target_replay_v1.lean.txt").read_text()
+    built = make_driver(
+        encoder, decoder, template, module="RTKPatchedSupport",
+        target_filename=".rtk-patched-qualification/target_equal.json",
+    ).decode()
+    assert "import RTKPatchedSupport" in built
+    assert 'env.header.quotInit' not in built
+    assert '"quotient_initialization_observed", Json.bool false' in built
+    assert "rtk.lean_historical_replay_context.v2-development" in built
+    assert ".rtk-imported-build/" not in built
+    assert "import RTKPatchedSource" not in built
