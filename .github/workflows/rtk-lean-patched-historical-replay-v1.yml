@@ -64,6 +64,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends bubblewrap
           bwrap --version
           mkdir -p "$GITHUB_WORKSPACE/.rtk-patched-historical-evidence"
+          echo "PYTHONPATH=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
           sha256sum "$LEAN_EXE" > "$GITHUB_WORKSPACE/.rtk-patched-historical-evidence/lean-binary.sha256"
           echo "PATCHED_KERNEL_EXECUTABLE_HASH_BOUND"
 
@@ -143,7 +144,7 @@ jobs:
           raw = reexport_source(native_log, original_source)
           (root / ".rtk-imported-build").mkdir(exist_ok=True)
           (root / ".rtk-imported-build/rtk_source_proof_payload.json").write_bytes(raw)
-          base = Path("experiments/rtk")
+          base = Path(__import__("os").environ["GITHUB_WORKSPACE"]) / "experiments/rtk"
           driver = separate_native_driver(
               encoder=(base / "lean_structural_expr_probe_v1.lean.txt").read_text(),
               decoder=(base / "lean_expr_decoder_roundtrip_v1.lean.txt").read_text(),
@@ -288,7 +289,7 @@ jobs:
           import sys
           from experiments.rtk.lean_second_process_source_v1 import separate_native_driver
           context = Path(sys.argv[1])
-          base = Path("experiments/rtk")
+          base = Path(__import__("os").environ["GITHUB_WORKSPACE"]) / "experiments/rtk"
           driver = separate_native_driver(
               encoder=(base / "lean_structural_expr_probe_v1.lean.txt").read_text(),
               decoder=(base / "lean_expr_decoder_roundtrip_v1.lean.txt").read_text(),
