@@ -176,8 +176,18 @@ jobs:
               + probe.replace(old, "let root : Name := `rtk_unproven_target_claim")
           )
           PY
-          for CONTROL in equal changed unrelated; do
-            if [ "$CONTROL" = equal ]; then
+          for CONTROL in reused equal changed unrelated; do
+            if [ "$CONTROL" = reused ]; then
+              # Exact source imported artifact reused under a NEW target goal.
+              # Unlike the independent-equal rebuild this is byte-identical.
+              cat > "$TARGET/RTKPatchedSupport.lean" <<'LEAN'
+          import Init.Prelude
+          def op (n : Nat) : Nat := n
+          LEAN
+              mkdir -p "$TARGET/.lake/build/lib/lean"
+              cp "$ROOT/source/.lake/build/lib/lean/RTKPatchedSupport.olean" \
+                "$TARGET/.lake/build/lib/lean/RTKPatchedSupport.olean"
+            elif [ "$CONTROL" = equal ]; then
               cat > "$TARGET/RTKPatchedSupport.lean" <<'LEAN'
           import Init.Prelude
           def op (n : Nat) : Nat := n
@@ -196,7 +206,9 @@ jobs:
           def unrelated (n : Nat) : Nat := n
           LEAN
             fi
-            (cd "$TARGET" && lake build)
+            if [ "$CONTROL" != reused ]; then
+              (cd "$TARGET" && lake build)
+            fi
             cp "$TARGET/.lake/build/lib/lean/RTKPatchedSupport.olean" \
               "$ROOT/target_support_$CONTROL.olean"
             LEAN_PATH="$TARGET/.lake/build/lib/lean" lean --trust=0 \
@@ -217,19 +229,26 @@ jobs:
           a = json.loads(Path(".rtk-patched-qualification/target_equal.json").read_text())
           b = json.loads(Path(".rtk-patched-qualification/target_changed.json").read_text())
           c = json.loads(Path(".rtk-patched-qualification/target_unrelated.json").read_text())
-          assert a["claim_ast"] == b["claim_ast"] == c["claim_ast"] == source["claim_ast"]
-          assert all(p["target_claim_established"] is False for p in (a, b, c))
+          d = json.loads(Path(".rtk-patched-qualification/target_reused.json").read_text())
+          assert a["claim_ast"] == b["claim_ast"] == c["claim_ast"] == d["claim_ast"] == source["claim_ast"]
+          assert all(p["target_claim_established"] is False for p in (a, b, c, d))
+          assert (root/"target_support_reused.olean").read_bytes() == (
+              root/"source/.lake/build/lib/lean/RTKPatchedSupport.olean").read_bytes()
+          # This is an observed cross-project build nondeterminism for the
+          # exact declared source; never treat same source as same artifact.
+          assert (root/"target_support_equal.olean").read_bytes() != (
+              root/"target_support_reused.olean").read_bytes()
           assert (root/"target_support_equal.olean").read_bytes() != (
               root/"target_support_changed.olean").read_bytes()
           assert (root/"target_support_equal.olean").read_bytes() != (
               root/"target_support_unrelated.olean").read_bytes()
-          print("PATCHED_THREE_UNPROVED_TARGETS_IDENTICAL_STATEMENTS_DISTINCT_MODULE_BYTES")
+          print("PATCHED_FOUR_UNPROVED_TARGETS_SOURCE_EQUAL_NOT_BYTE_EQUAL")
           PY
           # Version-specific, REPLAY-FREE predictions. The original proof,
           # native checked source witness, unproved target AST and imported
           # module bytes are the only evidence. This step cannot read any
           # target oracle outcome and is sealed before replay.
-          for CONTROL in equal changed unrelated; do
+          for CONTROL in reused equal changed unrelated; do
             test ! -e "$ROOT/target_oracle_$CONTROL.native.log"
             python -m experiments.rtk.lean_patched_preoracle_identity_v1 \
               --source-payload "$GITHUB_WORKSPACE/.rtk-patched-qualification/source_payload.json" \
@@ -250,9 +269,13 @@ jobs:
           root = Path(sys.argv[1])
           rows = {
               control: json.loads((root/f"preoracle_{control}.json").read_text())
-              for control in ("equal", "changed", "unrelated")
+              for control in ("reused", "equal", "changed", "unrelated")
           }
-          assert rows["equal"]["decision"] == "CONDITIONAL_IDENTITY_CANDIDATE"
+          assert rows["reused"]["decision"] == "CONDITIONAL_IDENTITY_CANDIDATE"
+          assert rows["equal"]["decision"] == "REVALIDATION_REQUIRED"
+          assert rows["equal"]["reason_code"] == (
+              "whole_import_module_drift_with_unchanged_observed_op"
+          )
           assert rows["changed"]["decision"] == "REVALIDATION_REQUIRED"
           assert rows["unrelated"]["decision"] == "REVALIDATION_REQUIRED"
           assert rows["unrelated"]["reason_code"] == (
@@ -263,17 +286,20 @@ jobs:
               assert row["production_reliance_authorization"] is False
               assert row["complete_kernel_semantic_support_proved"] is False
               assert row["source_target_environment_equivalence_proved"] is False
-          print("PATCHED_THREE_PREORACLE_PREDICTIONS_SEALED_NO_ORACLE_LABELS")
+          print("PATCHED_FOUR_PREORACLE_PREDICTIONS_SEALED_NO_ORACLE_LABELS")
           PY
           sha256sum "$GITHUB_WORKSPACE/.rtk-patched-qualification/"*.json \
+            "$ROOT/target_support_reused.olean" \
             "$ROOT/target_support_equal.olean" \
             "$ROOT/target_support_changed.olean" \
             "$ROOT/target_support_unrelated.olean" \
+            "$ROOT/preoracle_reused.json" \
             "$ROOT/preoracle_equal.json" \
             "$ROOT/preoracle_changed.json" \
             "$ROOT/preoracle_unrelated.json" \
             > "$ROOT/sealed_preoracle_artifacts.sha256"
           sha256sum --check --strict "$ROOT/sealed_preoracle_artifacts.sha256"
+          test ! -e "$ROOT/target_oracle_reused.native.log"
           test ! -e "$ROOT/target_oracle_equal.native.log"
           test ! -e "$ROOT/target_oracle_changed.native.log"
           test ! -e "$ROOT/target_oracle_unrelated.native.log"
@@ -287,7 +313,7 @@ jobs:
           TARGET="$ROOT/target"
           ENC=experiments/rtk/lean_structural_expr_probe_v1.lean.txt
           DEC=experiments/rtk/lean_expr_decoder_roundtrip_v1.lean.txt
-          for CONTROL in equal changed unrelated; do
+          for CONTROL in reused equal changed unrelated; do
             if [ "$CONTROL" = changed ]; then EXPECT=INADMISSIBLE; else EXPECT=ADMISSIBLE; fi
             cp "$ROOT/target_support_$CONTROL.olean" \
               "$TARGET/.lake/build/lib/lean/RTKPatchedSupport.olean"
@@ -324,20 +350,22 @@ jobs:
           a = json.loads((root/"target_oracle_equal.json").read_text())
           b = json.loads((root/"target_oracle_changed.json").read_text())
           c = json.loads((root/"target_oracle_unrelated.json").read_text())
+          d = json.loads((root/"target_oracle_reused.json").read_text())
           preds = {
               control: json.loads((root/f"preoracle_{control}.json").read_text())
-              for control in ("equal", "changed", "unrelated")
+              for control in ("reused", "equal", "changed", "unrelated")
           }
-          assert a["historical_source_payload_sha256"] == b["historical_source_payload_sha256"] == c["historical_source_payload_sha256"]
+          assert len({a["historical_source_payload_sha256"], b["historical_source_payload_sha256"], c["historical_source_payload_sha256"], d["historical_source_payload_sha256"]}) == 1
           assert a["historical_certificate_adjudication"] == "ADMISSIBLE"
           assert b["historical_certificate_adjudication"] == "INADMISSIBLE"
           assert c["historical_certificate_adjudication"] == "ADMISSIBLE"
-          assert preds["equal"]["decision"] == "CONDITIONAL_IDENTITY_CANDIDATE"
+          assert d["historical_certificate_adjudication"] == "ADMISSIBLE"
+          assert preds["reused"]["decision"] == "CONDITIONAL_IDENTITY_CANDIDATE"
+          assert preds["equal"]["decision"] == "REVALIDATION_REQUIRED"
           assert preds["changed"]["decision"] == preds["unrelated"]["decision"] == "REVALIDATION_REQUIRED"
-          # These are deliberately exposed development cases, not held-out
-          # sensitivity/specificity estimates. One unnecessary revalidation
-          # is documented rather than hidden by a positive replay result.
-          for row in (a, b, c):
+          # Three deliberately exposed development revalidation costs; two
+          # unnecessary, one necessary for this historical certificate.
+          for row in (a, b, c, d):
               assert row["patched_lean_version"] == "4.35.0"
               assert row["legacy_lean_4_14_artifact_reused"] is False
               assert row["source_proof_rebuilt_under_patched_version"] is True
@@ -346,8 +374,8 @@ jobs:
               assert row["patched_kernel_security_qualified_for_relying_policy"] is False
               assert row["production_reliance_authorized"] is False
           print("PATCHED_IDENTITY_SCREEN_CONCORDANT_NO_OBSERVED_FALSE_REUSE")
-          print("PATCHED_WHOLE_MODULE_SCREEN_UNNECESSARY_REVALIDATION_DEMONSTRATED")
-          print("PATCHED_HISTORICAL_CERTIFICATE_THREE_CONTROL_PASS_NO_RELIANCE")
+          print("PATCHED_INDEPENDENT_REBUILD_AND_UNRELATED_CHANGE_REVALIDATION_COST_OBSERVED")
+          print("PATCHED_HISTORICAL_CERTIFICATE_FOUR_CONTROL_PASS_NO_RELIANCE")
           PY
 
       - name: Publish bounded patched research observations
