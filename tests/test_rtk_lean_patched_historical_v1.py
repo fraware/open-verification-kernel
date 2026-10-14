@@ -101,10 +101,12 @@ def test_nonidentical_claim_ast_rejected():
         seal_patched_contexts(**args)
 
 
-def test_legacy_source_replacement_rejected():
+def test_source_log_digest_substitution_rejected():
     args = case()
-    args["historical_source_payload"] += b" "
-    with pytest.raises((ValueError, json.JSONDecodeError)):
+    payload = json.loads(args["historical_source_payload"])
+    payload["source_native_log_sha256"] = "0" * 64
+    args["historical_source_payload"] = json.dumps(payload).encode()
+    with pytest.raises(ValueError, match="source transcript was substituted"):
         seal_patched_contexts(**args)
 
 
