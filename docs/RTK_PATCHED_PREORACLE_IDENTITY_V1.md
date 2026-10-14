@@ -21,23 +21,24 @@ For identical imported module bytes *and* consistent native `op` AST, it emits o
 
 This bounded screen is **not** an actual Lean kernel soundness theorem. The input binding, trusted checker policy, completeness of imported closure and any unobserved local declarations remain unproved. An entire-imported-module digest is a conservative heuristic; identical bytes without independently authenticated context acquisition do not establish full source-target environment identity.
 
-## Three sealed development controls
+## Four sealed development controls
 
-The pinned native workflow extends the patched #209 source and target reconstruction with a third developer control. All three target claims have identical structural proposition ASTs and contain no target proof.
+The pinned native workflow extends the patched #209 source and target reconstruction with a third developer control. All four target claims have identical structural proposition ASTs and contain no target proof. The **reused** case imports the exact SHA-bound source `.olean` bytes into a new unproved target context; the **equal** case instead recompiles identical source text in a separate Lake project. The two conditions are deliberately distinct.
 
 | Control | Target imported module | Expected pre-oracle | Independent target replay |
 |---|---|---|---|
-| `equal` | `def op n := n` | `CONDITIONAL_IDENTITY_CANDIDATE` | `ADMISSIBLE` |
+| `reused` | Exact imported source `.olean` artifact reused; theorem not imported | `CONDITIONAL_IDENTITY_CANDIDATE` | `ADMISSIBLE` |
+| `equal` | Independently recompiled `def op n := n`; same text, different `.olean` bytes | `REVALIDATION_REQUIRED` | `ADMISSIBLE` |
 | `changed` | `def op n := 0 + n` | `REVALIDATION_REQUIRED` | `INADMISSIBLE` |
 | `unrelated` | `def op n := n` plus `def unrelated n := n` | `REVALIDATION_REQUIRED` | `ADMISSIBLE` |
 
-The unrelated declaration case is **intentional unnecessary revalidation** under the coarse whole-module identity rule. It demonstrates that stricter false-reuse avoidance can impose extra work even if relevant semantics are unchanged, motivating a proven dependency/support frontier and minimal repair.
+The independent-equal rebuild and unrelated declaration cases both expose **unnecessary revalidation** under the coarse whole-module identity rule. The native run showed that recompiling identical source in a separate Lake project produced different `.olean` bytes, even with the same pinned Lean binary. This is a material limit of byte identity as a portability test, not evidence of semantic drift. It motivates an authenticated normalization/semantic-support theorem and minimal repair.
 
 Every pre-oracle output and its two target native observation records, the source certificate, and target module files are SHA-256 sealed **before any target historical certificate replay**. The oracle later reads the same serialized historical proof expression, in a reconstructed target environment where the original theorem is absent, and reports actual Lean 4.35 kernel results under `--trust=0`. The workflow must verify the seal is unchanged after oracle adjudication.
 
 ## Evidence and nonclaims
 
-- These are three **pre-exposed development fixtures**, not blind prospective samples. Three matches of a known oracle cannot establish prospective false-reuse probability, semantic-support soundness, or generalized precision/recall. The calibration protocol in [#177](https://github.com/fraware/open-verification-kernel/issues/177) remains independently governed.
+- These are three **pre-exposed development fixtures**, not blind prospective samples. Four known development observations cannot establish prospective false-reuse probability, semantic-support soundness, or generalized precision/recall. The calibration protocol in [#177](https://github.com/fraware/open-verification-kernel/issues/177) remains independently governed.
 - The source theorem was verified with `lake check --paranoid` in #209; this pre-oracle does **not** independently check the changed target proof using all alternative kernels.
 - `source_target_environment_equivalence_proved=false`, `complete_kernel_semantic_support_proved=false`, `external_provenance_authenticated=false`, `patched_checker_relying_policy_qualified=false` and `production_reliance_authorization=false` are explicit output fields.
 - This screen does not attempt to lift the abstract Nat model theorem from #199 to the full Lean kernel. To avoid unnecessary revalidation with a declaration-level frontier, issue #195 still needs a genuine semantics-preservation result for a precisely admitted fragment and adequate, authenticated extraction of all kernel-relevant support.
