@@ -47,6 +47,9 @@ jobs:
           "$HOME/.elan/bin/elan" default leanprover/lean4:v4.35.0
           "$HOME/.elan/bin/lean" --version | tee "$EVIDENCE/patched_lean_version.txt"
           grep -F "4.35.0" "$EVIDENCE/patched_lean_version.txt"
+          LEAN_EXE="$("$HOME/.elan/bin/elan" which lean)"
+          sha256sum "$LEAN_EXE" | tee "$EVIDENCE/patched_lean_binary.sha256"
+          "$HOME/.elan/bin/elan" which lean | tee "$EVIDENCE/patched_lean_binary_path.txt"
           "$HOME/.elan/bin/lake" --version | tee "$EVIDENCE/patched_lake_version.txt"
           test -s "$EVIDENCE/patched_lake_version.txt"
           echo "RTK_PATCHED_SMOKE_TOOLCHAIN_VERSION_PINNED_4_35_0"
@@ -68,7 +71,7 @@ jobs:
           name = "RTKPatchedKernelSmoke"
           TOML
           cat > "$ROOT/RTKPatchedKernelSmoke.lean" <<'LEAN'
-          import Lean
+          import Init.Prelude
 
           namespace RTKPatchedKernelSmoke
 
@@ -85,7 +88,7 @@ jobs:
           test -f "$ROOT/.lake/build/lib/lean/RTKPatchedKernelSmoke.olean"
           sha256sum "$ROOT/.lake/build/lib/lean/RTKPatchedKernelSmoke.olean" \
             | tee "$EVIDENCE/rtk_patched_olean.sha256"
-          echo "RTK_PATCHED_SMOKE_MODULE_REBUILT_NO_LEGACY_OLEAN_REUSE"
+          echo "RTK_PATCHED_SMOKE_MODULE_REBUILT_NO_LEGACY_OLEAN_REUSE_MINIMAL_INIT_PRELUDE"
 
       - name: Provision required bubblewrap sandbox without weakening isolation
         shell: bash
