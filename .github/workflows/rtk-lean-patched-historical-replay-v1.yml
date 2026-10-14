@@ -58,8 +58,8 @@ jobs:
           LEAN_EXE="$("$HOME/.elan/bin/elan" which lean)"
           echo "bf8d54e4714cc4b03d3f6bb34c83b7202b87e49c8bfcbff6895c085bb90ceb38  $LEAN_EXE" | sha256sum --check --strict
           echo "RTK_PATCHED_LEAN_BIN_SHA256=bf8d54e4714cc4b03d3f6bb34c83b7202b87e49c8bfcbff6895c085bb90ceb38" >> "$GITHUB_ENV"
-          lean --version
-          grep -F "4.35.0" <(lean --version)
+          "$HOME/.elan/bin/lean" --version
+          grep -F "4.35.0" <("$HOME/.elan/bin/lean" --version)
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends bubblewrap
           bwrap --version
