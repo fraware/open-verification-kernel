@@ -188,27 +188,28 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      checks: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # GitHub's pull_request github.sha is the synthetic merge preview.
+          ref: ${{ github.sha }}
+          fetch-depth: 2
           persist-credentials: false
-      - name: Strict emit-check on known-bad diff
+      - name: Strict Action must reject caller-selected unbound input
         id: ovk
         continue-on-error: true
         uses: ./
         with:
           mode: strict
           use-check: "true"
-          emit-check: "true"
+          emit-check: "false"
           changed-files: examples/ci_secrets/workflow_secrets_on_pr.diff
           post-comment: "false"
-      - name: Assert strict block and observable check
+      - name: Assert unsafe input refused before verification
         run: |
           test "${{ steps.ovk.outcome }}" = "failure"
-          test "${{ steps.ovk.outputs.recommendation }}" = "block"
-          test "${{ steps.ovk.outputs.exit_code }}" = "1"
+          test ! -f ovk-source-binding.json
+          test ! -f ovk-evidence.json
 
   action_default_diff_dogfood:
     runs-on: ubuntu-latest
@@ -217,7 +218,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Match the actual GitHub event checkout subject, not PR-head.
+          ref: ${{ github.sha }}
           fetch-depth: 2
           persist-credentials: false
       - name: Exercise automatic diff collection
@@ -231,6 +233,20 @@ jobs:
         run: |
           test -f ovk-evidence.json
           test -f ovk-evidence-quality.json
+          test -f ovk-source-binding.json
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          r = json.loads(Path("ovk-source-binding.json").read_text())
+          assert r["evaluated_checkout_commit_sha"] == os.environ["GITHUB_SHA"]
+          assert r["evidence_subject_sha"] == os.environ["GITHUB_SHA"]
+          if os.environ["GITHUB_EVENT_NAME"] == "pull_request":
+              assert r["input_comparison"] == "event_base_to_verified_merge_preview"
+              assert r["input_structurally_bound_to_checkout"] is True
+          assert r["bound_into_signed_evidence_envelope"] is False
+          assert r["production_reliance_authorized"] is False
+          PY
           ovk evidence-quality ovk-evidence.json
 
   package:
