@@ -139,20 +139,19 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
-  checks: write   # required when emit-check: true
+  pull-requests: read
 
 jobs:
   ovk:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: fraware/open-verification-kernel@v1.3.0-rc.1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
         with:
-          mode: advisory          # switch to strict only after calibration
+          mode: advisory          # non-blocking, human-reviewed
           use-check: "true"       # analyze the PR diff automatically
-          emit-check: "true"      # optional; requires checks: write
-          post-comment: "true"    # requires pull-requests: write
+          emit-check: "false"     # no check-write authority
+          post-comment: "false"   # no comment-write authority
 ```
 
 Pin target is `v1.3.0-rc.1` only after the attributable tag/release exists. Until then, do not treat that tag as a live install surface; see [docs/CURRENT_RELEASE_STATUS.md](docs/CURRENT_RELEASE_STATUS.md).
