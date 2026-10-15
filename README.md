@@ -154,7 +154,7 @@ jobs:
           post-comment: "false"   # no comment-write authority
 ```
 
-Pin target is `v1.3.0-rc.1` only after the attributable tag/release exists. Until then, do not treat that tag as a live install surface; see [docs/CURRENT_RELEASE_STATUS.md](docs/CURRENT_RELEASE_STATUS.md).
+The example above pins the **historic v1.2.1 Git commit** because `v1.3.0-rc.1` does not exist as a published release. GitHub reports the historic annotated tag as unsigned and the `main` branch unprotected (audit 2026-10-15). An exact Action SHA fixes the top-level source identity, not every transitive third-party action referenced by the historic Action. Treat it as a consented, non-blocking compatibility pilot only. Do not upgrade to strict or merge-blocking without release provenance, supported source-profile evaluation, and independent calibration. See [docs/CURRENT_RELEASE_STATUS.md](docs/CURRENT_RELEASE_STATUS.md).
 
 Copy a full consumer example: [`examples/github_workflows/external_consumer.yml`](examples/github_workflows/external_consumer.yml)
 
