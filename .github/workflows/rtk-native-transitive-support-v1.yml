@@ -1,7 +1,21 @@
-name: RTK patched native checked declaration closure (research)
+name: RTK checker read-trace preservation research
 
 on:
   push:
+    branches: [research/rtk-checker-read-trace-preservation-v1]
+    paths:
+      - .github/workflows/rtk-native-transitive-support-v1.yml
+      - experiments/rtk/lean_native_transitive_declaration_probe_v1.lean.txt
+      - experiments/rtk/lean_native_transitive_preoracle_v1.py
+      - tests/test_rtk_native_transitive_preoracle_v1.py
+      - docs/RTK_NATIVE_TRANSITIVE_SUPPORT_V1.md
+      - experiments/rtk/lean_native_checked_closure_v1.lean.txt
+      - experiments/rtk/lean_native_checked_closure_v1.py
+      - tests/test_rtk_native_checked_closure_v1.py
+      - docs/RTK_NATIVE_CHECKED_CLOSURE_V1.md
+      - experiments/rtk/lean_checker_read_trace_preservation_v1.lean.txt
+      - docs/RTK_CHECKER_READ_TRACE_PRESERVATION_V1.md
+  pull_request:
     branches: [research/rtk-native-checked-closure-v1]
     paths:
       - .github/workflows/rtk-native-transitive-support-v1.yml
@@ -13,18 +27,8 @@ on:
       - experiments/rtk/lean_native_checked_closure_v1.py
       - tests/test_rtk_native_checked_closure_v1.py
       - docs/RTK_NATIVE_CHECKED_CLOSURE_V1.md
-  pull_request:
-    branches: [research/rtk-native-transitive-support-boundary-v1]
-    paths:
-      - .github/workflows/rtk-native-transitive-support-v1.yml
-      - experiments/rtk/lean_native_transitive_declaration_probe_v1.lean.txt
-      - experiments/rtk/lean_native_transitive_preoracle_v1.py
-      - tests/test_rtk_native_transitive_preoracle_v1.py
-      - docs/RTK_NATIVE_TRANSITIVE_SUPPORT_V1.md
-      - experiments/rtk/lean_native_checked_closure_v1.lean.txt
-      - experiments/rtk/lean_native_checked_closure_v1.py
-      - tests/test_rtk_native_checked_closure_v1.py
-      - docs/RTK_NATIVE_CHECKED_CLOSURE_V1.md
+      - experiments/rtk/lean_checker_read_trace_preservation_v1.lean.txt
+      - docs/RTK_CHECKER_READ_TRACE_PRESERVATION_V1.md
   workflow_dispatch:
 
 permissions:
@@ -70,13 +74,16 @@ jobs:
           cat > "$SRC/lakefile.toml" <<'TOML'
           name = "rtk_native_transitive_historical_source"
           version = "0.1.0"
-          defaultTargets = ["RTKPatchedSource"]
+          defaultTargets = ["RTKPatchedSource", "RTKCheckerReadTrace"]
 
           [[lean_lib]]
           name = "RTKPatchedSupport"
 
           [[lean_lib]]
           name = "RTKPatchedSource"
+
+          [[lean_lib]]
+          name = "RTKCheckerReadTrace"
           TOML
           cat > "$SRC/RTKPatchedSupport.lean" <<'LEAN'
           import Init.Prelude
@@ -88,9 +95,12 @@ jobs:
           import RTKPatchedSupport
           theorem historical_claim (n : Nat) : op n = n := Eq.refl n
           LEAN
+          cp experiments/rtk/lean_checker_read_trace_preservation_v1.lean.txt \
+            "$SRC/RTKCheckerReadTrace.lean"
           (cd "$SRC" && lake build)
           (cd "$SRC" && lake check --paranoid) | tee "$ROOT/source_paranoid.native.log"
           test -s "$ROOT/source_paranoid.native.log"
+          echo RTK_CHECKER_READ_TRACE_PRESERVATION_MODEL_PARANOID_CHECKED
           echo RTK_NATIVE_TRANSITIVE_HISTORICAL_SOURCE_PARANOID_PASS
 
       - name: Export and independently recheck original historical proof
