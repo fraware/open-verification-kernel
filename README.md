@@ -147,7 +147,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: fraware/open-verification-kernel@v1.3.0-rc.1
+      # SHA of the latest published v1.2.1 release's direct source commit.
+      # Change this only after reviewing the release identity and limits.
+      - uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
+        env:
+          OVK_PACKAGE_VERSION: "1.2.1"
         with:
           mode: advisory          # switch to strict only after calibration
           use-check: "true"       # analyze the PR diff automatically
@@ -155,7 +159,7 @@ jobs:
           post-comment: "true"    # requires pull-requests: write
 ```
 
-Pin target is `v1.3.0-rc.1` only after the attributable tag/release exists. Until then, do not treat that tag as a live install surface; see [docs/CURRENT_RELEASE_STATUS.md](docs/CURRENT_RELEASE_STATUS.md).
+**Distribution boundary (verified 2026-10-15):** `v1.3.0-rc.1` is not published or tagged. The snippet above targets the older, published `v1.2.1` code, pinned to its exact source commit, not the current `main` development candidate or the draft guarantee-continuity feature. An explicitly set `OVK_PACKAGE_VERSION` must install that exact distribution or fail; the Action must not silently switch to checkout code. The historical `v1.2.1` tag itself is unsigned and the corresponding GitHub Release is not marked immutable. See [release status](docs/CURRENT_RELEASE_STATUS.md) and the [pilot playbook](docs/EXTERNAL_PILOT_PLAYBOOK.md) before adoption.
 
 Copy a full consumer example: [`examples/github_workflows/external_consumer.yml`](examples/github_workflows/external_consumer.yml)
 
