@@ -52,6 +52,7 @@ jobs:
           mode: advisory
           use-check: "true"
           changed-files: ovk-pr.diff
+          emit-check: "false"
           post-comment: "false"
       - name: OVK advisory verification
         uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
@@ -59,6 +60,7 @@ jobs:
           mode: advisory
           verification-manifest: .verification/ci_secrets_pilot.json
           bundle-output-dir: ovk-pilot-bundle
+          emit-check: "false"
           post-comment: "false"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
@@ -71,7 +73,7 @@ jobs:
           if-no-files-found: warn
 ```
 
-Review the actual code and external actions before enabling this workflow. The full source-commit SHA pins the top-level Action, yet the historical Action may reference transitive dependencies by mutable tags; independently review that supply chain and keep the pilot non-blocking. The check stays advisory, cannot authorize a merge, and does not receive secrets from untrusted PRs.
+Review the actual code and external actions before enabling this workflow. The full source-commit SHA pins the top-level Action, yet the historical Action may reference transitive dependencies by mutable tags and may fall back to installing the Action checkout if its requested distribution version is unavailable. Independently review that supply chain and keep the pilot non-blocking. The legacy caller-supplied diff is **unbound source input**, not an authenticated verified-PR receipt; the workflow explicitly disables both check publication and comments. The check stays advisory, cannot authorize a merge, and does not receive secrets from untrusted PRs.
 
 ## 2. Observe all naturally occurring PRs
 
@@ -95,7 +97,7 @@ python scripts/render_pilot_metrics.py \
 
 The optional report starts from [external_pilot_report.template.json](templates/external_pilot_report.template.json); replace its placeholders. Even if a file named `external_pilot_report.json` appears within a downloaded CI artifact directory, the ingester **does not automatically adopt its adjudication fields**. A human operator must deliberately select a separately reviewed report via `--report`, with the same repository identifier as `--repo`. Such reports remain self-reported until independently audited. `prs_evaluated`, `prs_blocked`, and latency can come from workflow artifacts. **False positives require separate human or independently specified ground-truth adjudication.** OVK's own `passed`, `merge_recommendation`, and checker `PASS/FAIL` fields are not ground-truth labels. The metric ingester must not manufacture a false-positive rate from them.
 
-Only supply `false_positives` and `false_positive_rate` if a reviewer actually classified cases and the denominator and decisions are documented in the report's linked evidence or notes. Otherwise leave both `null`. If a new artifact cohort arrives without fresh adjudication, previously reported rates are stale and must not be carried forward as current measurements. A reviewer-provided number is still **self-reported** until independently audited.
+Only supply `false_positives` and `false_positive_rate` if a reviewer actually classified cases and the denominator and decisions are documented in the report's linked evidence or notes. Otherwise leave both `null`. Every explicitly ingested artifact directory is treated as a potentially new, unreviewed cohort, including directories containing only one evidence bundle or no recognized aggregate. Previously reported error counts/rates are invalidated unless an explicit report supplies fresh adjudication. Cohort identity is not authenticated in this development ingester; operators must document report-to-artifact correspondence. Missing input must never be treated as zero observed errors. A reviewer-provided number is still **self-reported** until independently audited.
 
 Explicitly distinguish:
 - **Check/recommendation rate:** what OVK returned on actual PRs.
