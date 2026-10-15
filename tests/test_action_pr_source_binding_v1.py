@@ -199,7 +199,8 @@ def test_caller_input_cannot_alias_generated_receipt(example_repo):
         "--pr-head-sha", example_repo["pr_head"],
         "--changed-files", "ovk-source-binding.json",
     ]) == 2
-    assert Path("ovk-source-binding.json").read_bytes() == content
+    # Reserved generated artifacts must be removed even when used as inputs.
+    assert not Path("ovk-source-binding.json").exists()
 
 
 def test_non_pr_push_uses_actual_checkout_parent(example_repo):
