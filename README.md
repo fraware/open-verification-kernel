@@ -131,7 +131,7 @@ Installation, package, optional-solver, and signing paths: [docs/INTEGRATION.md]
 
 ## GitHub Actions
 
-Add OVK to a pull request workflow. Start in **advisory** mode (reports findings without failing the job); move to **strict** only for lanes/profiles whose signal and trusted inputs you have calibrated for that repository.
+Add OVK to a pull request workflow in **advisory** mode, with the repository maintainer's consent and no merge-blocking authority. The current public source profiles lack independent strict qualification; strict enforcement is a separate release, evidence, and source-model security decision.
 
 ```yaml
 name: Verify PR
@@ -141,24 +141,25 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
-  checks: write   # required when emit-check: true
 
 jobs:
   ovk:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 2
+          persist-credentials: false
       # SHA of the latest published v1.2.1 release's direct source commit.
       # Change this only after reviewing the release identity and limits.
       - uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
         env:
           OVK_PACKAGE_VERSION: "1.2.1"
         with:
-          mode: advisory          # switch to strict only after calibration
-          use-check: "true"       # analyze the PR diff automatically
-          emit-check: "true"      # optional; requires checks: write
-          post-comment: "true"    # requires pull-requests: write
+          mode: advisory          # reviewed, non-blocking compatibility pilot
+          use-check: "true"       # legacy automatic PR-diff path; not a signed receipt
+          emit-check: "false"     # no check-write authority
+          post-comment: "false"   # no comment-write authority
 ```
 
 **Release safety boundary (verified 2026-10-15):** `v1.3.0-rc.1` is not published or tagged. This example runs **historical `v1.2.1` code**, pinned to its original source commit; it does not include the draft guarantee-continuity feature or the new fail-closed installer. **The `v1.2.1` Action falls back to its checkout if the requested PyPI version fails to install.** Do not treat that installation as independently authenticated solely because `OVK_PACKAGE_VERSION` is set. The old Git tag is unsigned, and its GitHub Release is not marked immutable. The corrected installation contract in draft PR #220 takes effect only in a later, independently authorized release. Until then use the checkout examples for development or a separately governed, consenting **advisory-only** experiment. See [release status](docs/CURRENT_RELEASE_STATUS.md), [pilot playbook](docs/EXTERNAL_PILOT_PLAYBOOK.md), and [launch checklist](docs/DEVELOPER_PREVIEW_READINESS.md).
