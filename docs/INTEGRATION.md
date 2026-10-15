@@ -110,8 +110,8 @@ jobs:
   ovk:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: fraware/open-verification-kernel@v1.2.1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
         id: ovk
         with:
           mode: advisory
@@ -129,7 +129,7 @@ Development reference: `uses: ./`
 ### All five check types (manifest)
 
 ```yaml
-- uses: fraware/open-verification-kernel@v1.2.1
+- uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
   with:
     mode: advisory
     verification-manifest: .verification/full_mvp.json
@@ -165,7 +165,7 @@ When `verification-manifest` is set, the manifest path wins over `use-check`.
 Downstream example:
 
 ```yaml
-- uses: fraware/open-verification-kernel@v1.2.1
+- uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
   id: ovk
   with:
     mode: strict
@@ -221,7 +221,7 @@ Explicit metadata (most reliable):
 ```
 
 ```yaml
-- uses: fraware/open-verification-kernel@v1.2.1
+- uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
   with:
     check-metadata: ovk-required-checks.json
 ```
@@ -290,8 +290,8 @@ jobs:
   ovk-smoke:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: fraware/open-verification-kernel@v1.2.1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
         env:
           OVK_PACKAGE_VERSION: "1.2.1"
         with:
