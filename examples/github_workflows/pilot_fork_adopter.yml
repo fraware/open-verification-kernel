@@ -2,7 +2,8 @@ name: OVK Pilot (Fork Adopter)
 
 # Copy to .github/workflows/ovk-pilot.yml in your repository.
 # Phase 0: advisory check + manifest verify; upload metrics for maintainer ingest.
-# See docs/EXTERNAL_PILOT_PLAYBOOK.md for advisory → strict rollout.
+# Advisory-only pilot. Strict enforcement is a separate qualification gate.
+# See docs/EXTERNAL_PILOT_PLAYBOOK.md for supported claims and reviewer protocol.
 
 on:
   pull_request:
@@ -10,39 +11,41 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: read
 
 env:
-  # Target pin for v1.3.0-rc.1 (use only after the attributable tag exists).
-  OVK_PACKAGE_VERSION: "1.3.0-rc.1"
+  # Historical package only; full Action SHA below matches the v1.2.1 source commit.
+  # The historical Action's transitive dependencies are not fully pinned.
+  OVK_PACKAGE_VERSION: "1.2.1"
 
 jobs:
   ovk-ci-secrets-pilot:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Build PR diff for OVK
         run: |
           git fetch origin "${{ github.base_ref }}"
           git diff "origin/${{ github.base_ref }}...HEAD" > ovk-pr.diff
       - name: OVK advisory check
-        uses: fraware/open-verification-kernel@v1.3.0-rc.1
+        uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
         with:
           mode: advisory
           use-check: "true"
           changed-files: ovk-pr.diff
           post-comment: "false"
       - name: OVK advisory verify (ci_secrets lane manifest)
-        uses: fraware/open-verification-kernel@v1.3.0-rc.1
+        uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
         with:
           mode: advisory
           verification-manifest: .verification/ci_secrets_pilot.json
           bundle-output-dir: ovk-pilot-bundle
-          post-comment: "true"
+          post-comment: "false"
       - name: Upload pilot metrics artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ovk-pilot-artifacts
           path: |
@@ -50,4 +53,4 @@ jobs:
             ovk-pilot-bundle/**
             external_pilot_report.json
           retention-days: 30
-          if-no-files-found: ignore
+          if-no-files-found: warn
