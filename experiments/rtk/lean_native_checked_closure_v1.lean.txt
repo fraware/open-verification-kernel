@@ -32,7 +32,7 @@ private partial def rtkGraphWalk
       return ← rtkGraphWalk env rest visited nodes (fuel - 1)
     if rtkGraphBase name then
       return ← rtkGraphWalk env rest (name :: visited) nodes (fuel - 1)
-    let some (.defnInfo val) := env.find? name
+    let some (.defnInfo val) := env.checked.get.find? name
       | throw s!"RTK_GRAPH_MISSING_OR_UNSUPPORTED_DECLARATION:{name}"
     unless val.safety == .safe do
       throw s!"RTK_GRAPH_UNSAFE_OR_PARTIAL_DEFINITION:{name}"
@@ -58,9 +58,9 @@ open Lean Elab Command
 
 run_cmd do
   let env ← getEnv
-  let root : Name := if (env.find? `historical_claim).isSome then
+  let root : Name := if (env.checked.get.find? `historical_claim).isSome then
     `historical_claim else `rtk_unproven_target_claim
-  let some info := env.find? root
+  let some info := env.checked.get.find? root
     | throwError "RTK_GRAPH_ROOT_ABSENT"
   let mut proofReferences : Array Name := #[]
   let rootKind : String ← match info with
