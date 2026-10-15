@@ -109,6 +109,20 @@ def _case(monkeypatch, *, changed_base=False, unrelated=False,
     }
 
 
+def _rebind_target_native_log(args: dict) -> None:
+    """Keep the synthetic target claim envelope bound to the changed log.
+
+    Tests mutate the *native observer* while preserving the upstream hash
+    contract, so they reach the observer-specific fail-closed checks.
+    """
+    payload = json.loads(args["target_payload_bytes"])
+    payload["target_native_preoracle_log_sha256"] = hashlib.sha256(
+        args["target_structural_log"].encode()
+    ).hexdigest()
+    args["target_payload_bytes"] = json.dumps(payload).encode()
+
+
+
 @pytest.mark.parametrize("change", ["none", "unrelated"])
 def test_candidate_only_for_observed_transitive_identity(monkeypatch, change):
     row = m.evaluate_native_transitive_boundary(
@@ -165,6 +179,7 @@ def test_claimed_completeness_and_authority_rejected(monkeypatch):
         args["target_structural_log"] = (
             entries[0] + "\n" + m._MARKER + json.dumps(row)
         )
+        _rebind_target_native_log(args)
         with pytest.raises(ValueError, match="unsupported authority"):
             m.evaluate_native_transitive_boundary(**args)
 
@@ -177,6 +192,7 @@ def test_native_observer_disagreement_rejected(monkeypatch):
     args["target_structural_log"] = (
         entries[0] + "\n" + m._MARKER + json.dumps(row)
     )
+    _rebind_target_native_log(args)
     with pytest.raises(ValueError, match="two native observations"):
         m.evaluate_native_transitive_boundary(**args)
 
@@ -196,6 +212,7 @@ def test_unknown_reference_is_not_admitted(monkeypatch):
     args["target_structural_log"] = (
         entries[0] + "\n" + m._MARKER + json.dumps(row)
     )
+    _rebind_target_native_log(args)
     result = m.evaluate_native_transitive_boundary(**args)
     assert result["decision"] == "REVALIDATION_REQUIRED"
     assert result["production_reliance_authorization"] is False
