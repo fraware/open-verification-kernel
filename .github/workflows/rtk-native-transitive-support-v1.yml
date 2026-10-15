@@ -169,7 +169,7 @@ jobs:
               changed_leaf)
                 cat > "$TARGET/RTKPatchedSupport.lean" <<'LEAN'
           import Init.Prelude
-          def leaf (n : Nat) : Nat := 0 + n
+          def leaf (n : Nat) : Nat := Nat.succ n
           def base (n : Nat) : Nat := leaf n
           def op (n : Nat) : Nat := base n
           LEAN
