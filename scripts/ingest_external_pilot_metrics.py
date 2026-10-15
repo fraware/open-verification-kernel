@@ -40,29 +40,11 @@ def _iso_timestamp() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def _find_file(artifacts_dir: Path, name: str) -> Path | None:
-    direct = artifacts_dir / name
-    if direct.is_file():
-        return direct
-    matches = sorted(artifacts_dir.rglob(name))
-    return matches[0] if matches else None
-
-
 def _median_elapsed_ms(results: list[dict[str, Any]]) -> float | None:
     timings = [float(item["elapsed_ms"]) for item in results if "elapsed_ms" in item]
     if not timings:
         return None
     return float(statistics.median(timings))
-
-
-def _false_positive_rate(results: list[dict[str, Any]]) -> float | None:
-    evaluated = [item for item in results if "passed" in item]
-    if not evaluated:
-        return None
-    false_positives = sum(
-        1 for item in evaluated if not item.get("passed") and item.get("merge_recommendation") == "block"
-    )
-    return false_positives / len(evaluated)
 
 
 def _blocked_count(results: list[dict[str, Any]]) -> int | None:
@@ -95,9 +77,10 @@ def _metrics_from_artifacts(artifacts_dir: Path) -> dict[str, Any]:
         results = list(pilot_report.get("results", []))
         metrics["prs_evaluated"] = len(results) or None
         metrics["prs_blocked"] = _blocked_count(results)
-        metrics["false_positive_rate"] = _false_positive_rate(results)
-        if metrics["false_positive_rate"] is not None and metrics["prs_evaluated"]:
-            metrics["false_positives"] = round(metrics["false_positive_rate"] * metrics["prs_evaluated"])
+        # 'passed' and 'merge_recommendation' are OVK's own output labels.
+        # They cannot independently adjudicate a false positive or measure
+        # false-negative risk. Only a separately reviewed external report may
+        # supply false_positives / false_positive_rate.
         metrics["median_check_latency_ms"] = _median_elapsed_ms(results)
 
     if evidence_path and evidence_path.exists():
@@ -111,12 +94,10 @@ def _metrics_from_artifacts(artifacts_dir: Path) -> dict[str, Any]:
         elif isinstance(timing, (int, float)):
             metrics["median_check_latency_ms"] = float(timing)
 
-    external_report = _find_file(artifacts_dir, "external_pilot_report.json")
-    if external_report is not None:
-        report = read_json_file(external_report)
-        for report_key, row_key in REPORT_FIELD_MAP.items():
-            if report_key in report and report[report_key] is not None:
-                metrics[row_key] = report[report_key]
+    # Artifact directories are not an adjudication authority. Even if they
+    # contain an external_pilot_report.json, never auto-adopt its verdicts,
+    # repository identity or strict_enabled flag. A report is accepted only
+    # via the explicit, separately reviewed --report input.
 
     return metrics
 
@@ -127,8 +108,10 @@ def _apply_report(row: dict[str, Any], report_path: Path) -> dict[str, Any]:
     for report_key, row_key in REPORT_FIELD_MAP.items():
         if report_key in report and report[report_key] is not None:
             updated[row_key] = report[report_key]
-    if "repository" in report and report["repository"]:
-        updated["repository"] = report["repository"]
+    # The CLI --repo argument is authoritative for the registry row.
+    # Never let a separately supplied report silently redirect ingestion.
+    if report.get("repository") and report["repository"] != updated["repository"]:
+        raise ValueError("external pilot report repository mismatch")
     return updated
 
 
@@ -159,10 +142,19 @@ def build_pilot_row(
     if existing is not None:
         row.update({key: value for key, value in existing.items() if value is not None or key in row})
         row["repository"] = repo
-    if report_path is not None and report_path.exists():
-        row = _apply_report(row, report_path)
     if artifacts_dir is not None and artifacts_dir.is_dir():
-        row.update({key: value for key, value in _metrics_from_artifacts(artifacts_dir).items() if value is not None})
+        artifact_metrics = _metrics_from_artifacts(artifacts_dir)
+        if artifact_metrics.get("prs_evaluated") is not None:
+            # A new artifact cohort invalidates older adjudicated error
+            # counts. Avoid carrying forward a historical zero as evidence
+            # that the current, unreviewed cohort had no false positives.
+            row["false_positives"] = None
+            row["false_positive_rate"] = None
+        row.update({key: value for key, value in artifact_metrics.items() if value is not None})
+    if report_path is not None and report_path.exists():
+        # A reviewer-provided report is the only source of error labels.
+        # Self-reports still need independent verification before promotion.
+        row = _apply_report(row, report_path)
     row["status"] = _infer_status(row)
     return row
 
