@@ -48,7 +48,7 @@ jobs:
           "$HOME/.elan/bin/elan" toolchain install leanprover/lean4:v4.35.0
           "$HOME/.elan/bin/elan" default leanprover/lean4:v4.35.0
           echo 'bf8d54e4714cc4b03d3f6bb34c83b7202b87e49c8bfcbff6895c085bb90ceb38  '"$("$HOME/.elan/bin/elan" which lean)" | sha256sum --check --strict
-          lean --version
+          "$HOME/.elan/bin/lean" --version
           echo RTK_NATIVE_TRANSITIVE_EXACT_PATCHED_BINARY
 
       - name: Check original historical certificate with independent kernels
