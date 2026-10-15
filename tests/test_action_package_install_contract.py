@@ -8,6 +8,7 @@ mistaken for qualified development source installs.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -26,29 +27,37 @@ def _action_install_script() -> str:
 
 
 def _exercise(tmp_path: Path, *, requested_version: str | None, fail_requested: bool = False):
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
+    # GitHub's Windows runners support Git Bash, whose PATH syntax differs
+    # from native Windows Python. BASH_ENV intercepts pip/python in Bash itself.
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("Bash unavailable for POSIX composite Action execution")
+    (tmp_path / "mock_commands.sh").write_text(
+        """pip() {
+  printf 'pip ' >> "$OVK_TEST_LOG"
+  printf '<%s>' "$@" >> "$OVK_TEST_LOG"
+  echo >> "$OVK_TEST_LOG"
+  if [ "$OVK_TEST_FAIL_VERSION" = "1" ] &&
+     [ "$1" = "install" ] &&
+     [ "$2" = "open-verification-kernel==$OVK_PACKAGE_VERSION" ]; then
+    return 47
+  fi
+  return 0
+}
+python() {
+  printf 'python ' >> "$OVK_TEST_LOG"
+  printf '<%s>' "$@" >> "$OVK_TEST_LOG"
+  echo >> "$OVK_TEST_LOG"
+  return 0
+}
+""",
+        encoding="utf-8",
+    )
     log_path = tmp_path / "commands.log"
-    for command in ("pip", "python"):
-        program = fake_bin / command
-        program.write_text(
-            "#!/bin/sh\n"
-            f'printf "{command} " >> "$OVK_TEST_LOG"\n'
-            'printf "<%s>" "$@" >> "$OVK_TEST_LOG"\n'
-            'printf "\\n" >> "$OVK_TEST_LOG"\n'
-            'if [ "$OVK_TEST_FAIL_VERSION" = "1" ] && '
-            ' [ "$1" = "install" ] && '
-            ' [ "$2" = "open-verification-kernel==$OVK_PACKAGE_VERSION" ]; then\n'
-            '  exit 47\n'
-            'fi\n'
-            'exit 0\n',
-            encoding="utf-8",
-        )
-        program.chmod(0o755)
     env = dict(os.environ)
     env.update({
-        "PATH": str(fake_bin) + os.pathsep + env.get("PATH", ""),
-        "OVK_TEST_LOG": str(log_path),
+        "BASH_ENV": "./mock_commands.sh",
+        "OVK_TEST_LOG": "commands.log",
         "OVK_TEST_FAIL_VERSION": "1" if fail_requested else "0",
     })
     if requested_version is None:
@@ -56,7 +65,7 @@ def _exercise(tmp_path: Path, *, requested_version: str | None, fail_requested: 
     else:
         env["OVK_PACKAGE_VERSION"] = requested_version
     result = subprocess.run(
-        ["bash", "-c", _action_install_script()],
+        [bash, "-c", _action_install_script()],
         cwd=tmp_path,
         env=env,
         check=False,
