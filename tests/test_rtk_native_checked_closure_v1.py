@@ -205,3 +205,16 @@ def test_target_cannot_smuggle_historical_proof(monkeypatch):
     modify_target(data, lambda obj: obj.update({"root_proof_ast": const("Eq.refl")}))
     with pytest.raises(ValueError, match="checked root proof"):
         closure.evaluate_checked_closure(**data)
+
+
+def test_native_structural_name_order_normalized():
+    # Lean Name.lt compares structured names; it is not String.lt on
+    # printable names. This precise permutation occurred in native CI.
+    assert closure._name_list(["Nat", "Eq.refl"], max_count=8) == [
+        "Eq.refl", "Nat"
+    ]
+
+
+def test_duplicate_name_still_rejected_after_normalization():
+    with pytest.raises(ValueError, match="duplicated"):
+        closure._name_list(["Eq.refl", "Nat", "Eq.refl"], max_count=8)
