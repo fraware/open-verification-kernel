@@ -803,6 +803,7 @@ def test_advisory_report_separates_current_claim_and_conditional_reuse(tmp_path)
     assert report.transport_reason_codes == []
     assert report.declared_definition_changed is False
     assert report.declared_machine_claim_changed is False
+    assert report.snapshot_state_reverified_at_review is False
     assert report.manifest_authority == "not_authenticated"
     assert report.live_temporal_policy == "not_evaluated"
     assert report.source_semantics_refinement == "unproved"
