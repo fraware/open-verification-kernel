@@ -156,6 +156,8 @@ def test_cli_generates_separate_observational_receipt(example_repo):
     path = Path(".ovk-effective-input-path").read_text(encoding="utf-8").strip()
     receipt = json.loads(Path("ovk-source-binding.json").read_text(encoding="utf-8"))
     assert path == ".ovk-pr.diff"
+    # Bash command substitution strips LF, not CR. This must be exact on Windows.
+    assert Path(".ovk-effective-input-path").read_bytes() == b".ovk-pr.diff\n"
     assert receipt["input_diff_sha256"] == hashlib.sha256(
         Path(path).read_bytes()
     ).hexdigest()
