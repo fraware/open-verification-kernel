@@ -124,6 +124,8 @@ jobs:
 
 Development reference: `uses: ./`
 
+The recommended copyable external workflow is [the non-blocking, read-only advisory example](../examples/github_workflows/external_consumer.yml). Required strict checks are not qualified for the current source profiles.
+
 ### All five check types (manifest)
 
 ```yaml
@@ -166,7 +168,7 @@ Downstream example:
 - uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
   id: ovk
   with:
-    mode: strict
+    mode: advisory
     use-check: "true"
     emit-check: "true"
 - name: Fail when OVK blocks
