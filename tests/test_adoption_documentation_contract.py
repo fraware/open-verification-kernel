@@ -14,6 +14,7 @@ UNPUBLISHED_TAG = "fraware/open-verification-kernel@v1.3.0-rc.1"
 EXAMPLES = [
     ROOT / "examples/github_workflows/pilot_fork_adopter.yml",
     ROOT / "examples/github_workflows/pilot_advisory_with_comment.yml",
+    ROOT / "examples/github_workflows/external_consumer.yml",
 ]
 
 
@@ -34,7 +35,9 @@ def test_active_pilot_workflows_do_not_install_nonexistent_candidate() -> None:
         assert UNPUBLISHED_TAG not in text, path
         assert 'OVK_PACKAGE_VERSION: "1.2.1"' in text, path
         assert f"fraware/open-verification-kernel@{HISTORICAL_SOURCE}" in text, path
-        assert "fallback to checkout" in text, path
+        assert (
+            "fallback to checkout" in text or "fall back to the Action checkout" in text
+        ), path
 
 
 def test_fork_example_does_not_request_write_permissions_or_comment() -> None:
@@ -78,3 +81,27 @@ def test_no_error_swallowing_for_requested_action_package_version() -> None:
     assert requested in action
     assert requested + " ||" not in action
     assert 'echo "OVK install: requested distribution version' in action
+
+
+def test_copyable_external_consumer_is_advisory_and_least_privilege() -> None:
+    text = (ROOT / "examples/github_workflows/external_consumer.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "mode: advisory" in text
+    assert "mode: strict" not in text
+    assert "contents: read" in text
+    assert "checks: write" not in text
+    assert "pull-requests: write" not in text
+    assert 'emit-check: "false"' in text
+    assert 'post-comment: "false"' in text
+    assert "changed-files:" not in text
+
+
+def test_strict_required_check_reference_not_copyable_as_unpublished_rc() -> None:
+    text = (
+        ROOT / "examples/github_workflows/branch_protection_required_check.yml"
+    ).read_text(encoding="utf-8")
+    assert UNPUBLISHED_TAG not in text
+    assert "REPLACE_WITH_AUTHORIZED_VERSION" in text
+    assert "REPLACE_WITH_VERIFIED_SHA" in text
+    assert "NOT INSTALLABLE UNTIL REPLACED" in text
