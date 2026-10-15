@@ -214,6 +214,47 @@ def test_new_artifacts_clear_stale_external_error_labels(
     assert row["false_positive_rate"] is None
 
 
+@pytest.mark.parametrize(
+    "new_artifact_metrics",
+    [{"prs_blocked": 1}, {"median_check_latency_ms": 23.0}, {}],
+)
+def test_partial_new_artifacts_invalidate_stale_error_labels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, new_artifact_metrics: dict
+) -> None:
+    """No denominator or aggregate results must not imply zero new errors."""
+    monkeypatch.setattr(
+        "scripts.ingest_external_pilot_metrics._metrics_from_artifacts",
+        lambda _: new_artifact_metrics,
+    )
+    existing = {
+        "repository": "example/oss-pilot",
+        "status": "advisory",
+        "check_types": ["ci_secrets"],
+        "false_positives": 0,
+        "false_positive_rate": 0.0,
+        "strict_enabled": False,
+        "ovk_version_pin": "1.2.1",
+    }
+    row = build_pilot_row("example/oss-pilot", existing=existing, artifacts_dir=tmp_path)
+    assert row["false_positives"] is None
+    assert row["false_positive_rate"] is None
+
+
+def test_without_new_artifacts_historical_labels_are_not_silently_rewritten() -> None:
+    existing = {
+        "repository": "example/oss-pilot",
+        "status": "advisory",
+        "check_types": ["ci_secrets"],
+        "false_positives": 1,
+        "false_positive_rate": 0.5,
+        "strict_enabled": False,
+        "ovk_version_pin": "1.2.1",
+    }
+    row = build_pilot_row("example/oss-pilot", existing=existing)
+    assert row["false_positives"] == 1
+    assert row["false_positive_rate"] == 0.5
+
+
 def test_external_report_supplies_separate_reviewed_labels(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
