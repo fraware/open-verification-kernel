@@ -1,6 +1,6 @@
 # External OSS Pilot Playbook
 
-Guide for adding OVK to an external open-source repository: start in advisory mode, measure false positives, then optionally enforce on protected branches.
+Guide for **consented, independently governed** OVK advisory pilots. Start with a reproducible, source-profile-qualified non-blocking deployment, measure coverage, unknowns, reviewer effort and both false positives and independently discovered misses. **Strict enforcement is a separate release/policy qualification decision; a low observed false-positive rate alone is insufficient.**
 
 ## Start with one check type
 
@@ -9,7 +9,7 @@ Guide for adding OVK to an external open-source repository: start in advisory mo
 | CI secrets | Repos with agent-authored workflow PRs | [pilot_manifest_ci_secrets.template.json](templates/pilot_manifest_ci_secrets.template.json) |
 | Self-protection | Repos adding agent CI gates | `examples/pilot_repos/self_protection_only.json` |
 
-Enable additional check types one at a time after each is stable on your diffs.
+Enable additional check types one at a time only within their declared source and checker support. Unsupported or partially extracted patterns are explicit unknowns, not passing guarantees. Request maintainer permission before installing the workflow.
 
 ## Step 1 — Advisory mode (no merge blocking)
 
@@ -24,14 +24,14 @@ on:
     branches: [main]
 
 env:
-  OVK_PACKAGE_VERSION: "1.2.1"
+  OVK_PACKAGE_VERSION: "1.2.1"  # Historical package only; Git tag signature not verified
 
 jobs:
   ovk-advisory:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,14 +41,14 @@ jobs:
           git fetch origin "${{ github.base_ref }}"
           git diff "origin/${{ github.base_ref }}...HEAD" > ovk-pr.diff
       - name: OVK advisory check
-        uses: fraware/open-verification-kernel@v1.2.1
+        uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
         with:
           mode: advisory
           use-check: "true"
           changed-files: ovk-pr.diff
           post-comment: "false"
       - name: OVK advisory verify (CI secrets check)
-        uses: fraware/open-verification-kernel@v1.2.1
+        uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
         with:
           mode: advisory
           verification-manifest: .verification/ci_secrets_pilot.json
@@ -62,9 +62,9 @@ jobs:
 
 | Metric | Target before strict |
 |--------|----------------------|
-| False positive rate | under 5% |
-| Time to first green after repair | under 5 minutes |
-| Block rate on known-bad fixtures | 100% |
+| False positives | report numerator, denominator, adjudicator and sample limitations; no automatic threshold from small samples |
+| Reviewer/CI time | measure setup, compute, review and repair time on all natural sampled PRs |
+| Known-defect recall and unknowns | retain independently identified misses and unsupported patterns; fixtures do not establish population sensitivity |
 
 Download the workflow artifact (`ovk-pilot-artifacts`) and ingest metrics into the OVK registry:
 
@@ -72,8 +72,6 @@ Download the workflow artifact (`ovk-pilot-artifacts`) and ingest metrics into t
 python scripts/ingest_external_pilot_metrics.py --repo org/repo --artifacts-dir ./artifact
 python scripts/render_pilot_metrics.py --registry docs/benchmarks/external-pilots-registry.json
 ```
-
-Optional self-report JSON: copy [external_pilot_report.template.json](templates/external_pilot_report.template.json), fill measured values, and pass `--report external_pilot_report.json` to the ingest script.
 
 Publish results in [PILOT_CASE_STUDIES.md](PILOT_CASE_STUDIES.md) under **External pilots**.
 
@@ -86,19 +84,21 @@ python scripts/render_pilot_metrics.py --registry docs/benchmarks/external-pilot
 
 Optional self-report JSON: copy [external_pilot_report.template.json](templates/external_pilot_report.template.json), fill metrics, and pass `--report external_pilot_report.json` to the ingest script. Registry rows live in [external-pilots-registry.json](benchmarks/external-pilots-registry.json).
 
-## Step 3 — Strict on protected branches
+## Step 3 — Strict enforcement is a separate GO/NO-GO
 
-When false positives stay below 5%:
+**Do not enable strict enforcement solely because two weeks elapsed or a small observed false-positive rate is below 5%.** The initial pilot remains advisory. Promotion needs a separate, documented decision verifying: the exact release/commit and repository protection, owner/operator approval, source-profile support on the intended change population, meaningful sensitivity and false-negative review, adequate sample size and uncertainty, explicit behavior on unknown inputs, rollback, and measured reviewer burden.
+
+The following is an example only **after all independent enforcement gates pass**, and the version must be pinned to a separately approved full commit SHA:
 
 ```yaml
-- uses: fraware/open-verification-kernel@v1.2.1
+- uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
   with:
     mode: strict
     use-check: "true"
     emit-check: "true"
 ```
 
-Require the OVK check on `main` / `release/*` only; keep advisory on experimental branches if needed.
+Required-check configuration must be explicitly approved for a qualified lane and repo after the gates above. Otherwise remain advisory on all branches.
 
 ## Step 4 — Add more check types
 
