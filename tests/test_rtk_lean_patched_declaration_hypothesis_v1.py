@@ -135,7 +135,7 @@ def test_unsupported_expression_constructs_are_rejected(node):
 
 def test_unknown_universe_instantiation_rejected():
     with pytest.raises(ValueError):
-        m._references(["const", _n("Eq.refl"), [["succ", ["zero"]]]],
+        m._references(["const", _n("Eq.refl"), [["param", _n("u")]]],
                       remaining=[100])
 
 
