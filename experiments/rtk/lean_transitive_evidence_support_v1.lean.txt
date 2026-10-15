@@ -1,4 +1,4 @@
-import Lean
+import Init
 
 /-!
 # Transitive historical-evidence support, finite trace calculus
