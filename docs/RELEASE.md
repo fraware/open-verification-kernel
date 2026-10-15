@@ -323,7 +323,7 @@ Consumers should trust only the Publish workflow path, exact immutable tag ident
 
 ## Historical release evidence
 
-Historical published releases such as `v1.2.1` retain their original release-artifact and workflow evidence, but **ref immutability is not established**. On 2026-10-15 GitHub reported the annotated `v1.2.1` tag as `unsigned`, the release's `immutable` field as `false`, and no active repository rulesets. Verify each release asset, signed bundle, and immutable **commit SHA** separately. Historical workflows and Sigstore identities do not authorize `v1.3.0-rc.1`.
+Historical published releases such as `v1.2.1` retain their original release-artifact and workflow evidence, but **ref immutability is not established**. On 2026-10-15 GitHub reported the annotated `v1.2.1` tag as `unsigned`, the release's `immutable` field as `false`, and no active repository rulesets; the live `main` branch object reports `protected=false`. Verify each release asset, signed bundle, and immutable **commit SHA** separately. Historical workflows and Sigstore identities do not authorize `v1.3.0-rc.1`.
 
 Independent consumer repositories currently used by the consumer-pin workflow are:
 
