@@ -1,7 +1,19 @@
-name: RTK patched native transitive support boundary (research)
+name: RTK patched native checked declaration closure (research)
 
 on:
   push:
+    branches: [research/rtk-native-checked-closure-v1]
+    paths:
+      - .github/workflows/rtk-native-transitive-support-v1.yml
+      - experiments/rtk/lean_native_transitive_declaration_probe_v1.lean.txt
+      - experiments/rtk/lean_native_transitive_preoracle_v1.py
+      - tests/test_rtk_native_transitive_preoracle_v1.py
+      - docs/RTK_NATIVE_TRANSITIVE_SUPPORT_V1.md
+      - experiments/rtk/lean_native_checked_closure_v1.lean.txt
+      - experiments/rtk/lean_native_checked_closure_v1.py
+      - tests/test_rtk_native_checked_closure_v1.py
+      - docs/RTK_NATIVE_CHECKED_CLOSURE_V1.md
+  pull_request:
     branches: [research/rtk-native-transitive-support-boundary-v1]
     paths:
       - .github/workflows/rtk-native-transitive-support-v1.yml
@@ -9,14 +21,10 @@ on:
       - experiments/rtk/lean_native_transitive_preoracle_v1.py
       - tests/test_rtk_native_transitive_preoracle_v1.py
       - docs/RTK_NATIVE_TRANSITIVE_SUPPORT_V1.md
-  pull_request:
-    branches: [research/rtk-transitive-evidence-support-v1]
-    paths:
-      - .github/workflows/rtk-native-transitive-support-v1.yml
-      - experiments/rtk/lean_native_transitive_declaration_probe_v1.lean.txt
-      - experiments/rtk/lean_native_transitive_preoracle_v1.py
-      - tests/test_rtk_native_transitive_preoracle_v1.py
-      - docs/RTK_NATIVE_TRANSITIVE_SUPPORT_V1.md
+      - experiments/rtk/lean_native_checked_closure_v1.lean.txt
+      - experiments/rtk/lean_native_checked_closure_v1.py
+      - tests/test_rtk_native_checked_closure_v1.py
+      - docs/RTK_NATIVE_CHECKED_CLOSURE_V1.md
   workflow_dispatch:
 
 permissions:
@@ -72,7 +80,8 @@ jobs:
           TOML
           cat > "$SRC/RTKPatchedSupport.lean" <<'LEAN'
           import Init.Prelude
-          def base (n : Nat) : Nat := n
+          def leaf (n : Nat) : Nat := n
+          def base (n : Nat) : Nat := leaf n
           def op (n : Nat) : Nat := base n
           LEAN
           cat > "$SRC/RTKPatchedSource.lean" <<'LEAN'
@@ -96,6 +105,7 @@ jobs:
             printf 'import Lean\nimport RTKPatchedSource\n'
             cat "$ENC"
             cat experiments/rtk/lean_native_transitive_declaration_probe_v1.lean.txt
+          cat experiments/rtk/lean_native_checked_closure_v1.lean.txt
           } > "$SRC/SourceProbe.lean"
           LEAN_PATH="$SRC/.lake/build/lib/lean" lean --trust=0 "$SRC/SourceProbe.lean" | tee "$ROOT/source_structural.native.log"
           python -m experiments.rtk.lean_patched_historical_certificate_v1 export \
@@ -139,32 +149,36 @@ jobs:
           assert existing.count(old) == 1
           probe = existing.replace(old, "let root : Name := `rtk_unproven_target_claim")
           extra = Path("experiments/rtk/lean_native_transitive_declaration_probe_v1.lean.txt").read_text()
+          graph = Path("experiments/rtk/lean_native_checked_closure_v1.lean.txt").read_text()
           Path(sys.argv[1]).write_text(
               "import Lean\nimport RTKPatchedSupport\n"
               "axiom rtk_unproven_target_claim (n : Nat) : op n = n\n"
-              + probe + "\n" + extra + "\n"
+              + probe + "\n" + extra + "\n" + graph + "\n"
           )
           PY
-          for CONTROL in unchanged changed_base unrelated; do
+          for CONTROL in unchanged changed_leaf unrelated; do
             case "$CONTROL" in
               unchanged)
                 cat > "$TARGET/RTKPatchedSupport.lean" <<'LEAN'
           import Init.Prelude
-          def base (n : Nat) : Nat := n
+          def leaf (n : Nat) : Nat := n
+          def base (n : Nat) : Nat := leaf n
           def op (n : Nat) : Nat := base n
           LEAN
                 ;;
-              changed_base)
+              changed_leaf)
                 cat > "$TARGET/RTKPatchedSupport.lean" <<'LEAN'
           import Init.Prelude
-          def base (n : Nat) : Nat := 0 + n
+          def leaf (n : Nat) : Nat := 0 + n
+          def base (n : Nat) : Nat := leaf n
           def op (n : Nat) : Nat := base n
           LEAN
                 ;;
               unrelated)
                 cat > "$TARGET/RTKPatchedSupport.lean" <<'LEAN'
           import Init.Prelude
-          def base (n : Nat) : Nat := n
+          def leaf (n : Nat) : Nat := n
+          def base (n : Nat) : Nat := leaf n
           def op (n : Nat) : Nat := base n
           def unrelated (n : Nat) : Nat := n
           LEAN
@@ -179,7 +193,7 @@ jobs:
               --target-log "$ROOT/target_unproved_$CONTROL.native.log" \
               --output "$GITHUB_WORKSPACE/.rtk-patched-qualification/target_$CONTROL.json"
             test ! -e "$ROOT/oracle_$CONTROL.native.log"
-            python -m experiments.rtk.lean_native_transitive_preoracle_v1 \
+            python -m experiments.rtk.lean_native_checked_closure_v1 \
               --source-payload "$GITHUB_WORKSPACE/.rtk-patched-qualification/source_payload.json" \
               --source-checked-input "$ROOT/source/RTKPatchedSource.lean" \
               --source-structural-log "$ROOT/source_structural.native.log" \
@@ -197,9 +211,9 @@ jobs:
           import sys
           p = Path(sys.argv[1])
           expected = {
-              "unchanged": "CONDITIONAL_TRANSITIVE_CANDIDATE",
-              "changed_base": "REVALIDATION_REQUIRED",
-              "unrelated": "CONDITIONAL_TRANSITIVE_CANDIDATE",
+              "unchanged": "CONDITIONAL_CLOSED_REFERENCE_CANDIDATE",
+              "changed_leaf": "REVALIDATION_REQUIRED",
+              "unrelated": "CONDITIONAL_CLOSED_REFERENCE_CANDIDATE",
           }
           rows = {k: json.loads((p/f"preoracle_{k}.json").read_text()) for k in expected}
           for key, row in rows.items():
@@ -207,19 +221,19 @@ jobs:
               assert row["actual_kernel_transport_preservation_proved"] is False
               assert row["production_reliance_authorization"] is False
               assert row["target_historical_proof_replayed"] is False
-          assert rows["changed_base"]["reason_code"] == "transitive_base_drift"
-          assert rows["changed_base"]["observed_op_ast_identical"] is True
-          assert rows["changed_base"]["observed_base_ast_identical"] is False
-          print("RTK_NATIVE_TRANSITIVE_PREORACLE_THREE_CASES_SEALED")
+          assert rows["changed_leaf"]["changed_declaration_names"] == ["leaf"]
+          assert rows["changed_leaf"]["observed_closed_noncore_names"] == ["base", "leaf", "op"]
+          assert rows["changed_leaf"]["closure_complete_relative_to_extracted_reference_relation"] is True
+          print("RTK_NATIVE_CHECKED_CLOSURE_THREE_CASES_SEALED")
           PY
           sha256sum "$ROOT"/target_*.olean "$ROOT"/preoracle_*.json \
             "$GITHUB_WORKSPACE"/.rtk-patched-qualification/*.json \
             > "$ROOT/prediction_commitment.sha256"
           sha256sum --check --strict "$ROOT/prediction_commitment.sha256"
-          for CONTROL in unchanged changed_base unrelated; do
+          for CONTROL in unchanged changed_leaf unrelated; do
             test ! -e "$ROOT/oracle_$CONTROL.native.log"
           done
-          echo RTK_NATIVE_TRANSITIVE_COMMITTED_BEFORE_HISTORICAL_REPLAY
+          echo RTK_NATIVE_CHECKED_CLOSURE_COMMITTED_BEFORE_HISTORICAL_REPLAY
 
       - name: Independent target kernel replay of identical old proof
         shell: bash
@@ -229,9 +243,9 @@ jobs:
           TARGET="$ROOT/target"
           ENC=experiments/rtk/lean_structural_expr_probe_v1.lean.txt
           DEC=experiments/rtk/lean_expr_decoder_roundtrip_v1.lean.txt
-          for CONTROL in unchanged changed_base unrelated; do
+          for CONTROL in unchanged changed_leaf unrelated; do
             EXPECT=ADMISSIBLE
-            if [ "$CONTROL" = changed_base ]; then EXPECT=INADMISSIBLE; fi
+            if [ "$CONTROL" = changed_leaf ]; then EXPECT=INADMISSIBLE; fi
             cp "$ROOT/target_$CONTROL.olean" "$TARGET/.lake/build/lib/lean/RTKPatchedSupport.olean"
             python -m experiments.rtk.lean_patched_historical_certificate_v1 driver \
               --encoder "$ENC" --decoder "$DEC" \
@@ -262,14 +276,14 @@ jobs:
           root = Path(sys.argv[1])
           for name, expected in {
               "unchanged": "ADMISSIBLE",
-              "changed_base": "INADMISSIBLE",
+              "changed_leaf": "INADMISSIBLE",
               "unrelated": "ADMISSIBLE",
           }.items():
               outcome = json.loads((root/f"oracle_{name}.json").read_text())
               assert outcome["historical_certificate_adjudication"] == expected
               assert outcome["semantic_transport_soundness_proved"] is False
               assert outcome["production_reliance_authorized"] is False
-          print("RTK_NATIVE_TRANSITIVE_HISTORICAL_PROOF_THREE_CONTROL_PASS_NO_RELIANCE")
+          print("RTK_NATIVE_CHECKED_CLOSURE_HISTORICAL_REPLAY_THREE_CONTROLS_NO_RELIANCE")
           PY
 
       - name: Retain exact-head development artifacts
