@@ -20,7 +20,7 @@ from experiments.rtk.lean_structural_expr_v1 import _structural_ast
 
 _MARKER = "RTK_NATIVE_CHECKED_CLOSURE_JSON="
 _SCHEMA = "rtk.lean_checked_definition_closure.v1-development"
-_BASE = frozenset({"Eq", "Eq.refl", "Nat"})
+_BASE = frozenset({"Eq", "Eq.refl", "Nat", "Nat.succ"})
 _NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_'.]*$")
 _MAX_NODES = 32
 _MAX_REFS = 96
