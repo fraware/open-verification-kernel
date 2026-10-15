@@ -30,6 +30,15 @@ def _exercise(tmp_path: Path, *, requested_version: str | None, fail_requested: 
     # GitHub's Windows runners support Git Bash, whose PATH syntax differs
     # from native Windows Python. BASH_ENV intercepts pip/python in Bash itself.
     bash = shutil.which("bash")
+    if bash is None and os.name == "nt":
+        program_files = Path(os.environ.get("ProgramFiles", "C:/Program Files"))
+        for candidate in (
+            program_files / "Git" / "bin" / "bash.exe",
+            program_files / "Git" / "usr" / "bin" / "bash.exe",
+        ):
+            if candidate.is_file():
+                bash = str(candidate)
+                break
     if bash is None:
         pytest.skip("Bash unavailable for POSIX composite Action execution")
     (tmp_path / "mock_commands.sh").write_text(
