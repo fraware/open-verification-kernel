@@ -2,6 +2,18 @@ name: RTK patched historical certificate replay (research)
 
 on:
   push:
+    branches: [research/rtk-patched-declaration-compatibility-v1]
+    paths:
+      - .github/workflows/rtk-lean-patched-historical-certificate-v1.yml
+      - experiments/rtk/lean_patched_historical_certificate_v1.py
+      - docs/RTK_PATCHED_HISTORICAL_CERTIFICATE_V1.md
+      - experiments/rtk/lean_patched_preoracle_identity_v1.py
+      - tests/test_rtk_lean_patched_preoracle_identity_v1.py
+      - docs/RTK_PATCHED_PREORACLE_IDENTITY_V1.md
+      - experiments/rtk/lean_patched_declaration_hypothesis_v1.py
+      - tests/test_rtk_lean_patched_declaration_hypothesis_v1.py
+      - docs/RTK_PATCHED_DECLARATION_HYPOTHESIS_V1.md
+  pull_request:
     branches: [research/rtk-patched-preoracle-identity-and-cost-v1]
     paths:
       - .github/workflows/rtk-lean-patched-historical-certificate-v1.yml
@@ -10,15 +22,9 @@ on:
       - experiments/rtk/lean_patched_preoracle_identity_v1.py
       - tests/test_rtk_lean_patched_preoracle_identity_v1.py
       - docs/RTK_PATCHED_PREORACLE_IDENTITY_V1.md
-  pull_request:
-    branches: [research/rtk-lean-patched-historical-certificate-v1]
-    paths:
-      - .github/workflows/rtk-lean-patched-historical-certificate-v1.yml
-      - experiments/rtk/lean_patched_historical_certificate_v1.py
-      - docs/RTK_PATCHED_HISTORICAL_CERTIFICATE_V1.md
-      - experiments/rtk/lean_patched_preoracle_identity_v1.py
-      - tests/test_rtk_lean_patched_preoracle_identity_v1.py
-      - docs/RTK_PATCHED_PREORACLE_IDENTITY_V1.md
+      - experiments/rtk/lean_patched_declaration_hypothesis_v1.py
+      - tests/test_rtk_lean_patched_declaration_hypothesis_v1.py
+      - docs/RTK_PATCHED_DECLARATION_HYPOTHESIS_V1.md
   workflow_dispatch:
 
 permissions:
@@ -288,6 +294,37 @@ jobs:
               assert row["source_target_environment_equivalence_proved"] is False
           print("PATCHED_FOUR_PREORACLE_PREDICTIONS_SEALED_NO_ORACLE_LABELS")
           PY
+          # Isolated declaration hypothesis: same evidence as identity
+          # baseline, no access to historical target replay.
+          for CONTROL in reused equal changed unrelated; do
+            test ! -e "$ROOT/target_oracle_$CONTROL.native.log"
+            python -m experiments.rtk.lean_patched_declaration_hypothesis_v1 \
+              --source-payload "$GITHUB_WORKSPACE/.rtk-patched-qualification/source_payload.json" \
+              --source-checked-input "$ROOT/source/RTKPatchedSource.lean" \
+              --source-structural-log "$ROOT/source_structural.native.log" \
+              --source-recheck-log "$ROOT/source_serialized_recheck.native.log" \
+              --target-payload "$GITHUB_WORKSPACE/.rtk-patched-qualification/target_$CONTROL.json" \
+              --target-structural-log "$ROOT/target_unproved_$CONTROL.native.log" \
+              --source-olean "$ROOT/source/.lake/build/lib/lean/RTKPatchedSupport.olean" \
+              --target-olean "$ROOT/target_support_$CONTROL.olean" \
+              --checker-binary "$(elan which lean)" \
+              --output "$ROOT/declaration_$CONTROL.json"
+          done
+          python - "$ROOT" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          root = Path(sys.argv[1])
+          for control in ("reused", "equal", "changed", "unrelated"):
+              row = json.loads((root/f"declaration_{control}.json").read_text())
+              expect = ("REVALIDATION_REQUIRED" if control == "changed"
+                        else "CONDITIONAL_DECLARATION_CANDIDATE")
+              assert row["decision"] == expect, (control, row)
+              assert row["actual_kernel_support_preservation_proved"] is False
+              assert row["production_reliance_authorization"] is False
+              assert row["target_historical_proof_replayed"] is False
+          print("PATCHED_DECLARATION_FOUR_CONDITIONAL_PREDICTIONS_BEFORE_ORACLE")
+          PY
           sha256sum "$GITHUB_WORKSPACE/.rtk-patched-qualification/"*.json \
             "$ROOT/target_support_reused.olean" \
             "$ROOT/target_support_equal.olean" \
@@ -297,6 +334,10 @@ jobs:
             "$ROOT/preoracle_equal.json" \
             "$ROOT/preoracle_changed.json" \
             "$ROOT/preoracle_unrelated.json" \
+            "$ROOT/declaration_reused.json" \
+            "$ROOT/declaration_equal.json" \
+            "$ROOT/declaration_changed.json" \
+            "$ROOT/declaration_unrelated.json" \
             > "$ROOT/sealed_preoracle_artifacts.sha256"
           sha256sum --check --strict "$ROOT/sealed_preoracle_artifacts.sha256"
           test ! -e "$ROOT/target_oracle_reused.native.log"
@@ -373,6 +414,21 @@ jobs:
               assert row["semantic_transport_soundness_proved"] is False
               assert row["patched_kernel_security_qualified_for_relying_policy"] is False
               assert row["production_reliance_authorized"] is False
+          decl = {
+              control: json.loads((root/f"declaration_{control}.json").read_text())
+              for control in ("reused", "equal", "changed", "unrelated")
+          }
+          for control, observed in (("reused", d), ("equal", a),
+                                    ("changed", b), ("unrelated", c)):
+              expected = "INADMISSIBLE" if control == "changed" else "ADMISSIBLE"
+              assert observed["historical_certificate_adjudication"] == expected
+              assert decl[control]["decision"] == (
+                  "REVALIDATION_REQUIRED" if control == "changed"
+                  else "CONDITIONAL_DECLARATION_CANDIDATE"
+              )
+              assert decl[control]["actual_kernel_support_preservation_proved"] is False
+              assert decl[control]["production_reliance_authorization"] is False
+          print("PATCHED_DECLARATION_SELECTIVITY_EXPOSED_DEV_CONTROLS_NO_RELIANCE")
           print("PATCHED_IDENTITY_SCREEN_CONCORDANT_NO_OBSERVED_FALSE_REUSE")
           print("PATCHED_INDEPENDENT_REBUILD_AND_UNRELATED_CHANGE_REVALIDATION_COST_OBSERVED")
           print("PATCHED_HISTORICAL_CERTIFICATE_FOUR_CONTROL_PASS_NO_RELIANCE")
