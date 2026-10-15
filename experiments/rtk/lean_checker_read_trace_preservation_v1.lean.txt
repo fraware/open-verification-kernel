@@ -1,0 +1,143 @@
+import Init
+
+/-!
+# Historical checker read-trace preservation
+
+This is a theorem about the explicit effect-only checker language below, NOT
+about Lean.Kernel.check, Lean4Lean.TypeChecker, a full Lean environment, or the
+completeness of instrumentation of a real checker.
+
+A checker Program has only one external effect: read a declaration/config
+key. Its continuation can adapt to the observed value, including 'none'.
+Executions are inductively witnessed, recording the exact read response.
+
+The theorem is a semantic noninterference result: a genuine source
+execution is preserved in any target that answers all of those same reads
+identically, even if unqueried keys differ. This is sufficient, not minimal.
+-/
+
+namespace RTKCheckerReadTrace
+
+inductive Key where
+  | declaration (name : String)
+  | checkerOption (name : String)
+deriving Repr, DecidableEq
+
+abbrev Payload := Nat
+abbrev Context := Key → Option Payload
+abbrev Observation := Key × Option Payload
+
+/-- A finite, adaptive, read-only checker. No hidden external access. -/
+inductive Program (α : Type) : Type where
+  | result (value : α)
+  | read (key : Key) (continueWith : Option Payload → Program α)
+
+/--
+Operational judgment validating a full historical execution transcript.
+The recorded value is checked against the actual source lookup. A missing
+lookup is recorded as 'none' and is an obligation just like a found value.
+-/
+inductive Executes (env : Context) : Program α → List Observation → α → Prop where
+  | result (value : α) :
+      Executes env (.result value) [] value
+  | read {key : Key} {next : Option Payload → Program α}
+      {rest : List Observation} {answer : α}
+      (observed : Option Payload)
+      (lookup : env key = observed)
+      (tail : Executes env (next observed) rest answer) :
+      Executes env (.read key next) ((key, observed) :: rest) answer
+
+/-- The source trace's read responses agree with the proposed target. -/
+def Preserved (env : Context) (trace : List Observation) : Prop :=
+  ∀ key observed, (key, observed) ∈ trace → env key = observed
+
+/--
+The checker-locality theorem, covering adaptive control flow and both
+successful and missing lookups. No equality of the entire environments is
+assumed. No independent proof of completeness for a real checker is implied.
+-/
+theorem historical_execution_preserved
+    (source : Context) {α : Type} {program : Program α}
+    {trace : List Observation} {answer : α}
+    (historical : Executes source program trace answer) :
+    ∀ target : Context,
+      Preserved target trace →
+      Executes target program trace answer := by
+  induction historical with
+  | result value =>
+      intro target _
+      exact Executes.result value
+  | @read key next rest answer observed lookup tail ih =>
+      intro target agreement
+      apply Executes.read (observed := observed)
+      · exact agreement key observed (by simp [Preserved])
+      · apply ih target
+        intro queried got appears
+        exact agreement queried got (by simp [Preserved, appears])
+
+/-- The same recorded execution is retained with the same result. -/
+theorem certified_result_preserved
+    (source target : Context)
+    {α : Type} {program : Program α} {trace : List Observation}
+    {answer : α}
+    (sourceCertificate : Executes source program trace answer)
+    (allReadsPreserved : Preserved target trace) :
+    Executes target program trace answer :=
+  historical_execution_preserved source sourceCertificate target allReadsPreserved
+
+/--
+If a historical checker tested absence, adding the formerly missing key
+changes the observed value. This illustrates why recording only positive
+declaration dependencies is an insufficient preservation contract.
+-/
+def forbidden : Key := .declaration "forbidden"
+
+def noForbiddenDeclaration : Program Bool :=
+  .read forbidden fun response => .result response.isNone
+
+def emptyContext : Context := fun _ => none
+def extendedContext : Context := fun _ => some 1
+
+example :
+    Executes emptyContext noForbiddenDeclaration [(forbidden, none)] true := by
+  apply Executes.read (observed := none)
+  · rfl
+  · exact Executes.result true
+
+example :
+    Executes extendedContext noForbiddenDeclaration [(forbidden, some 1)] false := by
+  apply Executes.read (observed := some 1)
+  · rfl
+  · exact Executes.result false
+
+/-- The target cannot satisfy the exact historical missing-lookup premise. -/
+theorem missing_lookup_is_not_preserved :
+    ¬ Preserved extendedContext [(forbidden, none)] := by
+  intro h
+  have hRead := h forbidden none (by simp [Preserved])
+  have : (some 1 : Option Payload) = none := hRead
+  cases this
+
+/--
+Checker options are first-class read keys, not unspecified ambient state.
+A real-kernel refinement must account for its actual fuel, safety, local
+context, reduction settings and any non-environment dependencies.
+-/
+def readSafetyFlag : Program Bool :=
+  .read (.checkerOption "safety") fun result =>
+    .result (result == some 1)
+
+example :
+    Executes emptyContext readSafetyFlag
+      [(.checkerOption "safety", none)] false := by
+  apply Executes.read (observed := none)
+  · rfl
+  · exact Executes.result false
+
+/-
+The theorem is conditional on a source derivation for THIS exact program.
+Producing hashes for an independently captured transcript does not prove
+that an actual Lean or Lean4Lean checker follows this Program or that its
+reads are exhaustive. That external refinement remains unproved.
+-/
+end RTKCheckerReadTrace
