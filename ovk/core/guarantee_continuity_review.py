@@ -38,6 +38,9 @@ class GuaranteeContinuityReview(BaseModel):
     target_evidence_digest: str | None = None
     declared_definition_changed: bool
     declared_machine_claim_changed: bool
+    changed_specification_fields: list[str] = Field(default_factory=list)
+    supplied_source_statement: str
+    supplied_target_statement: str
     historical_transport: Literal["conditional_candidate", "not_admitted"]
     transport_reason_codes: list[str] = Field(default_factory=list)
     manifest_authority: Literal["not_authenticated"] = "not_authenticated"
@@ -64,6 +67,10 @@ class GuaranteeContinuityReview(BaseModel):
                 .replace("\n", " ")
             )
 
+        changed_fields = (
+            ", ".join(safe(field) for field in self.changed_specification_fields)
+            if self.changed_specification_fields else "none"
+        )
         reasons = (
             ", ".join(safe(reason) for reason in self.transport_reason_codes)
             if self.transport_reason_codes else "none under this bounded gate"
@@ -82,11 +89,14 @@ class GuaranteeContinuityReview(BaseModel):
             "| Snapshot state independently reverified now | **NO** |\n"
             f"| Declared definition changed | {str(self.declared_definition_changed).lower()} |\n"
             f"| Declared machine claim changed | {str(self.declared_machine_claim_changed).lower()} |\n"
+            f"| Changed supplied declaration fields | {changed_fields} |\n"
             f"| Historical evidence gate | {safe(self.historical_transport)} |\n"
             f"| Governing manifest authority | {self.manifest_authority} |\n"
             f"| Live expiry / revocation | {self.live_temporal_policy} |\n"
             f"| Source-semantics refinement | {self.source_semantics_refinement} |\n"
             "| Production reliance / merge authorization | **NO** |\n\n"
+            f"**Supplied source statement:** {safe(self.supplied_source_statement)}\n\n"
+            f"**Supplied target statement:** {safe(self.supplied_target_statement)}\n\n"
             f"**Gate reason codes:** {reasons}.\n\n"
             f"**Next action:** {safe(self.next_action)}.\n\n"
             "The recorded snapshot status was not recomputed at review time; "
@@ -139,6 +149,12 @@ def build_guarantee_continuity_review(
     except ValueError:
         target_origin = None
 
+    source_fields = source_spec.model_dump(mode="json")
+    target_fields = target_spec.model_dump(mode="json")
+    changed_fields = sorted(
+        field for field in source_fields.keys() | target_fields.keys()
+        if source_fields.get(field) != target_fields.get(field)
+    )
     return GuaranteeContinuityReview(
         guarantee_id=guarantee_id,
         subject_repo=target.subject_repo,
@@ -154,6 +170,9 @@ def build_guarantee_continuity_review(
         declared_definition_changed=(
             source_spec.definition_digest != target_spec.definition_digest
         ),
+        changed_specification_fields=changed_fields,
+        supplied_source_statement=source_spec.statement,
+        supplied_target_statement=target_spec.statement,
         declared_machine_claim_changed=(
             source_spec.guarantee_type != target_spec.guarantee_type
             or source_spec.selector != target_spec.selector
