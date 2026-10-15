@@ -45,6 +45,8 @@ def log(*, target: bool = False, drift: bool = False) -> str:
         "schema_version": closure._SCHEMA,
         "root_name": "rtk_unproven_target_claim" if target else "historical_claim",
         "root_kind": "unproved_target_placeholder" if target else "historical_theorem",
+        "root_type_ast": const("op"),
+        "root_proof_ast": None if target else const("Eq.refl"),
         "root_type_references": ["op"],
         "root_proof_references": [] if target else ["Eq.refl"],
         "trusted_core_frontier": sorted(closure._BASE),
@@ -188,4 +190,18 @@ def test_missing_native_graph_receipt_rejected(monkeypatch):
     data = args(monkeypatch)
     data["source_structural_log"] = data["source_structural_log"].splitlines()[0]
     with pytest.raises(ValueError):
+        closure.evaluate_checked_closure(**data)
+
+
+def test_checked_root_ast_disagreement_rejected(monkeypatch):
+    data = args(monkeypatch)
+    modify_target(data, lambda obj: obj.update({"root_type_ast": const("Nat")}))
+    with pytest.raises(ValueError, match="checked root type"):
+        closure.evaluate_checked_closure(**data)
+
+
+def test_target_cannot_smuggle_historical_proof(monkeypatch):
+    data = args(monkeypatch)
+    modify_target(data, lambda obj: obj.update({"root_proof_ast": const("Eq.refl")}))
+    with pytest.raises(ValueError, match="checked root proof"):
         closure.evaluate_checked_closure(**data)
