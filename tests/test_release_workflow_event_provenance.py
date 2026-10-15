@@ -31,7 +31,16 @@ def test_required_generic_validation_workflows_checkout_recorded_head() -> None:
         text = (REPO / relative).read_text(encoding="utf-8")
         checkout_count = text.count("uses: actions/checkout@")
         assert checkout_count >= 1, relative
-        assert text.count(exact_ref) == checkout_count, relative
+        if relative == ".github/workflows/ci.yml":
+            # Source-validation and release-gate jobs still checkout the
+            # PR's actual head. The two Action dogfood jobs intentionally
+            # exercise GitHub's evaluated synthetic merge-preview commit,
+            # whose SHA is github.sha for a pull_request event.
+            merge_ref = "ref: ${{ github.sha }}"
+            assert text.count(merge_ref) == 2, relative
+            assert text.count(exact_ref) == checkout_count - 2, relative
+        else:
+            assert text.count(exact_ref) == checkout_count, relative
 
 
 def test_release_collector_supports_dispatch_only_filter() -> None:
