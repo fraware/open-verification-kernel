@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![FormalPR-Bench](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/fraware/open-verification-kernel/main/docs/benchmarks/leaderboard-badge.json)](docs/benchmarks/latest-leaderboard-summary.json)
-[![Docs](https://img.shields.io/badge/docs-v1.3.0--rc.1-green.svg)](docs/README.md)
+[![Docs](https://img.shields.io/badge/docs-development--candidate-informational.svg)](docs/README.md)
 
 [Quick start](#quick-start) · [Add to CI](#github-actions) · [Contribute](#contribute) · [Documentation](docs/README.md)
 
@@ -95,9 +95,11 @@ ovk repair-suggest --evidence ovk-evidence.json
 
 ---
 
-## Quick start
+## Quick start (local development snapshot)
 
 **Requirements:** Python 3.10+
+
+These commands clone current, unreleased development `main`. They are for local inspection and experimentation; they do **not** install an attributable published release or qualify a strict production gate.
 
 ```bash
 git clone https://github.com/fraware/open-verification-kernel.git
