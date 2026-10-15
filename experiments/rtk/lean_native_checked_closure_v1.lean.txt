@@ -81,7 +81,7 @@ run_cmd do
     ("root_type_references", rtkGraphNameArray typeReferences),
     ("root_proof_references", rtkGraphNameArray proofReferences),
     ("trusted_core_frontier", Json.arr #[
-      Json.str "Eq", Json.str "Eq.refl", Json.str "Nat"
+      Json.str "Eq", Json.str "Eq.refl", Json.str "Nat", Json.str "Nat.succ"
     ]),
     ("nodes", Json.arr nodes),
     ("native_declaration_relation_exhaustive_for_kernel_proved", Json.bool false),
