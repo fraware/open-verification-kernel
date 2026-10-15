@@ -6,7 +6,7 @@ Only safe definitions are traversed; all other non-base kinds are rejected.
 This observer has NO historical target proof or oracle access.
 -/
 private def rtkGraphBase (n : Lean.Name) : Bool :=
-  n == `Nat || n == `Eq || n == `Eq.refl
+  n == `Nat || n == `Nat.succ || n == `Eq || n == `Eq.refl
 
 private def rtkGraphNameArray (names : Array Lean.Name) : Lean.Json :=
   Lean.Json.arr (names.map (fun n => Lean.Json.str n.toString))
