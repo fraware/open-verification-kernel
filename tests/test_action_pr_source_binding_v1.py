@@ -203,6 +203,20 @@ def test_caller_input_cannot_alias_generated_receipt(example_repo):
     assert not Path("ovk-source-binding.json").exists()
 
 
+def test_identical_generated_output_paths_fail_closed(example_repo):
+    reserved = Path("shared-receipt.json")
+    reserved.write_bytes(b"old generated data")
+    assert binding.main([
+        "--event-name", "pull_request",
+        "--github-sha", example_repo["merge"],
+        "--base-sha", example_repo["base"],
+        "--pr-head-sha", example_repo["pr_head"],
+        "--input-path-output", str(reserved),
+        "--receipt-output", str(reserved),
+    ]) == 2
+    assert not reserved.exists()
+
+
 def test_non_pr_push_uses_actual_checkout_parent(example_repo):
     _, diff, receipt = binding.prepare(
         event_name="push", github_sha=example_repo["merge"],
