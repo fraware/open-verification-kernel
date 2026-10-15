@@ -38,3 +38,14 @@ def test_docs_reject_unproved_signed_source_binding():
     docs = (ROOT / "docs/PR_SOURCE_BINDING_V1.md").read_text()
     assert "not yet incorporated" in docs
     assert "production_reliance_authorized=false" in docs
+
+def test_unbound_caller_diff_never_emits_a_shareable_action_check_or_comment():
+    action = yaml.safe_load((ROOT / "action.yml").read_text(encoding="utf-8"))
+    steps = action["runs"]["steps"]
+    check = next(s for s in steps if s.get("name") == "Emit OVK GitHub check (check path)")
+    comment = next(s for s in steps if s.get("name") == "Post OVK pull-request comment")
+    warning = next(s for s in steps if s.get("name") == "Disclose unbound caller-selected inputs")
+    assert "inputs.changed-files == ''" in check["if"]
+    assert "inputs.changed-files == ''" in comment["if"]
+    assert "caller-supplied" in warning["run"]
+    assert "inputs.changed-files != ''" in warning["if"]
