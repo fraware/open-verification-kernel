@@ -768,3 +768,213 @@ def test_guarantee_transport_rejects_mutated_semantic_artifact(tmp_path) -> None
     result = _transport_admission(source, target, original, modified)
     assert result.eligible is False
     assert "target_semantic_artifact_mismatch" in result.reason_codes
+
+
+# Product-facing, non-controlling reviewer scenarios using actual sealed PE
+# evidence from this file's existing end-to-end integration fixture.
+
+
+def _review_for_case(
+    source, target, original, reused, *,
+    target_spec=None, source_spec=None, key=TEST_KEY,
+):
+    from ovk.core.guarantee_continuity_review import (
+        build_guarantee_continuity_review,
+    )
+
+    return build_guarantee_continuity_review(
+        source, target, guarantee_id="G-REFUND",
+        source_spec=source_spec if source_spec is not None else _specs()[0],
+        target_spec=target_spec if target_spec is not None else _specs()[0],
+        source_evidence=original,
+        target_evidence=reused,
+        signature_key=key,
+    )
+
+
+def test_advisory_report_separates_current_claim_and_conditional_reuse(tmp_path):
+    source, target, original, reused, _ = _make_signed_transport_case(tmp_path)
+    report = _review_for_case(source, target, original, reused)
+
+    assert report.source_typed_claim_status == "established"
+    assert report.target_typed_claim_status == "established"
+    assert report.target_evidence_origin == "reused"
+    assert report.historical_transport == "conditional_candidate"
+    assert report.transport_reason_codes == []
+    assert report.declared_definition_changed is False
+    assert report.declared_machine_claim_changed is False
+    assert report.changed_specification_fields == []
+    assert report.supplied_source_statement == report.supplied_target_statement
+    assert report.snapshot_state_reverified_at_review is False
+    assert report.manifest_authority == "not_authenticated"
+    assert report.live_temporal_policy == "not_evaluated"
+    assert report.source_semantics_refinement == "unproved"
+    assert report.production_reliance_authorized is False
+    assert report.decision_scope == "advisory_only"
+    assert "Production reliance / merge authorization | **NO**" in report.to_markdown()
+    assert report.source_evidence_digest == original.evidence_digest
+    assert report.target_evidence_digest == reused.evidence_digest
+
+
+def test_advisory_report_changed_statement_not_historical_reuse(tmp_path):
+    source, _, original, reused, head = _make_signed_transport_case(tmp_path)
+    changed = _specs()[0].model_copy(
+        update={"statement": "A different human-governed refund requirement."}
+    )
+    target = build_guarantee_assurance_snapshot(
+        head, [changed], [reused],
+        policy_digest="policy-a", signature_key=TEST_KEY,
+    )
+    report = _review_for_case(
+        source, target, original, reused, target_spec=changed
+    )
+
+    # A PASS for the typed PE machine claim does not transport a redefined
+    # durable guarantee into the new context.
+    assert report.target_typed_claim_status == "established"
+    assert report.historical_transport == "not_admitted"
+    assert report.declared_definition_changed is True
+    assert report.declared_machine_claim_changed is False
+    assert report.changed_specification_fields == ["statement"]
+    assert report.supplied_source_statement != report.supplied_target_statement
+    assert "guarantee_definition_changed" in report.transport_reason_codes
+    assert report.next_action == "obtain_fresh_evidence_or_independent_review"
+    assert report.production_reliance_authorized is False
+
+
+def test_advisory_report_changed_assumptions_not_historical_reuse(tmp_path):
+    source, _, original, reused, head = _make_signed_transport_case(tmp_path)
+    changed = _specs()[0].model_copy(
+        update={"assumptions": ["Maintain delegated authorization scope."]}
+    )
+    target = build_guarantee_assurance_snapshot(
+        head, [changed], [reused],
+        policy_digest="policy-a", signature_key=TEST_KEY,
+    )
+    report = _review_for_case(
+        source, target, original, reused, target_spec=changed
+    )
+    assert report.target_typed_claim_status == "established"
+    assert report.historical_transport == "not_admitted"
+    assert report.declared_definition_changed is True
+    assert report.changed_specification_fields == ["assumptions"]
+    assert "guarantee_definition_changed" in report.transport_reason_codes
+    assert report.production_reliance_authorized is False
+
+
+def test_advisory_report_refuses_wrong_signature_key(tmp_path):
+    source, target, original, reused, _ = _make_signed_transport_case(tmp_path)
+    report = _review_for_case(
+        source, target, original, reused, key=b"untrusted-demo-key"
+    )
+    assert report.historical_transport == "not_admitted"
+    assert any("signature_invalid" in x for x in report.transport_reason_codes)
+    assert report.target_typed_claim_status == "established"
+    assert report.production_reliance_authorized is False
+
+
+def test_advisory_report_untrusted_governance_and_time_never_authorize(tmp_path):
+    source, target, original, reused, _ = _make_signed_transport_case(tmp_path)
+    report = _review_for_case(source, target, original, reused)
+    data = report.model_dump()
+    assert data["manifest_authority"] == "not_authenticated"
+    assert data["live_temporal_policy"] == "not_evaluated"
+    assert data["production_reliance_authorized"] is False
+    assert report.next_action == "authenticate_context_and_run_live_policy_checks"
+
+
+def test_advisory_report_handles_missing_target_state_conservatively(tmp_path):
+    source, target, original, reused, _ = _make_signed_transport_case(tmp_path)
+    incomplete = target.model_copy(update={"states": []})
+    report = _review_for_case(source, incomplete, original, reused)
+    assert report.target_typed_claim_status == "untrusted_snapshot"
+    assert "state_set_mismatch" in report.target_snapshot_structural_issues
+    assert report.historical_transport == "not_admitted"
+    assert report.production_reliance_authorized is False
+
+
+
+def test_advisory_report_marks_inconsistent_established_snapshot_untrusted(tmp_path):
+    source, target, original, reused, _ = _make_signed_transport_case(tmp_path)
+    good = target.state_for("G-REFUND")
+    forged = good.model_copy(update={"local_status": "unbound"})
+    malformed = target.model_copy(update={"states": [forged]})
+    report = _review_for_case(source, malformed, original, reused)
+
+    assert good.status == "established"
+    assert forged.status == "established"
+    assert report.target_typed_claim_status == "untrusted_snapshot"
+    assert report.target_snapshot_structural_issues
+    assert "target_snapshot_invalid" in report.transport_reason_codes
+    assert report.historical_transport == "not_admitted"
+    assert report.production_reliance_authorized is False
+    assert "Target snapshot structural issues" in report.to_markdown()
+    assert "untrusted_snapshot" in report.to_markdown()
+
+
+def test_advisory_report_valid_snapshot_structure_is_explicit(tmp_path):
+    source, target, original, reused, _ = _make_signed_transport_case(tmp_path)
+    report = _review_for_case(source, target, original, reused)
+    assert report.source_snapshot_structural_issues == []
+    assert report.target_snapshot_structural_issues == []
+    assert report.target_typed_claim_status == "established"
+
+
+def test_advisory_cli_writes_separate_evidence_bound_reports(tmp_path):
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    source, target, original, reused, _ = _make_signed_transport_case(tmp_path)
+    inputs = {
+        "source-snapshot": source,
+        "target-snapshot": target,
+        "source-spec": _specs()[0],
+        "target-spec": _specs()[0],
+        "source-evidence": original,
+        "target-evidence": reused,
+    }
+    argv = []
+    for label, value in inputs.items():
+        path = tmp_path / f"{label}.json"
+        path.write_text(value.model_dump_json(indent=2), encoding="utf-8")
+        argv += ["--" + label, str(path)]
+    key = tmp_path / "signer.key"
+    key.write_bytes(TEST_KEY)
+    output = tmp_path / "review-output"
+    script = Path(__file__).resolve().parents[1] / "scripts" / "guarantee_continuity_review.py"
+    result = subprocess.run(
+        [
+            sys.executable, str(script), *argv,
+            "--guarantee-id", "G-REFUND",
+            "--signature-key-file", str(key),
+            "--output-dir", str(output),
+        ],
+        check=True, text=True, capture_output=True,
+    )
+    assert "Non-controlling review saved" in result.stdout
+    import json
+
+    payload = json.loads(
+        (output / "continuity-review.json").read_text(encoding="utf-8")
+    )
+    markdown = (output / "continuity-review.md").read_text(encoding="utf-8")
+    assert payload["historical_transport"] == "conditional_candidate"
+    assert payload["changed_specification_fields"] == []
+    assert payload["production_reliance_authorized"] is False
+    assert "advisory only" in markdown
+    assert "**NO**" in markdown
+    # Refuse to overwrite the same audit record silently.
+    again = subprocess.run(
+        [
+            sys.executable, str(script), *argv,
+            "--guarantee-id", "G-REFUND",
+            "--signature-key-file", str(key),
+            "--output-dir", str(output),
+        ],
+        text=True, capture_output=True,
+    )
+    assert again.returncode != 0
+    assert payload == json.loads(
+        (output / "continuity-review.json").read_text(encoding="utf-8")
+    )
