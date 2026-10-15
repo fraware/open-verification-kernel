@@ -38,9 +38,12 @@ def _names(expr: object) -> set[str]:
 def _name_list(value: object, *, max_count: int) -> list[str]:
     if (not isinstance(value, list) or len(value) > max_count
         or any(not isinstance(s, str) or not _NAME.fullmatch(s) for s in value)
-        or value != sorted(set(value))):
-        raise ValueError("unsorted, duplicated or malformed declaration names")
-    return value
+        or len(value) != len(set(value))):
+        raise ValueError("duplicated or malformed declaration names")
+    # Lean's Name.lt orders structured names, which need not agree with
+    # Python string sorting of Name.toString. Normalize after checking
+    # uniqueness and validate exactly the resulting identity set.
+    return sorted(value)
 
 
 def _manifest(log: str, *, expected_root: str, expected_kind: str,
