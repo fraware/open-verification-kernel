@@ -57,6 +57,14 @@ The contemporaneous [Lean-for-Lean](https://github.com/digama0/lean4lean) checko
 
 Thus Lean4Lean is useful for identifying and eventually mediating the real checker read surface; importing its implementation without version alignment or a proven correspondence would be invalid.
 
+## Existing verified metatheory: do not claim this as new
+
+The inspected Lean4Lean repository already contains theorems `VEnv.IsDefEq.mono` and `VEnv.HasType.mono` in [`Lean4Lean/Theory/Typing/Lemmas.lean`](https://github.com/digama0/lean4lean/blob/master/Lean4Lean/Theory/Typing/Lemmas.lean). Under `VEnv.LE`, all previously present constants preserve their types and all preexisting definitional equalities remain available; additional constants and equalities are admitted. It follows that any typing/equality derivation in that abstract formal theory persists under such an extension. This is a more substantial *semantic typing* preservation result than whole-environment equality, and must be cited as prior art for this research direction. Its `VEnv.LE` definition is in [`Lean4Lean/Theory/VEnv.lean`](https://github.com/digama0/lean4lean/blob/master/Lean4Lean/Theory/VEnv.lean).
+
+Our `historical_execution_preserved` theorem is deliberately different: it preserves the *same deterministic algorithmic execution and verdict* under equality of all its observed external reads, including negative lookups and configuration reads. An abstract typing judgment may stay valid under new declarations even as a specific checker makes different control-flow decisions. Neither theorem currently discharges the correspondence from the original historical Lean 4.35 certificate and checked source/target environments into Lean4Lean's abstract `VEnv` typing relation or our explicit `Program` execution relation. The Lean4Lean checked-version difference is a further independent blocker.
+
+Consequently **do not claim original discovery of semantic environment-extension monotonicity, a verified production-kernel equivalence, or a complete checker read trace**. A valuable continuation is to use the existing monotonicity theorem for an identified well-formed environment-extension class once the kernel/environment translation premises can actually be validated, and separately establish operational read locality for a suitably instrumented checker.
+
 ## Current outcome and next acceptance gate
 
 The Lean 4.35 pinned source workflow now builds the separate `RTKCheckerReadTrace` module and checks it alongside the historical source under `lake check --paranoid`. The existing #214 native historical-proof predictions and target oracle remain independent and unchanged; the new abstract theorem is *not* used to classify actual Lean evidence.
