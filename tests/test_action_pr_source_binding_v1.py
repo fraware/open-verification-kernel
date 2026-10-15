@@ -174,6 +174,34 @@ def test_source_binding_failure_emits_no_misleading_new_receipt(example_repo):
     assert not Path("ovk-source-binding.json").exists()
 
 
+def test_rejected_source_binding_discards_previous_generated_outputs(example_repo):
+    # A failed PR identity check must not leave old handoff/receipt files that
+    # the always-running artifact upload step could mistake for current output.
+    Path(".ovk-effective-input-path").write_bytes(b"stale.diff\\n")
+    Path("ovk-source-binding.json").write_bytes(b'{"forged": true}\\n')
+    assert binding.main([
+        "--event-name", "pull_request",
+        "--github-sha", example_repo["base"],
+        "--base-sha", example_repo["base"],
+        "--pr-head-sha", example_repo["pr_head"],
+    ]) == 2
+    assert not Path(".ovk-effective-input-path").exists()
+    assert not Path("ovk-source-binding.json").exists()
+
+
+def test_caller_input_cannot_alias_generated_receipt(example_repo):
+    content = b"caller supplied input"
+    Path("ovk-source-binding.json").write_bytes(content)
+    assert binding.main([
+        "--event-name", "pull_request",
+        "--github-sha", example_repo["merge"],
+        "--base-sha", example_repo["base"],
+        "--pr-head-sha", example_repo["pr_head"],
+        "--changed-files", "ovk-source-binding.json",
+    ]) == 2
+    assert Path("ovk-source-binding.json").read_bytes() == content
+
+
 def test_non_pr_push_uses_actual_checkout_parent(example_repo):
     _, diff, receipt = binding.prepare(
         event_name="push", github_sha=example_repo["merge"],
