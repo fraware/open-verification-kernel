@@ -142,6 +142,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--receipt-output", type=Path, default=Path("ovk-source-binding.json"))
     args = parser.parse_args(argv)
     try:
+        # These files are generated observations, never reusable input evidence.
+        # Clear earlier invocations before validating the current source identity.
+        output_paths = (args.input_path_output, args.receipt_output)
+        if output_paths[0].resolve() == output_paths[1].resolve():
+            raise BindingError("handoff and receipt output paths must differ")
+        if args.changed_files:
+            input_path = Path(args.changed_files).resolve()
+            if any(output.resolve() == input_path for output in output_paths):
+                raise BindingError("changed-files input overlaps generated output")
+        for output in output_paths:
+            if output.is_dir() and not output.is_symlink():
+                raise BindingError("generated output path is a directory")
+            output.unlink(missing_ok=True)
         path, content, receipt = prepare(
             event_name=args.event_name, github_sha=args.github_sha,
             base_sha=args.base_sha, pr_head_sha=args.pr_head_sha,
