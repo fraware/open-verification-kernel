@@ -2,7 +2,7 @@
 
 Measured outcomes from example configurations in `examples/pilot_repos/`. Metrics use `ovk check` and `ovk verify` in advisory mode.
 
-**Honesty:** in-repo pilot dogfood is **not** independent consumer validation and does not authorize `verified_source_sha` or `externally_calibrated_strict`. The last published tag is `v1.2.1`, whose annotated Git tag was reported unsigned by GitHub on 2026-10-15; do not call it a Git-signed or protected pin. For any permitted external advisory experiment, use a reviewed **full 40-hex commit SHA** and independently verify applicable release assets and operator trust.
+**Honesty:** in-repo pilot dogfood is **not** independent consumer validation and does not authorize `verified_source_sha` or `externally_calibrated_strict`. Fixture pass/block output does not establish a false-positive rate; unadjudicated error rates are reported as unknown. The last published tag is `v1.2.1`, whose annotated Git tag was reported unsigned by GitHub on 2026-10-15; do not call it a Git-signed or protected pin. For any permitted external advisory experiment, use a reviewed **full 40-hex commit SHA** and independently verify applicable release assets and operator trust.
 
 ## In-repo reference pilot
 
@@ -19,7 +19,7 @@ Simulates how an external repo would consume OVK before community pilots land.
 | Advisory mode | yes | yes |
 | Unsafe workflow diff block rate | 100% | _from weekly artifact_ |
 | Safe manifest pass rate | 100% | _from weekly artifact_ |
-| False positive rate (fixtures) | 0% | _from pilot-metrics.json_ |
+| Adjudicated false-positive rate | — | Unknown; the fixture outcomes contain no independent reviewer labels |
 | Median manifest latency | — | _from pilot-metrics.json_ |
 | Adoption summary | published | `docs/benchmarks/adoption-summary.json` |
 
@@ -45,7 +45,7 @@ python scripts/render_pilot_metrics.py --metrics pilot-dogfood-report.json
 |--------|--------|
 | Time to first green run | ~0.3s |
 | Check types run | 1 |
-| False positive rate (fixtures) | 0% (1/1 pass case) |
+| Adjudicated false-positive rate | Unknown; one passing fixture is not independent error adjudication |
 
 Lowest-friction path for repos adding agent-authored PR gates.
 
@@ -67,7 +67,7 @@ Lowest-friction path for repos adding agent-authored PR gates.
 |--------|--------|
 | Time to green (all pass fixtures) | ~2.1s |
 | Check types run | 5 |
-| False positive rate (fixtures) | 0% (5/5 pass cases) |
+| Adjudicated false-positive rate | Unknown; five passing fixtures are not independent error adjudication |
 | Artifacts | evidence, markdown, attestation, manifest, quality report |
 
 ## Cedar, TLA+, and Kani backends
@@ -124,12 +124,12 @@ Source of truth: [external-pilots-registry.json](benchmarks/external-pilots-regi
 
 | Repository | Status | Kind | Check types | Advisory period | False positive rate | Strict enabled |
 |-------|--------|------|-------------|-----------------|---------------------|----------------|
-| [fraware/ovk-consumer-fastapi-terraform](pilots/fastapi-terraform/REPORT.md) | advisory | Maintained consumer | ci_secrets, infrastructure | 2026-07-11 – 2026-07-25 | 0.0 (fixtures) | no |
-| [fraware/ovk-consumer-express-actions](pilots/express-actions/REPORT.md) | advisory | Maintained consumer | ci_secrets, self_protection | 2026-07-11 – 2026-07-25 | 0.0 (fixtures) | no |
-| [in-repo/ovk-pilot-infra-terraform-k8s](pilots/infra-terraform-k8s/REPORT.md) | advisory | In-repo maintained profile | infrastructure, ci_secrets | 2026-07-11 – 2026-07-25 | 0.0 (fixtures) | no |
+| [fraware/ovk-consumer-fastapi-terraform](pilots/fastapi-terraform/REPORT.md) | advisory | Maintained consumer | ci_secrets, infrastructure | 2026-07-11 – 2026-07-25 | unknown (unadjudicated fixtures) | no |
+| [fraware/ovk-consumer-express-actions](pilots/express-actions/REPORT.md) | advisory | Maintained consumer | ci_secrets, self_protection | 2026-07-11 – 2026-07-25 | unknown (unadjudicated fixtures) | no |
+| [in-repo/ovk-pilot-infra-terraform-k8s](pilots/infra-terraform-k8s/REPORT.md) | advisory | In-repo maintained profile | infrastructure, ci_secrets | 2026-07-11 – 2026-07-25 | unknown (unadjudicated fixtures) | no |
 | TBD - recruiting first true external OSS adopter | recruiting | True external OSS (open) | ci_secrets | — | — | no |
 
-Maintained-consumer and in-repo profile rows are **fixture/dogfood** measurements with `strict_mode_recommendation: remain_advisory`. They do not replace a true independent external OSS adopter. When such a repo completes advisory rollout, ingest artifacts, update the registry, re-render the adoption summary, and keep the kind label explicit. Target: under 5% false positives before enabling strict mode on protected branches.
+Maintained-consumer and in-repo profile rows are **fixture/dogfood** measurements with `strict_mode_recommendation: remain_advisory`. They do not replace a true independent external OSS adopter. When such a repo completes advisory rollout, ingest artifacts, update the registry, re-render the adoption summary, and keep the kind label explicit. No numeric fixture-rate threshold authorizes strict enforcement. The formerly displayed 0.0 error rates were not independently adjudicated and are now null in the registry and adoption summary; historical values remain in Git history. An independent pilot needs explicit, reviewed false-positive and false-negative denominators, coverage and unknown handling.
 
 ### Reporting template
 
