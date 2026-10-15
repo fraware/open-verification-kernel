@@ -122,7 +122,9 @@ def render_adoption_summary(
             "manifests_passed": pilot_dogfood.get("manifests_passed"),
             "manifests_total": pilot_dogfood.get("manifests_total"),
             "median_elapsed_ms": pilot_dogfood.get("median_elapsed_ms"),
-            "false_positive_rate": pilot_dogfood.get("false_positive_rate"),
+            # Legacy fixture PASS/BLOCK is not independent ground truth.
+            # No adjudication provenance is accepted on this dogfood path.
+            "false_positive_rate": None,
             "external_manifest": pilot_dogfood.get(
                 "external_manifest", "examples/pilot_repos/external_oss_ci_secrets.json"
             ),
