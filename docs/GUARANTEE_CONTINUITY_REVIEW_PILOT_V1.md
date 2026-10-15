@@ -6,7 +6,7 @@
 
 Recorded snapshot statuses are displayed as **historical statements from supplied snapshots**, not freshly recomputed verdicts. The machine record explicitly has snapshot_state_reverified_at_review=false. Input signatures are inspected by the transport gate; neither that verification nor a previously recorded established state establishes current source-semantic validity.
 
-A reviewer needs three distinct answers across revisions: (1) whether OVK's current typed Protected Effect claim is established by its supported model; (2) whether old signed evidence passes a narrow historical reuse eligibility gate; and (3) whether that old evidence is independently authorized for reliance. These are separate judgments.
+A reviewer needs three distinct answers across revisions: (1) what each supplied snapshot **recorded** about OVK's typed Protected Effect claim, and whether that snapshot passes internal structural consistency checks; (2) whether old signed evidence passes a narrow historical reuse eligibility gate; and (3) whether that old evidence is independently authorized for reliance. These are separate judgments. Structurally inconsistent snapshots produce `untrusted_snapshot` as the displayed status even if the caller-provided record contains `established`. A consistent snapshot still does not imply source authenticity or live re-verification.
 
 The new reviewer adapter and script emit a Markdown review and schema-versioned JSON, preserving the exact source/target record identifiers, **field-level differences in caller-supplied guarantee specifications** (including changed statement and assumptions), evidence digests, and gate reason codes. It displays supplied statements for reviewer context while explicitly withholding authentication of their governing Git manifests. The adapter delegates historical transport to PR #179; it adds **no new verifier**, no evidence reuse permission, and no semantic widening.
 
@@ -20,7 +20,7 @@ The test fixture is synthetic, constructed from OVK Assurance IR objects rather 
 | Edited descriptive guarantee statement, same typed PE slice | established | not admitted: definition changed | fresh evidence or independent review |
 | Modified governing assumption, same typed PE slice | established | not admitted: definition changed | fresh evidence or independent review |
 | Wrong signature-verification key | modeled target state still established under separately supplied original key | not admitted: invalid signature | review; no reliance |
-| Missing target guarantee state | unknown | not admitted | review; no reliance |
+| Missing or inconsistent target guarantee snapshot | untrusted_snapshot | not admitted | review; snapshot must be reconstructed from authenticated evidence |
 | Historical signature and recorded reuse valid, but manifest/time authority not independently established | established | conditional candidate | still NO production reliance |
 
 The word "established" here is scoped to OVK's typed Protected Effect machine claim. It is not a proof of the English guarantee statement or of all Python authorization behavior. A changed statement does not imply the typed machine claim was violated, and an ineligible transport is not a counterexample to that typed claim.
