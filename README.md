@@ -163,7 +163,7 @@ jobs:
 
 **Release safety boundary (verified 2026-10-15):** `v1.3.0-rc.1` is not published or tagged. This example runs **historical `v1.2.1` code**, pinned to its original source commit; it does not include the draft guarantee-continuity feature or the new fail-closed installer. **The `v1.2.1` Action falls back to its checkout if the requested PyPI version fails to install.** Do not treat that installation as independently authenticated solely because `OVK_PACKAGE_VERSION` is set. The old Git tag is unsigned, and its GitHub Release is not marked immutable. The corrected installation contract in draft PR #220 takes effect only in a later, independently authorized release. Until then use the checkout examples for development or a separately governed, consenting **advisory-only** experiment. See [release status](docs/CURRENT_RELEASE_STATUS.md), [pilot playbook](docs/EXTERNAL_PILOT_PLAYBOOK.md), and [launch checklist](docs/DEVELOPER_PREVIEW_READINESS.md).
 
-Copy a full consumer example: [`examples/github_workflows/external_consumer.yml`](examples/github_workflows/external_consumer.yml)
+Copy the **minimal advisory-only** consumer example: [`examples/github_workflows/external_consumer.yml`](examples/github_workflows/external_consumer.yml). It uses the historical Action and discloses its fallback limitation; it does not enable strict enforcement or require write tokens.
 
 ---
 
