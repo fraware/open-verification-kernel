@@ -11,6 +11,8 @@ Guide for adding OVK to a **consenting** external open-source repository. Start 
 
 Enable additional check types one at a time after each is stable on your diffs.
 
+**Verified release distinction (2026-10-15):** the examples below pin the exact source commit of the published `v1.2.1` release; the Git tag is unsigned and its GitHub Release is not marked immutable. `OVK_PACKAGE_VERSION: 1.2.1` selects the corresponding older PyPI distribution. New guarantee-continuity reviewer work from draft #218 is **not included**. Read [current release status](CURRENT_RELEASE_STATUS.md) before installing.
+
 ## Step 1 — Advisory mode (no merge blocking)
 
 1. Copy `docs/templates/pilot_manifest_ci_secrets.template.json` to `.verification/ci_secrets_pilot.json` in the target repo.
@@ -41,14 +43,14 @@ jobs:
           git fetch origin "${{ github.base_ref }}"
           git diff "origin/${{ github.base_ref }}...HEAD" > ovk-pr.diff
       - name: OVK advisory check
-        uses: fraware/open-verification-kernel@v1.2.1
+        uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
         with:
           mode: advisory
           use-check: "true"
           changed-files: ovk-pr.diff
           post-comment: "false"
       - name: OVK advisory verify (CI secrets check)
-        uses: fraware/open-verification-kernel@v1.2.1
+        uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
         with:
           mode: advisory
           verification-manifest: .verification/ci_secrets_pilot.json
