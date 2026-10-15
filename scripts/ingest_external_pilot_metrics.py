@@ -55,16 +55,6 @@ def _median_elapsed_ms(results: list[dict[str, Any]]) -> float | None:
     return float(statistics.median(timings))
 
 
-def _false_positive_rate(results: list[dict[str, Any]]) -> float | None:
-    evaluated = [item for item in results if "passed" in item]
-    if not evaluated:
-        return None
-    false_positives = sum(
-        1 for item in evaluated if not item.get("passed") and item.get("merge_recommendation") == "block"
-    )
-    return false_positives / len(evaluated)
-
-
 def _blocked_count(results: list[dict[str, Any]]) -> int | None:
     evaluated = [item for item in results if "merge_recommendation" in item]
     if not evaluated:
@@ -95,9 +85,10 @@ def _metrics_from_artifacts(artifacts_dir: Path) -> dict[str, Any]:
         results = list(pilot_report.get("results", []))
         metrics["prs_evaluated"] = len(results) or None
         metrics["prs_blocked"] = _blocked_count(results)
-        metrics["false_positive_rate"] = _false_positive_rate(results)
-        if metrics["false_positive_rate"] is not None and metrics["prs_evaluated"]:
-            metrics["false_positives"] = round(metrics["false_positive_rate"] * metrics["prs_evaluated"])
+        # 'passed' and 'merge_recommendation' are OVK's own output labels.
+        # They cannot independently adjudicate a false positive or measure
+        # false-negative risk. Only a separately reviewed external report may
+        # supply false_positives / false_positive_rate.
         metrics["median_check_latency_ms"] = _median_elapsed_ms(results)
 
     if evidence_path and evidence_path.exists():
@@ -159,10 +150,19 @@ def build_pilot_row(
     if existing is not None:
         row.update({key: value for key, value in existing.items() if value is not None or key in row})
         row["repository"] = repo
-    if report_path is not None and report_path.exists():
-        row = _apply_report(row, report_path)
     if artifacts_dir is not None and artifacts_dir.is_dir():
-        row.update({key: value for key, value in _metrics_from_artifacts(artifacts_dir).items() if value is not None})
+        artifact_metrics = _metrics_from_artifacts(artifacts_dir)
+        if artifact_metrics.get("prs_evaluated") is not None:
+            # A new artifact cohort invalidates older adjudicated error
+            # counts. Avoid carrying forward a historical zero as evidence
+            # that the current, unreviewed cohort had no false positives.
+            row["false_positives"] = None
+            row["false_positive_rate"] = None
+        row.update({key: value for key, value in artifact_metrics.items() if value is not None})
+    if report_path is not None and report_path.exists():
+        # A reviewer-provided report is the only source of error labels.
+        # Self-reports still need independent verification before promotion.
+        row = _apply_report(row, report_path)
     row["status"] = _infer_status(row)
     return row
 
