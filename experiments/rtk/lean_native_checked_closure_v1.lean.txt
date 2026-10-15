@@ -38,13 +38,14 @@ private partial def rtkGraphWalk
       throw s!"RTK_GRAPH_UNSAFE_OR_PARTIAL_DEFINITION:{name}"
     let typeAst ← rtkExprAst val.type 1024
     let valueAst ← rtkExprAst val.value 1024
-    let deps := (rtkGraphRefs val.type ++ rtkGraphRefs val.value).toList
+    let deps := ((val.type.getUsedConstantsAsSet ++
+      val.value.getUsedConstantsAsSet).toList.toArray.qsort Lean.Name.lt).toList
     let node := Lean.Json.mkObj [
       ("name", Lean.Json.str name.toString),
       ("kind", Lean.Json.str "definition"),
       ("type_ast", typeAst),
       ("value_ast", valueAst),
-      ("level_params", Lean.Json.arr (val.levelParams.toArray.map (Lean.Json.str ∘ Lean.Name.toString))),
+      ("level_params", Lean.Json.arr (val.levelParams.toArray.map (fun n => Lean.Json.str n.toString))),
       ("reducibility_hint", rtkGraphHint val.hints),
       ("safety", Lean.Json.str "safe"),
       ("direct_references", rtkGraphNameArray (deps.toArray.qsort Lean.Name.lt)),
