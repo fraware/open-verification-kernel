@@ -8,7 +8,7 @@ Recorded snapshot statuses are displayed as **historical statements from supplie
 
 A reviewer needs three distinct answers across revisions: (1) whether OVK's current typed Protected Effect claim is established by its supported model; (2) whether old signed evidence passes a narrow historical reuse eligibility gate; and (3) whether that old evidence is independently authorized for reliance. These are separate judgments.
 
-The new reviewer adapter and script emit a Markdown review and schema-versioned JSON, preserving the exact source/target record identifiers, known declaration changes, evidence digests, and gate reason codes. The adapter delegates historical transport to PR #179; it adds **no new verifier**, no evidence reuse permission, and no semantic widening.
+The new reviewer adapter and script emit a Markdown review and schema-versioned JSON, preserving the exact source/target record identifiers, **field-level differences in caller-supplied guarantee specifications** (including changed statement and assumptions), evidence digests, and gate reason codes. It displays supplied statements for reviewer context while explicitly withholding authentication of their governing Git manifests. The adapter delegates historical transport to PR #179; it adds **no new verifier**, no evidence reuse permission, and no semantic widening.
 
 ## Development acceptance scenarios
 
