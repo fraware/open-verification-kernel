@@ -2,9 +2,11 @@
 
 Living release/adoption status for Open Verification Kernel.
 
-**Last reviewed:** 2026-08-26
+**Release/ref state checked live:** 2026-10-15 (other program and maturity claims remain subject to their separate evidence).
 
-**Current judgment:** `1.3.0-rc.1` is an **engineering release candidate after the merge of final technical-closure PR #23**. It is not yet an attributable `v1.3.0-rc.1` release. The last previously signed immutable release remains `v1.2.1`; evidence from that tag must not be re-attributed to the RC source tree. The exact RC source identity is the final post-documentation candidate SHA that passes the complete exact-head development matrix; later movement of `main` does not redefine or authorize that candidate.
+**Current judgment:** `1.3.0-rc.1` is an **unpublished engineering release candidate**, not an attributable `v1.3.0-rc.1` release. On 2026-10-15, the RC tag lookup returned 404; the latest GitHub Release is `v1.2.1` (published 2026-07-23). Its annotated Git tag is reported by GitHub as **unsigned** (`verification.verified=false`, `reason=unsigned`), and its GitHub Release object reports `immutable=false`. Wheel/sdist Sigstore bundle assets are attached, but their cryptographic validity was **not independently verified by this live status review**. Do not conflate distribution signing with Git-tag signing or release immutability.
+
+`main` resolved to `79370539ca9b26a0a6b01f6ac6ab6923243f40f4` and reported `protected=false`; the repository rulesets list was empty. The branch-protection-detail endpoint was inaccessible to this integration (403), so administrative configuration was not inspected exhaustively. These observations do **not** establish the necessary release-ref protections. Issue #25 remains blocking. Historical artifacts from `v1.2.1` must never be re-attributed to an RC source tree. A new candidate requires the complete exact-head development matrix and independently authorized tag-bound release evidence.
 
 The authoritative publication procedure is [RELEASE.md](RELEASE.md). The evidence threshold is [ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md). The generated TCB is [TRUSTED_COMPUTING_BASE.md](TRUSTED_COMPUTING_BASE.md).
 
@@ -124,7 +126,7 @@ Safe recovery after a partial PyPI/GitHub failure is allowed only when existing 
 | Strict required check | Repository-specific only after trusted inputs and empirical calibration for the intended lane |
 | General production-stable enforcement | **Not claimed** |
 
-Until an attributable `v1.3.0-rc.1` release exists, do not present that tag as a live install pin. Historical `v1.2.1` remains a separate immutable release with its own source and signing evidence.
+Until an attributable `v1.3.0-rc.1` release exists, do not present that tag as a live install pin. Historical `v1.2.1` is a separate **published release**, with attached signing-related assets; its **Git tag is unsigned and GitHub Release immutability is false** according to the October 15, 2026 API observation. Its distribution bundles have not been cryptographically reverified by this review.
 
 ## Remaining external/maintainer evidence for the RC
 

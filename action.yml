@@ -103,8 +103,14 @@ runs:
           pip install .
         }
         if [ -n "${OVK_PACKAGE_VERSION:-}" ]; then
-          pip install "open-verification-kernel==${OVK_PACKAGE_VERSION}" || install_from_checkout
+          # A requested distribution version is an identity constraint.
+          # Never silently substitute the Action checkout if PyPI resolution fails.
+          echo "OVK install: requested distribution version ${OVK_PACKAGE_VERSION}"
+          pip install "open-verification-kernel==${OVK_PACKAGE_VERSION}"
+          python -c 'from importlib.metadata import version; print("OVK installed distribution version:", version("open-verification-kernel"))'
         else
+          # Action source installs remain available for SHA-pinned development.
+          echo "OVK install: package from Action source checkout"
           install_from_checkout
         fi
     - name: Initialize verification directory if needed
