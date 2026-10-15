@@ -1,102 +1,120 @@
 import Lean
 
 /-!
-# Historical-evidence support locality for a bounded unfolding calculus
+# Transitive historical-evidence support, finite trace calculus
 
-This is a machine-checked theorem for the Eval relation DEFINED BELOW.
-It is not a theorem about Lean.Kernel.check, Lean definitional equality,
-Lean's actual ConstantInfo extraction, or authentication of source/target
-environments. It does not authorize OVK production evidence reuse.
-
-The point of this fragment is to make *transitive* lookup support explicit
-in a historical evaluation derivation, and to show that preserving only
-the names used by that exact derivation suffices to preserve its result.
-Unrelated environment entries may change. Unlike a direct-constant
-whitelist, this support includes recursively unfolded definitions.
+This file proves a sound preservation theorem for the Trace and validity
+relations DEFINED HERE. It is not a theorem about Lean.Kernel.check, actual
+Lean Expr declarations, the soundness of external extraction, or production
+authority. The trace is explicit inspectable evidence, not a proof argument
+whose support set is merely asserted by a caller.
 -/
 
 namespace RTKTransitiveEvidenceSupport
 
 inductive Term where
-  | literal (n : Nat) : Term
-  | constant (name : String) : Term
-  | add (left right : Term) : Term
+  | literal (value : Nat)
+  | constant (name : String)
+  | add (left right : Term)
 deriving Repr, DecidableEq
 
 abbrev Environment := String → Option Term
 
-/-- Finite historical evaluation derivations, not Lean kernel derivations. -/
-inductive Eval (env : Environment) : Term → Nat → Type where
-  | literal (n : Nat) : Eval env (.literal n) n
-  | add {left right : Term} {a b : Nat}
-      (hLeft : Eval env left a) (hRight : Eval env right b) :
-      Eval env (.add left right) (a + b)
-  | constant {name : String} {body : Term} {value : Nat}
-      (lookup : env name = some body) (inner : Eval env body value) :
-      Eval env (.constant name) value
+/-- Explicit finite evidence of literal, addition, and constant unfolding. -/
+inductive Trace where
+  | literal (value : Nat)
+  | add (left right : Trace)
+  | unfold (name : String) (expectedBody : Term) (inner : Trace)
+deriving Repr
+
+/-- Exact term to which the trace is attached. -/
+def Trace.term : Trace → Term
+  | .literal n => .literal n
+  | .add left right => .add left.term right.term
+  | .unfold name _ _ => .constant name
+
+/-- Result recorded by the historical trace. -/
+def Trace.value : Trace → Nat
+  | .literal n => n
+  | .add left right => left.value + right.value
+  | .unfold _ _ inner => inner.value
 
 /--
-Names read by THIS derivation, including the transitive definitions it
-unfolds. It is intentionally evidence-relative and may contain duplicates.
-This is not a sound native Lean kernel support extractor.
+All names actually unfolded by a given trace, recursively including
+names in the recorded bodies. May contain duplicates; no native Lean
+kernel-support completeness is asserted.
 -/
-def Eval.support {env : Environment} {term : Term} {value : Nat} :
-    Eval env term value → List String
+def Trace.support : Trace → List String
   | .literal _ => []
   | .add left right => left.support ++ right.support
-  | .constant (name := name) _ inner => name :: inner.support
+  | .unfold name _ inner => name :: inner.support
 
 /--
-Transport a historical evaluation derivation to a different environment
-under agreement on exactly its recorded transitive lookup support.
-This is an induction over the actual derivation, not a congruence theorem
-obtained by assuming whole-environment equality.
+The explicit historical trace is valid in a declared environment only if
+every referenced constant has the recorded body, the nested trace proves
+that body's evaluation, and subtraces are themselves valid.
 -/
-theorem transport (source : Environment) {term : Term} {value : Nat}
-    (historical : Eval source term value) :
-    ∀ target : Environment,
-      (∀ name, name ∈ historical.support → source name = target name) →
-      Eval target term value := by
-  induction historical with
+def Trace.valid (env : Environment) : Trace → Prop
+  | .literal _ => True
+  | .add left right => left.valid env ∧ right.valid env
+  | .unfold name expectedBody inner =>
+      env name = some expectedBody ∧
+      inner.term = expectedBody ∧ inner.valid env
+
+/--
+Evidence-local transport: preserving the environment lookups present
+in the transitive historical trace suffices to preserve that EXACT trace's
+validity, including recorded term and result. The environments can
+differ arbitrarily outside the support.
+-/
+theorem valid_transport (trace : Trace) :
+    ∀ source target : Environment,
+      trace.valid source →
+      (∀ name, name ∈ trace.support → source name = target name) →
+      trace.valid target := by
+  induction trace with
   | literal n =>
-      intro target _
-      exact Eval.literal n
+      intro source target _ _
+      trivial
   | add left right ihLeft ihRight =>
-      intro target agreement
-      apply Eval.add
-      · apply ihLeft target
+      intro source target hValid hAgreement
+      constructor
+      · apply ihLeft source target hValid.1
         intro name hName
-        exact agreement name (by simp [Eval.support, hName])
-      · apply ihRight target
+        exact hAgreement name (by simp [Trace.support, hName])
+      · apply ihRight source target hValid.2
         intro name hName
-        exact agreement name (by simp [Eval.support, hName])
-  | @constant name body value lookup inner ih =>
-      intro target agreement
-      apply Eval.constant (body := body)
+        exact hAgreement name (by simp [Trace.support, hName])
+  | unfold name body inner ih =>
+      intro source target hValid hAgreement
+      refine ⟨?_, hValid.2.1, ?_⟩
       · calc
           target name = source name :=
-            (agreement name (by simp [Eval.support])).symm
-          _ = some body := lookup
-      · apply ih target
+            (hAgreement name (by simp [Trace.support])).symm
+          _ = some body := hValid.1
+      · apply ih source target hValid.2.2
         intro used hUsed
-        exact agreement used (by simp [Eval.support, hUsed])
+        exact hAgreement used (by simp [Trace.support, hUsed])
 
-/-- A source-specific historical result survives any irrelevant extension. -/
-theorem transport_with_support_agreement
-    (source target : Environment)
-    {term : Term} {value : Nat}
-    (historical : Eval source term value)
-    (agreement : ∀ name, name ∈ historical.support →
-      source name = target name) :
-    Eval target term value :=
-  transport source historical target agreement
+/--
+Exhibits a valid target certificate using identical historical evidence,
+without assuming the entire environment unchanged.
+-/
+theorem historical_evidence_transport
+    (source target : Environment) (trace : Trace)
+    (sourceValid : trace.valid source)
+    (sameTransitiveSupport :
+      ∀ name, name ∈ trace.support → source name = target name) :
+    trace.valid target :=
+  valid_transport trace source target sourceValid sameTransitiveSupport
 
 /-
-Development witness: both source and target keep the SAME definition
-body for "op". The target changes the transitive definition of "base".
-The name "base" must be included in the historical support. This exposes
-why comparing only the immediately referenced "op" body is insufficient
-once its body is allowed to refer to other definitions.
+Development boundary witness. Source and target have byte-for-byte equal
+definitions for "op" (which references "base"), while "base" changes.
+The source historical evaluation of "op" yields 0 and its old trace
+does not validate against the changed target environment. A new target
+trace evaluates "op" to 1. This is a model-level counterexample to an
+unrestricted immediate-declaration-only support criterion.
 -/
 def sourceEnv : Environment
   | "op" => some (.constant "base")
@@ -108,34 +126,30 @@ def changedEnv : Environment
   | "base" => some (.literal 1)
   | _ => none
 
-def originalEvaluation : Eval sourceEnv (.constant "op") 0 := by
-  apply Eval.constant (body := .constant "base")
-  · rfl
-  · apply Eval.constant (body := .literal 0)
-    · rfl
-    · exact Eval.literal 0
+def historicalTrace : Trace :=
+  .unfold "op" (.constant "base")
+    (.unfold "base" (.literal 0) (.literal 0))
 
-def changedEvaluation : Eval changedEnv (.constant "op") 1 := by
-  apply Eval.constant (body := .constant "base")
-  · rfl
-  · apply Eval.constant (body := .literal 1)
-    · rfl
-    · exact Eval.literal 1
+def targetTrace : Trace :=
+  .unfold "op" (.constant "base")
+    (.unfold "base" (.literal 1) (.literal 1))
 
+example : historicalTrace.term = .constant "op" := rfl
+example : historicalTrace.value = 0 := rfl
+example : targetTrace.term = .constant "op" := rfl
+example : targetTrace.value = 1 := rfl
 example : sourceEnv "op" = changedEnv "op" := rfl
 example : sourceEnv "base" ≠ changedEnv "base" := by decide
-example : "base" ∈ originalEvaluation.support := by decide
-example : "op" ∈ originalEvaluation.support := by decide
+example : "op" ∈ historicalTrace.support := by decide
+example : "base" ∈ historicalTrace.support := by decide
+example : historicalTrace.valid sourceEnv := by decide
+example : ¬ historicalTrace.valid changedEnv := by decide
+example : targetTrace.valid changedEnv := by decide
 
 /-
-Theorem scope:
-  * If the recorded derivation is well-formed and its lookup trace is
-    complete by construction, equality of those lookups preserves its
-    evaluated value, even with unrelated changes elsewhere.
-  * This neither establishes that real Lean Expr kernel support is
-    representable by Eval nor that an external extractor observes all
-    required lookups.
-  * The derivation is itself evidence; an untrusted caller must not
-    fabricate it or simply assert support-completeness.
+Boundary: The transitive support of a supplied trace is complete only with
+respect to THIS inductively defined trace semantics. No completeness result
+connects Trace.support to real Lean Expr kernel dependencies, imported
+declaration metadata, axioms, checker configuration or authentication.
 -/
 end RTKTransitiveEvidenceSupport
