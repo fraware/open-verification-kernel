@@ -103,14 +103,17 @@ def test_non_merge_pr_checkout_rejected(example_repo):
         binding.prepare(**options)
 
 
-def test_external_input_is_advisory_and_explicitly_unbound(example_repo):
+@pytest.mark.parametrize("payload", [b"caller-selected input\n", b"caller-selected input\r\n"])
+def test_external_input_is_advisory_and_explicitly_unbound(example_repo, payload):
+    # Bytes must be stable across OSes: Windows text-mode writes translate LF to CRLF.
     custom = example_repo["repo"] / "manual.diff"
-    custom.write_text("caller-selected input\n", encoding="utf-8")
+    custom.write_bytes(payload)
     path, diff, receipt = binding.prepare(
         **make_args(example_repo), changed_files=str(custom),
     )
     assert path == str(custom)
-    assert diff == b"caller-selected input\n"
+    assert diff == payload
+    assert receipt["input_diff_sha256"] == hashlib.sha256(payload).hexdigest()
     assert receipt["input_comparison"] == "caller_supplied_unbound"
     assert receipt["input_structurally_bound_to_checkout"] is False
     with pytest.raises(binding.BindingError, match="cannot authorize strict"):
