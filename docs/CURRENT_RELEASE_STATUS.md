@@ -2,7 +2,7 @@
 
 Living release/adoption status for Open Verification Kernel.
 
-**Last reviewed:** 2026-08-26
+**Last reviewed:** 2026-10-15 for live release/ref integrity only. Full engineering release candidacy has not been recertified by this documentation audit.
 
 **Current judgment:** `1.3.0-rc.1` is an **engineering release candidate after the merge of final technical-closure PR #23**. It is not yet an attributable `v1.3.0-rc.1` release. The last published GitHub release is `v1.2.1`. As inspected on 2026-10-15, the annotated `refs/tags/v1.2.1` object reports `verification.verified=false` with reason `unsigned`, its GitHub release reports `immutable=false`, the repository rulesets API returns `[]`, and the live `main` branch object explicitly reports `protected=false` (the detailed protection endpoint returned HTTP 403 to this integration). Release assets include separate signing materials, which must be verified on their own terms. Neither the tag signature nor protection/immutability should be assumed. Evidence from that historical release must not be re-attributed to the RC source tree. The exact RC source identity is the final post-documentation candidate SHA that passes the complete exact-head development matrix; later movement of `main` does not redefine or authorize that candidate.
 
