@@ -21,7 +21,7 @@ The FastAPI authorization / Protected Effect path is a separate bounded advisory
 
 ## 1. Install a released, attributable advisory build
 
-Use the [current release status](CURRENT_RELEASE_STATUS.md), [release procedure](RELEASE.md) and an exact vetted release/ref identity. The historic `v1.2.1` example below is a **reference only**: confirm the remote tag and distribution integrity for the installation, and never treat a draft `v1.3.0-rc.1` as a published release on the strength of green development CI.
+Use the [current release status](CURRENT_RELEASE_STATUS.md), [release procedure](RELEASE.md) and an exact vetted release/ref identity. The historic `v1.2.1` example below uses its **full 40-hex source commit**, not the unprotected tag: confirm the remote tag and distribution integrity for the installation, and never treat a draft `v1.3.0-rc.1` as a published release on the strength of green development CI.
 
 Copy `docs/templates/pilot_manifest_ci_secrets.template.json` into the consenting repository as `.verification/ci_secrets_pilot.json`, and replace sample inputs with real, explicitly in-scope paths. Do **not** treat `examples/ci_secrets/input_secrets_safe.json` as coverage of the adopter's code.
 
@@ -38,7 +38,7 @@ jobs:
   ovk-advisory:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -47,20 +47,20 @@ jobs:
           git fetch origin "${{ github.base_ref }}"
           git diff "origin/${{ github.base_ref }}...HEAD" > ovk-pr.diff
       - name: OVK advisory check
-        uses: fraware/open-verification-kernel@v1.2.1
+        uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
         with:
           mode: advisory
           use-check: "true"
           changed-files: ovk-pr.diff
           post-comment: "false"
       - name: OVK advisory verification
-        uses: fraware/open-verification-kernel@v1.2.1
+        uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
         with:
           mode: advisory
           verification-manifest: .verification/ci_secrets_pilot.json
           bundle-output-dir: ovk-pilot-bundle
           post-comment: "false"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: ovk-pilot-artifacts
@@ -71,7 +71,7 @@ jobs:
           if-no-files-found: warn
 ```
 
-Review the actual code and external actions before enabling this workflow. A pinned immutable SHA is preferable once the maintainer has verified the exact source identity. The check stays advisory, cannot authorize a merge, and does not receive secrets from untrusted PRs.
+Review the actual code and external actions before enabling this workflow. The full source-commit SHA pins the top-level Action, yet the historical Action may reference transitive dependencies by mutable tags; independently review that supply chain and keep the pilot non-blocking. The check stays advisory, cannot authorize a merge, and does not receive secrets from untrusted PRs.
 
 ## 2. Observe all naturally occurring PRs
 
