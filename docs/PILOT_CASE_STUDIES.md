@@ -2,7 +2,7 @@
 
 Measured outcomes from example configurations in `examples/pilot_repos/`. Metrics use `ovk check` and `ovk verify` in advisory mode.
 
-**Honesty:** in-repo pilot dogfood is **not** independent consumer validation and does not authorize `verified_source_sha` or `externally_calibrated_strict`. Live signed pin for external remotes remains `v1.2.1` until `v1.3.0-rc.1` is attributable.
+**Honesty:** in-repo pilot dogfood is **not** independent consumer validation and does not authorize `verified_source_sha` or `externally_calibrated_strict`. The last published tag is `v1.2.1`, whose annotated Git tag was reported unsigned by GitHub on 2026-10-15; do not call it a Git-signed or protected pin. For any permitted external advisory experiment, use a reviewed **full 40-hex commit SHA** and independently verify applicable release assets and operator trust.
 
 ## In-repo reference pilot
 
@@ -12,7 +12,7 @@ Simulates how an external repo would consume OVK before community pilots land.
 
 **Manifest:** `examples/pilot_repos/external_oss_ci_secrets.json`
 
-**Consumer path:** local Action (`./`) with package version matching the workflow under test. Prefer mirroring `@v1.2.1` for live signed pins; bump only after an attributable RC tag.
+**Consumer path:** local Action (`./`) with package version matching the workflow under test. Prefer the audited commit SHA `a27d5720f4350c00bca34f71d991c31f5a2f38c7` behind the published `v1.2.1` annotated tag for a legacy advisory Action example, with explicit owner review. This pins code identity but does not independently verify signer, source semantics, or dependency integrity. Bump only after an attributable new release.
 
 | Metric | Target | Measured |
 |--------|--------|----------|
@@ -137,14 +137,14 @@ Maintained-consumer and in-repo profile rows are **fixture/dogfood** measurement
 
 **Manifest:** adapted from `examples/pilot_repos/external_oss_ci_secrets.json` or `self_protection_only.json`
 
-**Rollout:** advisory (at least 14 days) → strict on `main`
+**Rollout:** advisory (at least 14 days) → independent review of qualified source coverage, sample adequacy, unknowns, false negatives, false positives, governance and rollback → optional separately approved strict deployment. There is no automatic promotion based on elapsed time or one metric.
 
 | Metric | Target | Measured |
 |--------|--------|----------|
 | Advisory period | ≥14 days | _TBD_ |
 | PRs scanned | — | _TBD_ |
 | Block rate on unsafe workflow diff | 100% | _TBD_ |
-| False positive rate | <5% before strict | _TBD_ |
+| False-positive numerator/denominator and uncertainty | report all cases; no automatic strict threshold from small N | _TBD_ |
 | Time to first green after repair | <5 minutes | _TBD_ |
 | Strict enable date | — | _TBD_ |
 | p95 Action latency | — | _TBD_ |
@@ -153,6 +153,6 @@ Maintained-consumer and in-repo profile rows are **fixture/dogfood** measurement
 ### Publication checklist
 
 - [ ] Advisory window ≥14 days with artifact retention
-- [ ] False-positive rate computed and under 5% (or strict not yet enabled)
-- [ ] Link to workflow file and version pin (`@v1.2.1` live; `@v1.3.0-rc.1` after attributable cut)
+- [ ] Report false positives with denominator and sampling limitations; strict remains off until independent source-profile, sensitivity/false-negative and policy qualification
+- [ ] Link to workflow file and exact immutable commit SHA; do not rely on unprotected release tags as immutable installation pins
 - [ ] Update the **Active and recruiting** table with measured values
