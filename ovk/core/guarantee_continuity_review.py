@@ -13,6 +13,9 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from ovk.core.guarantee_assurance_state import GuaranteeAssuranceSnapshot
+from ovk.core.guarantee_assurance_ledger import (
+    validate_guarantee_assurance_snapshot_structure,
+)
 from ovk.core.guarantee_graph import GuaranteeSpec
 from ovk.core.guarantee_transport import evaluate_guarantee_transport_admission
 from ovk.core.models import VerificationEvidence
@@ -31,6 +34,8 @@ class GuaranteeContinuityReview(BaseModel):
     source_typed_claim_status: str
     target_typed_claim_status: str
     snapshot_state_reverified_at_review: Literal[False] = False
+    source_snapshot_structural_issues: list[str] = Field(default_factory=list)
+    target_snapshot_structural_issues: list[str] = Field(default_factory=list)
     target_evidence_origin: str | None = None
     source_definition_digest: str | None = None
     target_definition_digest: str | None = None
@@ -67,6 +72,14 @@ class GuaranteeContinuityReview(BaseModel):
                 .replace("\n", " ")
             )
 
+        source_structure = (
+            ", ".join(safe(issue) for issue in self.source_snapshot_structural_issues)
+            if self.source_snapshot_structural_issues else "no structural inconsistency detected"
+        )
+        target_structure = (
+            ", ".join(safe(issue) for issue in self.target_snapshot_structural_issues)
+            if self.target_snapshot_structural_issues else "no structural inconsistency detected"
+        )
         changed_fields = (
             ", ".join(safe(field) for field in self.changed_specification_fields)
             if self.changed_specification_fields else "none"
@@ -87,6 +100,8 @@ class GuaranteeContinuityReview(BaseModel):
             f"| Target snapshot recorded typed-claim status | {safe(self.target_typed_claim_status)} |\n"
             f"| Target evidence origin | {safe(self.target_evidence_origin)} |\n"
             "| Snapshot state independently reverified now | **NO** |\n"
+            f"| Source snapshot structural issues | {source_structure} |\n"
+            f"| Target snapshot structural issues | {target_structure} |\n"
             f"| Declared definition changed | {str(self.declared_definition_changed).lower()} |\n"
             f"| Declared machine claim changed | {str(self.declared_machine_claim_changed).lower()} |\n"
             f"| Changed supplied declaration fields | {changed_fields} |\n"
@@ -134,6 +149,8 @@ def build_guarantee_continuity_review(
     is unverified here. Live expiration, revocation and source semantics are
     also outside this function, so no result authorizes production reliance.
     """
+    source_snapshot_issues = validate_guarantee_assurance_snapshot_structure(source)
+    target_snapshot_issues = validate_guarantee_assurance_snapshot_structure(target)
     transport = evaluate_guarantee_transport_admission(
         source,
         target,
@@ -160,8 +177,16 @@ def build_guarantee_continuity_review(
         subject_repo=target.subject_repo,
         source_head_sha=source.subject_head_sha,
         target_head_sha=target.subject_head_sha,
-        source_typed_claim_status=_status(source, guarantee_id),
-        target_typed_claim_status=_status(target, guarantee_id),
+        source_typed_claim_status=(
+            "untrusted_snapshot" if source_snapshot_issues
+            else _status(source, guarantee_id)
+        ),
+        target_typed_claim_status=(
+            "untrusted_snapshot" if target_snapshot_issues
+            else _status(target, guarantee_id)
+        ),
+        source_snapshot_structural_issues=source_snapshot_issues,
+        target_snapshot_structural_issues=target_snapshot_issues,
         target_evidence_origin=target_origin,
         source_definition_digest=transport.source_definition_digest,
         target_definition_digest=transport.target_definition_digest,
