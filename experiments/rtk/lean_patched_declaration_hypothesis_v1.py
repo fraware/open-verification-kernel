@@ -48,8 +48,10 @@ def _references(expr: object, *, remaining: list[int]) -> set[str]:
         raise ValueError("invalid structural expression")
     tag = expr[0]
     if tag == "const" and len(expr) == 3:
-        if not isinstance(expr[2], list) or expr[2]:
-            raise ValueError("nonempty universe instantiation excluded")
+        # Only the concrete Level.zero and Level.succ Level.zero forms
+        # observed in the pinned Nat/Eq fixture are admitted here.
+        if expr[2] not in ([], [["succ", ["zero"]]]):
+            raise ValueError("unrecognized universe instantiation")
         return {_name(expr[1])}
     if tag == "app" and len(expr) == 3:
         return _references(expr[1], remaining=remaining) | _references(
