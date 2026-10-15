@@ -887,9 +887,37 @@ def test_advisory_report_handles_missing_target_state_conservatively(tmp_path):
     source, target, original, reused, _ = _make_signed_transport_case(tmp_path)
     incomplete = target.model_copy(update={"states": []})
     report = _review_for_case(source, incomplete, original, reused)
-    assert report.target_typed_claim_status == "unknown"
+    assert report.target_typed_claim_status == "untrusted_snapshot"
+    assert "state_set_mismatch" in report.target_snapshot_structural_issues
     assert report.historical_transport == "not_admitted"
     assert report.production_reliance_authorized is False
+
+
+
+def test_advisory_report_marks_inconsistent_established_snapshot_untrusted(tmp_path):
+    source, target, original, reused, _ = _make_signed_transport_case(tmp_path)
+    good = target.state_for("G-REFUND")
+    forged = good.model_copy(update={"local_status": "unbound"})
+    malformed = target.model_copy(update={"states": [forged]})
+    report = _review_for_case(source, malformed, original, reused)
+
+    assert good.status == "established"
+    assert forged.status == "established"
+    assert report.target_typed_claim_status == "untrusted_snapshot"
+    assert report.target_snapshot_structural_issues
+    assert "target_snapshot_invalid" in report.transport_reason_codes
+    assert report.historical_transport == "not_admitted"
+    assert report.production_reliance_authorized is False
+    assert "Target snapshot structural issues" in report.to_markdown()
+    assert "untrusted_snapshot" in report.to_markdown()
+
+
+def test_advisory_report_valid_snapshot_structure_is_explicit(tmp_path):
+    source, target, original, reused, _ = _make_signed_transport_case(tmp_path)
+    report = _review_for_case(source, target, original, reused)
+    assert report.source_snapshot_structural_issues == []
+    assert report.target_snapshot_structural_issues == []
+    assert report.target_typed_claim_status == "established"
 
 
 def test_advisory_cli_writes_separate_evidence_bound_reports(tmp_path):
