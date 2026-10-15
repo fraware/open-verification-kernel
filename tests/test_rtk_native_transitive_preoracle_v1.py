@@ -165,6 +165,7 @@ def test_duplicate_native_observer_fails_closed(monkeypatch):
     args = _case(monkeypatch)
     line = args["target_structural_log"].splitlines()[-1]
     args["target_structural_log"] += "\n" + line
+    _rebind_target_native_log(args)
     with pytest.raises(ValueError, match="transitive native record"):
         m.evaluate_native_transitive_boundary(**args)
 
