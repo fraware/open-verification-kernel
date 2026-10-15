@@ -1,5 +1,6 @@
 include README.md
 include LICENSE
+include NOTICE
 recursive-include schemas *.json
 recursive-include templates *.intent.json
 recursive-include adapters *.json
