@@ -139,25 +139,24 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
-  checks: write   # required when emit-check: true
+  pull-requests: read
 
 jobs:
   ovk:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: fraware/open-verification-kernel@v1.3.0-rc.1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
         with:
-          mode: advisory          # switch to strict only after calibration
+          mode: advisory          # non-blocking, human-reviewed
           use-check: "true"       # analyze the PR diff automatically
-          emit-check: "true"      # optional; requires checks: write
-          post-comment: "true"    # requires pull-requests: write
+          emit-check: "false"     # no check-write authority
+          post-comment: "false"   # no comment-write authority
 ```
 
-Pin target is `v1.3.0-rc.1` only after the attributable tag/release exists. Until then, do not treat that tag as a live install surface; see [docs/CURRENT_RELEASE_STATUS.md](docs/CURRENT_RELEASE_STATUS.md).
+The example above pins the **historic v1.2.1 Git commit** because `v1.3.0-rc.1` does not exist as a published release. GitHub reports the historic annotated tag as unsigned and the `main` branch unprotected (audit 2026-10-15). An exact Action SHA fixes the top-level source identity, not every transitive third-party action referenced by the historic Action. Treat it as a consented, non-blocking compatibility pilot only. Do not upgrade to strict or merge-blocking without release provenance, supported source-profile evaluation, and independent calibration. See [docs/CURRENT_RELEASE_STATUS.md](docs/CURRENT_RELEASE_STATUS.md).
 
-Copy a full consumer example: [`examples/github_workflows/external_consumer.yml`](examples/github_workflows/external_consumer.yml)
+For a consented **advisory-only** adopter, begin with the [external pilot playbook](docs/EXTERNAL_PILOT_PLAYBOOK.md) (pilot evidence and sample workflow changes are in draft PR #217). The [external consumer workflow](examples/github_workflows/external_consumer.yml) is a **future strict-mode template referencing an unpublished RC** and is not a valid current installation example.
 
 ---
 

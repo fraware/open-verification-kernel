@@ -2,9 +2,9 @@
 
 Living release/adoption status for Open Verification Kernel.
 
-**Last reviewed:** 2026-08-26
+**Last reviewed:** 2026-10-15 for live release/ref integrity only. Full engineering release candidacy has not been recertified by this documentation audit.
 
-**Current judgment:** `1.3.0-rc.1` is an **engineering release candidate after the merge of final technical-closure PR #23**. It is not yet an attributable `v1.3.0-rc.1` release. The last previously signed immutable release remains `v1.2.1`; evidence from that tag must not be re-attributed to the RC source tree. The exact RC source identity is the final post-documentation candidate SHA that passes the complete exact-head development matrix; later movement of `main` does not redefine or authorize that candidate.
+**Current judgment:** `1.3.0-rc.1` is an **engineering release candidate after the merge of final technical-closure PR #23**. It is not yet an attributable `v1.3.0-rc.1` release. The last published GitHub release is `v1.2.1`. As inspected on 2026-10-15, the annotated `refs/tags/v1.2.1` object reports `verification.verified=false` with reason `unsigned`, its GitHub release reports `immutable=false`, the repository rulesets API returns `[]`, and the live `main` branch object explicitly reports `protected=false` (the detailed protection endpoint returned HTTP 403 to this integration). Release assets include separate signing materials, which must be verified on their own terms. Neither the tag signature nor protection/immutability should be assumed. Evidence from that historical release must not be re-attributed to the RC source tree. The exact RC source identity is the final post-documentation candidate SHA that passes the complete exact-head development matrix; later movement of `main` does not redefine or authorize that candidate.
 
 The authoritative publication procedure is [RELEASE.md](RELEASE.md). The evidence threshold is [ATTRIBUTABLE_PUBLICATION.md](ATTRIBUTABLE_PUBLICATION.md). The generated TCB is [TRUSTED_COMPUTING_BASE.md](TRUSTED_COMPUTING_BASE.md).
 
@@ -124,7 +124,7 @@ Safe recovery after a partial PyPI/GitHub failure is allowed only when existing 
 | Strict required check | Repository-specific only after trusted inputs and empirical calibration for the intended lane |
 | General production-stable enforcement | **Not claimed** |
 
-Until an attributable `v1.3.0-rc.1` release exists, do not present that tag as a live install pin. Historical `v1.2.1` remains a separate immutable release with its own source and signing evidence.
+Until an attributable `v1.3.0-rc.1` release exists, do not present that tag as a live install pin. Historical `v1.2.1` remains a separate **published** release with its own source and artifact-evidence history; the Git tag was not GitHub-verified as signed on 2026-10-15, and ref immutability has not been established. Use an audited exact commit pin for test installations until tag protection is verified.
 
 ## Remaining external/maintainer evidence for the RC
 

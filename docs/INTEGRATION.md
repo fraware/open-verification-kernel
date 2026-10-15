@@ -24,11 +24,13 @@ pip install open-verification-kernel==1.3.0-rc.1
 pip install "open-verification-kernel[solvers]==1.3.0-rc.1"
 ```
 
-Until the wheel is on PyPI, use `pip install -e '.[dev]'` from a checkout. **Live signed pin today:** `@v1.2.1` with `OVK_PACKAGE_VERSION: "1.2.1"`. **Candidate after attributable tag:** `@v1.3.0-rc.1` with matching `OVK_PACKAGE_VERSION`. Do not pin `@main` or treat uncommitted branch work as a verified release.
+The last *published* tag is `v1.2.1`; as of 2026-10-15 its Git tag is **unsigned**, repository `main` is unprotected, and published-release immutability is false. The underlying legacy source commit is `a27d5720f4350c00bca34f71d991c31f5a2f38c7`. For a consented, non-blocking compatibility pilot, pin the exact full commit after owner review and audit its transitive dependencies; this source pin does not prove package, signer or dependency provenance. The `v1.3.0-rc.1` tag **does not exist** and must not be installed or used in workflow examples until independently attributable. See [CURRENT_RELEASE_STATUS.md](CURRENT_RELEASE_STATUS.md).
 
 Optional Z3: `pip install -e '.[solvers]'`
 
 Optional HMAC signing: `export OVK_SIGNING_KEY=your-signing-secret`
+
+**Trust boundary:** this is an HMAC shared **secret** for both signing and verification; do not put it in fork-originated `pull_request` jobs, distribute it as a public verification key, or include it in reviewer artifacts. Historical evidence signed with this key does not independently authenticate repository manifests or authorize production reliance.
 
 ## First demo
 
@@ -93,6 +95,8 @@ permissions:
 
 ### Single check type (self-protection)
 
+The following is a historical integration example showing optional PR commenting/check publication. **It is not an approved external pilot configuration:** it requests write privileges and uses the unprotected `@v1.2.1` tag. For a real external advisory pilot, use the read-only, full-commit-pinned example in [EXTERNAL_PILOT_PLAYBOOK.md](EXTERNAL_PILOT_PLAYBOOK.md) (pending review under PR #217).
+
 ```yaml
 name: OVK
 on:
@@ -106,8 +110,8 @@ jobs:
   ovk:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: fraware/open-verification-kernel@v1.2.1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
         id: ovk
         with:
           mode: advisory
@@ -125,7 +129,7 @@ Development reference: `uses: ./`
 ### All five check types (manifest)
 
 ```yaml
-- uses: fraware/open-verification-kernel@v1.2.1
+- uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
   with:
     mode: advisory
     verification-manifest: .verification/full_mvp.json
@@ -161,7 +165,7 @@ When `verification-manifest` is set, the manifest path wins over `use-check`.
 Downstream example:
 
 ```yaml
-- uses: fraware/open-verification-kernel@v1.2.1
+- uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
   id: ovk
   with:
     mode: strict
@@ -217,7 +221,7 @@ Explicit metadata (most reliable):
 ```
 
 ```yaml
-- uses: fraware/open-verification-kernel@v1.2.1
+- uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
   with:
     check-metadata: ovk-required-checks.json
 ```
@@ -252,6 +256,8 @@ Required GitHub check name: **`Open Verification Kernel`** (from `ovk/core/githu
 
 ### Rollout stages
 
+Stages 2–4 below are *future, qualified configurations*, not presently authorized promotions. Current public profiles are advisory; the repo's ref protection and strict-calibration gates are open. A small or zero-error fixture sample does not qualify strict enforcement.
+
 | Stage | Workflow example | Mode | Publish check run | Branch protection |
 |---|---|---|---|---|
 | 1 — Advisory only | `examples/github_workflows/pilot_fork_adopter.yml` | advisory | no | none |
@@ -259,7 +265,7 @@ Required GitHub check name: **`Open Verification Kernel`** (from `ovk/core/githu
 | 3 — Strict enforcement | `examples/github_workflows/external_consumer.yml` | strict | yes | required on `main` |
 | 4 — Required check wired | `examples/github_workflows/branch_protection_required_check.yml` | strict | yes | required check |
 
-Steps for strict enforcement:
+Steps for strict enforcement **only after explicit release, source-profile, independent adjudication and owner approvals**:
 
 1. Run strict + `emit-check: true` on a sample PR and confirm the check appears on the commit.
 2. In repository **Settings → Branches**, add **`Open Verification Kernel`** as a required status check on protected branches.
@@ -284,8 +290,8 @@ jobs:
   ovk-smoke:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: fraware/open-verification-kernel@v1.2.1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
         env:
           OVK_PACKAGE_VERSION: "1.2.1"
         with:
