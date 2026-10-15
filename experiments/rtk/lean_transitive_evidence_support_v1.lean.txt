@@ -62,6 +62,44 @@ def Trace.valid (env : Environment) : Trace → Prop
       inner.term = expectedBody ∧ inner.valid env
 
 /--
+A second, independent operational relation: evaluating literals,
+additions, and recursive constant references. The proposition does not
+mention Trace.valid or Trace.support.
+-/
+inductive Evaluates (env : Environment) : Term → Nat → Prop where
+  | literal (n : Nat) : Evaluates env (.literal n) n
+  | add {left right : Term} {a b : Nat}
+      (hLeft : Evaluates env left a)
+      (hRight : Evaluates env right b) :
+      Evaluates env (.add left right) (a + b)
+  | constant {name : String} {body : Term} {value : Nat}
+      (lookup : env name = some body)
+      (inner : Evaluates env body value) :
+      Evaluates env (.constant name) value
+
+/--
+Soundness of a valid evidence trace against the independently defined
+big-step evaluator. This closes the model's trace-validator-to-conclusion
+proof obligation, NOT the external Lean-kernel refinement obligation.
+-/
+theorem trace_sound (env : Environment) :
+    ∀ trace : Trace,
+      trace.valid env → Evaluates env trace.term trace.value := by
+  intro trace
+  induction trace with
+  | literal n =>
+      intro _
+      exact Evaluates.literal n
+  | add left right ihLeft ihRight =>
+      intro hValid
+      exact Evaluates.add (ihLeft hValid.1) (ihRight hValid.2)
+  | unfold name body inner ih =>
+      intro hValid
+      have hEvaluation : Evaluates env body inner.value := by
+        simpa only [hValid.2.1] using ih hValid.2.2
+      exact Evaluates.constant hValid.1 hEvaluation
+
+/--
 Evidence-local transport: preserving the environment lookups present
 in the transitive historical trace suffices to preserve that EXACT trace's
 validity, including recorded term and result. The environments can
@@ -107,6 +145,20 @@ theorem historical_evidence_transport
       ∀ name, name ∈ trace.support → source name = target name) :
     trace.valid target :=
   valid_transport trace source target sourceValid sameTransitiveSupport
+
+/--
+If an authenticated, valid historical trace has preserved support,
+the specified operational evaluation consequence is justified in the
+target model. It is stronger than only transporting the validator flag.
+-/
+theorem certified_result_transport
+    (source target : Environment) (trace : Trace)
+    (sourceValid : trace.valid source)
+    (sameTransitiveSupport :
+      ∀ name, name ∈ trace.support → source name = target name) :
+    Evaluates target trace.term trace.value :=
+  trace_sound target trace
+    (valid_transport trace source target sourceValid sameTransitiveSupport)
 
 /-
 Development boundary witness. Source and target have byte-for-byte equal
