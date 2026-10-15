@@ -34,7 +34,7 @@ def test_active_pilot_workflows_do_not_install_nonexistent_candidate() -> None:
         assert UNPUBLISHED_TAG not in text, path
         assert 'OVK_PACKAGE_VERSION: "1.2.1"' in text, path
         assert f"fraware/open-verification-kernel@{HISTORICAL_SOURCE}" in text, path
-        assert "falls back to checkout" in text, path
+        assert "fallback to checkout" in text, path
 
 
 def test_fork_example_does_not_request_write_permissions_or_comment() -> None:
@@ -65,7 +65,7 @@ def test_preview_checklist_and_current_status_do_not_grant_release_authority() -
     checklist = (ROOT / "docs/DEVELOPER_PREVIEW_READINESS.md").read_text(encoding="utf-8")
     status = (ROOT / "docs/CURRENT_RELEASE_STATUS.md").read_text(encoding="utf-8")
     assert "NOT LAUNCH-AUTHORIZED" in checklist
-    assert "no public tag" in checklist
+    assert "not exist as a public tag" in checklist
     assert "unsigned" in status
     assert "immutable=false" in status
     assert "protected=false" in status
