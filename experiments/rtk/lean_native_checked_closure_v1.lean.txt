@@ -62,10 +62,17 @@ run_cmd do
     `historical_claim else `rtk_unproven_target_claim
   let some info := env.checked.get.find? root
     | throwError "RTK_GRAPH_ROOT_ABSENT"
+  let rootTypeAst ← match rtkExprAst info.type 1024 with
+    | .ok ast => pure ast
+    | .error issue => throwError m!"{issue}"
   let mut proofReferences : Array Name := #[]
+  let mut rootProofAst : Json := Json.null
   let rootKind : String ← match info with
     | .thmInfo v => do
       proofReferences := rtkGraphRefs v.value
+      rootProofAst ← match rtkExprAst v.value 1024 with
+        | .ok ast => pure ast
+        | .error issue => throwError m!"{issue}"
       pure "historical_theorem"
     | .axiomInfo _ => pure "unproved_target_placeholder"
     | _ => throwError "RTK_GRAPH_ROOT_UNSUPPORTED"
@@ -78,6 +85,8 @@ run_cmd do
     ("schema_version", Json.str "rtk.lean_checked_definition_closure.v1-development"),
     ("root_name", Json.str root.toString),
     ("root_kind", Json.str rootKind),
+    ("root_type_ast", rootTypeAst),
+    ("root_proof_ast", rootProofAst),
     ("root_type_references", rtkGraphNameArray typeReferences),
     ("root_proof_references", rtkGraphNameArray proofReferences),
     ("trusted_core_frontier", Json.arr #[
