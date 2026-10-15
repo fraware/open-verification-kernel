@@ -142,9 +142,12 @@ example : sourceEnv "op" = changedEnv "op" := rfl
 example : sourceEnv "base" ≠ changedEnv "base" := by decide
 example : "op" ∈ historicalTrace.support := by decide
 example : "base" ∈ historicalTrace.support := by decide
-example : historicalTrace.valid sourceEnv := by decide
-example : ¬ historicalTrace.valid changedEnv := by decide
-example : targetTrace.valid changedEnv := by decide
+example : historicalTrace.valid sourceEnv := by
+  simp [Trace.valid, historicalTrace, sourceEnv, Trace.term]
+example : ¬ historicalTrace.valid changedEnv := by
+  simp [Trace.valid, historicalTrace, changedEnv, Trace.term]
+example : targetTrace.valid changedEnv := by
+  simp [Trace.valid, targetTrace, changedEnv, Trace.term]
 
 /-
 Boundary: The transitive support of a supplied trace is complete only with
