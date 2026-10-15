@@ -143,13 +143,13 @@ def build_pilot_row(
         row.update({key: value for key, value in existing.items() if value is not None or key in row})
         row["repository"] = repo
     if artifacts_dir is not None and artifacts_dir.is_dir():
+        # An explicitly ingested artifact directory constitutes a new,
+        # potentially unreviewed cohort. Even a single evidence bundle or an
+        # incomplete aggregate must not inherit older human error labels.
+        # Cohort equality has not been independently authenticated.
+        row["false_positives"] = None
+        row["false_positive_rate"] = None
         artifact_metrics = _metrics_from_artifacts(artifacts_dir)
-        if artifact_metrics.get("prs_evaluated") is not None:
-            # A new artifact cohort invalidates older adjudicated error
-            # counts. Avoid carrying forward a historical zero as evidence
-            # that the current, unreviewed cohort had no false positives.
-            row["false_positives"] = None
-            row["false_positive_rate"] = None
         row.update({key: value for key, value in artifact_metrics.items() if value is not None})
     if report_path is not None and report_path.exists():
         # A reviewer-provided report is the only source of error labels.
