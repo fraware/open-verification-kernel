@@ -40,7 +40,14 @@ def test_build_pilot_row_from_artifacts(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    row = build_pilot_row("example/oss-pilot", artifacts_dir=artifacts_dir, ovk_version="1.2.0")
+    # The self-report must be separately selected as an adjudication source;
+    # merely placing it inside downloaded CI artifacts is insufficient.
+    row = build_pilot_row(
+        "example/oss-pilot",
+        artifacts_dir=artifacts_dir,
+        report_path=artifacts_dir / "external_pilot_report.json",
+        ovk_version="1.2.0",
+    )
     assert row["repository"] == "example/oss-pilot"
     assert row["prs_evaluated"] == 4
     assert row["false_positive_rate"] == 0.0
@@ -229,5 +236,70 @@ def test_external_report_supplies_separate_reviewed_labels(
         "example/oss-pilot", artifacts_dir=tmp_path, report_path=report
     )
     assert row["prs_evaluated"] == 4
+    assert row["false_positives"] == 1
+    assert row["false_positive_rate"] == 0.25
+
+
+def test_embedded_artifact_self_report_cannot_set_error_or_strictness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Embedded reports are not an approved independent source of labels."""
+    pilot = tmp_path / "pilot-report.json"
+    pilot.write_text(
+        json.dumps({"results": [{"passed": True, "merge_recommendation": "allow", "elapsed_ms": 12}]}),
+        encoding="utf-8",
+    )
+    embedded = tmp_path / "external_pilot_report.json"
+    embedded.write_text(
+        json.dumps({
+            "repository": "attacker/redirected",
+            "prs_evaluated": 1000,
+            "false_positives": 0,
+            "false_positive_rate": 0.0,
+            "strict_enabled": True,
+            "notes": "unreviewed data in artifact bundle",
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "scripts.collect_pilot_metrics.discover_artifacts_dir",
+        lambda _: (pilot, None, None),
+    )
+    row = build_pilot_row("example/oss-pilot", artifacts_dir=tmp_path)
+    assert row["repository"] == "example/oss-pilot"
+    assert row["prs_evaluated"] == 1
+    assert row["false_positives"] is None
+    assert row["false_positive_rate"] is None
+    assert row["strict_enabled"] is False
+    assert row["status"] == "advisory"
+
+
+def test_explicit_report_must_not_redirect_registry_identity(tmp_path: Path) -> None:
+    """Selected reporter may provide observations, not reassign the subject."""
+    report = tmp_path / "report.json"
+    report.write_text(
+        json.dumps({
+            "repository": "other/tenant",
+            "false_positives": 0,
+            "false_positive_rate": 0.0,
+        }),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="repository mismatch"):
+        build_pilot_row("example/oss-pilot", report_path=report)
+
+
+def test_explicit_report_with_matching_repository_still_supported(tmp_path: Path) -> None:
+    report = tmp_path / "report.json"
+    report.write_text(
+        json.dumps({
+            "repository": "example/oss-pilot",
+            "false_positives": 1,
+            "false_positive_rate": 0.25,
+        }),
+        encoding="utf-8",
+    )
+    row = build_pilot_row("example/oss-pilot", report_path=report)
+    assert row["repository"] == "example/oss-pilot"
     assert row["false_positives"] == 1
     assert row["false_positive_rate"] == 0.25
