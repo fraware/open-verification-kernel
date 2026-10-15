@@ -152,7 +152,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if path == ".ovk-pr.diff":
         Path(path).write_bytes(content)
-    # The composite Action reads this file from Bash; a Windows CRLF suffix\n    # would become part of the path after command substitution. Emit exact LF.\n    args.input_path_output.write_bytes((path + "\n").encode("utf-8"))
+    # The composite Action reads this file from Bash; a Windows CRLF suffix
+    # would become part of the path after command substitution. Emit exact LF.
+    args.input_path_output.write_bytes((path + "\n").encode("utf-8"))
     args.receipt_output.write_text(
         json.dumps(receipt, sort_keys=True, indent=2) + "\n", encoding="utf-8",
     )
