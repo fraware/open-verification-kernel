@@ -40,14 +40,6 @@ def _iso_timestamp() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def _find_file(artifacts_dir: Path, name: str) -> Path | None:
-    direct = artifacts_dir / name
-    if direct.is_file():
-        return direct
-    matches = sorted(artifacts_dir.rglob(name))
-    return matches[0] if matches else None
-
-
 def _median_elapsed_ms(results: list[dict[str, Any]]) -> float | None:
     timings = [float(item["elapsed_ms"]) for item in results if "elapsed_ms" in item]
     if not timings:
@@ -102,12 +94,10 @@ def _metrics_from_artifacts(artifacts_dir: Path) -> dict[str, Any]:
         elif isinstance(timing, (int, float)):
             metrics["median_check_latency_ms"] = float(timing)
 
-    external_report = _find_file(artifacts_dir, "external_pilot_report.json")
-    if external_report is not None:
-        report = read_json_file(external_report)
-        for report_key, row_key in REPORT_FIELD_MAP.items():
-            if report_key in report and report[report_key] is not None:
-                metrics[row_key] = report[report_key]
+    # Artifact directories are not an adjudication authority. Even if they
+    # contain an external_pilot_report.json, never auto-adopt its verdicts,
+    # repository identity or strict_enabled flag. A report is accepted only
+    # via the explicit, separately reviewed --report input.
 
     return metrics
 
@@ -118,8 +108,10 @@ def _apply_report(row: dict[str, Any], report_path: Path) -> dict[str, Any]:
     for report_key, row_key in REPORT_FIELD_MAP.items():
         if report_key in report and report[report_key] is not None:
             updated[row_key] = report[report_key]
-    if "repository" in report and report["repository"]:
-        updated["repository"] = report["repository"]
+    # The CLI --repo argument is authoritative for the registry row.
+    # Never let a separately supplied report silently redirect ingestion.
+    if report.get("repository") and report["repository"] != updated["repository"]:
+        raise ValueError("external pilot report repository mismatch")
     return updated
 
 
