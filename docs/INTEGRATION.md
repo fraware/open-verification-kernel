@@ -24,7 +24,7 @@ pip install open-verification-kernel==1.3.0-rc.1
 pip install "open-verification-kernel[solvers]==1.3.0-rc.1"
 ```
 
-Until the wheel is on PyPI, use `pip install -e '.[dev]'` from a checkout. **Live signed pin today:** `@v1.2.1` with `OVK_PACKAGE_VERSION: "1.2.1"`. **Candidate after attributable tag:** `@v1.3.0-rc.1` with matching `OVK_PACKAGE_VERSION`. Do not pin `@main` or treat uncommitted branch work as a verified release.
+For current, **unreleased development code**, use `pip install -e '.[dev]'` from a checkout. The last published GitHub Release is `v1.2.1`; its annotated Git tag is unsigned, its GitHub Release is not marked immutable, and its historical Action **falls back to checkout code if the requested package version cannot be installed**. Its exact source commit is `a27d5720f4350c00bca34f71d991c31f5a2f38c7`. An attributable `v1.3.0-rc.1` release is **not currently available**. The commands in the preceding PyPI section are forward-looking and must not be run as current-release instructions. The fail-closed installer introduced in draft PR #220 will apply only to a later independently authorized release.
 
 Optional Z3: `pip install -e '.[solvers]'`
 
@@ -91,6 +91,8 @@ permissions:
 
 **Third-party action pins:** `action.yml` and `.github/workflows/publish.yml` pin `actions/*` (and other release third-parties) to immutable commit SHAs. CI enforces this with `python scripts/pin_action_shas.py`.
 
+**Historical example warning:** the Action snippets below use the exact `v1.2.1` source commit for reproducibility of the *GitHub source reference*, not an authorized new release. That Action still has an installation fallback. Their configurations are **advisory/legacy illustrations only**, not a claim of fully authenticated package-byte identity. Do not promote to a required strict check solely from this example.
+
 ### Single check type (self-protection)
 
 ```yaml
@@ -107,7 +109,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: fraware/open-verification-kernel@v1.2.1
+      - uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
         id: ovk
         with:
           mode: advisory
@@ -122,10 +124,12 @@ jobs:
 
 Development reference: `uses: ./`
 
+The recommended copyable external workflow is [the non-blocking, read-only advisory example](../examples/github_workflows/external_consumer.yml). Required strict checks are not qualified for the current source profiles.
+
 ### All five check types (manifest)
 
 ```yaml
-- uses: fraware/open-verification-kernel@v1.2.1
+- uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
   with:
     mode: advisory
     verification-manifest: .verification/full_mvp.json
@@ -161,10 +165,10 @@ When `verification-manifest` is set, the manifest path wins over `use-check`.
 Downstream example:
 
 ```yaml
-- uses: fraware/open-verification-kernel@v1.2.1
+- uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
   id: ovk
   with:
-    mode: strict
+    mode: advisory
     use-check: "true"
     emit-check: "true"
 - name: Fail when OVK blocks
@@ -217,7 +221,7 @@ Explicit metadata (most reliable):
 ```
 
 ```yaml
-- uses: fraware/open-verification-kernel@v1.2.1
+- uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
   with:
     check-metadata: ovk-required-checks.json
 ```
@@ -285,7 +289,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: fraware/open-verification-kernel@v1.2.1
+      - uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
         env:
           OVK_PACKAGE_VERSION: "1.2.1"
         with:
