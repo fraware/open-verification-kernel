@@ -1,6 +1,6 @@
 # OVK v1.2.1
 
-Patch release to close the immutable-tag keyless Sigstore production pin and fix release-gate regressions on `main`.
+Historical patch release associated with keyless Sigstore artifact signing; Git-tag immutability was not established. Changes include release-gate regressions on `main`.
 
 ## Changes
 
