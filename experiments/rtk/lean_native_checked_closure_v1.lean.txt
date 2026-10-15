@@ -1,0 +1,100 @@
+/-
+Append after lean_structural_expr_probe_v1.lean.txt in the SAME Lean file.
+A bounded native observer of the checked Environment, not a certified
+semantic support extractor. Trust roots Nat/Eq/Eq.refl are explicit assumptions.
+Only safe definitions are traversed; all other non-base kinds are rejected.
+This observer has NO historical target proof or oracle access.
+-/
+private def rtkGraphBase (n : Lean.Name) : Bool :=
+  n == `Nat || n == `Nat.succ || n == `Eq || n == `Eq.refl
+
+private def rtkGraphNameArray (names : Array Lean.Name) : Lean.Json :=
+  Lean.Json.arr (names.map (fun n => Lean.Json.str n.toString))
+
+private def rtkGraphRefs (e : Lean.Expr) : Array Lean.Name :=
+  (e.getUsedConstantsAsSet.toList.toArray).qsort Lean.Name.lt
+
+private def rtkGraphHint : Lean.ReducibilityHints → Lean.Json
+  | .opaque => Lean.Json.arr #[Lean.Json.str "opaque"]
+  | .abbrev => Lean.Json.arr #[Lean.Json.str "abbrev"]
+  | .regular level => Lean.Json.arr #[Lean.Json.str "regular", toJson level.toNat]
+
+private partial def rtkGraphWalk
+    (env : Lean.Environment) (pending visited : List Lean.Name)
+    (nodes : Array Lean.Json) (fuel : Nat) :
+    Except String (Array Lean.Json) := do
+  match pending with
+  | [] => return nodes
+  | name :: rest =>
+    if fuel == 0 then
+      throw "RTK_GRAPH_BUDGET_EXCEEDED"
+    if visited.contains name then
+      return ← rtkGraphWalk env rest visited nodes (fuel - 1)
+    if rtkGraphBase name then
+      return ← rtkGraphWalk env rest (name :: visited) nodes (fuel - 1)
+    let some (.defnInfo val) := env.checked.get.find? name
+      | throw s!"RTK_GRAPH_MISSING_OR_UNSUPPORTED_DECLARATION:{name}"
+    unless val.safety == .safe do
+      throw s!"RTK_GRAPH_UNSAFE_OR_PARTIAL_DEFINITION:{name}"
+    let typeAst ← rtkExprAst val.type 1024
+    let valueAst ← rtkExprAst val.value 1024
+    let deps := ((val.type.getUsedConstantsAsSet ++
+      val.value.getUsedConstantsAsSet).toList.toArray.qsort Lean.Name.lt).toList
+    let node := Lean.Json.mkObj [
+      ("name", Lean.Json.str name.toString),
+      ("kind", Lean.Json.str "definition"),
+      ("type_ast", typeAst),
+      ("value_ast", valueAst),
+      ("level_params", Lean.Json.arr (val.levelParams.toArray.map (fun n => Lean.Json.str n.toString))),
+      ("reducibility_hint", rtkGraphHint val.hints),
+      ("safety", Lean.Json.str "safe"),
+      ("direct_references", rtkGraphNameArray (deps.toArray.qsort Lean.Name.lt)),
+      ("native_full_semantic_support_proved", Lean.Json.bool false)
+    ]
+    return ← rtkGraphWalk env (rest ++ deps) (name :: visited)
+      (nodes.push node) (fuel - 1)
+
+open Lean Elab Command
+
+run_cmd do
+  let env ← getEnv
+  let root : Name := if (env.checked.get.find? `historical_claim).isSome then
+    `historical_claim else `rtk_unproven_target_claim
+  let some info := env.checked.get.find? root
+    | throwError "RTK_GRAPH_ROOT_ABSENT"
+  let rootTypeAst ← match rtkExprAst info.type 1024 with
+    | .ok ast => pure ast
+    | .error issue => throwError m!"{issue}"
+  let mut proofReferences : Array Name := #[]
+  let mut rootProofAst : Json := Json.null
+  let rootKind : String ← match info with
+    | .thmInfo v => do
+      proofReferences := rtkGraphRefs v.value
+      rootProofAst ← match rtkExprAst v.value 1024 with
+        | .ok ast => pure ast
+        | .error issue => throwError m!"{issue}"
+      pure "historical_theorem"
+    | .axiomInfo _ => pure "unproved_target_placeholder"
+    | _ => throwError "RTK_GRAPH_ROOT_UNSUPPORTED"
+  let typeReferences := rtkGraphRefs info.type
+  let roots := (typeReferences ++ proofReferences).toList
+  let nodes ← match rtkGraphWalk env roots [] #[] 48 with
+    | .ok entries => pure entries
+    | .error issue => throwError m!"{issue}"
+  logInfo m!"RTK_NATIVE_CHECKED_CLOSURE_JSON={Json.compress (Json.mkObj [
+    ("schema_version", Json.str "rtk.lean_checked_definition_closure.v1-development"),
+    ("root_name", Json.str root.toString),
+    ("root_kind", Json.str rootKind),
+    ("root_type_ast", rootTypeAst),
+    ("root_proof_ast", rootProofAst),
+    ("root_type_references", rtkGraphNameArray typeReferences),
+    ("root_proof_references", rtkGraphNameArray proofReferences),
+    ("trusted_core_frontier", Json.arr #[
+      Json.str "Eq", Json.str "Eq.refl", Json.str "Nat", Json.str "Nat.succ"
+    ]),
+    ("nodes", Json.arr nodes),
+    ("native_declaration_relation_exhaustive_for_kernel_proved", Json.bool false),
+    ("core_frontier_semantics_authenticated", Json.bool false),
+    ("historical_target_certificate_replayed", Json.bool false),
+    ("relying_authorization", Json.bool false)
+  ])}"
