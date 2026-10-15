@@ -30,6 +30,7 @@ class GuaranteeContinuityReview(BaseModel):
     target_head_sha: str
     source_typed_claim_status: str
     target_typed_claim_status: str
+    snapshot_state_reverified_at_review: Literal[False] = False
     target_evidence_origin: str | None = None
     source_definition_digest: str | None = None
     target_definition_digest: str | None = None
@@ -75,9 +76,10 @@ class GuaranteeContinuityReview(BaseModel):
             f"{safe(self.target_head_sha)}\n\n"
             "| Review dimension | Result |\n"
             "| --- | --- |\n"
-            f"| Source typed claim | {safe(self.source_typed_claim_status)} |\n"
-            f"| Target typed claim | {safe(self.target_typed_claim_status)} |\n"
+            f"| Source snapshot recorded typed-claim status | {safe(self.source_typed_claim_status)} |\n"
+            f"| Target snapshot recorded typed-claim status | {safe(self.target_typed_claim_status)} |\n"
             f"| Target evidence origin | {safe(self.target_evidence_origin)} |\n"
+            "| Snapshot state independently reverified now | **NO** |\n"
             f"| Declared definition changed | {str(self.declared_definition_changed).lower()} |\n"
             f"| Declared machine claim changed | {str(self.declared_machine_claim_changed).lower()} |\n"
             f"| Historical evidence gate | {safe(self.historical_transport)} |\n"
@@ -87,7 +89,8 @@ class GuaranteeContinuityReview(BaseModel):
             "| Production reliance / merge authorization | **NO** |\n\n"
             f"**Gate reason codes:** {reasons}.\n\n"
             f"**Next action:** {safe(self.next_action)}.\n\n"
-            "Target typed-claim status refers only to OVK's extracted machine "
+            "The recorded snapshot status was not recomputed at review time; "
+            "typed-claim establishment refers only to OVK's extracted machine "
             "claim. Conditional historical eligibility compares supplied "
             "declarations and signed evidence. It does not authenticate "
             "governing Git manifests, re-check temporal expiry/revocation, "
