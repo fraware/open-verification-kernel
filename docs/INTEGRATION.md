@@ -30,6 +30,8 @@ Optional Z3: `pip install -e '.[solvers]'`
 
 Optional HMAC signing: `export OVK_SIGNING_KEY=your-signing-secret`
 
+**Signing trust boundary:** `OVK_SIGNING_KEY` is a shared HMAC secret used for signing and verifying; it is not a public verification key. Do not expose it to fork-originated `pull_request` jobs, upload it with evidence artifacts, or mistake a locally HMAC-signed bundle for independently authenticated source or release provenance.
+
 ## First demo
 
 Self-protection failing case (gate removed):
@@ -94,6 +96,8 @@ permissions:
 **Historical example warning:** the Action snippets below use the exact `v1.2.1` source commit for reproducibility of the *GitHub source reference*, not an authorized new release. That Action still has an installation fallback. Their configurations are **advisory/legacy illustrations only**, not a claim of fully authenticated package-byte identity. Do not promote to a required strict check solely from this example.
 
 ### Single check type (self-protection)
+
+The following historical illustration includes optional check/comment publishing with write privileges. **Do not copy it as the first external pilot workflow.** For consenting adopters, use the [read-only advisory example](../examples/github_workflows/external_consumer.yml) and the [pilot playbook](EXTERNAL_PILOT_PLAYBOOK.md).
 
 ```yaml
 name: OVK
@@ -171,9 +175,9 @@ Downstream example:
     mode: advisory
     use-check: "true"
     emit-check: "true"
-- name: Fail when OVK blocks
+- name: Surface OVK block for human review
   if: steps.ovk.outputs.recommendation == 'block'
-  run: exit 1
+  run: echo "OVK reported a block; inspect scope and supporting evidence"
 ```
 
 **Artifact files:**
@@ -256,22 +260,26 @@ Required GitHub check name: **`Open Verification Kernel`** (from `ovk/core/githu
 
 ### Rollout stages
 
+**Stages 2–4 are future, separately qualified configurations**, not a current promotion path. Current public source profiles are advisory, the repository's protection and release-signing gates are open, and small in-repo samples do not authorize strict enforcement.
+
 | Stage | Workflow example | Mode | Publish check run | Branch protection |
 |---|---|---|---|---|
 | 1 — Advisory only | `examples/github_workflows/pilot_fork_adopter.yml` | advisory | no | none |
 | 2 — Advisory + visibility | `examples/github_workflows/pilot_advisory_with_comment.yml` | advisory | yes | optional |
-| 3 — Strict enforcement | `examples/github_workflows/external_consumer.yml` | strict | yes | required on `main` |
+| 3 — Strict enforcement (future) | No currently approved copyable workflow | strict | qualified-only | approved protection |
 | 4 — Required check wired | `examples/github_workflows/branch_protection_required_check.yml` | strict | yes | required check |
 
-Steps for strict enforcement:
+Steps for strict enforcement **only following source-profile, release, independent adjudication, owner approval and rollback qualification**:
 
-1. Run strict + `emit-check: true` on a sample PR and confirm the check appears on the commit.
+1. On the separately authorized repository and exact source profile, test strict + `emit-check: true` and confirm correct source binding and check attribution.
 2. In repository **Settings → Branches**, add **`Open Verification Kernel`** as a required status check on protected branches.
 3. Supply explicit `check-metadata` when verifying gate preservation (auto-collected metadata is best-effort only).
 
 `collect_branch_metadata.py` needs a `GITHUB_TOKEN` with permission to read branch protection rules. Pass explicit before/after JSON when you need removal detection.
 
 ## External repository smoke test
+
+The following is a **historical, write-enabled integration example**, not a copyable first-user or fork-safe installation. The default external pilot uses the read-only example in the playbook.
 
 Create `.github/workflows/ovk-smoke.yml` in an integration repository:
 
