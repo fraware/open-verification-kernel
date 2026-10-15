@@ -1,6 +1,6 @@
 # External OSS Pilot Playbook
 
-Guide for adding OVK to an external open-source repository: start in advisory mode, measure false positives, then optionally enforce on protected branches.
+Guide for adding OVK to a **consenting** external open-source repository. Start in advisory mode, retain both supported and unsupported PRs, measure reviewer utility and coverage, and qualify strict enforcement only through a separate safety decision.
 
 ## Start with one check type
 
@@ -56,15 +56,18 @@ jobs:
           post-comment: "false"
 ```
 
-4. Run for **two weeks** on all agent PRs without blocking merges.
+4. Run for **two weeks** on the organization's natural PR stream, including relevant non-agent changes. Record all eligible and unsupported cases without blocking merges; if the sample is too small, extend the observation window and report attrition.
 
 ## Step 2 — Measure
 
-| Metric | Target before strict |
-|--------|----------------------|
-| False positive rate | under 5% |
-| Time to first green after repair | under 5 minutes |
-| Block rate on known-bad fixtures | 100% |
+| Measurement | Required reporting |
+|--------|--------------------|
+| Source-profile coverage | Eligible and unsupported PRs with exact denominators and known blind spots |
+| Reviewer judgments | All findings reviewed, disagreements, time spent, independently discovered misses and unknown outcomes |
+| Operational cost | Setup effort, per-PR runtime, reviewer minutes, repeat-check and repair work |
+| Known-bad controls | All relevant admitted adversarial cases with versioned evidence; never a substitute for real-PR calibration |
+
+**A small pilot demonstrates feasibility, not production accuracy.** Report counts and denominators, rather than treating a threshold such as a 5% false-positive rate from a handful of PRs as sufficient for strict enforcement.
 
 Download the workflow artifact (`ovk-pilot-artifacts`) and ingest metrics into the OVK registry:
 
@@ -77,28 +80,21 @@ Optional self-report JSON: copy [external_pilot_report.template.json](templates/
 
 Publish results in [PILOT_CASE_STUDIES.md](PILOT_CASE_STUDIES.md) under **External pilots**.
 
-Maintainers ingest downloaded workflow artifacts and refresh the public summary:
+Registry rows live in [external-pilots-registry.json](benchmarks/external-pilots-registry.json). Existing maintained-consumer reports are not independent customer evaluations.
 
-```bash
-python scripts/ingest_external_pilot_metrics.py --repo org/repo --artifacts-dir ./artifact
-python scripts/render_pilot_metrics.py --registry docs/benchmarks/external-pilots-registry.json
-```
+## Step 3 — Independent strict-enforcement qualification (not an automatic upgrade)
 
-Optional self-report JSON: copy [external_pilot_report.template.json](templates/external_pilot_report.template.json), fill metrics, and pass `--report external_pilot_report.json` to the ingest script. Registry rows live in [external-pilots-registry.json](benchmarks/external-pilots-registry.json).
+**Do not switch a pilot to strict mode from a low measured false-positive rate alone.** Current generated source profiles are `executable_advisory`, not `externally_calibrated_strict`.
 
-## Step 3 — Strict on protected branches
+Strict enforcement must be separately authorized by the adopting organization for a *specific exact product version, supported source profile and claim*. Before using any result as a required check, document:
 
-When false positives stay below 5%:
+1. Trusted acquisition of the actual repository inputs, source revision, policy and toolchain identities.
+2. Source-to-model fidelity for the admitted constructs, together with explicit unsupported, unknown, timeout and error handling.
+3. Human-adjudicated normal PRs and adversarial change tests, with denominators, missed issues, false alarms, and uncertainty reported. No arbitrary small-N accuracy threshold.
+4. CI token permissions, adversarial fork PR isolation, bypass and workflow-self-modification resistance, protected branch rules, and a rollback owner.
+5. Reviewer approval and monitoring for the exact admitted claim family. Unknown and incomplete outcomes do not count as positive verification.
 
-```yaml
-- uses: fraware/open-verification-kernel@v1.2.1
-  with:
-    mode: strict
-    use-check: "true"
-    emit-check: "true"
-```
-
-Require the OVK check on `main` / `release/*` only; keep advisory on experimental branches if needed.
+Until those gates are independently met, remain in **advisory mode with no merge-blocking authority**. Green fixture tests do not override this constraint.
 
 ## Step 4 — Add more check types
 
