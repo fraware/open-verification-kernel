@@ -1,0 +1,28 @@
+/-
+Append AFTER lean_structural_expr_probe_v1.lean.txt in the SAME Lean file.
+Uses its strict native Expr AST encoder for a second imported definition.
+This observer loads the target environment but never imports the historical
+source theorem into target and does not replay the old proof.
+-/
+run_cmd do
+  let env ← getEnv
+  let some (.defnInfo baseDecl) := env.find? `base
+    | throwError "RTK_TRANSITIVE_NATIVE_BASE_MISSING_OR_WRONG_KIND"
+  let some (.defnInfo opDecl) := env.find? `op
+    | throwError "RTK_TRANSITIVE_NATIVE_OP_MISSING_OR_WRONG_KIND"
+  let baseType ← rtkStrictExprAst baseDecl.type
+  let baseValue ← rtkStrictExprAst baseDecl.value
+  let opValue ← rtkStrictExprAst opDecl.value
+  logInfo m!"RTK_TRANSITIVE_DECLARATION_JSON={Json.compress (Json.mkObj [
+    ("schema_version", Json.str "rtk.lean_native_transitive_declaration.v1-development"),
+    ("base_name", Json.str "base"),
+    ("base_kind", Json.str "definition"),
+    ("base_type_ast", baseType),
+    ("base_value_ast", baseValue),
+    ("op_name", Json.str "op"),
+    ("op_kind", Json.str "definition"),
+    ("op_value_ast", opValue),
+    ("support_completeness_proved", Json.bool false),
+    ("historical_certificate_replayed", Json.bool false),
+    ("relying_authority", Json.bool false)
+  ])}"

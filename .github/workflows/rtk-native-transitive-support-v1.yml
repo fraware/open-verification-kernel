@@ -1,0 +1,284 @@
+name: RTK patched native transitive support boundary (research)
+
+on:
+  push:
+    branches: [research/rtk-native-transitive-support-boundary-v1]
+    paths:
+      - .github/workflows/rtk-native-transitive-support-v1.yml
+      - experiments/rtk/lean_native_transitive_declaration_probe_v1.lean.txt
+      - experiments/rtk/lean_native_transitive_preoracle_v1.py
+      - tests/test_rtk_native_transitive_preoracle_v1.py
+      - docs/RTK_NATIVE_TRANSITIVE_SUPPORT_V1.md
+  pull_request:
+    branches: [research/rtk-transitive-evidence-support-v1]
+    paths:
+      - .github/workflows/rtk-native-transitive-support-v1.yml
+      - experiments/rtk/lean_native_transitive_declaration_probe_v1.lean.txt
+      - experiments/rtk/lean_native_transitive_preoracle_v1.py
+      - tests/test_rtk_native_transitive_preoracle_v1.py
+      - docs/RTK_NATIVE_TRANSITIVE_SUPPORT_V1.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native_transitive_boundary:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 55
+    steps:
+      - name: Checkout exact research head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Install hash-pinned patched Lean and independent checkers
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bubblewrap
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+            https://github.com/leanprover/elan/releases/download/v4.2.3/elan-x86_64-unknown-linux-gnu.tar.gz \
+            --output "$RUNNER_TEMP/elan.tar.gz"
+          echo 'df0b2b3a439961ffcbb3985214365ffe40f49bc871df04dff268c7d8e21ca8b2  '"$RUNNER_TEMP"'/elan.tar.gz' | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/elan.tar.gz" -C "$RUNNER_TEMP" elan-init
+          "$RUNNER_TEMP/elan-init" -y --no-modify-path --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          "$HOME/.elan/bin/elan" toolchain install leanprover/lean4:v4.35.0
+          "$HOME/.elan/bin/elan" default leanprover/lean4:v4.35.0
+          echo 'bf8d54e4714cc4b03d3f6bb34c83b7202b87e49c8bfcbff6895c085bb90ceb38  '"$("$HOME/.elan/bin/elan" which lean)" | sha256sum --check --strict
+          "$HOME/.elan/bin/lean" --version
+          echo RTK_NATIVE_TRANSITIVE_EXACT_PATCHED_BINARY
+
+      - name: Check original historical certificate with independent kernels
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/rtk-native-transitive"
+          SRC="$ROOT/source"
+          mkdir -p "$SRC" "$GITHUB_WORKSPACE/.rtk-patched-qualification"
+          printf 'leanprover/lean4:v4.35.0\n' > "$SRC/lean-toolchain"
+          cat > "$SRC/lakefile.toml" <<'TOML'
+          name = "rtk_native_transitive_historical_source"
+          version = "0.1.0"
+          defaultTargets = ["RTKPatchedSource"]
+
+          [[lean_lib]]
+          name = "RTKPatchedSupport"
+
+          [[lean_lib]]
+          name = "RTKPatchedSource"
+          TOML
+          cat > "$SRC/RTKPatchedSupport.lean" <<'LEAN'
+          import Init.Prelude
+          def base (n : Nat) : Nat := n
+          def op (n : Nat) : Nat := base n
+          LEAN
+          cat > "$SRC/RTKPatchedSource.lean" <<'LEAN'
+          import RTKPatchedSupport
+          theorem historical_claim (n : Nat) : op n = n := Eq.refl n
+          LEAN
+          (cd "$SRC" && lake build)
+          (cd "$SRC" && lake check --paranoid) | tee "$ROOT/source_paranoid.native.log"
+          test -s "$ROOT/source_paranoid.native.log"
+          echo RTK_NATIVE_TRANSITIVE_HISTORICAL_SOURCE_PARANOID_PASS
+
+      - name: Export and independently recheck original historical proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/rtk-native-transitive"
+          SRC="$ROOT/source"
+          ENC=experiments/rtk/lean_structural_expr_probe_v1.lean.txt
+          DEC=experiments/rtk/lean_expr_decoder_roundtrip_v1.lean.txt
+          {
+            printf 'import Lean\nimport RTKPatchedSource\n'
+            cat "$ENC"
+            cat experiments/rtk/lean_native_transitive_declaration_probe_v1.lean.txt
+          } > "$SRC/SourceProbe.lean"
+          LEAN_PATH="$SRC/.lake/build/lib/lean" lean --trust=0 "$SRC/SourceProbe.lean" | tee "$ROOT/source_structural.native.log"
+          python -m experiments.rtk.lean_patched_historical_certificate_v1 export \
+            --source-log "$ROOT/source_structural.native.log" \
+            --source-file "$SRC/RTKPatchedSource.lean" \
+            --output "$GITHUB_WORKSPACE/.rtk-patched-qualification/source_payload.json"
+          python -m experiments.rtk.lean_patched_historical_certificate_v1 driver \
+            --encoder "$ENC" --decoder "$DEC" \
+            --template experiments/rtk/lean_second_process_driver_v1.lean.txt \
+            --module RTKPatchedSupport \
+            --output "$ROOT/SourceRecheck.lean"
+          if grep -q 'import RTKPatchedSource' "$ROOT/SourceRecheck.lean"; then
+            echo "historical source theorem imported into rechecker" >&2
+            exit 1
+          fi
+          LEAN_PATH="$SRC/.lake/build/lib/lean" lean --trust=0 "$ROOT/SourceRecheck.lean" | tee "$ROOT/source_recheck.native.log"
+          grep -q 'RTK_SECOND_PROCESS_PROOF_JSON=' "$ROOT/source_recheck.native.log"
+          echo RTK_NATIVE_TRANSITIVE_ORIGINAL_PROOF_RECHECKED
+
+      - name: Build unproved targets and seal oracle-blind predictions
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/rtk-native-transitive"
+          TARGET="$ROOT/target"
+          mkdir -p "$TARGET"
+          printf 'leanprover/lean4:v4.35.0\n' > "$TARGET/lean-toolchain"
+          cat > "$TARGET/lakefile.toml" <<'TOML'
+          name = "rtk_native_transitive_target"
+          version = "0.1.0"
+          defaultTargets = ["RTKPatchedSupport"]
+
+          [[lean_lib]]
+          name = "RTKPatchedSupport"
+          TOML
+          python - "$TARGET/TargetProbe.lean" <<'PY'
+          from pathlib import Path
+          import sys
+          existing = Path("experiments/rtk/lean_structural_expr_probe_v1.lean.txt").read_text()
+          old = "let root : Name := `historical_claim"
+          assert existing.count(old) == 1
+          probe = existing.replace(old, "let root : Name := `rtk_unproven_target_claim")
+          extra = Path("experiments/rtk/lean_native_transitive_declaration_probe_v1.lean.txt").read_text()
+          Path(sys.argv[1]).write_text(
+              "import Lean\nimport RTKPatchedSupport\n"
+              "axiom rtk_unproven_target_claim (n : Nat) : op n = n\n"
+              + probe + "\n" + extra + "\n"
+          )
+          PY
+          for CONTROL in unchanged changed_base unrelated; do
+            case "$CONTROL" in
+              unchanged)
+                cat > "$TARGET/RTKPatchedSupport.lean" <<'LEAN'
+          import Init.Prelude
+          def base (n : Nat) : Nat := n
+          def op (n : Nat) : Nat := base n
+          LEAN
+                ;;
+              changed_base)
+                cat > "$TARGET/RTKPatchedSupport.lean" <<'LEAN'
+          import Init.Prelude
+          def base (n : Nat) : Nat := 0 + n
+          def op (n : Nat) : Nat := base n
+          LEAN
+                ;;
+              unrelated)
+                cat > "$TARGET/RTKPatchedSupport.lean" <<'LEAN'
+          import Init.Prelude
+          def base (n : Nat) : Nat := n
+          def op (n : Nat) : Nat := base n
+          def unrelated (n : Nat) : Nat := n
+          LEAN
+                ;;
+            esac
+            (cd "$TARGET" && lake build)
+            cp "$TARGET/.lake/build/lib/lean/RTKPatchedSupport.olean" "$ROOT/target_$CONTROL.olean"
+            LEAN_PATH="$TARGET/.lake/build/lib/lean" lean --trust=0 "$TARGET/TargetProbe.lean" \
+              | tee "$ROOT/target_unproved_$CONTROL.native.log"
+            python -m experiments.rtk.lean_patched_historical_certificate_v1 target \
+              --source-payload "$GITHUB_WORKSPACE/.rtk-patched-qualification/source_payload.json" \
+              --target-log "$ROOT/target_unproved_$CONTROL.native.log" \
+              --output "$GITHUB_WORKSPACE/.rtk-patched-qualification/target_$CONTROL.json"
+            test ! -e "$ROOT/oracle_$CONTROL.native.log"
+            python -m experiments.rtk.lean_native_transitive_preoracle_v1 \
+              --source-payload "$GITHUB_WORKSPACE/.rtk-patched-qualification/source_payload.json" \
+              --source-checked-input "$ROOT/source/RTKPatchedSource.lean" \
+              --source-structural-log "$ROOT/source_structural.native.log" \
+              --source-recheck-log "$ROOT/source_recheck.native.log" \
+              --target-payload "$GITHUB_WORKSPACE/.rtk-patched-qualification/target_$CONTROL.json" \
+              --target-structural-log "$ROOT/target_unproved_$CONTROL.native.log" \
+              --source-olean "$ROOT/source/.lake/build/lib/lean/RTKPatchedSupport.olean" \
+              --target-olean "$ROOT/target_$CONTROL.olean" \
+              --checker-binary "$(elan which lean)" \
+              --output "$ROOT/preoracle_$CONTROL.json"
+          done
+          python - "$ROOT" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          p = Path(sys.argv[1])
+          expected = {
+              "unchanged": "CONDITIONAL_TRANSITIVE_CANDIDATE",
+              "changed_base": "REVALIDATION_REQUIRED",
+              "unrelated": "CONDITIONAL_TRANSITIVE_CANDIDATE",
+          }
+          rows = {k: json.loads((p/f"preoracle_{k}.json").read_text()) for k in expected}
+          for key, row in rows.items():
+              assert row["decision"] == expected[key], (key, row)
+              assert row["actual_kernel_transport_preservation_proved"] is False
+              assert row["production_reliance_authorization"] is False
+              assert row["target_historical_proof_replayed"] is False
+          assert rows["changed_base"]["reason_code"] == "transitive_base_drift"
+          assert rows["changed_base"]["observed_op_ast_identical"] is True
+          assert rows["changed_base"]["observed_base_ast_identical"] is False
+          print("RTK_NATIVE_TRANSITIVE_PREORACLE_THREE_CASES_SEALED")
+          PY
+          sha256sum "$ROOT"/target_*.olean "$ROOT"/preoracle_*.json \
+            "$GITHUB_WORKSPACE"/.rtk-patched-qualification/*.json \
+            > "$ROOT/prediction_commitment.sha256"
+          sha256sum --check --strict "$ROOT/prediction_commitment.sha256"
+          for CONTROL in unchanged changed_base unrelated; do
+            test ! -e "$ROOT/oracle_$CONTROL.native.log"
+          done
+          echo RTK_NATIVE_TRANSITIVE_COMMITTED_BEFORE_HISTORICAL_REPLAY
+
+      - name: Independent target kernel replay of identical old proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/rtk-native-transitive"
+          TARGET="$ROOT/target"
+          ENC=experiments/rtk/lean_structural_expr_probe_v1.lean.txt
+          DEC=experiments/rtk/lean_expr_decoder_roundtrip_v1.lean.txt
+          for CONTROL in unchanged changed_base unrelated; do
+            EXPECT=ADMISSIBLE
+            if [ "$CONTROL" = changed_base ]; then EXPECT=INADMISSIBLE; fi
+            cp "$ROOT/target_$CONTROL.olean" "$TARGET/.lake/build/lib/lean/RTKPatchedSupport.olean"
+            python -m experiments.rtk.lean_patched_historical_certificate_v1 driver \
+              --encoder "$ENC" --decoder "$DEC" \
+              --template experiments/rtk/lean_historical_target_replay_v1.lean.txt \
+              --module RTKPatchedSupport \
+              --target-file ".rtk-patched-qualification/target_$CONTROL.json" \
+              --output "$ROOT/TargetOracle_$CONTROL.lean"
+            if grep -q 'import RTKPatchedSource' "$ROOT/TargetOracle_$CONTROL.lean"; then
+              echo "historical theorem imported into target" >&2
+              exit 1
+            fi
+            LEAN_PATH="$TARGET/.lake/build/lib/lean" lean --trust=0 "$ROOT/TargetOracle_$CONTROL.lean" \
+              | tee "$ROOT/oracle_$CONTROL.native.log"
+            python -m experiments.rtk.lean_patched_historical_certificate_v1 verify \
+              --source-payload "$GITHUB_WORKSPACE/.rtk-patched-qualification/source_payload.json" \
+              --target-payload "$GITHUB_WORKSPACE/.rtk-patched-qualification/target_$CONTROL.json" \
+              --driver "$ROOT/TargetOracle_$CONTROL.lean" \
+              --module-olean "$ROOT/target_$CONTROL.olean" \
+              --oracle-log "$ROOT/oracle_$CONTROL.native.log" \
+              --expected "$EXPECT" \
+              --output "$ROOT/oracle_$CONTROL.json"
+          done
+          sha256sum --check --strict "$ROOT/prediction_commitment.sha256"
+          python - "$ROOT" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          root = Path(sys.argv[1])
+          for name, expected in {
+              "unchanged": "ADMISSIBLE",
+              "changed_base": "INADMISSIBLE",
+              "unrelated": "ADMISSIBLE",
+          }.items():
+              outcome = json.loads((root/f"oracle_{name}.json").read_text())
+              assert outcome["historical_certificate_adjudication"] == expected
+              assert outcome["semantic_transport_soundness_proved"] is False
+              assert outcome["production_reliance_authorized"] is False
+          print("RTK_NATIVE_TRANSITIVE_HISTORICAL_PROOF_THREE_CONTROL_PASS_NO_RELIANCE")
+          PY
+
+      - name: Retain exact-head development artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rtk-native-transitive-research
+          path: |
+            ${{ runner.temp }}/rtk-native-transitive/*.log
+            ${{ runner.temp }}/rtk-native-transitive/*.json
+            ${{ runner.temp }}/rtk-native-transitive/*.sha256
+          if-no-files-found: warn
