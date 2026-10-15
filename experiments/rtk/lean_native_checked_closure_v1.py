@@ -54,8 +54,9 @@ def _manifest(log: str, *, expected_root: str, expected_kind: str,
     except json.JSONDecodeError as exc:
         raise ValueError("invalid native closure JSON") from exc
     keys = {
-        "schema_version", "root_name", "root_kind", "root_type_references",
-        "root_proof_references", "trusted_core_frontier", "nodes",
+        "schema_version", "root_name", "root_kind", "root_type_ast",
+        "root_proof_ast", "root_type_references", "root_proof_references",
+        "trusted_core_frontier", "nodes",
         "native_declaration_relation_exhaustive_for_kernel_proved",
         "core_frontier_semantics_authenticated",
         "historical_target_certificate_replayed", "relying_authorization",
@@ -70,6 +71,10 @@ def _manifest(log: str, *, expected_root: str, expected_kind: str,
             "historical_target_certificate_replayed", "relying_authorization",
         ))):
         raise ValueError("native closure receipt missing, mismatched or claims authority")
+    if record["root_type_ast"] != observed["theorem_type_ast"]:
+        raise ValueError("checked root type differs from structural source/target witness")
+    if record["root_proof_ast"] != historical_proof:
+        raise ValueError("checked root proof differs from source certificate or target is proved")
     if record["trusted_core_frontier"] != sorted(_BASE):
         raise ValueError("unexpected trusted core frontier")
     if _name_list(record["root_type_references"], max_count=_MAX_REFS) != sorted(
