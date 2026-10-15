@@ -140,6 +140,11 @@ runs:
           --pr-head-sha "$OVK_EVENT_HEAD_SHA" \
           --changed-files "$OVK_CHANGED_FILES" \
           --mode "$OVK_MODE"
+    - name: Disclose unbound caller-selected inputs
+      if: ${{ inputs.changed-files != '' && inputs.verification-manifest == '' }}
+      shell: bash
+      run: |
+        echo '::warning::OVK caller-supplied change input is not bound to the checked-out source; automated GitHub Check/comment emission is disabled.'
     - name: Run OVK multi-lane verification
       id: verify
       if: ${{ inputs.verification-manifest != '' }}
@@ -214,7 +219,7 @@ runs:
         echo "$ACTION_RC" > .ovk-action-exit-code
     - name: Emit OVK GitHub check (check path)
       id: emit-check-run
-      if: ${{ inputs.emit-check == 'true' && inputs.verification-manifest == '' && inputs.use-check == 'true' }}
+      if: ${{ inputs.emit-check == 'true' && inputs.verification-manifest == '' && inputs.use-check == 'true' && inputs.changed-files == '' }}
       shell: bash
       working-directory: ${{ github.workspace }}
       env:
@@ -310,7 +315,7 @@ runs:
         set -e
         echo "$ACTION_RC" > .ovk-action-exit-code
     - name: Post OVK pull-request comment
-      if: ${{ inputs.post-comment == 'true' }}
+      if: ${{ inputs.post-comment == 'true' && (inputs.changed-files == '' || inputs.verification-manifest != '') }}
       shell: bash
       working-directory: ${{ github.workspace }}
       env:
