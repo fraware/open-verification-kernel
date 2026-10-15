@@ -78,3 +78,31 @@ def test_release_docs_and_strict_example_are_explicitly_qualified() -> None:
     assert "v1.3.0-rc.1" in status
     assert "shared HMAC secret" in integration
     assert "No currently approved copyable workflow" in integration
+
+
+def test_published_fixture_error_rates_are_unadjudicated_unknown() -> None:
+    """Corrected archived aggregates must not advertise 0% without ground truth."""
+    registry = json.loads(
+        (ROOT / "docs/benchmarks/external-pilots-registry.json").read_text(encoding="utf-8")
+    )
+    summary = json.loads(
+        (ROOT / "docs/benchmarks/adoption-summary.json").read_text(encoding="utf-8")
+    )
+    assert summary["pilot_dogfood"]["false_positive_rate"] is None
+
+    for data in (registry, summary):
+        maintained = [
+            row for row in data["external_pilots"]
+            if "Maintained consumer" in row.get("notes", "")
+            or "In-repo maintained" in row.get("notes", "")
+        ]
+        assert len(maintained) == 3
+        for row in maintained:
+            assert row["false_positives"] is None
+            assert row["false_positive_rate"] is None
+            assert "not independently" in row["notes"] or "no independent" in row["notes"]
+
+    study = (ROOT / "docs/PILOT_CASE_STUDIES.md").read_text(encoding="utf-8")
+    assert "0.0 (fixtures)" not in study
+    assert "Target: under 5%" not in study
+    assert "reported as unknown" in study
