@@ -2,6 +2,20 @@ name: RTK patched historical certificate replay (research)
 
 on:
   push:
+    branches: [research/rtk-transitive-evidence-support-v1]
+    paths:
+      - .github/workflows/rtk-lean-patched-historical-certificate-v1.yml
+      - experiments/rtk/lean_patched_historical_certificate_v1.py
+      - docs/RTK_PATCHED_HISTORICAL_CERTIFICATE_V1.md
+      - experiments/rtk/lean_patched_preoracle_identity_v1.py
+      - tests/test_rtk_lean_patched_preoracle_identity_v1.py
+      - docs/RTK_PATCHED_PREORACLE_IDENTITY_V1.md
+      - experiments/rtk/lean_patched_declaration_hypothesis_v1.py
+      - tests/test_rtk_lean_patched_declaration_hypothesis_v1.py
+      - docs/RTK_PATCHED_DECLARATION_HYPOTHESIS_V1.md
+      - experiments/rtk/lean_transitive_evidence_support_v1.lean.txt
+      - docs/RTK_TRANSITIVE_EVIDENCE_SUPPORT_V1.md
+  pull_request:
     branches: [research/rtk-patched-declaration-compatibility-v1]
     paths:
       - .github/workflows/rtk-lean-patched-historical-certificate-v1.yml
@@ -13,18 +27,8 @@ on:
       - experiments/rtk/lean_patched_declaration_hypothesis_v1.py
       - tests/test_rtk_lean_patched_declaration_hypothesis_v1.py
       - docs/RTK_PATCHED_DECLARATION_HYPOTHESIS_V1.md
-  pull_request:
-    branches: [research/rtk-patched-preoracle-identity-and-cost-v1]
-    paths:
-      - .github/workflows/rtk-lean-patched-historical-certificate-v1.yml
-      - experiments/rtk/lean_patched_historical_certificate_v1.py
-      - docs/RTK_PATCHED_HISTORICAL_CERTIFICATE_V1.md
-      - experiments/rtk/lean_patched_preoracle_identity_v1.py
-      - tests/test_rtk_lean_patched_preoracle_identity_v1.py
-      - docs/RTK_PATCHED_PREORACLE_IDENTITY_V1.md
-      - experiments/rtk/lean_patched_declaration_hypothesis_v1.py
-      - tests/test_rtk_lean_patched_declaration_hypothesis_v1.py
-      - docs/RTK_PATCHED_DECLARATION_HYPOTHESIS_V1.md
+      - experiments/rtk/lean_transitive_evidence_support_v1.lean.txt
+      - docs/RTK_TRANSITIVE_EVIDENCE_SUPPORT_V1.md
   workflow_dispatch:
 
 permissions:
@@ -72,13 +76,16 @@ jobs:
           cat > "$SRC/lakefile.toml" <<'TOML'
           name = "rtk_patched_historical_source"
           version = "0.1.0"
-          defaultTargets = ["RTKPatchedSource"]
+          defaultTargets = ["RTKPatchedSource", "RTKTransitiveEvidenceSupport"]
 
           [[lean_lib]]
           name = "RTKPatchedSupport"
 
           [[lean_lib]]
           name = "RTKPatchedSource"
+
+          [[lean_lib]]
+          name = "RTKTransitiveEvidenceSupport"
           TOML
           cat > "$SRC/RTKPatchedSupport.lean" <<'LEAN'
           import Init.Prelude
@@ -88,6 +95,8 @@ jobs:
           import RTKPatchedSupport
           theorem historical_claim (n : Nat) : op n = n := Eq.refl n
           LEAN
+          cp experiments/rtk/lean_transitive_evidence_support_v1.lean.txt \
+            "$SRC/RTKTransitiveEvidenceSupport.lean"
           (cd "$SRC" && lake build)
           (cd "$SRC" && lake check --paranoid) \
             | tee "$ROOT/source_paranoid.native.log"
@@ -96,6 +105,7 @@ jobs:
             "$SRC/.lake/build/lib/lean/RTKPatchedSource.olean" \
             > "$ROOT/source_patched_module_hashes.sha256"
           echo "PATCHED_SOURCE_HISTORICAL_THEOREM_PARANOID_INDEPENDENT_CHECKER_PASS"
+          echo "PATCHED_TRANSITIVE_MODEL_THEOREMS_PARANOID_CHECKED_MODEL_ONLY"
 
       - name: Export source proof expression and recheck unchanged serialized expression
         shell: bash
