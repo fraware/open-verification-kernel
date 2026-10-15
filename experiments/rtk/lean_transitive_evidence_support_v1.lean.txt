@@ -1,0 +1,141 @@
+import Lean
+
+/-!
+# Historical-evidence support locality for a bounded unfolding calculus
+
+This is a machine-checked theorem for the Eval relation DEFINED BELOW.
+It is not a theorem about Lean.Kernel.check, Lean definitional equality,
+Lean's actual ConstantInfo extraction, or authentication of source/target
+environments. It does not authorize OVK production evidence reuse.
+
+The point of this fragment is to make *transitive* lookup support explicit
+in a historical evaluation derivation, and to show that preserving only
+the names used by that exact derivation suffices to preserve its result.
+Unrelated environment entries may change. Unlike a direct-constant
+whitelist, this support includes recursively unfolded definitions.
+-/
+
+namespace RTKTransitiveEvidenceSupport
+
+inductive Term where
+  | literal (n : Nat) : Term
+  | constant (name : String) : Term
+  | add (left right : Term) : Term
+deriving Repr, DecidableEq
+
+abbrev Environment := String → Option Term
+
+/-- Finite historical evaluation derivations, not Lean kernel derivations. -/
+inductive Eval (env : Environment) : Term → Nat → Type where
+  | literal (n : Nat) : Eval env (.literal n) n
+  | add {left right : Term} {a b : Nat}
+      (hLeft : Eval env left a) (hRight : Eval env right b) :
+      Eval env (.add left right) (a + b)
+  | constant {name : String} {body : Term} {value : Nat}
+      (lookup : env name = some body) (inner : Eval env body value) :
+      Eval env (.constant name) value
+
+/--
+Names read by THIS derivation, including the transitive definitions it
+unfolds. It is intentionally evidence-relative and may contain duplicates.
+This is not a sound native Lean kernel support extractor.
+-/
+def Eval.support {env : Environment} {term : Term} {value : Nat} :
+    Eval env term value → List String
+  | .literal _ => []
+  | .add left right => left.support ++ right.support
+  | .constant (name := name) _ inner => name :: inner.support
+
+/--
+Transport a historical evaluation derivation to a different environment
+under agreement on exactly its recorded transitive lookup support.
+This is an induction over the actual derivation, not a congruence theorem
+obtained by assuming whole-environment equality.
+-/
+theorem transport (source : Environment) {term : Term} {value : Nat}
+    (historical : Eval source term value) :
+    ∀ target : Environment,
+      (∀ name, name ∈ historical.support → source name = target name) →
+      Eval target term value := by
+  induction historical with
+  | literal n =>
+      intro target _
+      exact Eval.literal n
+  | add left right ihLeft ihRight =>
+      intro target agreement
+      apply Eval.add
+      · apply ihLeft target
+        intro name hName
+        exact agreement name (by simp [Eval.support, hName])
+      · apply ihRight target
+        intro name hName
+        exact agreement name (by simp [Eval.support, hName])
+  | @constant name body value lookup inner ih =>
+      intro target agreement
+      apply Eval.constant (body := body)
+      · calc
+          target name = source name :=
+            (agreement name (by simp [Eval.support])).symm
+          _ = some body := lookup
+      · apply ih target
+        intro used hUsed
+        exact agreement used (by simp [Eval.support, hUsed])
+
+/-- A source-specific historical result survives any irrelevant extension. -/
+theorem transport_with_support_agreement
+    (source target : Environment)
+    {term : Term} {value : Nat}
+    (historical : Eval source term value)
+    (agreement : ∀ name, name ∈ historical.support →
+      source name = target name) :
+    Eval target term value :=
+  transport source historical target agreement
+
+/-
+Development witness: both source and target keep the SAME definition
+body for "op". The target changes the transitive definition of "base".
+The name "base" must be included in the historical support. This exposes
+why comparing only the immediately referenced "op" body is insufficient
+once its body is allowed to refer to other definitions.
+-/
+def sourceEnv : Environment
+  | "op" => some (.constant "base")
+  | "base" => some (.literal 0)
+  | _ => none
+
+def changedEnv : Environment
+  | "op" => some (.constant "base")
+  | "base" => some (.literal 1)
+  | _ => none
+
+def originalEvaluation : Eval sourceEnv (.constant "op") 0 := by
+  apply Eval.constant (body := .constant "base")
+  · rfl
+  · apply Eval.constant (body := .literal 0)
+    · rfl
+    · exact Eval.literal 0
+
+def changedEvaluation : Eval changedEnv (.constant "op") 1 := by
+  apply Eval.constant (body := .constant "base")
+  · rfl
+  · apply Eval.constant (body := .literal 1)
+    · rfl
+    · exact Eval.literal 1
+
+example : sourceEnv "op" = changedEnv "op" := rfl
+example : sourceEnv "base" ≠ changedEnv "base" := by decide
+example : "base" ∈ originalEvaluation.support := by decide
+example : "op" ∈ originalEvaluation.support := by decide
+
+/-
+Theorem scope:
+  * If the recorded derivation is well-formed and its lookup trace is
+    complete by construction, equality of those lookups preserves its
+    evaluated value, even with unrelated changes elsewhere.
+  * This neither establishes that real Lean Expr kernel support is
+    representable by Eval nor that an external extractor observes all
+    required lookups.
+  * The derivation is itself evidence; an untrusted caller must not
+    fabricate it or simply assert support-completeness.
+-/
+end RTKTransitiveEvidenceSupport
