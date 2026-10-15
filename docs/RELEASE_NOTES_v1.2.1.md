@@ -26,7 +26,7 @@ pip install -e '.[dev]'
 env:
   OVK_PACKAGE_VERSION: "1.2.1"
 steps:
-  - uses: fraware/open-verification-kernel@v1.2.1
+  - uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7  # exact historical source commit
 ```
 
 ## Consumer Sigstore verify
