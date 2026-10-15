@@ -26,7 +26,7 @@ theorem historical_claim (n : Nat) : op n = n := Eq.refl n
 | Target change | Expected graph comparison | Expected native old-proof replay |
 | --- | --- | --- |
 | Independently rebuild identical three-level chain | `CONDITIONAL_CLOSED_REFERENCE_CANDIDATE` | `ADMISSIBLE` |
-| Change only `leaf n := 0+n`, preserve `base` and `op` | `REVALIDATION_REQUIRED`, differing node `leaf` | `INADMISSIBLE` |
+| Change only `leaf n := Nat.succ n`, preserve `base` and `op` | `REVALIDATION_REQUIRED`, differing node `leaf` | `INADMISSIBLE` |
 | Add unrelated definition outside reachable chain | `CONDITIONAL_CLOSED_REFERENCE_CANDIDATE` | `ADMISSIBLE` |
 
 These expected labels are development controls, **not measured results until exact-head CI and native replay succeed**. New cases in this branch cannot be used as confirmatory cases under #177.
