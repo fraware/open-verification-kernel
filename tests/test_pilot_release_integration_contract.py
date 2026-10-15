@@ -106,3 +106,22 @@ def test_published_fixture_error_rates_are_unadjudicated_unknown() -> None:
     assert "0.0 (fixtures)" not in study
     assert "Target: under 5%" not in study
     assert "reported as unknown" in study
+
+
+def test_historical_pilot_case_studies_disclose_unreviewed_fixture_rates() -> None:
+    """Archival per-pilot reports must not equate fixture outcomes with FPR."""
+    paths = (
+        "docs/pilots/fastapi-terraform/REPORT.md",
+        "docs/pilots/express-actions/REPORT.md",
+        "docs/pilots/infra-terraform-k8s/REPORT.md",
+    )
+    for path in paths:
+        report = (ROOT / path).read_text(encoding="utf-8")
+        assert "historical" in report.lower()
+        assert "null/unknown" in report
+        assert "Independently adjudicated false positives | **Unknown**" in report
+        assert "Independently adjudicated false-positive rate | **Unknown**" in report
+        assert "Independently adjudicated false negatives | **Unknown**" in report
+        assert "| False positive rate | **0.0**" not in report
+        assert "FP under 5%" not in report
+        assert "immutable tag / audited SHA only" not in report
