@@ -22,7 +22,7 @@ historical.valid target
 
 The theorem `valid_transport` is proved by structural induction on the explicit historical `Trace` data. In the constant case, agreement preserves the exact looked-up body, while the inductive hypothesis transports the nested trace's validity. In the addition case, the two independent historical subtraces are transported. This is strictly weaker than whole-environment identity: unrelated names can change freely.
 
-The proof is a **sound locality theorem for the model's explicit evaluation relation**, not a tautological claim that the two entire environments are equal. It neither proves optimality of a revalidation frontier nor quantifies the cost of repairing invalid evidence.
+The proof is a **sound locality theorem for the model's explicit trace validity relation**, not a tautological claim that the two entire environments are equal. A second inductive relation, `Evaluates env term value`, independently defines literal, addition, and constant-unfolding evaluation **without using `Trace.valid` or `Trace.support`**. The theorem `trace_sound` establishes that every valid trace is a correct evaluation under that relation. Composing both results, `certified_result_transport` establishes that a source-valid historical trace with all transitive lookups preserved justifies the **same specified evaluation result in the target model**. This is a model-level soundness statement with an explicit semantic target; it neither proves optimality of a revalidation frontier nor quantifies the cost of repairing invalid evidence.
 
 ## Adversarial model witness
 
@@ -39,7 +39,7 @@ The source's historical trace is valid for the source environment but invalid fo
 5. **Trust and relying policy:** Qualify the patched kernel and relevant independent checkers for the intended scope, declared axioms, issuer/provenance, revocation, and relying authority. All existing `VALID` gates remain closed.
 6. **Repair:** On a versioned dependency/evidence graph, compute revalidation obligations with a proven soundness criterion; only claim minimality under an explicit repair operation set and cost model. Evaluate unnecessary work and false reuse prospectively under #177.
 
-The exact-head patched Lean workflow builds this source file as a new Lake library alongside the historical source theorem and checks the project with `lake check --paranoid`. That would establish kernel acceptance of the formal model proof **once the workflow completes successfully**; it is not an external proof of correctness of Lean's opaque `Kernel.check` over changed target contexts.
+The exact-head patched Lean workflow builds this source file as a new Lake library alongside the historical source theorem and checks the project with `lake check --paranoid`. The earlier trace-validity theorem passed at commit `d0f172ccd5e568d8ec6a27dd2bded077538147f5` (native run 38773103664). The newly added evaluator-soundness and composed-transport theorems have a **new unqualified head** until their own exact-head native workflow succeeds. No kernel checker validation here is an external proof of correctness of Lean's opaque `Kernel.check` over changed target contexts.
 
 ## North Star
 
