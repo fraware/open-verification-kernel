@@ -803,6 +803,8 @@ def test_advisory_report_separates_current_claim_and_conditional_reuse(tmp_path)
     assert report.transport_reason_codes == []
     assert report.declared_definition_changed is False
     assert report.declared_machine_claim_changed is False
+    assert report.changed_specification_fields == []
+    assert report.supplied_source_statement == report.supplied_target_statement
     assert report.snapshot_state_reverified_at_review is False
     assert report.manifest_authority == "not_authenticated"
     assert report.live_temporal_policy == "not_evaluated"
@@ -833,6 +835,8 @@ def test_advisory_report_changed_statement_not_historical_reuse(tmp_path):
     assert report.historical_transport == "not_admitted"
     assert report.declared_definition_changed is True
     assert report.declared_machine_claim_changed is False
+    assert report.changed_specification_fields == ["statement"]
+    assert report.supplied_source_statement != report.supplied_target_statement
     assert "guarantee_definition_changed" in report.transport_reason_codes
     assert report.next_action == "obtain_fresh_evidence_or_independent_review"
     assert report.production_reliance_authorized is False
@@ -853,6 +857,7 @@ def test_advisory_report_changed_assumptions_not_historical_reuse(tmp_path):
     assert report.target_typed_claim_status == "established"
     assert report.historical_transport == "not_admitted"
     assert report.declared_definition_changed is True
+    assert report.changed_specification_fields == ["assumptions"]
     assert "guarantee_definition_changed" in report.transport_reason_codes
     assert report.production_reliance_authorized is False
 
@@ -927,6 +932,7 @@ def test_advisory_cli_writes_separate_evidence_bound_reports(tmp_path):
     )
     markdown = (output / "continuity-review.md").read_text(encoding="utf-8")
     assert payload["historical_transport"] == "conditional_candidate"
+    assert payload["changed_specification_fields"] == []
     assert payload["production_reliance_authorized"] is False
     assert "advisory only" in markdown
     assert "**NO**" in markdown
