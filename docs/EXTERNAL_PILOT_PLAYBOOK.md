@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
+      # No token write permissions for fork-compatible advisory evaluation.
     steps:
       - uses: actions/checkout@v4
         with:
