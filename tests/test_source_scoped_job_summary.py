@@ -22,7 +22,7 @@ BASE = "a" * 40
 HEAD = "b" * 40
 MERGE = "c" * 40
 TREE = "f" * 40
-DIFF_BYTES = b"diff --git a/sample.py b/sample.py\\n+authorized = True\\n"
+DIFF_BYTES = b"diff --git a/sample.py b/sample.py\n+authorized = True\n"
 DIFF = hashlib.sha256(DIFF_BYTES).hexdigest()
 
 
@@ -160,6 +160,7 @@ def test_job_summary_only_runs_for_default_source_bound_advisory_pr() -> None:
     ):
         assert guard in condition
     assert 'render_source_bound_job_summary.py' in step["run"]
+    assert "--diff .ovk-pr.diff" in step["run"]
     assert '"$GITHUB_STEP_SUMMARY"' in step["run"]
     assert "GITHUB_TOKEN" not in step.get("env", {})
     assert "GITHUB_TOKEN" not in step["run"]
