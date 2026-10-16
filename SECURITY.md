@@ -2,19 +2,22 @@
 
 OVK is security-sensitive infrastructure because it may influence pull-request merge decisions and evidence claims.
 
-## Supported versions
+## Release and security support status
 
-| Version | Supported |
+**Last reviewed:** 2026-10-15. The latest publicly published release is `v1.2.1`. The `v1.3.0-rc.1` tag and distribution are **not published**. A historical version appearing in this table does not establish that it receives backported security fixes.
+
+| Version | Public release and support status |
 |---|---|
-| 1.1.x | yes |
-| 1.0.x | yes |
-| &lt; 1.0 | no |
+| `1.2.1` | Latest published release; the maintainer must explicitly confirm the security-patch support commitment |
+| `1.1.x`, `1.0.x` | Historical versions; earlier documentation marked these supported, but ongoing security maintenance is not independently verified |
+| Before `1.0` | No support claim |
+| `1.3.0-rc.1` | Unpublished engineering candidate; no public install or security-support claim |
 
-Report security issues against `main` or the latest release tag.
+Report suspected vulnerabilities affecting the published release or current source tree through a **private** channel. Do not assume that reporting a problem against an old series creates a backport commitment.
 
 ## Reporting a vulnerability
 
-Please open a private security advisory if available, or contact the maintainers through the repository owner.
+Use the repository's private vulnerability-reporting / security advisory interface if available; otherwise contact the repository maintainer privately before sharing exploit details. If no private reporting path is available, the maintainers must configure one before a wider security-sensitive launch.
 
 ## Security-critical project rules
 
