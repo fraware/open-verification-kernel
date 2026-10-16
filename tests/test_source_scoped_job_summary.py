@@ -264,5 +264,8 @@ def test_action_uploads_scoped_report_without_uploading_raw_diff(tmp_path: Path)
     assert "inputs.verification-manifest == ''" in summary["if"]
     upload = next(s for s in steps if s.get("name") == "Upload OVK artifacts")
     assert "ovk-advisory-pr-summary.md" in upload["with"]["path"]
+    # A diff can contain credentials or private source. It is used and
+    # hashed locally, never included in portable uploaded artifacts.
+    assert ".ovk-pr.diff" not in upload["with"]["path"]
     cleanup = next(s for s in steps if s.get("name") == "Invalidate stale generated Action outputs")
     assert "ovk-advisory-pr-summary.md" in cleanup["run"]
