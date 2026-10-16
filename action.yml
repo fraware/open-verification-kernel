@@ -415,6 +415,14 @@ runs:
             }
             exit_code = str(exit_codes.get(decision_state or recommendation, 2))
 
+        if os.environ.get("OVK_VERIFICATION_MANIFEST"):
+            # Manifest claims describe caller-selected materials, not a
+            # source-bound PR. Do not export their PASS as an Action-wide
+            # allow recommendation that downstream jobs could use as a gate.
+            decision_state = "unknown"
+            recommendation = "require_human_review"
+            exit_code = "2"
+
         check_emitted = "true" if Path(".ovk-check-emitted").exists() else "false"
         github_output = os.environ["GITHUB_OUTPUT"]
         with open(github_output, "a", encoding="utf-8") as handle:
