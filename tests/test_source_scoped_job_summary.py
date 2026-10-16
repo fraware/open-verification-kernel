@@ -21,7 +21,9 @@ ROOT = Path(__file__).resolve().parents[1]
 BASE = "a" * 40
 HEAD = "b" * 40
 MERGE = "c" * 40
-DIFF = "d" * 64
+TREE = "f" * 40
+DIFF_BYTES = b"diff --git a/sample.py b/sample.py\\n+authorized = True\\n"
+DIFF = hashlib.sha256(DIFF_BYTES).hexdigest()
 
 
 def receipt() -> dict:
@@ -31,6 +33,7 @@ def receipt() -> dict:
         "event_base_sha": BASE,
         "event_pr_head_sha": HEAD,
         "evaluated_checkout_commit_sha": MERGE,
+        "evaluated_checkout_tree_sha": TREE,
         "evidence_subject_sha": MERGE,
         "input_comparison": "event_base_to_verified_merge_preview",
         "input_diff_sha256": DIFF,
@@ -54,10 +57,10 @@ def evidence(state: str = "allow") -> dict:
 def test_shareable_summary_is_precisely_scoped_and_identifiable() -> None:
     data = evidence("block")
     raw = json.dumps(data, sort_keys=True).encode()
-    markdown = build_summary(data, receipt(), raw)
+    markdown = build_summary(data, receipt(), raw, DIFF_BYTES)
     assert "advisory PR observation" in markdown
     assert "**Recorded scoped decision:** `block`" in markdown
-    for id_ in (BASE, HEAD, MERGE, DIFF):
+    for id_ in (BASE, HEAD, MERGE, TREE, DIFF):
         assert id_ in markdown
     assert hashlib.sha256(raw).hexdigest() in markdown
     assert "neither the event nor the evidence is independently authenticated" in markdown
@@ -79,6 +82,7 @@ def test_shareable_summary_is_precisely_scoped_and_identifiable() -> None:
         ("evaluated_checkout_commit_sha", "wrong"),
         ("event_pr_head_sha", "missing"),
         ("event_base_sha", "BAD"),
+        ("evaluated_checkout_tree_sha", "missing"),
         ("input_diff_sha256", "not-a-digest"),
         ("evidence_subject_sha", BASE),
     ],
@@ -87,21 +91,23 @@ def test_unbound_unexpected_and_malformed_receipts_fail_closed(key: str, replace
     altered = copy.deepcopy(receipt())
     altered[key] = replacement
     with pytest.raises(ObservationError):
-        build_summary(evidence(), altered, b"{}")
+        build_summary(evidence(), altered, b"{}", DIFF_BYTES)
 
 
 def test_subject_mismatch_and_unknown_decision_fail_closed() -> None:
     altered = evidence()
     altered["subject"]["head_sha"] = HEAD
     with pytest.raises(ObservationError, match="evidence subject"):
-        build_summary(altered, receipt(), b"{}")
+        build_summary(altered, receipt(), b"{}", DIFF_BYTES)
     with pytest.raises(ObservationError, match="decision state"):
-        build_summary(evidence("authoritative_verified"), receipt(), b"{}")
+        build_summary(evidence("authoritative_verified"), receipt(), b"{}", DIFF_BYTES)
 
 
 def test_renderer_appends_without_overwriting_existing_job_summary(tmp_path: Path) -> None:
     observation = tmp_path / "evidence.json"
     binding = tmp_path / "binding.json"
+    diff = tmp_path / "actual-pr.diff"
+    diff.write_bytes(DIFF_BYTES)
     output = tmp_path / "summary.md"
     observation.write_text(json.dumps(evidence()), encoding="utf-8")
     binding.write_text(json.dumps(receipt()), encoding="utf-8")
@@ -110,6 +116,7 @@ def test_renderer_appends_without_overwriting_existing_job_summary(tmp_path: Pat
     assert main([
         "--evidence", str(observation),
         "--source-binding", str(binding),
+        "--diff", str(diff),
         "--output", str(output),
     ]) == 0
     contents = output.read_text(encoding="utf-8")
@@ -122,6 +129,8 @@ def test_renderer_appends_without_overwriting_existing_job_summary(tmp_path: Pat
 def test_no_summary_written_from_unbound_input(tmp_path: Path) -> None:
     observation = tmp_path / "evidence.json"
     binding = tmp_path / "binding.json"
+    diff = tmp_path / "actual-pr.diff"
+    diff.write_bytes(DIFF_BYTES)
     output = tmp_path / "summary.md"
     observation.write_text(json.dumps(evidence("allow")), encoding="utf-8")
     unbound = receipt()
@@ -131,6 +140,7 @@ def test_no_summary_written_from_unbound_input(tmp_path: Path) -> None:
     assert main([
         "--evidence", str(observation),
         "--source-binding", str(binding),
+        "--diff", str(diff),
         "--output", str(output),
     ]) == 2
     assert not output.exists()
@@ -154,3 +164,23 @@ def test_job_summary_only_runs_for_default_source_bound_advisory_pr() -> None:
     assert "GITHUB_TOKEN" not in step.get("env", {})
     assert "GITHUB_TOKEN" not in step["run"]
     assert "check-runs" not in step["run"]
+
+
+def test_modified_diff_bytes_cannot_be_described_by_old_receipt() -> None:
+    with pytest.raises(ObservationError, match="diff bytes"):
+        build_summary(evidence(), receipt(), b"{}", DIFF_BYTES + b"unexpected")
+
+
+def test_missing_source_diff_never_creates_report(tmp_path: Path) -> None:
+    observation = tmp_path / "evidence.json"
+    binding = tmp_path / "binding.json"
+    destination = tmp_path / "summary.md"
+    observation.write_text(json.dumps(evidence()), encoding="utf-8")
+    binding.write_text(json.dumps(receipt()), encoding="utf-8")
+    assert main([
+        "--evidence", str(observation),
+        "--source-binding", str(binding),
+        "--diff", str(tmp_path / "absent.diff"),
+        "--output", str(destination),
+    ]) == 2
+    assert not destination.exists()
