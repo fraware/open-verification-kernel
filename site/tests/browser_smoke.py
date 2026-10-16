@@ -29,6 +29,8 @@ def main():
         assert desktop.locator("#totalCount").inner_text() == "51"
         assert desktop.locator(".resource-card").count() == 12
         desktop.locator("#resourceSearch").fill("source binding")
+        assert desktop.locator("#quickResults").is_visible()
+        assert desktop.locator("#quickResults .quick-link").count() >= 1
         titles = desktop.locator(".resource-card h3").all_text_contents()
         assert "PR source binding" in titles
         assert "Source-scoped PR report" in titles
