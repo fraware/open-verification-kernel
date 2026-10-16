@@ -142,18 +142,35 @@ def build_pilot_row(
     if existing is not None:
         row.update({key: value for key, value in existing.items() if value is not None or key in row})
         row["repository"] = repo
-    if artifacts_dir is not None and artifacts_dir.is_dir():
-        # An explicitly ingested artifact directory constitutes a new,
-        # potentially unreviewed cohort. Even a single evidence bundle or an
-        # incomplete aggregate must not inherit older human error labels.
-        # Cohort equality has not been independently authenticated.
-        row["false_positives"] = None
-        row["false_positive_rate"] = None
+    if artifacts_dir is not None:
+        if not artifacts_dir.is_dir():
+            raise FileNotFoundError(f"pilot artifacts directory not found: {artifacts_dir}")
+        # An explicitly ingested artifact directory is a new, potentially
+        # unreviewed cohort. Invalidate all prior cohort-specific metrics,
+        # including totals and timing, before reading whatever is available.
+        # An empty or partial artifact set must never inherit old counts.
+        for field in (
+            "prs_evaluated",
+            "prs_blocked",
+            "false_positives",
+            "false_positive_rate",
+            "median_check_latency_ms",
+        ):
+            row[field] = None
         artifact_metrics = _metrics_from_artifacts(artifacts_dir)
         row.update({key: value for key, value in artifact_metrics.items() if value is not None})
-    if report_path is not None and report_path.exists():
-        # A reviewer-provided report is the only source of error labels.
-        # Self-reports still need independent verification before promotion.
+    if report_path is not None:
+        if not report_path.is_file():
+            raise FileNotFoundError(f"external pilot report not found: {report_path}")
+        # A separately selected report is still self-reported. If the report
+        # updates cohort counts without refreshed adjudication, do not retain
+        # historical zero-error labels from a previous cohort.
+        report = read_json_file(report_path)
+        if any(report.get(field) is not None for field in ("prs_evaluated", "prs_blocked")):
+            for field in ("false_positives", "false_positive_rate"):
+                row[field] = None
+        # _apply_report verifies that the selected report cannot redirect
+        # the repository identity and copies only explicitly supplied fields.
         row = _apply_report(row, report_path)
     row["status"] = _infer_status(row)
     return row
