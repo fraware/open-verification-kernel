@@ -31,6 +31,11 @@ evidence only** in the Action:
   of caller-supplied `emit-check` or `post-comment` inputs.
 - `mode: strict` with `verification-manifest` is refused before evaluation.
   Strict PR enforcement cannot be synthesized from an unbound manifest.
+- The composite Action outputs are deliberately `decision_state=unknown`,
+  `recommendation=require_human_review`, and `exit_code=2` for any
+  manifest input, even if the selected manifest's own scoped verifier reports
+  `allow`. The scoped result remains in the local artifact, not an
+  Action-wide PR approval suitable for branch protections or downstream gates.
 - All reserved top-level Action outputs are invalidated before installation
   (including if package installation fails and uploads run with `always()`).
   Manifest mode deletes any prior source receipt/handoff and refuses a
