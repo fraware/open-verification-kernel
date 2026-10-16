@@ -24,3 +24,7 @@
 
 /* Narrow screens should not inherit a long eyebrow's min-content grid width. */
 @media(max-width:520px){.hero{grid-template-columns:minmax(0,1fr)}.hero-content,.hero-search-group{min-width:0;max-width:100%}.eyebrow{white-space:normal;line-height:1.6}}
+
+/* High-contrast secondary text for readability in documentation workflows. */
+.hero-footnote,.search-helper,.section-counter,.sidebar-overline,.index-note,.footer-bottom,.visual-note,.visual-flow .flow-meta,.resource-card .card-path,.category-button .cat-count,.quick-heading,.quick-link-text small{color:#647186}
+.resource-card p,.step-card p,.strip-item p,.section-heading p:not(.section-kicker),.empty-state p,.visual-status p,.hero-intro{color:#617085}
