@@ -487,6 +487,5 @@ runs:
           ovk-attestation-envelope.json
           ${{ inputs.bundle-output-dir }}/**
           ovk-branch-metadata.json
-          .ovk-pr.diff
           ovk-source-binding.json
           .ovk-check-emitted
