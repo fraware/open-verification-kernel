@@ -145,3 +145,42 @@ def test_manifest_rejects_existing_nonempty_output_bundle(tmp_path: Path) -> Non
     assert proc.returncode == 2, proc.stderr
     assert "already contains files" in proc.stdout
     assert (folder / "old-ovk-evidence.json").read_text(encoding="utf-8") == "STALE"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Bash execution tested on Linux/macOS")
+def test_manifest_pass_cannot_be_exported_as_pr_allow(tmp_path: Path) -> None:
+    if shutil.which("bash") is None:
+        pytest.skip("bash unavailable")
+    outputs = next(step for step in _steps() if step.get("name") == "Set action outputs")
+    folder = tmp_path / "ovk-bundle"
+    folder.mkdir()
+    (folder / "ovk-evidence.json").write_text(
+        '{"decision": {"decision_state": "allow", "merge_recommendation": "allow"}}',
+        encoding="utf-8",
+    )
+    target = tmp_path / "action-output.txt"
+    env = dict(os.environ)
+    env.update({
+        "OVK_VERIFICATION_MANIFEST": "selected.json",
+        "OVK_BUNDLE_OUTPUT_DIR": str(folder),
+        "OVK_EVIDENCE_OUTPUT": "ovk-evidence.json",
+        "GITHUB_OUTPUT": str(target),
+    })
+    proc = subprocess.run(
+        ["bash", "-eo", "pipefail", "-c", outputs["run"]],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    outcome = dict(line.split("=", 1) for line in target.read_text(encoding="utf-8").splitlines())
+    assert outcome == {
+        "decision_state": "unknown",
+        "recommendation": "require_human_review",
+        "exit_code": "2",
+        "check_emitted": "false",
+    }
+    # The raw, explicitly scoped advisory observation remains available.
+    assert '"allow"' in (folder / "ovk-evidence.json").read_text(encoding="utf-8")
