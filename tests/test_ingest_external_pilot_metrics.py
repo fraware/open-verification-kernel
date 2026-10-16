@@ -51,7 +51,9 @@ def test_build_pilot_row_from_artifacts(tmp_path: Path) -> None:
     assert row["repository"] == "example/oss-pilot"
     assert row["prs_evaluated"] == 4
     assert row["false_positive_rate"] == 0.0
-    assert row["median_check_latency_ms"] == 88.5
+    # The explicit report changes the cohort count without a bound evidence ID.
+    # Preserve the reviewed report values, not latency from an unlinked artifact.
+    assert row["median_check_latency_ms"] is None
     assert row["status"] == "advisory"
 
 
