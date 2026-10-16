@@ -58,6 +58,9 @@ def main():
         mobile.locator("#resourceSearch").fill("ci secrets")
         assert mobile.locator(".resource-card").count() >= 1
         assert mobile.evaluate("document.documentElement.scrollWidth - innerWidth") <= 0
+        # The narrowest supported mobile layout must also stay within the viewport.
+        mobile.set_viewport_size({"width": 320, "height": 800})
+        assert mobile.evaluate("document.documentElement.scrollWidth - innerWidth") <= 0
         assert not errors, errors
         browser.close()
     print("PASS — desktop/mobile layout, search, accessible navigation, JS execution")
