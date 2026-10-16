@@ -49,11 +49,15 @@ The renderer itself uses only Python's standard library:
 python scripts/render_source_bound_job_summary.py \
   --evidence ovk-evidence.json \
   --source-binding ovk-source-binding.json \
+  --diff .ovk-pr.diff \
   --output advisory-summary.md
 ```
 
-The input files must come from the same ordinary, internally prepared
-source-bound OVK PR run. Copying fixtures, passing caller-selected diffs,
+The evidence, source receipt, and **exact binary diff bytes** must come
+from the same ordinary, internally prepared source-bound OVK PR run. The
+renderer recomputes the input diff digest and refuses a changed or missing
+diff; it also checks the complete source tree SHA field and agreement of
+the evidence subject with the observed merge preview. Copying fixtures, passing caller-selected diffs,
 relabeling PR heads, or using a multi-lane manifest is deliberately refused.
 The renderer appends instead of overwriting an existing summary, so
 multiple independent tools in the same CI job retain their own sections.
