@@ -41,6 +41,18 @@ reports and locating the underlying artifacts. A SHA-256 digest is tamper
 evidence only relative to a trusted expected digest; it does not establish
 the authenticity of the evidence or the GitHub runner.
 
+**Portable human-review artifact (unreleased draft #228):** The same validated
+text is also saved as `ovk-advisory-pr-summary.md` and included in the
+existing OVK evidence-artifact upload. A teammate can inspect the report with
+its exact source/decision limitations without copying the generic
+`ovk-pr-comment.md`, which lacks these prominent source-binding caveats.
+The standalone Markdown report is *not* a cryptographic certificate, and the
+upload does not itself authenticate the file or event. Failed source validation
+deletes any stale portable report before an always-running upload occurs.
+The renderer deliberately excludes raw PR diffs and source excerpts from its
+Markdown; the recorded digest supports subsequent independent comparison.
+Native GitHub job-summary presentation remains available in parallel.
+
 ## Reuse across repositories and CI systems
 
 The renderer itself uses only Python's standard library:
@@ -50,7 +62,8 @@ python scripts/render_source_bound_job_summary.py \
   --evidence ovk-evidence.json \
   --source-binding ovk-source-binding.json \
   --diff .ovk-pr.diff \
-  --output advisory-summary.md
+  --output advisory-summary.md \
+  --portable-output ovk-advisory-pr-summary.md
 ```
 
 The evidence, source receipt, and **exact binary diff bytes** must come
