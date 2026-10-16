@@ -34,8 +34,11 @@ evidence only** in the Action:
 - The composite Action outputs are deliberately `decision_state=unknown`,
   `recommendation=require_human_review`, and `exit_code=2` for any
   manifest input, even if the selected manifest's own scoped verifier reports
-  `allow`. The scoped result remains in the local artifact, not an
-  Action-wide PR approval suitable for branch protections or downstream gates.
+  `allow`. The same Action-level downgrade applies to any caller-supplied
+  `changed-files` diff. Only the internally prepared default change input
+  retains its scoped decision in Action outputs; neither form of unbound input
+  grants an `allow` output suitable for downstream PR approval.
+  The selected input's own result remains in local advisory artifacts.
 - All reserved top-level Action outputs are invalidated before installation
   (including if package installation fails and uploads run with `always()`).
   Manifest mode deletes any prior source receipt/handoff and refuses a
