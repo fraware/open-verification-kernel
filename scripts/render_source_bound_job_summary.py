@@ -130,15 +130,32 @@ def main(argv: list[str] | None = None) -> int:
         default=Path(os.environ["GITHUB_STEP_SUMMARY"]) if os.environ.get("GITHUB_STEP_SUMMARY") else None,
         help="GitHub job summary path or another explicit Markdown file",
     )
+    parser.add_argument(
+        "--portable-output", type=Path,
+        help="Optional standalone, read-only scoped Markdown report for artifact reuse",
+    )
     args = parser.parse_args(argv)
     if args.output is None:
         print("no summary output path", file=sys.stderr)
         return 2
     try:
+        if args.portable_output is not None:
+            # A report is an output, never an input or a replacement for the
+            # runner-owned job summary. Reject collisions before any deletion.
+            protected = (args.evidence, args.source_binding, args.diff, args.output)
+            if args.portable_output.resolve() in {p.resolve() for p in protected}:
+                raise ObservationError("portable output aliases source material or job summary")
+            if args.portable_output.is_symlink() or args.portable_output.is_dir():
+                raise ObservationError("portable output must be an ordinary file path")
+            # If validation fails, a prior report must not survive to the
+            # always-running artifact uploader as if it belonged to this run.
+            args.portable_output.unlink(missing_ok=True)
         evidence, evidence_bytes = _json_object(args.evidence)
         receipt, _ = _json_object(args.source_binding)
         diff_bytes = args.diff.read_bytes()
         summary = build_summary(evidence, receipt, evidence_bytes, diff_bytes)
+        if args.portable_output is not None:
+            args.portable_output.write_text(summary + "\n", encoding="utf-8", newline="\n")
         # The host owns GITHUB_STEP_SUMMARY; append so this Action composes
         # with earlier steps and multiple invocations without clobbering them.
         with args.output.open("a", encoding="utf-8", newline="\n") as output:
