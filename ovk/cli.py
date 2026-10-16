@@ -736,8 +736,11 @@ def check(
     input_path = diff or changed_files
     files, diff_text = load_diff_or_changed_files(input_path)
     if source_binding is not None:
-        if input_path is None or diff_text is None or github_event is None:
-            raise typer.BadParameter("source binding requires an actual unified diff and GitHub PR event")
+        if input_path is None or github_event is None:
+            raise typer.BadParameter("source binding requires an input file and GitHub PR event")
+        # A valid Git merge preview can have an empty diff. The byte-level
+        # receipt check still applies; lack of changed lines must not be
+        # mislabeled as a validated source-to-model PASS.
         from ovk.core.source_binding_identity import (
             SourceSubjectMismatch,
             require_bound_merge_preview_subject,
