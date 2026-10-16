@@ -185,3 +185,84 @@ def test_missing_source_diff_never_creates_report(tmp_path: Path) -> None:
         "--output", str(destination),
     ]) == 2
     assert not destination.exists()
+
+
+def test_portable_report_matches_append_only_job_summary(tmp_path: Path) -> None:
+    evidence_path = tmp_path / "ovk-evidence.json"
+    receipt_path = tmp_path / "ovk-source-binding.json"
+    diff_path = tmp_path / ".ovk-pr.diff"
+    job_summary = tmp_path / "GITHUB_STEP_SUMMARY"
+    portable = tmp_path / "ovk-advisory-pr-summary.md"
+    evidence_path.write_text(json.dumps(evidence("allow")), encoding="utf-8")
+    receipt_path.write_text(json.dumps(receipt()), encoding="utf-8")
+    diff_path.write_bytes(DIFF_BYTES)
+    job_summary.write_text("## First tool\n\n", encoding="utf-8")
+    rc = main([
+        "--evidence", str(evidence_path), "--source-binding", str(receipt_path),
+        "--diff", str(diff_path), "--output", str(job_summary),
+        "--portable-output", str(portable),
+    ])
+    assert rc == 0
+    expected = build_summary(evidence(), receipt(), evidence_path.read_bytes(), DIFF_BYTES)
+    assert portable.read_text(encoding="utf-8") == expected + "\n"
+    assert job_summary.read_text(encoding="utf-8") == "## First tool\n\n" + expected + "\n"
+    assert "An `allow` is not permission to merge" in portable.read_text(encoding="utf-8")
+    assert "independently authenticated" in portable.read_text(encoding="utf-8")
+    assert "ovk-advisory-pr-summary" not in evidence_path.read_text(encoding="utf-8")
+
+
+def test_bad_source_does_not_retain_preexisting_shareable_report(tmp_path: Path) -> None:
+    evidence_path = tmp_path / "ovk-evidence.json"
+    receipt_path = tmp_path / "ovk-source-binding.json"
+    diff_path = tmp_path / ".ovk-pr.diff"
+    job_summary = tmp_path / "GITHUB_STEP_SUMMARY"
+    portable = tmp_path / "ovk-advisory-pr-summary.md"
+    evidence_path.write_text(json.dumps(evidence()), encoding="utf-8")
+    receipt_path.write_text(json.dumps(receipt()), encoding="utf-8")
+    diff_path.write_bytes(DIFF_BYTES + b"tampered")
+    portable.write_text("UNSAFE STALE ALLOW", encoding="utf-8")
+    assert main([
+        "--evidence", str(evidence_path), "--source-binding", str(receipt_path),
+        "--diff", str(diff_path), "--output", str(job_summary),
+        "--portable-output", str(portable),
+    ]) == 2
+    assert not portable.exists()
+    assert not job_summary.exists()
+
+
+@pytest.mark.parametrize("alias", ["evidence", "receipt", "diff", "summary"])
+def test_portable_report_cannot_overwrite_verification_input(
+    tmp_path: Path, alias: str,
+) -> None:
+    paths = {
+        "evidence": tmp_path / "evidence.json",
+        "receipt": tmp_path / "receipt.json",
+        "diff": tmp_path / "change.diff",
+        "summary": tmp_path / "job-summary.md",
+    }
+    paths["evidence"].write_text(json.dumps(evidence()), encoding="utf-8")
+    paths["receipt"].write_text(json.dumps(receipt()), encoding="utf-8")
+    paths["diff"].write_bytes(DIFF_BYTES)
+    before = paths[alias].read_bytes() if paths[alias].exists() else None
+    assert main([
+        "--evidence", str(paths["evidence"]),
+        "--source-binding", str(paths["receipt"]),
+        "--diff", str(paths["diff"]),
+        "--output", str(paths["summary"]),
+        "--portable-output", str(paths[alias]),
+    ]) == 2
+    after = paths[alias].read_bytes() if paths[alias].exists() else None
+    assert before == after
+
+
+def test_action_uploads_scoped_report_without_uploading_raw_diff(tmp_path: Path) -> None:
+    action = yaml.safe_load((ROOT / "action.yml").read_text(encoding="utf-8"))
+    steps = action["runs"]["steps"]
+    summary = next(s for s in steps if s.get("name") == "Share scoped advisory observation in job summary")
+    assert "--portable-output ovk-advisory-pr-summary.md" in summary["run"]
+    assert "inputs.changed-files == ''" in summary["if"]
+    assert "inputs.verification-manifest == ''" in summary["if"]
+    upload = next(s for s in steps if s.get("name") == "Upload OVK artifacts")
+    assert "ovk-advisory-pr-summary.md" in upload["with"]["path"]
+    cleanup = next(s for s in steps if s.get("name") == "Invalidate stale generated Action outputs")
+    assert "ovk-advisory-pr-summary.md" in cleanup["run"]
