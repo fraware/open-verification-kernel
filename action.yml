@@ -261,6 +261,16 @@ runs:
         fi
         set -e
         echo "$ACTION_RC" > .ovk-action-exit-code
+    - name: Share scoped advisory observation in job summary
+      if: ${{ github.event_name == 'pull_request' && inputs.mode == 'advisory' && inputs.verification-manifest == '' && inputs.changed-files == '' && inputs.use-check == 'true' }}
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        set -euo pipefail
+        python "${{ github.action_path }}/scripts/render_source_bound_job_summary.py" \
+          --evidence ovk-evidence.json \
+          --source-binding ovk-source-binding.json \
+          --output "$GITHUB_STEP_SUMMARY"
     - name: Emit OVK GitHub check (check path)
       id: emit-check-run
       if: ${{ inputs.emit-check == 'true' && inputs.verification-manifest == '' && inputs.use-check == 'true' && inputs.changed-files == '' }}
