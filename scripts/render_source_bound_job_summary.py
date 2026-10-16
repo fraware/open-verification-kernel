@@ -103,6 +103,7 @@ def build_summary(
         "| Observation | Exact value |\n"
         "| --- | --- |\n"
         f"| Evaluated GitHub merge-preview commit | `{checkout}` |\n"
+        f"| Observed Git tree identity | `{tree}` |\n"
         f"| Original contributor PR head | `{head}` |\n"
         f"| Event base revision | `{base}` |\n"
         f"| Observed binary diff SHA-256 | `{diff_hash}` |\n"
