@@ -16,7 +16,27 @@ def test_collect_pilot_metrics_schema_valid() -> None:
     require_schema_valid(metrics, schema, context="pilot metrics")
     validate_metrics(metrics)
     assert metrics["pilot_report"]["manifests_passed"] == metrics["pilot_report"]["manifests_total"]
-    assert metrics["adoption"]["pilot_dogfood"]["false_positive_rate"] == 0.0
+    assert metrics["adoption"]["pilot_dogfood"]["false_positive_rate"] is None
+
+
+def test_checker_block_on_fixture_does_not_qualify_false_positive_rate(tmp_path: Path) -> None:
+    """A failed fixture and a BLOCK are both tool-relative signals, not ground truth."""
+    report = tmp_path / "pilot-report.json"
+    report.write_text(
+        json.dumps({
+            "results": [
+                {"passed": False, "merge_recommendation": "block", "elapsed_ms": 12.0},
+                {"passed": True, "merge_recommendation": "allow", "elapsed_ms": 14.0},
+            ],
+            "manifests_total": 2,
+            "manifests_passed": 1,
+        }),
+        encoding="utf-8",
+    )
+    metrics = collect_pilot_metrics(source="pilot-dogfood", pilot_report_path=report)
+    validate_metrics(metrics)
+    assert metrics["adoption"]["pilot_dogfood"]["manifests_total"] == 2
+    assert metrics["adoption"]["pilot_dogfood"]["false_positive_rate"] is None
 
 
 def test_collect_pilot_metrics_with_evidence(tmp_path: Path) -> None:

@@ -24,11 +24,13 @@ pip install open-verification-kernel==1.3.0-rc.1
 pip install "open-verification-kernel[solvers]==1.3.0-rc.1"
 ```
 
-Until the wheel is on PyPI, use `pip install -e '.[dev]'` from a checkout. **Live signed pin today:** `@v1.2.1` with `OVK_PACKAGE_VERSION: "1.2.1"`. **Candidate after attributable tag:** `@v1.3.0-rc.1` with matching `OVK_PACKAGE_VERSION`. Do not pin `@main` or treat uncommitted branch work as a verified release.
+For current, **unreleased development code**, use `pip install -e '.[dev]'` from a checkout. The last published GitHub Release is `v1.2.1`; its annotated Git tag is unsigned, its GitHub Release is not marked immutable, and its historical Action **falls back to checkout code if the requested package version cannot be installed**. Its exact source commit is `a27d5720f4350c00bca34f71d991c31f5a2f38c7`. An attributable `v1.3.0-rc.1` release is **not currently available**. The commands in the preceding PyPI section are forward-looking and must not be run as current-release instructions. The fail-closed installer introduced in draft PR #220 will apply only to a later independently authorized release.
 
 Optional Z3: `pip install -e '.[solvers]'`
 
 Optional HMAC signing: `export OVK_SIGNING_KEY=your-signing-secret`
+
+**Signing trust boundary:** `OVK_SIGNING_KEY` is a shared HMAC secret used for signing and verifying; it is not a public verification key. Do not expose it to fork-originated `pull_request` jobs, upload it with evidence artifacts, or mistake a locally HMAC-signed bundle for independently authenticated source or release provenance.
 
 ## First demo
 
@@ -91,7 +93,11 @@ permissions:
 
 **Third-party action pins:** `action.yml` and `.github/workflows/publish.yml` pin `actions/*` (and other release third-parties) to immutable commit SHAs. CI enforces this with `python scripts/pin_action_shas.py`.
 
+**Historical example warning:** the Action snippets below use the exact `v1.2.1` source commit for reproducibility of the *GitHub source reference*, not an authorized new release. That Action still has an installation fallback. Their configurations are **advisory/legacy illustrations only**, not a claim of fully authenticated package-byte identity. Do not promote to a required strict check solely from this example.
+
 ### Single check type (self-protection)
+
+The following historical illustration includes optional check/comment publishing with write privileges. **Do not copy it as the first external pilot workflow.** For consenting adopters, use the [read-only advisory example](../examples/github_workflows/external_consumer.yml) and the [pilot playbook](EXTERNAL_PILOT_PLAYBOOK.md).
 
 ```yaml
 name: OVK
@@ -107,7 +113,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: fraware/open-verification-kernel@v1.2.1
+      - uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
         id: ovk
         with:
           mode: advisory
@@ -122,10 +128,12 @@ jobs:
 
 Development reference: `uses: ./`
 
+The recommended copyable external workflow is [the non-blocking, read-only advisory example](../examples/github_workflows/external_consumer.yml). Required strict checks are not qualified for the current source profiles.
+
 ### All five check types (manifest)
 
 ```yaml
-- uses: fraware/open-verification-kernel@v1.2.1
+- uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
   with:
     mode: advisory
     verification-manifest: .verification/full_mvp.json
@@ -161,15 +169,15 @@ When `verification-manifest` is set, the manifest path wins over `use-check`.
 Downstream example:
 
 ```yaml
-- uses: fraware/open-verification-kernel@v1.2.1
+- uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
   id: ovk
   with:
-    mode: strict
+    mode: advisory
     use-check: "true"
     emit-check: "true"
-- name: Fail when OVK blocks
+- name: Surface OVK block for human review
   if: steps.ovk.outputs.recommendation == 'block'
-  run: exit 1
+  run: echo "OVK reported a block; inspect scope and supporting evidence"
 ```
 
 **Artifact files:**
@@ -217,7 +225,7 @@ Explicit metadata (most reliable):
 ```
 
 ```yaml
-- uses: fraware/open-verification-kernel@v1.2.1
+- uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
   with:
     check-metadata: ovk-required-checks.json
 ```
@@ -252,22 +260,26 @@ Required GitHub check name: **`Open Verification Kernel`** (from `ovk/core/githu
 
 ### Rollout stages
 
+**Stages 2–4 are future, separately qualified configurations**, not a current promotion path. Current public source profiles are advisory, the repository's protection and release-signing gates are open, and small in-repo samples do not authorize strict enforcement.
+
 | Stage | Workflow example | Mode | Publish check run | Branch protection |
 |---|---|---|---|---|
 | 1 — Advisory only | `examples/github_workflows/pilot_fork_adopter.yml` | advisory | no | none |
 | 2 — Advisory + visibility | `examples/github_workflows/pilot_advisory_with_comment.yml` | advisory | yes | optional |
-| 3 — Strict enforcement | `examples/github_workflows/external_consumer.yml` | strict | yes | required on `main` |
+| 3 — Strict enforcement (future) | No currently approved copyable workflow | strict | qualified-only | approved protection |
 | 4 — Required check wired | `examples/github_workflows/branch_protection_required_check.yml` | strict | yes | required check |
 
-Steps for strict enforcement:
+Steps for strict enforcement **only following source-profile, release, independent adjudication, owner approval and rollback qualification**:
 
-1. Run strict + `emit-check: true` on a sample PR and confirm the check appears on the commit.
+1. On the separately authorized repository and exact source profile, test strict + `emit-check: true` and confirm correct source binding and check attribution.
 2. In repository **Settings → Branches**, add **`Open Verification Kernel`** as a required status check on protected branches.
 3. Supply explicit `check-metadata` when verifying gate preservation (auto-collected metadata is best-effort only).
 
 `collect_branch_metadata.py` needs a `GITHUB_TOKEN` with permission to read branch protection rules. Pass explicit before/after JSON when you need removal detection.
 
 ## External repository smoke test
+
+The following is a **historical, write-enabled integration example**, not a copyable first-user or fork-safe installation. The default external pilot uses the read-only example in the playbook.
 
 Create `.github/workflows/ovk-smoke.yml` in an integration repository:
 
@@ -285,7 +297,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: fraware/open-verification-kernel@v1.2.1
+      - uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
         env:
           OVK_PACKAGE_VERSION: "1.2.1"
         with:

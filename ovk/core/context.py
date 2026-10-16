@@ -204,6 +204,7 @@ def build_repository_context(
     repo: str = "unknown/repo",
     head_sha: str = "unknown",
     base_sha: str | None = None,
+    preserve_explicit_subject: bool = False,
 ) -> RepositoryContext:
     """Build repository context from PR metadata and trusted policy materials."""
     files = changed_files or []
@@ -214,7 +215,16 @@ def build_repository_context(
         defaults = metadata_to_self_protection_defaults(github)
         actor_type = str(defaults.get("actor_type", "unknown"))
         repo = github.repository or repo
-        head_sha = github.head_sha or head_sha
+        # A separately checked source-binding receipt permits an observed
+        # merge-preview to be the subject of a default PR diff. Ordinary
+        # event-based callers retain the historical PR-head convention.
+        if preserve_explicit_subject:
+            if not head_sha or head_sha == "unknown":
+                raise ValueError("bound source subject requires explicit checkout SHA")
+            branch_metadata["event_pr_head_sha"] = github.head_sha
+            branch_metadata["source_subject_origin"] = "locally_bound_merge_preview"
+        else:
+            head_sha = github.head_sha or head_sha
         base_sha = github.base_sha or base_sha
         branch_metadata["github"] = defaults
     if check_metadata_path is not None and check_metadata_path.exists():

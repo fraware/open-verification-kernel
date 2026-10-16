@@ -1,146 +1,127 @@
-# External OSS Pilot Playbook
+# External OSS pilot playbook — advisory evaluation
 
-Guide for adding OVK to an external open-source repository: start in advisory mode, measure false positives, then optionally enforce on protected branches.
+This playbook governs **consented, non-blocking** use of Open Verification Kernel (OVK) in an independently operated repository. An external pilot is a test of customer utility and the declared verification profile, **not** proof of general source-level security, production readiness, or verified economic savings.
 
-## Start with one check type
+The current public status identifies source profiles as `executable_advisory`. No `externally_calibrated_strict` source-profile qualification is established. A small pilot must never automatically promote a check to strict or to a required merge gate.
 
-| Check type | Best for | Starter manifest |
-|------|----------|------------------|
-| CI secrets | Repos with agent-authored workflow PRs | [pilot_manifest_ci_secrets.template.json](templates/pilot_manifest_ci_secrets.template.json) |
-| Self-protection | Repos adding agent CI gates | `examples/pilot_repos/self_protection_only.json` |
+## 0. Obtain consent and qualify the repository
 
-Enable additional check types one at a time after each is stable on your diffs.
+Before adding any GitHub workflow, obtain approval from the maintaining organization, identify a reviewer and a technically responsible operator, and agree on which evidence is safe to retain or publish. Do not install CI into someone else's repository without permission.
 
-## Step 1 — Advisory mode (no merge blocking)
+Record the target repository and exact PR revision, the declared check family, its supported source constructs and exclusions, the intended high-risk operation, the reviewer decision, and the organization's actual need. A changed authentication-related file is **not** sufficient proof that OVK supports the code's authorization semantics. Keep unsupported shapes **unknown** and subject to human review.
 
-1. Copy `docs/templates/pilot_manifest_ci_secrets.template.json` to `.verification/ci_secrets_pilot.json` in the target repo.
-2. Add check input JSON under `.verification/ci_secrets/` (see `examples/ci_secrets/input_secrets_safe.json` for shape).
-3. Add OVK to CI in advisory mode. Build the PR diff locally — OVK reads files, not URLs:
+Start with one available check family. The historical example manifests include:
+
+| Check family | Potential starting problem | Starter manifest |
+| --- | --- | --- |
+| CI secrets | Changes to workflow secret exposure | [CI secrets template](templates/pilot_manifest_ci_secrets.template.json) |
+| Self-protection | Changes to agent CI gates | `examples/pilot_repos/self_protection_only.json` |
+
+The FastAPI authorization / Protected Effect path is a separate bounded advisory research profile. It must first pass source-eligibility and coverage screening; do not substitute the CI-secrets example for proof of route authorization.
+
+## 1. Install a released, attributable advisory build
+
+Use the [current release status](CURRENT_RELEASE_STATUS.md), [release procedure](RELEASE.md) and an exact vetted release/ref identity. The historic `v1.2.1` example below uses its **full 40-hex source commit**, not the unprotected tag: confirm the remote tag and distribution integrity for the installation, and never treat a draft `v1.3.0-rc.1` as a published release on the strength of green development CI.
+
+Copy `docs/templates/pilot_manifest_ci_secrets.template.json` into the consenting repository as `.verification/ci_secrets_pilot.json`, and replace sample inputs with real, explicitly in-scope paths. Do **not** treat `examples/ci_secrets/input_secrets_safe.json` as coverage of the adopter's code.
+
+The action should use least privileges and no automatic comments on untrusted fork PRs. Example starting point (adapt to the target repository's branch and trust settings):
 
 ```yaml
-name: OVK Pilot
+name: OVK advisory pilot
 on:
   pull_request:
     branches: [main]
-
-env:
-  OVK_PACKAGE_VERSION: "1.2.1"
-
+permissions:
+  contents: read
 jobs:
   ovk-advisory:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
-      - name: Build PR diff for OVK
+          persist-credentials: false
+      - name: Build PR diff
         run: |
           git fetch origin "${{ github.base_ref }}"
           git diff "origin/${{ github.base_ref }}...HEAD" > ovk-pr.diff
       - name: OVK advisory check
-        uses: fraware/open-verification-kernel@v1.2.1
+        uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
         with:
           mode: advisory
           use-check: "true"
           changed-files: ovk-pr.diff
+          emit-check: "false"
           post-comment: "false"
-      - name: OVK advisory verify (CI secrets check)
-        uses: fraware/open-verification-kernel@v1.2.1
+      - name: OVK advisory verification
+        uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7
         with:
           mode: advisory
           verification-manifest: .verification/ci_secrets_pilot.json
           bundle-output-dir: ovk-pilot-bundle
+          emit-check: "false"
           post-comment: "false"
-```
-
-4. Run for **two weeks** on all agent PRs without blocking merges.
-
-## Step 2 — Measure
-
-| Metric | Target before strict |
-|--------|----------------------|
-| False positive rate | under 5% |
-| Time to first green after repair | under 5 minutes |
-| Block rate on known-bad fixtures | 100% |
-
-Download the workflow artifact (`ovk-pilot-artifacts`) and ingest metrics into the OVK registry:
-
-```bash
-python scripts/ingest_external_pilot_metrics.py --repo org/repo --artifacts-dir ./artifact
-python scripts/render_pilot_metrics.py --registry docs/benchmarks/external-pilots-registry.json
-```
-
-Optional self-report JSON: copy [external_pilot_report.template.json](templates/external_pilot_report.template.json), fill measured values, and pass `--report external_pilot_report.json` to the ingest script.
-
-Publish results in [PILOT_CASE_STUDIES.md](PILOT_CASE_STUDIES.md) under **External pilots**.
-
-Maintainers ingest downloaded workflow artifacts and refresh the public summary:
-
-```bash
-python scripts/ingest_external_pilot_metrics.py --repo org/repo --artifacts-dir ./artifact
-python scripts/render_pilot_metrics.py --registry docs/benchmarks/external-pilots-registry.json
-```
-
-Optional self-report JSON: copy [external_pilot_report.template.json](templates/external_pilot_report.template.json), fill metrics, and pass `--report external_pilot_report.json` to the ingest script. Registry rows live in [external-pilots-registry.json](benchmarks/external-pilots-registry.json).
-
-## Step 3 — Strict on protected branches
-
-When false positives stay below 5%:
-
-```yaml
-- uses: fraware/open-verification-kernel@v1.2.1
-  with:
-    mode: strict
-    use-check: "true"
-    emit-check: "true"
-```
-
-Require the OVK check on `main` / `release/*` only; keep advisory on experimental branches if needed.
-
-## Step 4 — Add more check types
-
-After CI secrets is stable, add check types one at a time using manifests from `examples/pilot_repos/`. Re-run advisory for each new check before strict enforcement.
-
-## Copy-paste workflow
-
-See `examples/github_workflows/pilot_fork_adopter.yml` and the full example in Step 1 above. Upload artifacts for your pilot report:
-
-```yaml
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
         with:
           name: ovk-pilot-artifacts
           path: |
             ovk-evidence.json
             ovk-pilot-bundle/**
           retention-days: 30
+          if-no-files-found: warn
 ```
 
-## Reference in this repo
+Review the actual code and external actions before enabling this workflow. The full source-commit SHA pins the top-level Action, yet the historical Action may reference transitive dependencies by mutable tags and may fall back to installing the Action checkout if its requested distribution version is unavailable. Independently review that supply chain and keep the pilot non-blocking. The legacy caller-supplied diff is **unbound source input**, not an authenticated verified-PR receipt; the workflow explicitly disables both check publication and comments. The check stays advisory, cannot authorize a merge, and does not receive secrets from untrusted PRs.
 
-Weekly in-repo pilot workflow: `.github/workflows/pilot-dogfood.yml` with `scripts/collect_pilot_metrics.py`.
+## 2. Observe all naturally occurring PRs
 
-Published advisory reports (maintained consumers + infra profile): [pilots/README.md](pilots/README.md).
+Begin with a 14-day window. Collect **all** natural PRs in the consented scope, not a favorable selection. A target of five PRs is useful to test deployment feasibility, **not** a safety or false-negative-rate threshold. Extend the observation window if activity is low.
 
-## Support artifacts
+For each PR, record the exact base/head SHAs, source and verifier version, declared claim, supported/unsupported/unknown input, raw evidence and assumptions, report viewed by the reviewer, actual reviewer decision, adjudicated incorrect alerts, independently discovered misses, setup and review time, and fixes or rechecks. Record missing observations as missing—not as zeros. Keep private source and evidence out of the public registry unless explicitly approved.
 
-- Repair loop walkthrough: [AGENT_REPAIR_LOOP.md](AGENT_REPAIR_LOOP.md)
-- Realistic PR diffs: `benchmarks/real_diffs/`
-- Example workflows: `examples/github_workflows/`
-- Metrics: `scripts/collect_pilot_metrics.py`, `docs/benchmarks/adoption-summary.json`
-- External pilot registry: `docs/benchmarks/external-pilots-registry.json`
-- Self-report template: `docs/templates/external_pilot_report.template.json`
-- Ingest script: `scripts/ingest_external_pilot_metrics.py`
+If the pipeline reports a `PASS`, communicate the **typed checker/IR claim under its exact coverage assumptions**. Never summarize it as proof that an arbitrary source application is secure. If extraction is partial or an operation is outside the admitted profile, the outcome is unresolved.
 
-## What to report
+## 3. Compute metrics with correct provenance
 
-- Repository name (link)
-- Check type(s) enabled
-- Advisory duration (dates)
-- PRs evaluated / blocked / false positives
-- Median `ovk check` latency
-- Strict mode enabled (yes/no)
+The ingest command is:
 
-Add entries to [PILOT_CASE_STUDIES.md](PILOT_CASE_STUDIES.md).
+```bash
+python scripts/ingest_external_pilot_metrics.py \
+  --repo org/repo --artifacts-dir ./artifact \
+  --report ./external_pilot_report.json
+python scripts/render_pilot_metrics.py \
+  --registry docs/benchmarks/external-pilots-registry.json
+```
+
+The optional report starts from [external_pilot_report.template.json](templates/external_pilot_report.template.json); replace its placeholders. Even if a file named `external_pilot_report.json` appears within a downloaded CI artifact directory, the ingester **does not automatically adopt its adjudication fields**. A human operator must deliberately select a separately reviewed report via `--report`, with the same repository identifier as `--repo`. Such reports remain self-reported until independently audited. `prs_evaluated`, `prs_blocked`, and latency can come from workflow artifacts. **False positives require separate human or independently specified ground-truth adjudication.** OVK's own `passed`, `merge_recommendation`, and checker `PASS/FAIL` fields are not ground-truth labels. The metric ingester must not manufacture a false-positive rate from them.
+
+Only supply `false_positives` and `false_positive_rate` if a reviewer actually classified cases and the denominator and decisions are documented in the report's linked evidence or notes. Otherwise leave both `null`. Every explicitly ingested artifact directory is treated as a potentially new, unreviewed cohort, including directories containing only one evidence bundle or no recognized aggregate. Previously reported error counts/rates are invalidated unless an explicit report supplies fresh adjudication. Cohort identity is not authenticated in this development ingester; operators must document report-to-artifact correspondence. Missing input must never be treated as zero observed errors. A reviewer-provided number is still **self-reported** until independently audited.
+
+Explicitly distinguish:
+- **Check/recommendation rate:** what OVK returned on actual PRs.
+- **Adjudicated false alarms:** the reviewer judged the tool's finding incorrect, with a defined denominator.
+- **Independently found misses:** issues found by a separate source of truth that OVK did not flag, including unsupported cases.
+- **Coverage/unknown fraction:** what proportion of natural PRs and relevant constructs fell outside the supported profile.
+- **Economics:** reviewer minutes, CI latency/cost, integration effort and rechecks; compare with a credible baseline.
+
+Small selected samples, even with zero observed false positives, cannot justify a general low-risk claim.
+
+## 4. Decision gate: continue, revise, or stop
+
+**Continue advisory:** the maintainer actively uses the findings and they remain appropriately scoped, with transparent unknowns and manageable review costs.
+
+**Revise:** coverage misses important high-risk changes, the result is difficult to interpret, or false alarms dominate. Improve the *supported profile* or workflow only with evidence from actual users.
+
+**Stop or select a different wedge:** the relevant guarantee is outside the verifier's modeled semantics, no reviewer values the output, or no willing maintainer participates.
+
+**Strict enforcement is a distinct qualification project.** It needs a justified source-model correspondence, trustworthy evidence/provenance, independent profile-appropriate safety evaluation with explicit unknown handling, security review, a controlled rollback plan, repository-specific risk approval, and release/ref integrity. No numeric false-positive threshold or five-PR fixture test automatically grants strict maturity.
+
+## 5. Reporting and references
+
+Publish a study only with maintainer permission and clearly label it as *independent external*, *maintained-consumer*, or *dogfood*. The existing [external pilot registry](benchmarks/external-pilots-registry.json) includes maintained and internal examples; they are not independent customer validation.
+
+The adoption report and supporting paths are [PILOT_CASE_STUDIES.md](PILOT_CASE_STUDIES.md), `scripts/collect_pilot_metrics.py`, `scripts/ingest_external_pilot_metrics.py`, `scripts/render_pilot_metrics.py`, and `docs/benchmarks/external-pilots-registry.json`.
+
+Operational ownership and milestones are tracked in [North Star issue #216](https://github.com/fraware/open-verification-kernel/issues/216), with the first independent pilot in [issue #20](https://github.com/fraware/open-verification-kernel/issues/20).
