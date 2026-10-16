@@ -90,6 +90,7 @@ def execute_kernel(
     repo: str = "unknown/repo",
     head_sha: str = "unknown",
     base_sha: str | None = None,
+    preserve_explicit_subject: bool = False,
     budget: VerificationBudget | None = None,
     cache_dir: Path | None = DEFAULT_CACHE_DIR,
     use_cache: bool = True,
@@ -113,6 +114,7 @@ def execute_kernel(
         repo=repo,
         head_sha=head_sha,
         base_sha=base_sha,
+        preserve_explicit_subject=preserve_explicit_subject,
     )
 
     compiler = ObligationCompilerRegistry.default()

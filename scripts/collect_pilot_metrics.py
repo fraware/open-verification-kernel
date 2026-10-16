@@ -54,16 +54,6 @@ def _bundle_artifacts(bundle_dir: Path | None) -> list[str]:
     return sorted(path.name for path in bundle_dir.rglob("*") if path.is_file())
 
 
-def _false_positive_rate(results: list[dict[str, Any]]) -> float | None:
-    evaluated = [item for item in results if "passed" in item]
-    if not evaluated:
-        return None
-    false_positives = sum(
-        1 for item in evaluated if not item.get("passed") and item.get("merge_recommendation") == "block"
-    )
-    return false_positives / len(evaluated)
-
-
 def _median_elapsed_ms(results: list[dict[str, Any]]) -> float | None:
     timings = [float(item["elapsed_ms"]) for item in results if "elapsed_ms" in item]
     if not timings:
@@ -190,7 +180,7 @@ def collect_pilot_metrics(
                 "manifests_passed": manifests_passed,
                 "manifests_total": manifests_total,
                 "median_elapsed_ms": median_elapsed,
-                "false_positive_rate": _false_positive_rate(results),
+                "false_positive_rate": None,  # no independent ground-truth adjudication in fixture output
                 "block_rate_on_unsafe_fixture": block_rate,
                 "external_manifest": _repo_relative(manifest_path),
             },

@@ -726,11 +726,37 @@ def check(
     strict: bool = typer.Option(False, help="Enforce non-zero exit codes (overrides advisory)."),
     no_cache: bool = typer.Option(False, help="Disable lane result cache."),
     format: str = typer.Option("md", help="Output format: md, json, or github."),
+    source_binding: Optional[Path] = typer.Option(
+        None, "--source-binding",
+        help="Local PR merge-preview source receipt; checked against Git/event/diff before choosing evidence subject.",
+    ),
 ) -> None:
     """Infer, compile, and verify affected lanes for a PR diff."""
     enforce_exit = strict or not advisory
     input_path = diff or changed_files
     files, diff_text = load_diff_or_changed_files(input_path)
+    if source_binding is not None:
+        if input_path is None or github_event is None:
+            raise typer.BadParameter("source binding requires an input file and GitHub PR event")
+        # A valid Git merge preview can have an empty diff. The byte-level
+        # receipt check still applies; lack of changed lines must not be
+        # mislabeled as a validated source-to-model PASS.
+        from ovk.core.source_binding_identity import (
+            SourceSubjectMismatch,
+            require_bound_merge_preview_subject,
+        )
+
+        try:
+            require_bound_merge_preview_subject(
+                receipt_path=source_binding,
+                diff_path=input_path,
+                event_path=github_event,
+                repo=repo,
+                head_sha=head_sha,
+                base_sha=base_sha,
+            )
+        except (SourceSubjectMismatch, OSError, ValueError) as exc:
+            raise typer.BadParameter(f"refusing unbound evidence subject: {exc}") from exc
     meta = read_json_file(metadata) if metadata else None
     result = run_check(
         changed_files=files,
@@ -741,6 +767,7 @@ def check(
         repo=repo,
         head_sha=head_sha,
         base_sha=base_sha,
+        preserve_explicit_subject=source_binding is not None,
         use_cache=not no_cache,
     )
     output_dir.mkdir(parents=True, exist_ok=True)

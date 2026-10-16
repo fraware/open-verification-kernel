@@ -28,6 +28,15 @@ def test_render_adoption_summary_shape() -> None:
     assert summary["pilot_dogfood"]["manifests_passed"] == metrics["adoption"]["pilot_dogfood"]["manifests_passed"]
 
 
+def test_renderer_discards_unadjudicated_legacy_fixture_rate() -> None:
+    """A stale aggregate must not recreate a self-judged 0% error rate."""
+    metrics = collect_pilot_metrics(source="local")
+    metrics["adoption"]["pilot_dogfood"]["false_positive_rate"] = 0.0
+    rendered = render_adoption_summary(metrics)
+    validate_summary(rendered)
+    assert rendered["pilot_dogfood"]["false_positive_rate"] is None
+
+
 def test_adoption_summary_template_is_schema_valid() -> None:
     template = read_json_file(Path("docs/benchmarks/adoption-summary.json"))
     schema = read_json_file(Path("schemas/adoption.summary.schema.json"))
