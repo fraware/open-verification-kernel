@@ -1,0 +1,31 @@
+name: OVK site quality
+
+on:
+  pull_request:
+    paths:
+      - "site/**"
+      - ".github/workflows/site-quality.yml"
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/site-quality.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  site-contract:
+    name: Site resource contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Validate JavaScript syntax
+        run: |
+          node --check site/assets/catalog.js
+          node --check site/assets/app.js
+      - name: Validate public resource paths and basic accessibility contract
+        run: node site/tests/catalog_contract.mjs
