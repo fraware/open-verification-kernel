@@ -143,7 +143,7 @@
   els.input.addEventListener('input',()=>setQuery(els.input.value,{focus:false,scroll:false}));
   els.input.addEventListener('keydown',(e)=>{
     if(e.key==='Escape'){ e.preventDefault();if(state.query)setQuery('',{focus:true,scroll:false});else els.input.blur();}
-    if(e.key==='Enter'){const first=els.list.querySelector('.resource-card');if(first && state.query){e.preventDefault();first.focus();document.getElementById('explore').scrollIntoView({block:'start'});}}
+    if(e.key==='Enter'){const first=els.quick.querySelector('.quick-link')||els.list.querySelector('.resource-card');if(first && state.query){e.preventDefault();first.focus();}}
     if(e.key==='ArrowDown'){const first=els.quick.querySelector('.quick-link')||els.list.querySelector('.resource-card');if(first){e.preventDefault();first.focus();}}
   });
   document.addEventListener('keydown',(e)=>{
@@ -152,6 +152,7 @@
     }
   });
   document.addEventListener('pointerdown',(e)=>{if(!e.target.closest('.hero-search-group')&&state.suggestionsOpen){state.suggestionsOpen=false;renderQuick(filtered());}});
+  els.quick.addEventListener('keydown',(e)=>{if(!['ArrowDown','ArrowUp','Escape'].includes(e.key))return;e.preventDefault();if(e.key==='Escape'){state.suggestionsOpen=false;renderQuick(filtered());els.input.focus();return;}const links=[...els.quick.querySelectorAll('a,button')];const i=links.indexOf(document.activeElement);const next=e.key==='ArrowDown'?i+1:i-1;if(next<0)els.input.focus();else if(next<links.length)links[next].focus();});
   for (const b of document.querySelectorAll('[data-query]')) b.addEventListener('click',()=>setQuery(b.dataset.query));
   els.clear.addEventListener('click',()=>{state.category='All resources';setQuery('',{scroll:false});});
   els.reset.addEventListener('click',()=>{state.category='All resources';setQuery('',{scroll:false});});
@@ -162,7 +163,7 @@
     const code=els.quickCode.textContent;
     try {
       if(navigator.clipboard && window.isSecureContext)await navigator.clipboard.writeText(code);
-      else {const selection=window.getSelection();const range=document.createRange();range.selectNodeContents(els.quickCode);selection.removeAllRanges();selection.addRange(range);document.execCommand('copy');selection.removeAllRanges();}
+      else {const selection=window.getSelection();const range=document.createRange();range.selectNodeContents(els.quickCode);selection.removeAllRanges();selection.addRange(range);const didCopy=document.execCommand('copy');selection.removeAllRanges();if(!didCopy)throw Error('clipboard unavailable');}
       els.copyLabel.textContent='Copied';els.copy.setAttribute('aria-label','Copied local commands');
     } catch(_){els.copyLabel.textContent='Select code';els.copy.setAttribute('aria-label','Select code to copy');}
   });
