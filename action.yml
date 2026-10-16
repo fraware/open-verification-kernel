@@ -83,6 +83,18 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Invalidate stale generated Action outputs
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        set -euo pipefail
+        # Generated OVK filenames are reserved Action outputs, not inputs.
+        # Upload runs with if: always(); stale files must never leak through.
+        rm -f -- .ovk-effective-input-path .ovk-pr.diff .ovk-action-exit-code
+        rm -f -- .ovk-emit-exit-code .ovk-check-emitted ovk-source-binding.json
+        rm -f -- ovk-evidence.json ovk-pr-comment.md ovk-attestation.json
+        rm -f -- ovk-artifact-manifest.json ovk-evidence-quality.json
+        rm -f -- ovk-provenance.json ovk-attestation-envelope.json
     - name: Cache pip packages
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
@@ -177,6 +189,14 @@ runs:
         rm -f -- ovk-evidence.json ovk-pr-comment.md ovk-attestation.json
         rm -f -- ovk-artifact-manifest.json ovk-evidence-quality.json
         rm -f -- ovk-provenance.json ovk-attestation-envelope.json
+        # Never append new evidence to a directory with old bundle material.
+        # Caller-selected output roots are not deleted by the Action.
+        if [ -e "$OVK_BUNDLE_OUTPUT_DIR" ]; then
+          if [ ! -d "$OVK_BUNDLE_OUTPUT_DIR" ] || [ -n "$(find "$OVK_BUNDLE_OUTPUT_DIR" -mindepth 1 -print -quit)" ]; then
+            echo '::error::OVK manifest output directory already contains files; use an empty distinct directory.'
+            exit 2
+          fi
+        fi
         if [ "$OVK_MODE" != "advisory" ]; then
           echo '::error::OVK manifest verification lacks PR source binding; strict Action enforcement is refused.'
           exit 2
