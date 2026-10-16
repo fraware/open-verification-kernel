@@ -320,6 +320,62 @@ def test_new_report_cohort_without_error_labels_invalidates_old_rates(
     assert row["false_positive_rate"] is None
 
 
+def test_new_selected_report_counts_clear_stale_latency_and_block_count(
+    tmp_path: Path,
+) -> None:
+    selected = tmp_path / "new-cohort.json"
+    selected.write_text(
+        json.dumps({"repository": "example/oss-pilot", "prs_evaluated": 6}),
+        encoding="utf-8",
+    )
+    existing = {
+        "repository": "example/oss-pilot",
+        "status": "advisory",
+        "check_types": ["ci_secrets"],
+        "prs_evaluated": 4,
+        "prs_blocked": 2,
+        "false_positives": 0,
+        "false_positive_rate": 0.0,
+        "median_check_latency_ms": 71.0,
+        "strict_enabled": False,
+        "ovk_version_pin": "1.2.1",
+    }
+    row = build_pilot_row("example/oss-pilot", existing=existing, report_path=selected)
+    assert row["prs_evaluated"] == 6
+    for metric in ("prs_blocked", "false_positives", "false_positive_rate", "median_check_latency_ms"):
+        assert row[metric] is None
+
+
+@pytest.mark.parametrize(
+    ("selected_fields", "stale_field"),
+    [
+        ({"false_positives": 2}, "false_positive_rate"),
+        ({"false_positive_rate": 0.2}, "false_positives"),
+    ],
+)
+def test_partial_adjudication_does_not_retain_old_counterpart(
+    tmp_path: Path, selected_fields: dict, stale_field: str,
+) -> None:
+    selected = tmp_path / "partial-review.json"
+    selected.write_text(
+        json.dumps({"repository": "example/oss-pilot", **selected_fields}),
+        encoding="utf-8",
+    )
+    existing = {
+        "repository": "example/oss-pilot",
+        "status": "advisory",
+        "check_types": ["ci_secrets"],
+        "false_positives": 0,
+        "false_positive_rate": 0.0,
+        "strict_enabled": False,
+        "ovk_version_pin": "1.2.1",
+    }
+    row = build_pilot_row("example/oss-pilot", existing=existing, report_path=selected)
+    assert row[stale_field] is None
+    for key, value in selected_fields.items():
+        assert row[key] == value
+
+
 def test_external_report_supplies_separate_reviewed_labels(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
