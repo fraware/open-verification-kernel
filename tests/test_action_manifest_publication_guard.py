@@ -59,6 +59,15 @@ def test_unbound_manifest_has_no_publication_path() -> None:
     assert "strict enforcement are disabled" in warning["run"]
 
 
+def test_all_caller_selected_inputs_degrade_action_level_decision() -> None:
+    step = next(s for s in _steps() if s.get("name") == "Set action outputs")
+    assert step["env"]["OVK_CHANGED_FILES"] == "${{ inputs.changed-files }}"
+    assert step["env"]["OVK_VERIFICATION_MANIFEST"] == "${{ inputs.verification-manifest }}"
+    assert 'or os.environ.get("OVK_CHANGED_FILES")' in step["run"]
+    assert 'decision_state = "unknown"' in step["run"]
+    assert 'recommendation = "require_human_review"' in step["run"]
+
+
 def test_manifest_step_is_advisory_only_and_removes_stale_source_receipt() -> None:
     step = next(s for s in _steps() if s.get("name") == "Run OVK multi-lane verification")
     assert "inputs.verification-manifest != ''" in step["if"]
@@ -184,3 +193,45 @@ def test_manifest_pass_cannot_be_exported_as_pr_allow(tmp_path: Path) -> None:
     }
     # The raw, explicitly scoped advisory observation remains available.
     assert '"allow"' in (folder / "ovk-evidence.json").read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Bash runtime exercised on Linux/macOS")
+@pytest.mark.parametrize(
+    ("changed_files", "expected_state", "expected_exit"),
+    [("caller-selected.diff", "unknown", "2"), ("", "allow", "0")],
+)
+def test_caller_selected_diff_cannot_export_allow_but_default_bound_path_can(
+    tmp_path: Path, changed_files: str, expected_state: str, expected_exit: str,
+) -> None:
+    if shutil.which("bash") is None:
+        pytest.skip("bash unavailable")
+    step = next(s for s in _steps() if s.get("name") == "Set action outputs")
+    (tmp_path / "ovk-evidence.json").write_text(
+        '{"decision": {"decision_state": "allow", "merge_recommendation": "allow"}}',
+        encoding="utf-8",
+    )
+    target = tmp_path / "action-outputs.txt"
+    env = dict(os.environ)
+    env.update({
+        "OVK_VERIFICATION_MANIFEST": "",
+        "OVK_CHANGED_FILES": changed_files,
+        "OVK_BUNDLE_OUTPUT_DIR": "ovk-release-bundle",
+        "OVK_EVIDENCE_OUTPUT": "ovk-evidence.json",
+        "GITHUB_OUTPUT": str(target),
+    })
+    proc = subprocess.run(
+        ["bash", "-eo", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    outcome = dict(line.split("=", 1) for line in target.read_text(encoding="utf-8").splitlines())
+    assert outcome["decision_state"] == expected_state
+    assert outcome["exit_code"] == expected_exit
+    assert outcome["recommendation"] == (
+        "allow" if not changed_files else "require_human_review"
+    )
+    assert outcome["check_emitted"] == "false"
