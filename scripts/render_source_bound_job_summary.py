@@ -37,7 +37,12 @@ def _json_object(path: Path) -> tuple[dict[str, Any], bytes]:
     return payload, raw
 
 
-def build_summary(evidence: dict[str, Any], receipt: dict[str, Any], evidence_bytes: bytes) -> str:
+def build_summary(
+    evidence: dict[str, Any],
+    receipt: dict[str, Any],
+    evidence_bytes: bytes,
+    diff_bytes: bytes,
+) -> str:
     """Build a non-authoritative advisory report, rejecting unbound or stale input."""
     if receipt.get("schema_version") != SCHEMA:
         raise ObservationError("unknown source observation contract")
@@ -55,15 +60,18 @@ def build_summary(evidence: dict[str, Any], receipt: dict[str, Any], evidence_by
         raise ObservationError("unexpected reliance status")
 
     checkout = receipt.get("evaluated_checkout_commit_sha")
+    tree = receipt.get("evaluated_checkout_tree_sha")
     subject = receipt.get("evidence_subject_sha")
     head = receipt.get("event_pr_head_sha")
     base = receipt.get("event_base_sha")
     diff_hash = receipt.get("input_diff_sha256")
-    fields = {"checkout": checkout, "subject": subject, "head": head, "base": base}
+    fields = {"checkout": checkout, "tree": tree, "subject": subject, "head": head, "base": base}
     if any(not isinstance(v, str) or SHA40.fullmatch(v) is None for v in fields.values()):
         raise ObservationError("missing or malformed source revision")
     if not isinstance(diff_hash, str) or DIGEST64.fullmatch(diff_hash) is None:
         raise ObservationError("missing or malformed diff digest")
+    if hashlib.sha256(diff_bytes).hexdigest() != diff_hash:
+        raise ObservationError("observed diff bytes disagree with receipt digest")
     if checkout != subject:
         raise ObservationError("receipt subject does not match evaluated checkout")
     evidence_subject = evidence.get("subject")
@@ -115,6 +123,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--evidence", type=Path, default=Path("ovk-evidence.json"))
     parser.add_argument("--source-binding", type=Path, default=Path("ovk-source-binding.json"))
+    parser.add_argument("--diff", type=Path, default=Path(".ovk-pr.diff"))
     parser.add_argument(
         "--output", type=Path,
         default=Path(os.environ["GITHUB_STEP_SUMMARY"]) if os.environ.get("GITHUB_STEP_SUMMARY") else None,
@@ -127,7 +136,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         evidence, evidence_bytes = _json_object(args.evidence)
         receipt, _ = _json_object(args.source_binding)
-        summary = build_summary(evidence, receipt, evidence_bytes)
+        diff_bytes = args.diff.read_bytes()
+        summary = build_summary(evidence, receipt, evidence_bytes, diff_bytes)
         # The host owns GITHUB_STEP_SUMMARY; append so this Action composes
         # with earlier steps and multiple invocations without clobbering them.
         with args.output.open("a", encoding="utf-8", newline="\n") as output:
