@@ -46,9 +46,10 @@
           <label for="resourceSearch" class="sr-only">Search OVK documentation, examples, and templates</label>
           <div class="search-field" id="searchField">
             <svg class="search-icon" width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><circle cx="10.8" cy="10.8" r="7.3"/><path d="m16.2 16.2 5 5"/></svg>
-            <input type="search" id="resourceSearch" autocomplete="off" spellcheck="false" placeholder="Search evidence, checkers, guides, examples…" aria-describedby="searchHelp">
+            <input type="search" id="resourceSearch" autocomplete="off" spellcheck="false" aria-controls="quickResults" aria-expanded="false" placeholder="Search evidence, checkers, guides, examples…" aria-describedby="searchHelp">
             <kbd class="keyboard-hint" aria-hidden="true">⌘ / Ctrl K</kbd>
           </div>
+          <div class="quick-results" id="quickResults" role="region" aria-label="Search suggestions" hidden></div>
           <p class="search-helper" id="searchHelp">Try <button type="button" data-query="CI secrets">CI secrets</button>, <button type="button" data-query="source binding">source binding</button>, or <button type="button" data-query="Lean">Lean</button></p>
         </div>
         <div class="hero-footnote"><span class="line"></span> Curated repository documentation <span class="footnote-dot">·</span> No account or API key needed</div>
