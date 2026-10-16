@@ -25,6 +25,20 @@ def _steps() -> list[dict]:
     return action["runs"]["steps"]
 
 
+def test_stale_output_cleanup_precedes_package_install() -> None:
+    steps = _steps()
+    names = [step.get("name") for step in steps]
+    assert names.index("Invalidate stale generated Action outputs") < names.index("Install OVK package")
+    cleanup = next(step for step in steps if step.get("name") == "Invalidate stale generated Action outputs")
+    assert "set -euo pipefail" in cleanup["run"]
+    for artifact in (
+        "ovk-source-binding.json", "ovk-evidence.json", "ovk-pr-comment.md",
+        "ovk-artifact-manifest.json", "ovk-attestation-envelope.json",
+        ".ovk-check-emitted",
+    ):
+        assert artifact in cleanup["run"]
+
+
 def test_unbound_manifest_has_no_publication_path() -> None:
     steps = _steps()
     by_name = {step.get("name"): step for step in steps}
@@ -102,3 +116,32 @@ def test_strict_manifest_rejects_before_checker_or_artifact_reuse(tmp_path: Path
         ".ovk-pr.diff", "ovk-evidence.json", ".ovk-check-emitted",
     ):
         assert not (tmp_path / name).exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Bash runtime exercised on Linux/macOS")
+def test_manifest_rejects_existing_nonempty_output_bundle(tmp_path: Path) -> None:
+    if shutil.which("bash") is None:
+        pytest.skip("bash unavailable")
+    step = next(step for step in _steps() if step.get("name") == "Run OVK multi-lane verification")
+    folder = tmp_path / "ovk-release-bundle"
+    folder.mkdir()
+    (folder / "old-ovk-evidence.json").write_text("STALE", encoding="utf-8")
+    env = dict(os.environ)
+    env.update({
+        "OVK_MODE": "advisory",
+        "OVK_VERIFICATION_MANIFEST": "sample.json",
+        "OVK_BUNDLE_OUTPUT_DIR": str(folder),
+        "OVK_REPO": "owner/repo",
+        "OVK_HEAD_SHA": "b" * 40,
+    })
+    proc = subprocess.run(
+        ["bash", "-eo", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 2, proc.stderr
+    assert "already contains files" in proc.stdout
+    assert (folder / "old-ovk-evidence.json").read_text(encoding="utf-8") == "STALE"
