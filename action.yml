@@ -230,6 +230,8 @@ runs:
         OVK_MODE: ${{ inputs.mode }}
         OVK_CHECK_METADATA: ${{ inputs.check-metadata }}
         OVK_GITHUB_EVENT: ${{ github.event_path }}
+        OVK_EVENT_NAME: ${{ github.event_name }}
+        OVK_CHANGED_FILES: ${{ inputs.changed-files }}
         OVK_REPO: ${{ github.repository }}
         OVK_HEAD_SHA: ${{ github.sha }}
       run: |
@@ -241,6 +243,12 @@ runs:
           --head-sha "$OVK_HEAD_SHA"
           --output-dir .
         )
+        if [ "$OVK_EVENT_NAME" = "pull_request" ] && [ -z "$OVK_CHANGED_FILES" ]; then
+          # The locally generated source receipt was checked against the
+          # checkout and event. Bind the evidence subject to that exact merge,
+          # not to the contributor PR head re-read from the event payload.
+          args+=(--source-binding ovk-source-binding.json)
+        fi
         if [ -n "$OVK_CHECK_METADATA" ]; then
           args+=(--check-metadata "$OVK_CHECK_METADATA")
         elif [ -f ovk-branch-metadata.json ]; then
