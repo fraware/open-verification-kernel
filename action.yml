@@ -270,6 +270,7 @@ runs:
         python "${{ github.action_path }}/scripts/render_source_bound_job_summary.py" \
           --evidence ovk-evidence.json \
           --source-binding ovk-source-binding.json \
+          --diff .ovk-pr.diff \
           --output "$GITHUB_STEP_SUMMARY"
     - name: Emit OVK GitHub check (check path)
       id: emit-check-run
