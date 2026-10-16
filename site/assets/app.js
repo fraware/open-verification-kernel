@@ -7,7 +7,7 @@
   const draftRef = 'https://github.com/fraware/open-verification-kernel/blob/837c931d059f74dcda06432d83f5bde759f53d0a/';
   const entries = source.map(([title, description, category, path, keywords], i) => ({id:i,title, description, category, path, keywords, draft:development.has(path), href:(development.has(path)?draftRef:repo)+path}));
   const els = {
-    input: document.getElementById('resourceSearch'), list: document.getElementById('resultList'),
+    input: document.getElementById('resourceSearch'), list: document.getElementById('resultList'), quick: document.getElementById('quickResults'),
     cats: document.getElementById('categoryList'), count: document.getElementById('resultsCount'),
     queryContext: document.getElementById('queryContext'), clear: document.getElementById('clearSearch'),
     empty: document.getElementById('emptyState'), reset: document.getElementById('resetAll'),
@@ -16,7 +16,7 @@
     copy: document.getElementById('copyCode'), copyLabel: document.getElementById('copyLabel'),
     quickCode: document.getElementById('quickStartCode'),
   };
-  const state = { query: '', category: 'All resources', limit: 12 };
+  const state = { query: '', category: 'All resources', limit: 12, suggestionsOpen: false };
   const norm = str => String(str ?? '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const words = (value) => value.trim().split(/\s+/).filter(Boolean);
   function score(item, queryTerms) {
@@ -93,8 +93,29 @@
     const path = element('div','card-path',item.path);
     a.append(outer,path);return a;
   }
+  function renderQuick(found) {
+    const showing = Boolean(state.query.trim()) && state.suggestionsOpen;
+    els.quick.hidden = !showing;
+    els.input.setAttribute('aria-expanded',String(showing));
+    if(!showing){els.quick.replaceChildren();return;}
+    const frag = document.createDocumentFragment();
+    const label = element('div','quick-heading',`TOP MATCHES · ${found.length} FOUND`);
+    frag.append(label);
+    for(const item of found.slice(0,4)){
+      const anchor = element('a','quick-link');anchor.href=item.href;anchor.target='_blank';anchor.rel='noopener noreferrer';
+      anchor.setAttribute('aria-label',`${item.title} (opens GitHub in a new tab)`);
+      const name = element('span','',item.title);const meta=element('small','',item.category+(item.draft?' · Draft':''));
+      const wrap=element('span','quick-link-text');wrap.append(name,meta);
+      anchor.append(wrap,element('span','quick-arrow','↗'));frag.append(anchor);
+    }
+    if(!found.length)frag.append(element('p','quick-empty','No matches. Try a shorter or different term.'));
+    const view=element('button','quick-all',`View all ${found.length} ${found.length===1?'result':'results'} ↓`);
+    view.type='button';view.addEventListener('click',()=>{state.suggestionsOpen=false;renderQuick(found);document.getElementById('explore').scrollIntoView({block:'start',behavior:'smooth'});});
+    frag.append(view);els.quick.replaceChildren(frag);
+  }
   function render() {
     const found = filtered(), tokens=words(state.query);
+    renderQuick(found);
     const fragment=document.createDocumentFragment();
     for(const item of found.slice(0,state.limit)) fragment.append(renderCard(item,tokens));
     els.list.replaceChildren(fragment);
@@ -114,7 +135,7 @@
     catch (error) { if (error.name !== 'SecurityError') throw error; } // Embedded/file previews may disallow URL edits.
   }
   function setQuery(value,{focus=true,scroll=true}={}) {
-    state.query=value.trimStart().slice(0,160);state.limit=12;els.input.value=state.query;render();syncUrl();
+    state.query=value.trimStart().slice(0,160);state.limit=12;state.suggestionsOpen=Boolean(state.query);els.input.value=state.query;render();syncUrl();
     if(scroll)document.getElementById('explore').scrollIntoView({block:'start',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});
     if(focus) els.input.focus({preventScroll:true});
   }
@@ -122,13 +143,14 @@
   els.input.addEventListener('keydown',(e)=>{
     if(e.key==='Escape'){ e.preventDefault();if(state.query)setQuery('',{focus:true,scroll:false});else els.input.blur();}
     if(e.key==='Enter'){const first=els.list.querySelector('.resource-card');if(first && state.query){e.preventDefault();first.focus();document.getElementById('explore').scrollIntoView({block:'start'});}}
-    if(e.key==='ArrowDown'){const first=els.list.querySelector('.resource-card');if(first){e.preventDefault();first.focus();}}
+    if(e.key==='ArrowDown'){const first=els.quick.querySelector('.quick-link')||els.list.querySelector('.resource-card');if(first){e.preventDefault();first.focus();}}
   });
   document.addEventListener('keydown',(e)=>{
     if((e.key==='k'&&(e.metaKey||e.ctrlKey)) || (e.key==='/' && !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName) && !document.activeElement.isContentEditable)){
       e.preventDefault();els.input.focus({preventScroll:false});els.input.select();
     }
   });
+  document.addEventListener('pointerdown',(e)=>{if(!e.target.closest('.hero-search-group')&&state.suggestionsOpen){state.suggestionsOpen=false;renderQuick(filtered());}});
   for (const b of document.querySelectorAll('[data-query]')) b.addEventListener('click',()=>setQuery(b.dataset.query));
   els.clear.addEventListener('click',()=>{state.category='All resources';setQuery('',{scroll:false});});
   els.reset.addEventListener('click',()=>{state.category='All resources';setQuery('',{scroll:false});});
@@ -146,7 +168,7 @@
   const params=new URLSearchParams(location.search);
   state.query=(params.get('q')||'').slice(0,160);
   const cat=params.get('category');if(categories.includes(cat))state.category=cat;
-  els.input.value=state.query;
+  els.input.value=state.query;state.suggestionsOpen=Boolean(state.query);
   els.total.textContent=String(entries.length);
   render();
 })();
