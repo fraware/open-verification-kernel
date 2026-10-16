@@ -60,10 +60,10 @@ def test_shareable_summary_is_precisely_scoped_and_identifiable() -> None:
     for id_ in (BASE, HEAD, MERGE, DIFF):
         assert id_ in markdown
     assert hashlib.sha256(raw).hexdigest() in markdown
-    assert "not independently authenticated" not in markdown or "independently authenticated" in markdown
+    assert "neither the event nor the evidence is independently authenticated" in markdown
     assert "An `allow` is not permission to merge." in markdown
     assert "not signed into the evidence envelope" in markdown
-    assert "source-to-model" not in markdown or "source" in markdown
+    assert "supported-source completeness" in markdown
 
 
 @pytest.mark.parametrize(
@@ -115,7 +115,7 @@ def test_renderer_appends_without_overwriting_existing_job_summary(tmp_path: Pat
     contents = output.read_text(encoding="utf-8")
     assert contents.startswith("## Existing reviewer summary\n\n")
     assert "advisory PR observation" in contents
-    assert "source revision" not in contents or MERGE in contents
+    assert MERGE in contents
     assert observation.read_bytes() and binding.read_bytes()
 
 
