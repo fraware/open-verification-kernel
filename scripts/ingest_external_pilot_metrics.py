@@ -103,15 +103,33 @@ def _metrics_from_artifacts(artifacts_dir: Path) -> dict[str, Any]:
 
 
 def _apply_report(row: dict[str, Any], report_path: Path) -> dict[str, Any]:
+    """Apply exactly one local report snapshot without reusing stale cohort data."""
     report = read_json_file(report_path)
+    # The CLI --repo argument is authoritative. Check identity before copying
+    # any report values; no content here independently authenticates a reviewer.
+    if report.get("repository") and report["repository"] != row["repository"]:
+        raise ValueError("external pilot report repository mismatch")
     updated = dict(row)
+    if any(report.get(key) is not None for key in ("prs_evaluated", "prs_blocked")):
+        # Counts identify a potentially different cohort, regardless of
+        # whether the report includes fresh error/latency observations.
+        for field in (
+            "prs_evaluated", "prs_blocked", "false_positives",
+            "false_positive_rate", "median_check_latency_ms",
+        ):
+            updated[field] = None
+    else:
+        # Even without new counts, do not join an independently supplied
+        # partial error observation to a stale counterpart.
+        for field, counterpart in (
+            ("false_positives", "false_positive_rate"),
+            ("false_positive_rate", "false_positives"),
+        ):
+            if report.get(field) is not None and report.get(counterpart) is None:
+                updated[counterpart] = None
     for report_key, row_key in REPORT_FIELD_MAP.items():
         if report_key in report and report[report_key] is not None:
             updated[row_key] = report[report_key]
-    # The CLI --repo argument is authoritative for the registry row.
-    # Never let a separately supplied report silently redirect ingestion.
-    if report.get("repository") and report["repository"] != updated["repository"]:
-        raise ValueError("external pilot report repository mismatch")
     return updated
 
 
@@ -162,15 +180,8 @@ def build_pilot_row(
     if report_path is not None:
         if not report_path.is_file():
             raise FileNotFoundError(f"external pilot report not found: {report_path}")
-        # A separately selected report is still self-reported. If the report
-        # updates cohort counts without refreshed adjudication, do not retain
-        # historical zero-error labels from a previous cohort.
-        report = read_json_file(report_path)
-        if any(report.get(field) is not None for field in ("prs_evaluated", "prs_blocked")):
-            for field in ("false_positives", "false_positive_rate"):
-                row[field] = None
-        # _apply_report verifies that the selected report cannot redirect
-        # the repository identity and copies only explicitly supplied fields.
+        # A selected report is still self-reported. Apply a single parsed
+        # snapshot with explicit cohort invalidation and identity checks.
         row = _apply_report(row, report_path)
     row["status"] = _infer_status(row)
     return row
