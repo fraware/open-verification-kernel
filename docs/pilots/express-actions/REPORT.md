@@ -8,12 +8,15 @@
 
 Machine-readable companions: [`pilot-report.json`](pilot-report.json) (`ovk.pilot_report.v1`), [`external_pilot_report.json`](external_pilot_report.json).
 
+
+**Historical-data interpretation correction (2026-10-15):** The original companion JSON files preserve fixture counts and earlier self-reported error fields for historical inspection. Those fields have no independently adjudicated ground truth; the normalized external-pilot registry and adoption summary now record the rates as **null/unknown**. This clarification is not a new measurement.
+
 ## Repository profile
 
 | Field | Value |
 |---|---|
 | Stack | TypeScript Express service with GitHub Actions workflows |
-| Role | Independent maintained consumer gate (program section 23) |
+| Role | Maintained consumer fixture validation (not independent adoption) |
 | Advisory workflow | `.github/workflows/ovk-advisory-pr.yml` |
 | Pilot ledger | Consumer `pilot/ledger.json` (automated_scenario rows only) |
 | Production gate | `production_gate_met: false` |
@@ -40,14 +43,14 @@ Documented playbook path reproduced locally against the consumer clone:
 
 | Metric | Measured |
 |---|---|
-| False positives | **0** |
-| False positive rate | **0.0** (0/2 fixture cases) |
+| Independently adjudicated false positives | **Unknown** — fixture decisions lack independent reviewer ground truth |
+| Independently adjudicated false-positive rate | **Unknown** — 2 fixtures do not estimate an external error rate |
 
 ## False negatives
 
 | Metric | Measured |
 |---|---|
-| False negatives | **0** |
+| Independently adjudicated false negatives | **Unknown** — only specified known-bad fixtures were exercised |
 
 Unsafe secrets-on-PR fixture blocked as expected.
 
@@ -70,13 +73,13 @@ Live production unknown rate: **unmeasured**.
 
 ## Configuration changes
 
-- Pin Action to `fraware/open-verification-kernel@v1.2.1`.
+- Historical workflow used `@v1.2.1`; for any newly consented advisory experiment, review and pin the full source commit `a27d5720f4350c00bca34f71d991c31f5a2f38c7` and its transitive dependencies. The historical tag is unsigned/unprotected.
 - Advisory mode + `default_on_unknown: require_human_review`.
 - `.verification/ci_secrets_pilot.json` in the consumer; in-repo mirror `examples/pilot_repos/express_actions_consumer.json`.
 - `post-comment` / `emit-check` exercised on the advisory PR workflow path.
 
 ## Strict-mode recommendation
 
-**Remain advisory (`remain_advisory`).** Fixture metrics meet the playbook FP target numerically, but without a live human-adjudicated advisory window this report does not authorize strict branch protection.
+**Remain advisory (`remain_advisory`).** These controlled fixture outcomes do not establish an externally adjudicated error rate. Without a live, independently reviewed advisory cohort and qualified source/profile and release controls, strict branch protection is unauthorized.
 
 Median `ovk check` latency on fixture diffs: ~82 ms.

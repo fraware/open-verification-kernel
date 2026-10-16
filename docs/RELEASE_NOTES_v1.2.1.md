@@ -1,10 +1,10 @@
 # OVK v1.2.1
 
-Patch release to close the immutable-tag keyless Sigstore production pin and fix release-gate regressions on `main`.
+Historical patch release associated with keyless Sigstore artifact signing; Git-tag immutability was not established. Changes include release-gate regressions on `main`.
 
 ## Changes
 
-- Publish workflow on an immutable `refs/tags/v1.2.1` Release: build → keyless cosign → verify → attach `*.cosign.bundle.json`
+- Publish workflow associated with the published `v1.2.1` release: build → keyless cosign → verify → attach `*.cosign.bundle.json`. **Correction (2026-10-15):** the GitHub annotated tag object reports `verification.verified=false` (`unsigned`) and the release's `immutable` API field is `false`. Treat artifact Sigstore bundles separately from Git tag signing and ref protection.
 - Composite Action installs sync `ovk/package_data` before `pip install .` so policy schemas ship into site-packages
 - Align unit tests with honest CBMC template-harness limits, relative provenance URIs, and reliability-based repo-memory priors
 
@@ -26,7 +26,7 @@ pip install -e '.[dev]'
 env:
   OVK_PACKAGE_VERSION: "1.2.1"
 steps:
-  - uses: fraware/open-verification-kernel@v1.2.1
+  - uses: fraware/open-verification-kernel@a27d5720f4350c00bca34f71d991c31f5a2f38c7  # exact historical source commit
 ```
 
 ## Consumer Sigstore verify

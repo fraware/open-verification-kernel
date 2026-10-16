@@ -1,6 +1,10 @@
 name: OVK Branch Protection (Strict Required Check)
 
-# Phase 2+: strict enforcement with required check "Open Verification Kernel".
+# FUTURE REFERENCE ONLY — NOT INSTALLABLE UNTIL REPLACED AND AUTHORIZED.
+# Strict enforcement is prohibited for current executable_advisory source profiles.
+# Only qualify this after independent external calibration of the exact claim
+# family, protected source acquisition, live policy, authorized package and
+# a repository-owner decision. Do not copy this template into active CI.
 # Add the check name to branch protection after this workflow runs green on a sample PR.
 
 on:
@@ -12,8 +16,8 @@ permissions:
   checks: write
 
 env:
-  # Target pin for v1.3.0-rc.1 (use only after the attributable tag exists).
-  OVK_PACKAGE_VERSION: "1.3.0-rc.1"
+  # Placeholder, deliberately not a published/working version.
+  OVK_PACKAGE_VERSION: "REPLACE_WITH_AUTHORIZED_VERSION"
 
 jobs:
   ovk-required-check:
@@ -27,7 +31,7 @@ jobs:
           git fetch origin "${{ github.base_ref }}"
           git diff "origin/${{ github.base_ref }}...HEAD" > ovk-pr.diff
       - name: Run OVK strict check (required)
-        uses: fraware/open-verification-kernel@v1.3.0-rc.1
+        uses: fraware/open-verification-kernel@REPLACE_WITH_VERIFIED_SHA
         with:
           mode: strict
           use-check: "true"

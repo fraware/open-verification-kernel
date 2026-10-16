@@ -9,6 +9,9 @@
 
 Machine-readable companions: [`pilot-report.json`](pilot-report.json) (`ovk.pilot_report.v1`), [`external_pilot_report.json`](external_pilot_report.json).
 
+
+**Historical-data interpretation correction (2026-10-15):** The original companion JSON files preserve fixture counts and earlier self-reported error fields for historical inspection. Those fields have no independently adjudicated ground truth; the normalized external-pilot registry and adoption summary now record the rates as **null/unknown**. This clarification is not a new measurement.
+
 ## Repository profile
 
 | Field | Value |
@@ -31,8 +34,8 @@ This pilot satisfies OVK-PR8’s third-pilot requirement at the **advisory metri
 
 | Metric | Measured |
 |---|---|
-| False positives | **0** |
-| False positive rate | **0.0** (0/3 fixture cases) |
+| Independently adjudicated false positives | **Unknown** — fixture decisions lack independent reviewer ground truth |
+| Independently adjudicated false-positive rate | **Unknown** — 3 fixtures do not estimate an external error rate |
 
 Private / repaired infrastructure fixtures allowed when expected.
 
@@ -40,7 +43,7 @@ Private / repaired infrastructure fixtures allowed when expected.
 
 | Metric | Measured |
 |---|---|
-| False negatives | **0** |
+| Independently adjudicated false negatives | **Unknown** — only specified known-bad fixtures were exercised |
 
 Public-sensitive and failing repair-loop fixtures blocked as expected.
 
@@ -66,6 +69,6 @@ Public-sensitive and failing repair-loop fixtures blocked as expected.
 
 ## Strict-mode recommendation
 
-**Remain advisory (`remain_advisory`).** Publish-only scaffold with fixture metrics. Promote to strict only after a live infra consumer completes the playbook window with FP under 5% and human adjudication.
+**Remain advisory (`remain_advisory`).** Publish-only scaffold with fixture metrics. Strict enforcement remains a separate qualification decision contingent on independently adjudicated natural PRs, source-profile coverage, unknown and miss rates, provenance, reviewer approval, and rollback controls. No fixture-based percentage authorizes promotion.
 
 Median `ovk check` latency on fixture diffs: ~46 ms.
