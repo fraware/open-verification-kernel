@@ -18,6 +18,35 @@ For a GitHub `pull_request`, the event reports `base.sha` and `head.sha`. The Ac
 
 The new test creates real base/head/merge Git commits, asserts the chosen binary diff, introduces wrong base/head/checkout identifiers, tests a contributor-only checkout, opaque inputs, `pull_request_target`, push, and failure without writing a misleading receipt.
 
+## Explicit manifest safety boundary
+
+The composite Action's `verification-manifest` mode accepts a caller-selected
+manifest and checks the referenced materials under that manifest's own scope.
+It does **not** execute the pull-request source-binding helper, so its
+`subject.head_sha` alone does not establish that every changed PR construct
+was assessed. Consequently an explicit manifest result is **local advisory
+evidence only** in the Action:
+
+- The manifest path does not publish a GitHub Check or PR comment, regardless
+  of caller-supplied `emit-check` or `post-comment` inputs.
+- `mode: strict` with `verification-manifest` is refused before evaluation.
+  Strict PR enforcement cannot be synthesized from an unbound manifest.
+- All reserved top-level Action outputs are invalidated before installation
+  (including if package installation fails and uploads run with `always()`).
+  Manifest mode deletes any prior source receipt/handoff and refuses a
+  nonempty existing output directory, preserving existing contents rather
+  than silently mixing cohorts.
+- Local `ovk verify --manifest ... --advisory` remains an available
+  explicitly scoped experiment. Its results must identify which claims and
+  supplied materials were evaluated, and must not be presented as verification
+  of the entire PR or its source revision.
+
+This restriction is a publication-safety measure, not evidence authentication.
+No existing signed source/evidence envelope, production approval, or
+cross-repository certificate applicability follows. A future manifest
+publication path must bind exact source revision, source-to-model coverage,
+referenced material digests, results, and a qualified relying policy.
+
 ## Important limitations
 
 - **Not source authenticity proof.** The GitHub event metadata, runner, checkout and storage remain unverified external observations. Raw parent shape is not a signed source/target validity certificate.
