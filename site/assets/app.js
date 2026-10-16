@@ -24,7 +24,8 @@
     const title = norm(item.title), desc = norm(item.description), keys = norm(item.keywords), path = norm(item.path), category = norm(item.category);
     let sum = 0;
     for (const word of queryTerms) {
-      const t = norm(word);
+      const aliases = {authentication:'authorization',authn:'authorization',rbac:'authorization',workflows:'workflow',pipelines:'workflow',proofs:'proof',certificates:'certificate'};
+      const raw = norm(word); const t = aliases[raw] || raw;
       if (title === t) sum += 30;
       else if (title.startsWith(t)) sum += 17;
       else if (title.includes(t)) sum += 12;
