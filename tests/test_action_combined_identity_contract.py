@@ -61,7 +61,8 @@ def test_unbound_manual_diff_cannot_be_published_by_default_check_path() -> None
     comment = by_name["Post OVK pull-request comment"]
     assert "inputs.changed-files == ''" in check["if"]
     assert "inputs.changed-files == ''" in comment["if"]
-    assert "inputs.verification-manifest != ''" in comment["if"]
+    # Explicit manifests bypass source binding; public comments are forbidden.
+    assert "inputs.verification-manifest == ''" in comment["if"]
 
     upload = by_name["Upload OVK artifacts"]
     assert "ovk-source-binding.json" in upload["with"]["path"]
