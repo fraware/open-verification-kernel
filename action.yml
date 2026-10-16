@@ -357,6 +357,7 @@ runs:
       working-directory: ${{ github.workspace }}
       env:
         OVK_VERIFICATION_MANIFEST: ${{ inputs.verification-manifest }}
+        OVK_CHANGED_FILES: ${{ inputs.changed-files }}
         OVK_BUNDLE_OUTPUT_DIR: ${{ inputs.bundle-output-dir }}
         OVK_EVIDENCE_OUTPUT: ${{ inputs.evidence-output }}
       run: |
@@ -415,10 +416,10 @@ runs:
             }
             exit_code = str(exit_codes.get(decision_state or recommendation, 2))
 
-        if os.environ.get("OVK_VERIFICATION_MANIFEST"):
-            # Manifest claims describe caller-selected materials, not a
-            # source-bound PR. Do not export their PASS as an Action-wide
-            # allow recommendation that downstream jobs could use as a gate.
+        if os.environ.get("OVK_VERIFICATION_MANIFEST") or os.environ.get("OVK_CHANGED_FILES"):
+            # Caller-selected manifests and diffs are not source-bound PR
+            # inputs. Their scoped claim results stay in local evidence only;
+            # never export PASS as an Action-wide downstream allow gate.
             decision_state = "unknown"
             recommendation = "require_human_review"
             exit_code = "2"
