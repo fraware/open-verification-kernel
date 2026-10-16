@@ -151,6 +151,11 @@ runs:
       shell: bash
       run: |
         echo '::warning::OVK caller-supplied change input is not bound to the checked-out source; automated GitHub Check/comment emission is disabled.'
+    - name: Disclose unbound manifest inputs
+      if: ${{ inputs.verification-manifest != '' }}
+      shell: bash
+      run: |
+        echo '::warning::OVK multi-lane manifest inputs lack source-to-PR binding; only local advisory artifacts are permitted. Automatic Check/comment publication and strict enforcement are disabled.'
     - name: Run OVK multi-lane verification
       id: verify
       if: ${{ inputs.verification-manifest != '' }}
@@ -163,6 +168,19 @@ runs:
         OVK_REPO: ${{ github.repository }}
         OVK_HEAD_SHA: ${{ github.sha }}
       run: |
+        set -euo pipefail
+        # This path bypasses PR source preparation. Remove source-bound
+        # and previously generated observations left by any earlier Action
+        # invocation in the same workspace. No stale result is portable.
+        rm -f -- .ovk-effective-input-path .ovk-pr.diff ovk-source-binding.json
+        rm -f -- .ovk-check-emitted .ovk-emit-exit-code .ovk-action-exit-code
+        rm -f -- ovk-evidence.json ovk-pr-comment.md ovk-attestation.json
+        rm -f -- ovk-artifact-manifest.json ovk-evidence-quality.json
+        rm -f -- ovk-provenance.json ovk-attestation-envelope.json
+        if [ "$OVK_MODE" != "advisory" ]; then
+          echo '::error::OVK manifest verification lacks PR source binding; strict Action enforcement is refused.'
+          exit 2
+        fi
         args=(
           --manifest "$OVK_VERIFICATION_MANIFEST"
           --output-dir "$OVK_BUNDLE_OUTPUT_DIR"
@@ -246,32 +264,6 @@ runs:
         else
           echo "$EMIT_RC" > .ovk-emit-exit-code
         fi
-    - name: Emit OVK GitHub check (verify path)
-      id: emit-check-verify
-      if: ${{ inputs.emit-check == 'true' && inputs.verification-manifest != '' }}
-      shell: bash
-      working-directory: ${{ github.workspace }}
-      env:
-        GITHUB_TOKEN: ${{ github.token }}
-        OVK_BUNDLE_OUTPUT_DIR: ${{ inputs.bundle-output-dir }}
-        OVK_REPO: ${{ github.repository }}
-        OVK_HEAD_SHA: ${{ github.sha }}
-      run: |
-        EVIDENCE="$OVK_BUNDLE_OUTPUT_DIR/ovk-evidence.json"
-        MARKDOWN="$OVK_BUNDLE_OUTPUT_DIR/ovk-pr-comment.md"
-        set +e
-        python "${{ github.action_path }}/scripts/emit_github_check.py" \
-          --evidence "$EVIDENCE" \
-          --markdown "$MARKDOWN" \
-          --repo "$OVK_REPO" \
-          --head-sha "$OVK_HEAD_SHA"
-        EMIT_RC=$?
-        set -e
-        if [ "$EMIT_RC" -eq 0 ]; then
-          echo "true" > .ovk-check-emitted
-        else
-          echo "$EMIT_RC" > .ovk-emit-exit-code
-        fi
     - name: Run OVK self-protection CI path
       id: ci
       if: ${{ inputs.verification-manifest == '' && inputs.use-check != 'true' }}
@@ -321,7 +313,7 @@ runs:
         set -e
         echo "$ACTION_RC" > .ovk-action-exit-code
     - name: Post OVK pull-request comment
-      if: ${{ inputs.post-comment == 'true' && (inputs.changed-files == '' || inputs.verification-manifest != '') }}
+      if: ${{ inputs.post-comment == 'true' && inputs.changed-files == '' && inputs.verification-manifest == '' }}
       shell: bash
       working-directory: ${{ github.workspace }}
       env:
