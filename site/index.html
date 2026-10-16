@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f8f9fb">
+  <meta name="description" content="Explore Open Verification Kernel: bounded checks, documentation, evidence contracts, examples and research. Curated, source-linked, and explicit about verification limits.">
+  <title>Explore OVK — Open Verification Kernel</title>
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+  <link rel="stylesheet" href="assets/styles.css">
+  <script defer src="assets/catalog.js"></script>
+  <script defer src="assets/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+  <header class="site-header">
+    <div class="topbar container">
+      <a class="brand" href="#top" aria-label="Open Verification Kernel home">
+        <svg class="brand-mark" viewBox="0 0 38 38" aria-hidden="true"><rect x="1" y="1" width="36" height="36" rx="10" fill="#171b29"/><path d="M10 11.5l9 15 9-15" fill="none" stroke="#fafbff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M13.6 18.5h10.8" stroke="#a9b8ff" stroke-width="2.6" stroke-linecap="round"/></svg>
+        <span class="brand-lockup"><strong>OVK</strong><small>Open Verification Kernel</small></span>
+      </a>
+      <nav class="desktop-nav" aria-label="Primary navigation">
+        <a href="#explore" data-nav="explore">Explore</a>
+        <a href="#how-it-works" data-nav="how-it-works">How it works</a>
+        <a href="#start" data-nav="start">Get started</a>
+        <a href="#boundaries" data-nav="boundaries">Trust &amp; limits</a>
+      </nav>
+      <div class="header-actions">
+        <a class="header-github" href="https://github.com/fraware/open-verification-kernel" target="_blank" rel="noopener noreferrer">GitHub <span aria-hidden="true">↗</span></a>
+        <button class="mobile-menu-toggle" id="menuToggle" aria-controls="mobileNav" aria-expanded="false" type="button" aria-label="Open navigation"><span></span><span></span><span></span></button>
+      </div>
+    </div>
+    <nav class="mobile-nav container" id="mobileNav" aria-label="Mobile navigation" hidden>
+      <a href="#explore">Explore resources</a><a href="#how-it-works">How it works</a><a href="#start">Get started</a><a href="#boundaries">Trust &amp; limits</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero container" id="top" aria-labelledby="heroTitle">
+      <div class="hero-content">
+        <p class="eyebrow"><span class="eyebrow-dot"></span> OPEN VERIFICATION KERNEL <span class="eyebrow-slash">/</span> RESOURCE EXPLORER</p>
+        <h1 id="heroTitle">Understand what<br><span>the evidence</span> establishes.</h1>
+        <p class="hero-intro">Find the verification claim, source profile, checker, or research you need. Every resource links to its source. Every result has a scope.</p>
+        <div class="hero-search-group" role="search" aria-label="Search OVK resources">
+          <label for="resourceSearch" class="sr-only">Search OVK documentation, examples, and templates</label>
+          <div class="search-field" id="searchField">
+            <svg class="search-icon" width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><circle cx="10.8" cy="10.8" r="7.3"/><path d="m16.2 16.2 5 5"/></svg>
+            <input type="search" id="resourceSearch" autocomplete="off" spellcheck="false" placeholder="Search evidence, checkers, guides, examples…" aria-describedby="searchHelp">
+            <kbd class="keyboard-hint" aria-hidden="true">⌘ / Ctrl K</kbd>
+          </div>
+          <p class="search-helper" id="searchHelp">Try <button type="button" data-query="CI secrets">CI secrets</button>, <button type="button" data-query="source binding">source binding</button>, or <button type="button" data-query="Lean">Lean</button></p>
+        </div>
+        <div class="hero-footnote"><span class="line"></span> Curated repository documentation <span class="footnote-dot">·</span> No account or API key needed</div>
+      </div>
+      <div class="hero-visual" aria-label="Illustration of OVK evidence workflow">
+        <div class="visual-title"><span class="visual-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="3" width="14" height="14" rx="3"/><path d="M7 10l2 2 4-4"/></svg></span><span>How to read a result</span><span class="visual-note">ILLUSTRATIVE</span></div>
+        <div class="visual-rule"></div>
+        <div class="visual-flow">
+          <div class="visual-flow-item"><span class="flow-count">01</span><span class="flow-label">Changed source</span><span class="flow-meta">Input</span></div>
+          <div class="flow-join"></div>
+          <div class="visual-flow-item"><span class="flow-count">02</span><span class="flow-label">Bounded claim</span><span class="flow-meta">Scope</span></div>
+          <div class="flow-join"></div>
+          <div class="visual-flow-item"><span class="flow-count">03</span><span class="flow-label">Checker evidence</span><span class="flow-meta">Result</span></div>
+        </div>
+        <div class="visual-rule lower"></div>
+        <div class="visual-status"><span class="status-mark"></span><div><strong>Review the evidence, not a badge.</strong><p>See assumptions, unsupported inputs, and provenance before relying on a result.</p></div></div>
+        <div class="visual-bottom"><span>Source → Claim → Evidence</span><span aria-hidden="true">↗</span></div>
+      </div>
+    </section>
+
+    <section class="value-strip" aria-label="What you will find">
+      <div class="container strip-grid">
+        <div class="strip-item"><strong>01</strong><div><h2>Understand</h2><p>What each supported check means</p></div></div>
+        <div class="strip-item"><strong>02</strong><div><h2>Locate</h2><p>Specifications, evidence and examples</p></div></div>
+        <div class="strip-item"><strong>03</strong><div><h2>Apply</h2><p>Use an advisory workflow responsibly</p></div></div>
+      </div>
+    </section>
+
+    <section class="explorer-section container" id="explore" aria-labelledby="exploreTitle">
+      <div class="section-heading"><div><p class="section-kicker">RESOURCE LIBRARY</p><h2 id="exploreTitle">Find your starting point.</h2><p>Search a curated index of source-linked OVK resources.</p></div><div class="section-counter"><strong id="totalCount">—</strong><span>indexed resources</span></div></div>
+      <div class="explore-layout">
+        <aside class="filter-sidebar" aria-label="Filter resource categories">
+          <div class="sidebar-overline">BROWSE BY TOPIC</div>
+          <div class="category-list" id="categoryList" role="group" aria-label="Resource categories"></div>
+          <div class="sidebar-help"><span aria-hidden="true">↗</span><p>Looking for source code?<br><a href="https://github.com/fraware/open-verification-kernel" target="_blank" rel="noopener noreferrer">Open the GitHub repository</a></p></div>
+        </aside>
+        <div class="library-main">
+          <div class="library-toolbar"><div><span id="resultsCount" role="status" aria-live="polite" aria-atomic="true">Loading resources…</span><span id="queryContext" class="query-context"></span></div><button type="button" class="clear-action" id="clearSearch" hidden>Clear search <span aria-hidden="true">×</span></button></div>
+          <div id="resultList" class="resource-grid" aria-label="Resource search results"></div>
+          <div class="empty-state" id="emptyState" hidden><div class="empty-symbol" aria-hidden="true">⌕</div><h3>No matching resources</h3><p>Try a broader term, or browse all topics. The index covers curated documents and examples, not every repository file.</p><button type="button" class="small-button" id="resetAll">Show all resources</button></div>
+          <button type="button" id="showMore" class="show-more" hidden>Show more resources <span aria-hidden="true">↓</span></button>
+          <p class="index-note">This search indexes a curated set of repository files. It does not search private evidence, execute a verifier, or assert that a resource is production-qualified.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="how-section" id="how-it-works" aria-labelledby="howTitle"><div class="container">
+      <div class="section-heading"><div><p class="section-kicker">THE MODEL</p><h2 id="howTitle">From a change to a scoped claim.</h2><p>A simple way to understand what OVK records—and where human judgment still matters.</p></div></div>
+      <div class="steps-grid">
+        <article class="step-card"><span class="step-number">01 / INPUT</span><div class="step-symbol" aria-hidden="true">{ }</div><h3>Identify the change</h3><p>Connect the proposed diff to the exact source revision and the constructs being examined.</p></article>
+        <article class="step-card"><span class="step-number">02 / CONTRACT</span><div class="step-symbol" aria-hidden="true">◇</div><h3>State the bounded claim</h3><p>Declare the property, supported source profile, assumptions, and selected checker.</p></article>
+        <article class="step-card"><span class="step-number">03 / EVIDENCE</span><div class="step-symbol" aria-hidden="true">≡</div><h3>Inspect the result</h3><p>Review supporting observations, unresolved coverage, and applicability before making a decision.</p></article>
+      </div>
+    </div></section>
+
+    <section class="start-section container" id="start" aria-labelledby="startTitle">
+      <div class="start-text"><p class="section-kicker">GET STARTED</p><h2 id="startTitle">Start with a local advisory check.</h2><p>Inspect the open-source development tree and run an example without changing repository branch protections or granting write permissions.</p><a class="text-link" href="https://github.com/fraware/open-verification-kernel/blob/main/docs/INTEGRATION.md" target="_blank" rel="noopener noreferrer">Read the integration guide <span aria-hidden="true">↗</span></a></div>
+      <div class="code-panel"><div class="code-panel-head"><span><span class="terminal-dot"></span> LOCAL DEVELOPMENT EXAMPLE</span><button id="copyCode" type="button" aria-label="Copy local start commands"><span id="copyLabel">Copy</span> <span aria-hidden="true">⧉</span></button></div><pre><code id="quickStartCode">git clone https://github.com/fraware/open-verification-kernel.git
+cd open-verification-kernel
+pip install -e '.[dev]'
+ovk check --changed-files examples/multi_surface/pr_combined.diff --advisory</code></pre><div class="code-panel-footer">Development source · Advisory mode · Not a published, qualified release</div></div>
+    </section>
+
+    <section class="trust-section" id="boundaries" aria-labelledby="trustTitle"><div class="container trust-layout"><div><p class="section-kicker">TRUST &amp; RELEASE</p><h2 id="trustTitle">Clear limits are part of the product.</h2><p>OVK reports evidence for bounded properties. A local result, a passing CI job, or a reusable report does not establish whole-system correctness or authorization to merge.</p></div><div class="trust-details"><div class="trust-row"><span>Published source</span><strong>Verify the release identity</strong></div><div class="trust-row"><span>Unknown or unsupported</span><strong>Keep human review in control</strong></div><div class="trust-row"><span>Evidence across changes</span><strong>Check applicability before reuse</strong></div><a href="https://github.com/fraware/open-verification-kernel/blob/main/docs/CURRENT_RELEASE_STATUS.md" target="_blank" rel="noopener noreferrer">Read current release and qualification status <span aria-hidden="true">↗</span></a></div></div></section>
+  </main>
+  <footer class="site-footer"><div class="container footer-main"><div><div class="footer-brand">OVK <span>Open Verification Kernel</span></div><p>Source-linked resources for precise, reusable verification evidence.</p></div><div class="footer-links"><a href="https://github.com/fraware/open-verification-kernel" target="_blank" rel="noopener noreferrer">Repository ↗</a><a href="https://github.com/fraware/open-verification-kernel/issues" target="_blank" rel="noopener noreferrer">Issues ↗</a><a href="https://github.com/fraware/open-verification-kernel/blob/main/SECURITY.md" target="_blank" rel="noopener noreferrer">Security ↗</a></div></div><div class="container footer-bottom"><span>OVK Resource Explorer · Static developer preview</span><span>Repository sources are authoritative · No live verification is performed on this page</span></div></footer>
+</body>
+</html>
