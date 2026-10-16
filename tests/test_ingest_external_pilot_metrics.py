@@ -255,6 +255,71 @@ def test_without_new_artifacts_historical_labels_are_not_silently_rewritten() ->
     assert row["false_positive_rate"] == 0.5
 
 
+@pytest.mark.parametrize("input_kind", ["artifacts", "report"])
+def test_explicit_missing_pilot_input_fails_closed(
+    tmp_path: Path, input_kind: str
+) -> None:
+    """A missing operator-selected input must never preserve prior metrics."""
+    missing = tmp_path / ("missing-artifacts" if input_kind == "artifacts" else "missing.json")
+    params = {"artifacts_dir": missing} if input_kind == "artifacts" else {"report_path": missing}
+    with pytest.raises(FileNotFoundError, match="not found"):
+        build_pilot_row("example/oss-pilot", **params)
+
+
+@pytest.mark.parametrize(
+    "new_artifact_metrics",
+    [{}, {"prs_blocked": 2}, {"median_check_latency_ms": 17.0}],
+)
+def test_partial_new_cohort_discards_all_stale_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, new_artifact_metrics: dict
+) -> None:
+    """A new partial cohort cannot inherit old PR totals or timings."""
+    monkeypatch.setattr(
+        "scripts.ingest_external_pilot_metrics._metrics_from_artifacts",
+        lambda _: new_artifact_metrics,
+    )
+    existing = {
+        "repository": "example/oss-pilot",
+        "status": "advisory",
+        "check_types": ["ci_secrets"],
+        "prs_evaluated": 100,
+        "prs_blocked": 20,
+        "false_positives": 0,
+        "false_positive_rate": 0.0,
+        "median_check_latency_ms": 5.0,
+        "strict_enabled": False,
+        "ovk_version_pin": "1.2.1",
+    }
+    row = build_pilot_row("example/oss-pilot", existing=existing, artifacts_dir=tmp_path)
+    for key in ("prs_evaluated", "prs_blocked", "false_positives", "false_positive_rate", "median_check_latency_ms"):
+        assert row[key] == new_artifact_metrics.get(key), key
+
+
+def test_new_report_cohort_without_error_labels_invalidates_old_rates(
+    tmp_path: Path,
+) -> None:
+    """Fresh selected counts must not inherit unrelated older adjudications."""
+    selected = tmp_path / "reviewer-report.json"
+    selected.write_text(
+        json.dumps({"repository": "example/oss-pilot", "prs_evaluated": 6}),
+        encoding="utf-8",
+    )
+    existing = {
+        "repository": "example/oss-pilot",
+        "status": "advisory",
+        "check_types": ["ci_secrets"],
+        "prs_evaluated": 4,
+        "false_positives": 0,
+        "false_positive_rate": 0.0,
+        "strict_enabled": False,
+        "ovk_version_pin": "1.2.1",
+    }
+    row = build_pilot_row("example/oss-pilot", existing=existing, report_path=selected)
+    assert row["prs_evaluated"] == 6
+    assert row["false_positives"] is None
+    assert row["false_positive_rate"] is None
+
+
 def test_external_report_supplies_separate_reviewed_labels(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
